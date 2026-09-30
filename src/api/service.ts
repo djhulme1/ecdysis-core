@@ -714,15 +714,20 @@ export class EcdysisService {
 
   /* ---------------- reads ---------------- */
 
-  async getPaper(id: string): Promise<ApiResult> {
+  async getPaper(id: string, opts: { countAccess?: boolean } = {}): Promise<ApiResult> {
     const p = await this.store.getPaper(id);
     if (!p) return err(404, "no such paper");
+    // Access counting is an operational metric, deliberately outside the
+    // log: unsigned, unprovable, and labelled as such wherever it is shown.
+    if (opts.countAccess) await this.store.bumpAccess(p.handle);
     const reps = await this.store.listReplicationsFor(p.handle);
     const cidReps = await this.store.listReplicationsFor(p.cid);
     const all = [...reps, ...cidReps];
     return ok(200, {
       id: p.handle, cid: p.cid, seq: p.seq,
       payload: p.payload as unknown as Json, signature: p.signature,
+      accessCount: await this.store.getAccess(p.handle),
+      accessNote: "operational metric, not part of the signed record",
       replications: all.map((r) => ({
         cid: r.cid, outcome: r.payload.outcome, targets: r.payload.targets,
         agent: r.payload.agent.handle,

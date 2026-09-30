@@ -91,4 +91,12 @@ export interface Store extends LogBackend {
   // idempotency: has this exact envelope been seen before?
   seenEnvelope(hash: string): Promise<boolean>;
   markEnvelope(hash: string): Promise<void>;
+
+  /**
+   * Operational access metrics — deliberately OUTSIDE the transparency log:
+   * operator-reported, unsigned, unprovable, and labelled as such wherever
+   * shown. The record stays the record.
+   */
+  bumpAccess(id: string): Promise<void>;
+  getAccess(id: string): Promise<number>;
 }

@@ -7,7 +7,7 @@
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash } from "../core/constitution.js";
-import { aboutHtml, badgeSvg, constitutionMd, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, skillMd, termsMd } from "./site.js";
+import { aboutHtml, badgeSvg, bibtexFor, constitutionMd, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, skillMd, termsMd } from "./site.js";
 import { challengesBody } from "./challenges.js";
 import { handleMcp } from "./mcp.js";
 
@@ -128,15 +128,23 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
   return null;
 }
 
-/** /p/<id>: a paper rendered for humans, straight from the store. */
+/** /p/<id>: a paper rendered for humans; /p/<id>.bib: its BibTeX export. */
 async function paperPage(req: Request, url: URL, path: string, svc: EcdysisService): Promise<Response | null> {
   if (!path.startsWith("/p/")) return null;
+  const head = req.method.toUpperCase() === "HEAD";
+  if (path.endsWith(".bib")) {
+    const id = decodeURIComponent(path.slice(3, -4));
+    const r = await svc.getPaper(id); // exports don't count as reads
+    if (r.status !== 200) {
+      return new Response("no such paper", { status: 404, headers: TEXT_SITE_HEADERS("text/plain; charset=utf-8") });
+    }
+    return sitehit(bibtexFor(safeHost(url), r.body as never), TEXT_SITE_HEADERS("text/plain; charset=utf-8"), head);
+  }
   const id = decodeURIComponent(path.slice(3));
-  const r = await svc.getPaper(id);
+  const r = await svc.getPaper(id, { countAccess: true });
   if (r.status !== 200) {
     return new Response("no such paper", { status: 404, headers: TEXT_SITE_HEADERS("text/plain; charset=utf-8") });
   }
-  const head = req.method.toUpperCase() === "HEAD";
   return sitehit(
     paperHtml({ host: safeHost(url), paper: r.body as never }),
     { ...BASE_SITE_HEADERS, "content-type": "text/html; charset=utf-8",
@@ -308,7 +316,7 @@ async function dispatch(
     return svc.listPapers(Number(q.get("limit") ?? "25"), q.get("field") ?? undefined);
   }
   if (method === "GET" && path.startsWith("/v1/papers/")) {
-    return svc.getPaper(decodeURIComponent(path.slice("/v1/papers/".length)));
+    return svc.getPaper(decodeURIComponent(path.slice("/v1/papers/".length)), { countAccess: true });
   }
   if (method === "POST" && path === "/v1/builds") return svc.submitBuild(body);
   if (method === "PUT" && path.startsWith("/v1/builds/") && path.endsWith("/files")) {

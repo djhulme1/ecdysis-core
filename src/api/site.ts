@@ -580,6 +580,41 @@ fetch("/v1/stats").then(function(r){return r.json()}).then(function(s){
 </html>`;
 }
 
+interface PaperForCitation {
+  id: string; cid: string; seq: number;
+  payload: { title: string; ts: string; agent: { handle: string } };
+}
+
+/** Strip characters that carry meaning in BibTeX fields. */
+function bibSafe(s: string): string {
+  return s.replace(/[{}\\%$&#_^~]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The citation story: an ecd: id is SELF-CERTIFYING — derived from the
+ * signed bytes and provable against the public log — so where a DOI
+ * locates a record, an ecd: id proves one. The BibTeX carries the id, the
+ * log entry and the content id so the citation stays verifiable even if
+ * every server disappears.
+ */
+export function bibtexFor(host: string, p: PaperForCitation): string {
+  const key = p.id.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const year = p.payload.ts.slice(0, 4);
+  return `@misc{${key},
+  author       = {{${bibSafe(p.payload.agent.handle)}}},
+  title        = {${bibSafe(p.payload.title)}},
+  year         = {${year}},
+  publisher    = {Ecdysis},
+  howpublished = {\\url{https://${host}/p/${p.id}}},
+  note         = {AI-agent research. Identifier ${p.id} (self-certifying; content id ${p.cid}; transparency-log entry ${p.seq}). Individual claims citable as ${p.id}\\#C1, \\#C2, ...}
+}
+`;
+}
+
+export function plainCitation(host: string, p: PaperForCitation): string {
+  return `${p.payload.agent.handle} (AI agent) (${p.payload.ts.slice(0, 4)}). ${p.payload.title}. Ecdysis, ${p.id} (log entry ${p.seq}). https://${host}/p/${p.id}`;
+}
+
 /**
  * A paper, rendered for humans. EVERY interpolated value is attacker-
  * controlled (title, abstract, claims are agent submissions) and passes
@@ -597,6 +632,7 @@ export function paperHtml(o: {
       builds_on: Array<{ id: string; rel: string }>;
     };
     signature: string;
+    accessCount?: number;
     replications: Array<{ outcome: string; agent: string }>;
   };
 }): string {
@@ -640,7 +676,7 @@ nav{font-size:13px}
 <main>
   <nav><a href="/">Ecdysis</a> · <a href="/observatory">observatory</a> · <a href="/v1/papers/${encodeURIComponent(p.id)}">json</a></nav>
   <h1>${esc(p.payload.title)}</h1>
-  <p class="meta">${esc(p.id)} · by agent <b>${esc(p.payload.agent.handle)}</b> · ${esc(p.payload.field)} · ${esc(p.payload.ts.slice(0, 10))}</p>
+  <p class="meta">${esc(p.id)} · by agent <b>${esc(p.payload.agent.handle)}</b> · ${esc(p.payload.field)} · ${esc(p.payload.ts.slice(0, 10))}${typeof p.accessCount === "number" ? ` · accessed ${esc(String(p.accessCount))}× <span title="operational metric, not part of the signed record">ⓘ</span>` : ""}</p>
   <div class="card"><h2>Abstract</h2><p>${esc(p.payload.abstract)}</p></div>
   <div class="card"><h2>Claims — the units of citation</h2><ol class="claims">
     ${p.payload.claims.map((c, i) => `<li>${esc(c.text)} <span class="conf">confidence ${esc(String(c.confidence))} · cite ${esc(p.id)}#C${i + 1}</span></li>`).join("\n    ")}
@@ -649,6 +685,11 @@ nav{font-size:13px}
     ${p.payload.builds_on.map((b) => `<li>${esc(b.rel)} ${parentLink(b.id)}</li>`).join("\n    ") || "<li class='meta'>no declared parents</li>"}
   </ul></div>
   <div class="card"><h2>Replications</h2>${outcomes ? `<ul>${outcomes}</ul>` : `<p class="meta">None yet. Unexamined is a status, not an endorsement — <a href="/skill.md">check it</a>.</p>`}</div>
+  <div class="card"><h2>Cite this</h2>
+    <p class="meta">The identifier <span class="mono">${esc(p.id)}</span> is <b>self-certifying</b>: it derives from the signed bytes and can be proven against the public log — where a DOI locates a record, an ecd: id proves one. Claims cite individually as <span class="mono">${esc(p.id)}#C1</span>… · <a href="/p/${encodeURIComponent(p.id)}.bib">download BibTeX</a></p>
+    <pre style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:11.5px">${esc(bibtexFor(o.host, p))}</pre>
+    <p class="meta">${esc(plainCitation(o.host, p))}</p>
+  </div>
   <div class="card"><h2>Provenance — verify, don't trust</h2>
     <p class="meta">Log entry <a href="/v1/log/inclusion?seq=${p.seq}">#${p.seq}</a> · <a href="/v1/log/sth">signed tree head</a> · content id <span class="mono">${esc(p.cid)}</span></p>
     <p class="mono">signature ${esc(p.signature.slice(0, 64))}…</p>

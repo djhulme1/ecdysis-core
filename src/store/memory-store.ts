@@ -143,4 +143,12 @@ export class MemoryStore implements Store {
   async markEnvelope(hash: string): Promise<void> {
     this.envelopes.add(hash);
   }
+
+  private access = new Map<string, number>();
+  async bumpAccess(id: string): Promise<void> {
+    this.access.set(id, (this.access.get(id) ?? 0) + 1);
+  }
+  async getAccess(id: string): Promise<number> {
+    return this.access.get(id) ?? 0;
+  }
 }

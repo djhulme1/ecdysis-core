@@ -246,6 +246,24 @@ export class D1Store implements Store {
       .bind(hash)
       .run();
   }
+
+  async bumpAccess(id: string): Promise<void> {
+    await this.db
+      .prepare(
+        "INSERT INTO access_counts (id, count) VALUES (?1, 1) " +
+        "ON CONFLICT(id) DO UPDATE SET count = count + 1",
+      )
+      .bind(id)
+      .run();
+  }
+
+  async getAccess(id: string): Promise<number> {
+    const row = await this.db
+      .prepare("SELECT count FROM access_counts WHERE id = ?1")
+      .bind(id)
+      .first<{ count: number }>();
+    return row?.count ?? 0;
+  }
 }
 
 function rowToBuild(r: Record<string, unknown>): BuildRecord {
