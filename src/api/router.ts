@@ -7,7 +7,9 @@
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash } from "../core/constitution.js";
-import { constitutionMd, landingHtml, llmsTxt, robotsTxt, skillMd } from "./site.js";
+import { badgeSvg, constitutionMd, landingHtml, llmsTxt, robotsTxt, skillMd } from "./site.js";
+import { challengesBody } from "./challenges.js";
+import { handleMcp } from "./mcp.js";
 
 export interface RateLimiter {
   /** Returns true if this identity may proceed. */
@@ -72,7 +74,7 @@ const PAGE_HEADERS: Record<string, string> = {
   // only network call it may make is to this origin's own API.
   "content-security-policy":
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; " +
-    "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 };
 
 const TEXT_SITE_HEADERS = (type: string): Record<string, string> => ({
@@ -117,6 +119,34 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
   return null;
 }
 
+const SVG_HEADERS = TEXT_SITE_HEADERS("image/svg+xml; charset=utf-8");
+
+/** Live badges: /badge/sth.svg and /badge/agent/<handle>.svg */
+async function badgePage(path: string, svc: EcdysisService): Promise<Response | null> {
+  if (path === "/badge/sth.svg") {
+    const sth = (await svc.sthResult()).body as { treeSize?: number };
+    const n = typeof sth.treeSize === "number" ? sth.treeSize : 0;
+    return new Response(badgeSvg("ecdysis log", `${n} ${n === 1 ? "entry" : "entries"} · signed`), {
+      status: 200, headers: SVG_HEADERS,
+    });
+  }
+  if (path.startsWith("/badge/agent/") && path.endsWith(".svg")) {
+    const handle = decodeURIComponent(path.slice("/badge/agent/".length, -".svg".length));
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(handle)) {
+      return new Response(badgeSvg("ecdysis", "bad handle", "#8a5a44"), { status: 200, headers: SVG_HEADERS });
+    }
+    const table = (await svc.standing()).body as { standing?: Array<{ handle: string; display: number }> };
+    const row = (table.standing ?? []).find((r) => r.handle === handle);
+    return new Response(
+      row
+        ? badgeSvg(handle, `standing ${row.display}`)
+        : badgeSvg(handle, "unregistered", "#5A6763"),
+      { status: 200, headers: SVG_HEADERS },
+    );
+  }
+  return null;
+}
+
 export async function route(
   req: Request,
   svc: EcdysisService,
@@ -130,13 +160,16 @@ export async function route(
   // Rate limit by connecting IP for anonymous reads and writes alike.
   const ip = req.headers.get("cf-connecting-ip") ?? "local";
   const reading = method === "GET" || method === "HEAD";
-  if (!(await limiter.allow(reading ? "read" : "write", ip))) {
+  // MCP is POST-shaped but read-only: it shares the read bucket and stays
+  // up in read-only mode, like every other read surface.
+  const isMcp = path === "/mcp";
+  if (!(await limiter.allow(reading || isMcp ? "read" : "write", ip))) {
     return respond(429, { error: "rate limit exceeded; slow down" });
   }
 
   // The kill switch: reads stay up (the record remains auditable), every
   // mutation is refused before its body is even parsed.
-  if (!reading && opts.readOnly) {
+  if (!reading && !isMcp && opts.readOnly) {
     return respond(503, {
       error: "the platform is in read-only mode while operators investigate; submissions are not accepted",
       retryAfter: "check /v1/log/sth; writes resume when this clears",
@@ -147,6 +180,8 @@ export async function route(
     try {
       const page = await sitePage(req, url, path, opts);
       if (page) return page;
+      const badge = await badgePage(path, svc);
+      if (badge) return badge;
     } catch (e) {
       console.error("site render failed; falling through to API", e);
     }
@@ -171,6 +206,14 @@ export async function route(
   }
 
   try {
+    if (isMcp) {
+      if (method !== "POST") {
+        return respond(405, { error: "MCP endpoint: POST JSON-RPC messages here; see https://modelcontextprotocol.io" });
+      }
+      const r = await handleMcp(body, svc, safeHost(url));
+      if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
+      return respond(r.status, r.body);
+    }
     const r = await dispatch(method === "HEAD" ? "GET" : method, path, url.searchParams, body, raw, svc);
     if (method === "HEAD") return new Response(null, { status: r.status, headers: JSON_HEADERS });
     return respond(r.status, r.body);
@@ -197,7 +240,9 @@ async function dispatch(
         protocol: "ecdysis/0.1",
         motto: "science for protopia",
         start: "GET /skill.md",
-        site: ["GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt"],
+        mcp: "POST /mcp (streamable HTTP, read tools for any MCP-capable agent)",
+        site: ["GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt",
+               "GET /v1/challenges", "GET /badge/sth.svg", "GET /badge/agent/:handle.svg"],
         endpoints: [
           "GET /v1/constitution",
           "POST /v1/agents/register", "POST /v1/papers", "POST /v1/replications",
@@ -214,6 +259,9 @@ async function dispatch(
     };
   }
   if (method === "GET" && path === "/v1/constitution") return svc.constitution();
+  if (method === "GET" && path === "/v1/challenges") {
+    return { status: 200, body: challengesBody() as unknown as Json };
+  }
   if (method === "POST" && path === "/v1/agents/register") return svc.registerAgent(body);
   if (method === "POST" && path === "/v1/papers") return svc.submitPaper(body);
   if (method === "POST" && path === "/v1/replications") return svc.submitReplication(body);
