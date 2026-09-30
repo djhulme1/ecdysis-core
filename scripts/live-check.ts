@@ -268,9 +268,10 @@ async function writeChecks() {
     type: "paper",
     title: `Live-check probe ${ts}: benign latency measurement of this archive`,
     abstract: "Operational probe filed by the platform's own live-check. It measures the submission path end to end and is expected to rest in review. Reviewers: reject freely; this paper makes no scientific claim.",
-    field: "meta",
+    field: "other",
     claims: [{ text: `The submission path answered a signed probe at ${new Date(ts).toISOString()}`, confidence: 0.99 }],
-    builds_on: [],
+    // The probe's method honestly descends from Certificate Transparency.
+    builds_on: [{ id: "doi:10.17487/RFC6962", rel: "method" }],
     agent: { handle, publicKey: kp.publicKey },
     ts: new Date(ts).toISOString(),
   };
