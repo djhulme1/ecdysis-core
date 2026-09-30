@@ -169,30 +169,41 @@ export class D1Store implements Store {
     }));
   }
 
+  async listAgents(limit: number): Promise<AgentRecord[]> {
+    const rs = await this.db
+      .prepare("SELECT * FROM agents ORDER BY handle LIMIT ?1")
+      .bind(limit)
+      .all<Record<string, unknown>>();
+    return (rs.results ?? []).map(rowToAgent);
+  }
+
   // --- quarantine ---
   async putQuarantine(q: QuarantineRecord): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO quarantine (id, kind, envelope_json, findings_json, received_at, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(id) DO UPDATE SET status=?6`,
+        `INSERT INTO quarantine (id, kind, envelope_json, findings_json, received_at, status, jury_json, jury_ops_json, votes_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(id) DO UPDATE SET status=?6, votes_json=?9`,
       )
-      .bind(q.id, q.kind, JSON.stringify(q.envelope), JSON.stringify(q.findings), q.receivedAt, q.status)
+      .bind(
+        q.id, q.kind, JSON.stringify(q.envelope), JSON.stringify(q.findings), q.receivedAt,
+        q.status, JSON.stringify(q.jury), JSON.stringify(q.juryOperators), JSON.stringify(q.votes),
+      )
       .run();
+  }
+  async getQuarantine(id: string): Promise<QuarantineRecord | null> {
+    const r = await this.db
+      .prepare("SELECT * FROM quarantine WHERE id = ?1")
+      .bind(id)
+      .first<Record<string, unknown>>();
+    return r ? rowToQuarantine(r) : null;
   }
   async listQuarantine(status: QuarantineRecord["status"], limit: number): Promise<QuarantineRecord[]> {
     const rs = await this.db
       .prepare("SELECT * FROM quarantine WHERE status = ?1 ORDER BY received_at LIMIT ?2")
       .bind(status, limit)
       .all<Record<string, unknown>>();
-    return (rs.results ?? []).map((r) => ({
-      id: r["id"] as string,
-      kind: r["kind"] as QuarantineRecord["kind"],
-      envelope: JSON.parse(r["envelope_json"] as string),
-      findings: JSON.parse(r["findings_json"] as string),
-      receivedAt: r["received_at"] as string,
-      status: r["status"] as QuarantineRecord["status"],
-    }));
+    return (rs.results ?? []).map(rowToQuarantine);
   }
 
   // --- idempotency ---
@@ -209,6 +220,20 @@ export class D1Store implements Store {
       .bind(hash)
       .run();
   }
+}
+
+function rowToQuarantine(r: Record<string, unknown>): QuarantineRecord {
+  return {
+    id: r["id"] as string,
+    kind: r["kind"] as QuarantineRecord["kind"],
+    envelope: JSON.parse(r["envelope_json"] as string),
+    findings: JSON.parse(r["findings_json"] as string),
+    receivedAt: r["received_at"] as string,
+    status: r["status"] as QuarantineRecord["status"],
+    jury: JSON.parse((r["jury_json"] as string) ?? "[]"),
+    juryOperators: JSON.parse((r["jury_ops_json"] as string) ?? "[]"),
+    votes: JSON.parse((r["votes_json"] as string) ?? "[]"),
+  };
 }
 
 function rowToAgent(r: Record<string, unknown>): AgentRecord {

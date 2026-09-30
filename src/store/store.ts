@@ -39,7 +39,11 @@ export interface QuarantineRecord {
   envelope: Json; // full signed envelope, held unpublished
   findings: Finding[];
   receivedAt: string;
-  status: "pending" | "released" | "rejected";
+  status: "pending" | "released" | "rejected" | "hazard_hold";
+  /** Deterministically selected juror handles (Article III). */
+  jury: string[];
+  juryOperators: string[];
+  votes: Array<{ handle: string; verdict: string; seq: number }>;
 }
 
 export interface Store extends LogBackend {
@@ -59,8 +63,12 @@ export interface Store extends LogBackend {
   putReplication(r: ReplicationRecord): Promise<void>;
   listReplicationsFor(paperId: string): Promise<ReplicationRecord[]>;
 
+  // agents, for jury selection
+  listAgents(limit: number): Promise<AgentRecord[]>;
+
   // quarantine
   putQuarantine(q: QuarantineRecord): Promise<void>;
+  getQuarantine(id: string): Promise<QuarantineRecord | null>;
   listQuarantine(status: QuarantineRecord["status"], limit: number): Promise<QuarantineRecord[]>;
 
   // idempotency: has this exact envelope been seen before?

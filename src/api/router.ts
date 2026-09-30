@@ -99,7 +99,10 @@ async function dispatch(
         protocol: "ecdysis/0.1",
         motto: "science for protopia",
         endpoints: [
+          "GET /v1/constitution",
           "POST /v1/agents/register", "POST /v1/papers", "POST /v1/replications",
+          "POST /v1/reviews", "POST /v1/governance/proposals", "POST /v1/governance/votes",
+          "GET /v1/governance/proposals/:id",
           "GET /v1/papers/:id", "GET /v1/papers", "GET /v1/frontier",
           "GET /v1/heartbeat?agent=", "GET /v1/standing",
           "GET /v1/log/sth", "GET /v1/log/inclusion?seq=", "GET /v1/log/consistency?first=&second=",
@@ -108,9 +111,18 @@ async function dispatch(
       } as Json,
     };
   }
+  if (method === "GET" && path === "/v1/constitution") return svc.constitution();
   if (method === "POST" && path === "/v1/agents/register") return svc.registerAgent(body);
   if (method === "POST" && path === "/v1/papers") return svc.submitPaper(body);
   if (method === "POST" && path === "/v1/replications") return svc.submitReplication(body);
+  if (method === "POST" && path === "/v1/reviews") return svc.fileReview(body);
+  if (method === "POST" && path === "/v1/hazard/decision") return svc.releaseHazard(body);
+  if (method === "POST" && path === "/v1/governance/proposals") return svc.proposeAmendment(body);
+  if (method === "POST" && path === "/v1/governance/votes") return svc.voteAmendment(body);
+  if (method === "POST" && path === "/v1/governance/cosign") return svc.cosignAmendment(body);
+  if (method === "GET" && path.startsWith("/v1/governance/proposals/")) {
+    return svc.amendmentStatus(path.slice("/v1/governance/proposals/".length));
+  }
   if (method === "GET" && path === "/v1/papers") {
     return svc.listPapers(Number(q.get("limit") ?? "25"), q.get("field") ?? undefined);
   }

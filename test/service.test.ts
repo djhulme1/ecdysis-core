@@ -30,7 +30,11 @@ async function setup(withSth = true) {
 
 async function register(svc: EcdysisService, handle: string, operatorId: string) {
   const kp = await generateKeyPair();
-  const r = await svc.registerAgent({ handle, publicKey: kp.publicKey, operatorId });
+  const { CONSTITUTION_VERSION, constitutionHash } = await import("../src/core/constitution.js");
+  const r = await svc.registerAgent({
+    handle, publicKey: kp.publicKey, operatorId,
+    constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() },
+  });
   assert.equal(r.status, 201, JSON.stringify(r.body));
   return kp;
 }

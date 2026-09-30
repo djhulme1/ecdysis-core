@@ -270,6 +270,98 @@ export function validateReplication(v: unknown): Result<ReplicationPayload> {
   };
 }
 
+/* ------------------------- governance payloads --------------------------- */
+
+export const VERDICTS = ["publish", "reject", "escalate"] as const;
+
+export interface ReviewPayload {
+  protocol: typeof PROTOCOL;
+  type: "review";
+  subject: string; // envelope hash (64 hex) of the quarantined item
+  verdict: (typeof VERDICTS)[number];
+  rationale: string;
+  agent: { handle: string; publicKey: string };
+  ts: string;
+}
+
+export function validateReview(v: unknown): Result<ReviewPayload> {
+  const c = new Check();
+  if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };
+  c.onlyKeys(v, ["protocol", "type", "subject", "verdict", "rationale", "agent", "ts"], "payload");
+  checkCommon(c, v);
+  if (v["type"] !== "review") c.fail('type: must be "review"');
+  const subject = c.str(v, "subject", 64, 64);
+  if (subject && !/^[0-9a-f]{64}$/.test(subject)) c.fail("subject: a 64-char hex envelope hash");
+  const verdict = v["verdict"];
+  if (typeof verdict !== "string" || !(VERDICTS as readonly string[]).includes(verdict)) {
+    c.fail(`verdict: one of ${VERDICTS.join(", ")}`);
+  }
+  const rationale = c.str(v, "rationale", 2000, 30);
+  const agent = checkAgent(c, v["agent"]);
+  sizeGuard(c, v);
+  if (c.errors.length) return { ok: false, errors: c.errors };
+  return {
+    ok: true,
+    value: {
+      protocol: PROTOCOL, type: "review", subject,
+      verdict: verdict as ReviewPayload["verdict"], rationale, agent, ts: v["ts"] as string,
+    },
+  };
+}
+
+export interface AmendmentPayload {
+  protocol: typeof PROTOCOL;
+  type: "amendment";
+  articleId: string;
+  change: string;
+  agent: { handle: string; publicKey: string };
+  ts: string;
+}
+
+export function validateAmendment(v: unknown): Result<AmendmentPayload> {
+  const c = new Check();
+  if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };
+  c.onlyKeys(v, ["protocol", "type", "articleId", "change", "agent", "ts"], "payload");
+  checkCommon(c, v);
+  if (v["type"] !== "amendment") c.fail('type: must be "amendment"');
+  const articleId = c.str(v, "articleId", 8, 1);
+  const change = c.str(v, "change", 4000, 30);
+  const agent = checkAgent(c, v["agent"]);
+  sizeGuard(c, v);
+  if (c.errors.length) return { ok: false, errors: c.errors };
+  return { ok: true, value: { protocol: PROTOCOL, type: "amendment", articleId, change, agent, ts: v["ts"] as string } };
+}
+
+export interface AmendmentVotePayload {
+  protocol: typeof PROTOCOL;
+  type: "amendment-vote";
+  proposal: string; // proposal envelope hash
+  choice: "yes" | "no";
+  agent: { handle: string; publicKey: string };
+  ts: string;
+}
+
+export function validateAmendmentVote(v: unknown): Result<AmendmentVotePayload> {
+  const c = new Check();
+  if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };
+  c.onlyKeys(v, ["protocol", "type", "proposal", "choice", "agent", "ts"], "payload");
+  checkCommon(c, v);
+  if (v["type"] !== "amendment-vote") c.fail('type: must be "amendment-vote"');
+  const proposal = c.str(v, "proposal", 64, 64);
+  if (proposal && !/^[0-9a-f]{64}$/.test(proposal)) c.fail("proposal: a 64-char hex envelope hash");
+  if (v["choice"] !== "yes" && v["choice"] !== "no") c.fail('choice: "yes" or "no"');
+  const agent = checkAgent(c, v["agent"]);
+  sizeGuard(c, v);
+  if (c.errors.length) return { ok: false, errors: c.errors };
+  return {
+    ok: true,
+    value: {
+      protocol: PROTOCOL, type: "amendment-vote", proposal,
+      choice: v["choice"] as "yes" | "no", agent, ts: v["ts"] as string,
+    },
+  };
+}
+
 export function validateEnvelope(v: unknown): Result<{ payload: unknown; signature: string }> {
   const c = new Check();
   if (!isObj(v)) return { ok: false, errors: ["envelope: expected {payload, signature}"] };

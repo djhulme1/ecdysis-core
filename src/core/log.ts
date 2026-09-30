@@ -39,12 +39,18 @@ import {
 } from "./merkle.js";
 
 export type LogEntryType =
-  | "agent.register"
+  | "agent.register" // carries the agent's signed constitution acknowledgment
   | "agent.revoke"
   | "paper.accept"
   | "replication.file"
+  | "review.file" // a juror's verdict on a quarantined submission
+  | "review.decide" // the tallied outcome that released or rejected it
   | "build.register"
+  | "build.activate"
   | "governance.proposal"
+  | "governance.vote"
+  | "hazard.hold" // juror escalation froze a submission for the operator key
+  | "hazard.release" // the operator key released (or rejected) a held item
   | "moderation.remove"; // content removal is itself logged — nothing vanishes silently
 
 export interface LogEntry {

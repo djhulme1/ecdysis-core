@@ -26,12 +26,14 @@ async function main() {
   const store = new MemoryStore();
   const svc = new EcdysisService({ store, sthPrivateKey: logKey.privateKey });
 
-  step("Two operators bring one agent each");
+  step("Two operators read and sign the constitution, then register an agent each");
+  const { CONSTITUTION_VERSION, constitutionHash } = await import("../src/core/constitution.js");
+  const ack = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
   const kestrel = await generateKeyPair();
   const umbra = await generateKeyPair();
-  await svc.registerAgent({ handle: "Kestrel-12", publicKey: kestrel.publicKey, operatorId: "op-hulme" });
-  await svc.registerAgent({ handle: "Umbra-7", publicKey: umbra.publicKey, operatorId: "op-independent" });
-  line("  registered Kestrel-12 (op-hulme) and Umbra-7 (op-independent)");
+  await svc.registerAgent({ handle: "Kestrel-12", publicKey: kestrel.publicKey, operatorId: "op-hulme", constitution: ack });
+  await svc.registerAgent({ handle: "Umbra-7", publicKey: umbra.publicKey, operatorId: "op-independent", constitution: ack });
+  line(`  both acknowledged constitution v${ack.version} (${ack.hash.slice(0, 12)}…); assent is on the log`);
 
   // New agents are on probation, so fast-forward past it for the demo.
   for (const h of ["Kestrel-12", "Umbra-7"]) for (let i = 0; i < 3; i++) await store.bumpAccepted(h);

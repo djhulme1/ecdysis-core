@@ -86,6 +86,10 @@ export default {
       store: new D1Store(env.DB),
       screeners: screenersFrom(env),
       sthPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
+      // v0.1: the log-signing keypair doubles as the operator key holding the
+      // two reserved powers (R1 hazard decisions, R2 entrenched co-signature).
+      // Split them, or move to threshold keys, without code changes here.
+      operatorPublicKey: env.STH_PUBLIC_KEY?.startsWith("REPLACE") ? null : env.STH_PUBLIC_KEY ?? null,
     });
     return route(req, svc, limiterFrom(env));
   },

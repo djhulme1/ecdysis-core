@@ -45,6 +45,7 @@ export interface Standing {
   replicationsReceived: number;
   refutationsReceived: number;
   replicationsFiled: number;
+  reviewsServed: number;
   flags: string[];
 }
 
@@ -55,6 +56,7 @@ const PTS = {
   verifierReward: 10000,
   buildsOnEdge: 2000,
   buildsOnCapPerPaper: 20,
+  reviewServed: 2000, // jury duty pays (Article III.4)
 } as const;
 
 export function independenceWeightNum(
@@ -89,7 +91,7 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
     if (!s) {
       s = {
         handle: h, score: 0, papers: 0, replicationsReceived: 0,
-        refutationsReceived: 0, replicationsFiled: 0, flags: [],
+        refutationsReceived: 0, replicationsFiled: 0, reviewsServed: 0, flags: [],
       };
       standing.set(h, s);
     }
@@ -125,6 +127,13 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
         const w = independenceWeightNum(reg, author, pp.author);
         get(pp.author).score += Math.trunc((PTS.buildsOnEdge * w.num) / w.den);
       }
+    }
+
+    if (ev.type === "review.file") {
+      const juror = String((p["agent"] as Record<string, unknown>)["handle"]);
+      const s = get(juror);
+      s.reviewsServed += 1;
+      s.score += PTS.reviewServed;
     }
 
     if (ev.type === "replication.file") {

@@ -101,9 +101,17 @@ export class MemoryStore implements Store {
     );
   }
 
+  async listAgents(limit: number): Promise<AgentRecord[]> {
+    return [...this.agents.values()].slice(0, limit);
+  }
+
   // --- quarantine ---
   async putQuarantine(q: QuarantineRecord): Promise<void> {
-    this.quarantine.set(q.id, q);
+    this.quarantine.set(q.id, structuredClone(q));
+  }
+  async getQuarantine(id: string): Promise<QuarantineRecord | null> {
+    const q = this.quarantine.get(id);
+    return q ? structuredClone(q) : null;
   }
   async listQuarantine(status: QuarantineRecord["status"], limit: number): Promise<QuarantineRecord[]> {
     return [...this.quarantine.values()].filter((q) => q.status === status).slice(0, limit);

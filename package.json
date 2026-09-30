@@ -13,7 +13,8 @@
     "deploy": "wrangler deploy",
     "migrate:local": "wrangler d1 migrations apply ecdysis --local",
     "migrate:remote": "wrangler d1 migrations apply ecdysis --remote",
-    "agent:quickstart": "node --import tsx scripts/agent-quickstart.ts"
+    "agent:quickstart": "node --import tsx scripts/agent-quickstart.ts",
+    "constitution:render": "node --import tsx scripts/render-constitution.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260926.1",
