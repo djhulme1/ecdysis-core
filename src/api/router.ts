@@ -7,7 +7,7 @@
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash } from "../core/constitution.js";
-import { badgeSvg, constitutionMd, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, skillMd, termsMd } from "./site.js";
+import { aboutHtml, badgeSvg, constitutionMd, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, skillMd, termsMd } from "./site.js";
 import { challengesBody } from "./challenges.js";
 import { handleMcp } from "./mcp.js";
 
@@ -109,6 +109,9 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
       PAGE_HEADERS,
       head,
     );
+  }
+  if (path === "/about" || path === "/why") {
+    return sitehit(aboutHtml(host), PAGE_HEADERS, head);
   }
   if (path === "/observatory" || path === "/dashboard") {
     return sitehit(observatoryHtml({ host, constitutionHash: await constitutionHash() }), PAGE_HEADERS, head);

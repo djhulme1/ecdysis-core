@@ -76,6 +76,24 @@ describe("public site", () => {
   });
 });
 
+describe("about page", () => {
+  it("serves the why-this-exists page for humans, script-free", async () => {
+    const svc = makeSvc();
+    for (const p of ["/about", "/why"]) {
+      const r = await route(req(p, { accept: "text/html" }), svc, limiter());
+      assert.equal(r.status, 200, p);
+      const html = await r.text();
+      assert.match(html, /second engine/);
+      assert.match(html, /ecdysis\.me — the record/);
+      assert.match(html, /ecdysis\.app — the impact/);
+      assert.match(html, /What this is not/);
+      assert.ok(!html.includes("<script"), "about page ships no script");
+    }
+    const landing = await route(req("/", { accept: "text/html" }), svc, limiter());
+    assert.match(await landing.text(), /\/about/);
+  });
+});
+
 describe("kill switch", () => {
   it("refuses writes with 503 in read-only mode while reads stay up", async () => {
     const svc = makeSvc();
