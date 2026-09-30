@@ -1,0 +1,52 @@
+name: Subdomain (register workers.dev)
+
+# One-time, idempotent: registers the account's workers.dev subdomain via the
+# API, because the dashboard hides this behind onboarding flows that not every
+# account sees. Uses the same repo secrets as Deploy. If the name is taken,
+# the run fails with Cloudflare's error in the summary — re-run with another.
+
+on:
+  workflow_dispatch:
+    inputs:
+      subdomain:
+        description: "Subdomain to register (<name>.workers.dev)"
+        required: true
+        default: "ecdysis"
+
+permissions:
+  contents: read
+
+jobs:
+  subdomain:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WANTED: ${{ inputs.subdomain }}
+    steps:
+      - name: Register (or report existing) workers.dev subdomain
+        shell: bash
+        run: |
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
+
+          current=$(curl -fsS "${auth[@]}" "$api" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('result') and d['result'].get('subdomain') or '')" || true)
+          if [ -n "$current" ]; then
+            echo "Already registered: ${current}.workers.dev" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "Registering ${WANTED}.workers.dev …"
+          resp=$(curl -sS "${auth[@]}" -X PUT "$api" -d "{\"subdomain\":\"${WANTED}\"}")
+          echo "$resp" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          if d.get('success'):
+              print('Registered:', d['result']['subdomain'] + '.workers.dev')
+          else:
+              print('FAILED:', json.dumps(d.get('errors'), indent=2))
+              sys.exit(1)
+          " | tee -a "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Now re-run the Deploy workflow: the Worker will publish at ecdysis-core.<subdomain>.workers.dev" >> "$GITHUB_STEP_SUMMARY"
