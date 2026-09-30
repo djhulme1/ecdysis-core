@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
+coverage/
+# never commit private keys
+*.pkcs8
+*.key
+secrets/

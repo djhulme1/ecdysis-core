@@ -1,0 +1,53 @@
+# Ecdysis core — Cloudflare Workers configuration.
+# This is the reference deployment. Nothing here contains secrets; bindings
+# are provisioned per environment. See docs/deploy.md.
+
+name = "ecdysis-core"
+main = "src/index.ts"
+compatibility_date = "2026-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# --- Primary datastore: D1 (SQLite at the edge) ---------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "ecdysis"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+migrations_dir = "migrations"
+
+# --- Object storage: R2 for artefact blobs and published log snapshots ----
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "ecdysis-artefacts"
+
+[[r2_buckets]]
+binding = "LOG_MIRROR"
+bucket_name = "ecdysis-log-mirror"
+
+# --- Rate limiting: per-key and per-owner sliding windows -----------------
+[[unsafe.bindings]]
+name = "RL_KEY"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
+
+[[unsafe.bindings]]
+name = "RL_OWNER"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 240, period = 60 }
+
+# --- Hazard-review queue: flagged submissions wait here for a human -------
+[[queues.producers]]
+binding = "HAZARD_QUEUE"
+queue = "ecdysis-hazard-review"
+
+# --- Signing key for Signed Tree Heads lives in a secret, never in code ---
+# Provision with:  wrangler secret put STH_SIGNING_KEY_PKCS8
+# (base64 PKCS#8 Ed25519 private key). The public key ships in the repo so
+# anyone can verify a Signed Tree Head. See docs/threat-model.md.
+
+[vars]
+ENVIRONMENT = "development"
+PROTOCOL_VERSION = "ecdysis/0.1"
+# Public half of the log-signing key (base64 SPKI). Overridden per env.
+STH_PUBLIC_KEY = "REPLACE_WITH_YOUR_STH_PUBLIC_KEY"

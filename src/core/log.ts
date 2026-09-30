@@ -1,0 +1,217 @@
+/**
+ * The transparency log: an append-only, hash-chained, Merkle-committed record
+ * of everything that changes the scientific record — paper accepted, claim
+ * replicated, claim refuted, key registered, key revoked.
+ *
+ * Integrity comes from three interlocking mechanisms:
+ *
+ *  1. Each entry commits to its predecessor (`prevHash`), so the sequence
+ *     cannot be reordered or edited without breaking the chain.
+ *  2. A Merkle tree over all entries yields a root; the server publishes
+ *     Signed Tree Heads (STHs). Inclusion proofs show an entry is present;
+ *     consistency proofs show growth was append-only.
+ *  3. STHs are meant to be mirrored outside the operator's control (R2 bucket
+ *     with object lock, independent auditors). If the operator ever forks or
+ *     rewrites history, two irreconcilable STHs exist — cryptographic proof
+ *     of misbehaviour that anyone can check.
+ *
+ * The log never interprets payloads; it stores the hash and the canonical
+ * bytes. Interpretation (scoring, search) is downstream and recomputable.
+ */
+
+import {
+  canonicalBytes,
+  canonicalize,
+  fromHex,
+  hashJson,
+  toHex,
+  type Json,
+} from "./canonical.js";
+import { signJson, verifyJson } from "./crypto.js";
+import {
+  consistencyProof,
+  inclusionProof,
+  leafHash,
+  merkleRoot,
+  verifyConsistency,
+  verifyInclusion,
+  type Hash,
+} from "./merkle.js";
+
+export type LogEntryType =
+  | "agent.register"
+  | "agent.revoke"
+  | "paper.accept"
+  | "replication.file"
+  | "build.register"
+  | "governance.proposal"
+  | "moderation.remove"; // content removal is itself logged — nothing vanishes silently
+
+export interface LogEntry {
+  seq: number; // 0-based position in the log
+  ts: string; // ISO-8601 UTC, assigned by the log
+  type: LogEntryType;
+  payloadHash: string; // sha256 hex of the canonical payload
+  prevHash: string; // entryHash of seq-1, or 64 zeros for seq 0
+}
+
+export interface AppendResult {
+  entry: LogEntry;
+  entryHash: string; // sha256 hex of canonical entry
+}
+
+export interface SignedTreeHead {
+  treeSize: number;
+  rootHash: string; // hex
+  timestamp: string;
+  signature: string; // Ed25519 over canonical {treeSize, rootHash, timestamp}
+}
+
+const ZERO = "0".repeat(64);
+
+/** Storage the log needs. Implemented by MemoryStore and D1Store. */
+export interface LogBackend {
+  logSize(): Promise<number>;
+  lastEntryHash(): Promise<string | null>;
+  appendLogRow(row: {
+    entry: LogEntry;
+    entryHash: string;
+    leafHash: string; // hex
+    payload: Json;
+  }): Promise<void>;
+  getEntry(seq: number): Promise<{ entry: LogEntry; entryHash: string } | null>;
+  /** Leaf hashes for seq in [0, size), hex, in order. */
+  leafHashes(size: number): Promise<string[]>;
+}
+
+export class TransparencyLog {
+  constructor(
+    private backend: LogBackend,
+    private now: () => Date = () => new Date(),
+  ) {}
+
+  /** Append a payload. Returns the committed entry and its hash. */
+  async append(type: LogEntryType, payload: Json): Promise<AppendResult> {
+    const seq = await this.backend.logSize();
+    const prevHash = seq === 0 ? ZERO : (await this.backend.lastEntryHash())!;
+    const entry: LogEntry = {
+      seq,
+      ts: this.now().toISOString(),
+      type,
+      payloadHash: await hashJson(payload),
+      prevHash,
+    };
+    const entryHash = await hashJson(entry as unknown as Json);
+    const leaf = await leafHash(canonicalBytes(entry as unknown as Json));
+    await this.backend.appendLogRow({
+      entry,
+      entryHash,
+      leafHash: toHex(leaf),
+      payload,
+    });
+    return { entry, entryHash };
+  }
+
+  async size(): Promise<number> {
+    return this.backend.logSize();
+  }
+
+  async root(size?: number): Promise<string> {
+    const n = size ?? (await this.backend.logSize());
+    const leaves = (await this.backend.leafHashes(n)).map(fromHex);
+    return toHex(await merkleRoot(leaves));
+  }
+
+  /** Produce a Signed Tree Head with the log operator's Ed25519 key. */
+  async signedTreeHead(privateKeyB64: string, size?: number): Promise<SignedTreeHead> {
+    const treeSize = size ?? (await this.backend.logSize());
+    const rootHash = await this.root(treeSize);
+    const timestamp = this.now().toISOString();
+    const body = { treeSize, rootHash, timestamp };
+    const signature = await signJson(privateKeyB64, body);
+    return { ...body, signature };
+  }
+
+  static async verifySth(publicKeyB64: string, sth: SignedTreeHead): Promise<boolean> {
+    const { signature, ...body } = sth;
+    return verifyJson(publicKeyB64, body as unknown as Json, signature);
+  }
+
+  /** Inclusion proof for entry `seq` within the tree of size `treeSize`. */
+  async proveInclusion(seq: number, treeSize?: number): Promise<{ proof: string[]; treeSize: number }> {
+    const n = treeSize ?? (await this.backend.logSize());
+    if (seq < 0 || seq >= n) throw new Error("proveInclusion: seq out of range");
+    const leaves = (await this.backend.leafHashes(n)).map(fromHex);
+    const proof = await inclusionProof(leaves, seq);
+    return { proof: proof.map(toHex), treeSize: n };
+  }
+
+  /** Consistency proof between two published sizes. */
+  async proveConsistency(first: number, second: number): Promise<string[]> {
+    const leaves = (await this.backend.leafHashes(second)).map(fromHex);
+    return (await consistencyProof(leaves, first, second)).map(toHex);
+  }
+
+  /**
+   * Client-side verification helpers: these run anywhere (auditor scripts,
+   * browsers, other agents) with no access to the backend.
+   */
+  static async verifyEntryInclusion(
+    entry: LogEntry,
+    proofHex: string[],
+    treeSize: number,
+    rootHex: string,
+  ): Promise<boolean> {
+    const leaf = await leafHash(canonicalBytes(entry as unknown as Json));
+    return verifyInclusion(entry.seq, treeSize, leaf, proofHex.map(fromHex), fromHex(rootHex));
+  }
+
+  static async verifyLogConsistency(
+    first: number,
+    second: number,
+    firstRootHex: string,
+    secondRootHex: string,
+    proofHex: string[],
+  ): Promise<boolean> {
+    return verifyConsistency(
+      first,
+      second,
+      fromHex(firstRootHex),
+      fromHex(secondRootHex),
+      proofHex.map(fromHex),
+    );
+  }
+
+  /**
+   * Full audit: re-walk the chain, recompute every hash, and confirm the
+   * Merkle root. O(n) — run by auditors and after restores from backup.
+   * Returns the first problem found, or null if the log is intact.
+   */
+  async audit(): Promise<string | null> {
+    const n = await this.backend.logSize();
+    let prev = ZERO;
+    const leaves: Hash[] = [];
+    for (let i = 0; i < n; i++) {
+      const row = await this.backend.getEntry(i);
+      if (!row) return `entry ${i} missing`;
+      const { entry, entryHash } = row;
+      if (entry.seq !== i) return `entry ${i} has wrong seq ${entry.seq}`;
+      if (entry.prevHash !== prev) return `entry ${i} breaks the chain`;
+      const recomputed = await hashJson(entry as unknown as Json);
+      if (recomputed !== entryHash) return `entry ${i} hash mismatch`;
+      prev = entryHash;
+      leaves.push(await leafHash(canonicalBytes(entry as unknown as Json)));
+    }
+    // Root recomputation doubles as a check that stored leaf hashes are honest.
+    const stored = await this.backend.leafHashes(n);
+    for (let i = 0; i < n; i++) {
+      if (toHex(leaves[i]!) !== stored[i]) return `leaf hash ${i} mismatch`;
+    }
+    return null;
+  }
+}
+
+/** Canonical text of an entry, for exports and mirrors. */
+export function entryText(entry: LogEntry): string {
+  return canonicalize(entry as unknown as Json);
+}
