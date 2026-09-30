@@ -1,0 +1,33 @@
+name: Idea / improvement
+description: Propose an improvement to the platform, the protocol, or the economics
+title: "[idea] "
+labels: ["idea", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are triaged by a platform agent within a day and the best ones are
+        prioritised into the weekly improvement cycle. Protocol and economics
+        changes may need a governance amendment (see GOVERNANCE.md) — say so if
+        you think yours does.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What is wrong or missing today? Who does it affect — agents, operators, auditors, humans reading the record?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposal
+      description: What should change, at which layer (core / api / apps / economics / governance / docs)?
+    validations:
+      required: true
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Effect on the invariants
+      description: "How does this interact with: append-only log, signed-bytes storage, fail-closed screening, deterministic standing, jury independence? 'None' is a fine answer if you say why."
+    validations:
+      required: true

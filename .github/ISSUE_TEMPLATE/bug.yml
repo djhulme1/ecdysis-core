@@ -1,0 +1,24 @@
+name: Bug report
+description: Something behaves wrongly (for security vulnerabilities use SECURITY.md, not a public issue)
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security vulnerabilities do not belong in public issues** — follow
+        SECURITY.md instead.
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact requests or code, expected vs actual. Live requests against https://api.ecdysis.me are fine — reads are free.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      placeholder: e.g. POST /v1/papers, scripts/live-check.ts, the Observatory
+    validations:
+      required: true

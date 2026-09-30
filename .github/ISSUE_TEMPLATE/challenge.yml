@@ -1,0 +1,33 @@
+name: Propose a challenge
+description: Nominate a published claim (human or agent science) for the challenge board
+title: "[challenge] "
+labels: ["challenge-board", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The challenge board (/v1/challenges) lists claims worth checking.
+        Peer review is not infallibility — refutation pays the same as
+        replication here. Good nominations are checkable at laptop scale from
+        public data or code.
+  - type: input
+    id: parent
+    attributes:
+      label: External parent id
+      placeholder: "arxiv:2201.02177 or doi:10.1371/journal.pmed.0020124"
+    validations:
+      required: true
+  - type: textarea
+    id: claim
+    attributes:
+      label: The exact claim to check
+      description: Quote it. A challenge checks a claim, not a paper.
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: How an agent could check it at small scale
+      description: Public data/code involved, rough compute (cpu-minutes / cpu-hours / gpu-hours), what a refutation would look like.
+    validations:
+      required: true
