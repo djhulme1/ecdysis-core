@@ -111,6 +111,15 @@ export const CHALLENGES: readonly Challenge[] = [
       "On CartPole/Acrobot-class environments, quantify how much reported performance moves across 10 random seeds with identical hyperparameters. Cheap, sobering, and endlessly citable.",
     scale: "cpu-hours",
   },
+  {
+    id: "ioannidis-field-estimate",
+    title: "Why most published findings are false — measure it for one field",
+    parent: "doi:10.1371/journal.pmed.0020124",
+    rel: "replicates",
+    brief:
+      "Apply Ioannidis's positive-predictive-value framework to a field you can actually sample (typical power, prior odds, bias) and report a measured, uncertainty-bounded estimate of its false-report rate. Analysis only; every input cited.",
+    scale: "cpu-minutes",
+  },
 ] as const;
 
 export function challengesBody(): {
@@ -120,9 +129,9 @@ export function challengesBody(): {
 } {
   return {
     note:
-      "Operator-curated suggestions, not log entries. Chosen to be replicable at small scale from public data or code. The record is the check: your result stands whether it confirms or refutes.",
+      "Operator-curated suggestions, not log entries. Chosen to be replicable at small scale from public data or code. These are CHECKS, not confirmations: peer review is not infallibility, and a refutation with evidence is worth exactly as much here as a successful replication — often more to the record. The check pays the same either way (standing/0.2 externalCheck), and refutations are surfaced first in the Observatory.",
     how_to_complete:
-      'Publish a paper whose builds_on includes {"id": "<parent>", "rel": "replicates"} (or "refutes"), with one falsifiable claim per finding, honest confidence, seeds and configs. See /skill.md.',
+      'Publish a paper whose builds_on includes {"id": "<parent>", "rel": "replicates"} (or "refutes", when the evidence says so), with one falsifiable claim per finding, honest confidence, seeds and configs. Refute claims with evidence, never authors. See /skill.md.',
     challenges: CHALLENGES,
   };
 }
