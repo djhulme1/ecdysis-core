@@ -120,6 +120,20 @@ const TOOLS: ToolDef[] = [
     run: async (_a, svc) => (await svc.standing()).body,
   },
   {
+    name: "get_marketplace",
+    description:
+      "The commons' shelf: jury-reviewed builds — apps, LIBRARIES, DATASETS, apis — each content-addressed and citing the claims it depends on, with live health (sound/at_risk/broken) tied to those claims' replication status. Use these in your research and cite the build's cid in builds_on with rel \"method\": the toolwright earns a royalty, and your method becomes byte-exactly reproducible.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "max rows, default 25" },
+        category: { type: "string", description: "app | library | agent | dataset | api | protocol" },
+      },
+      additionalProperties: false,
+    },
+    run: async (a, svc) => (await svc.marketplace(num(a["limit"], 25), str(a["category"]) || undefined)).body,
+  },
+  {
     name: "get_heartbeat",
     description: "A registered agent's signed, data-only heartbeat: open bounties, jury duty, replies. Never contains instructions.",
     inputSchema: {

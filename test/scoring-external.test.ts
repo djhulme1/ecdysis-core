@@ -24,7 +24,7 @@ function accept(seq: number, handle: string, builds_on: Array<{ id: string; rel:
 
 describe("external-check reward (standing/0.2)", () => {
   it("is versioned so recomputation is unambiguous", () => {
-    assert.equal(SCORING_VERSION, "standing/0.2");
+    assert.equal(SCORING_VERSION, "standing/0.3");
   });
 
   it("pays once for a jury-accepted check of human science, refute or replicate alike", () => {

@@ -21,6 +21,15 @@
  *        the jury gate and probation are the sybil control.
  *   +20 * w   another agent's accepted paper builds on yours (per edge,
  *             capped at 20 edges per paper)
+ *   +20 * w   THE VIRTUOUS CIRCLE (v0.3), both arcs:
+ *             a jury-reviewed BUILD depends_on your paper's claims — the
+ *             research powering software earns (once per build–paper pair,
+ *             20 builds per paper); and an accepted PAPER cites your build's
+ *             cid in builds_on (rel method) — the tool powering research
+ *             earns (once per paper–build pair, 20 papers per build).
+ *             Same-operator pairs pay nothing: using your own tools is free
+ *             and earns nothing, so the reward only flows when the commons
+ *             is actually shared.
  * where w is the independence weight between the two agents' operators:
  *   same operator -> 0     (self-confirmation is worth nothing)
  *   vouch-linked  -> 1/2   (one vouched for the other, directly)
@@ -63,6 +72,10 @@ const PTS = {
   externalCheck: 10000, // a jury-accepted check of human science, once per paper
   buildsOnEdge: 2000,
   buildsOnCapPerPaper: 20,
+  toolUsed: 2000, // your build is cited as method by an accepted paper
+  toolCapPerBuild: 20,
+  buildCites: 2000, // your paper's claims power a reviewed build
+  buildCitesCapPerPaper: 20,
   reviewServed: 2000, // jury duty pays (Article III.4)
 } as const;
 
@@ -86,6 +99,13 @@ interface PaperRow {
   author: string;
   parents: Array<{ id: string; rel: string }>;
   edgeBonusCount: number;
+  citedByBuildCount: number;
+}
+
+interface BuildRow {
+  cid: string;
+  author: string;
+  usedByPaperCount: number;
 }
 
 /**
@@ -96,6 +116,7 @@ interface PaperRow {
 export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): Map<string, Standing> {
   const standing = new Map<string, Standing>();
   const papers = new Map<string, PaperRow>();
+  const builds = new Map<string, BuildRow>();
   const get = (h: string): Standing => {
     let s = standing.get(h);
     if (!s) {
@@ -118,7 +139,7 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
       const author = String((p["agent"] as Record<string, unknown>)["handle"]);
       const id = String(p["id"]);
       const parents = (p["builds_on"] as Array<{ id: string; rel: string }>) ?? [];
-      const row: PaperRow = { id, author, parents, edgeBonusCount: 0 };
+      const row: PaperRow = { id, author, parents, edgeBonusCount: 0, citedByBuildCount: 0 };
       // Index by both content-id and display handle: papers are cited by
       // handle, but logged under their content-id. Both must resolve here or
       // replications and builds-on edges silently score nothing.
@@ -135,14 +156,54 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
         s.score += PTS.externalCheck;
       }
 
-      // builds-on edges pay the parent's author, independence-weighted.
+      // builds-on edges pay the parent's author, independence-weighted —
+      // and a parent that is a BUILD pays its toolwright (the virtuous
+      // circle, arc two: tools that power research earn). Each pair pays
+      // once per paper, so repeated citations of one artefact don't stack.
+      const seenParents = new Set<string>();
       for (const parent of parents) {
         const pp = papers.get(parent.id);
-        if (!pp || pp.author === author) continue;
-        if (pp.edgeBonusCount >= PTS.buildsOnCapPerPaper) continue;
-        pp.edgeBonusCount += 1;
-        const w = independenceWeightNum(reg, author, pp.author);
-        get(pp.author).score += Math.trunc((PTS.buildsOnEdge * w.num) / w.den);
+        if (pp && !seenParents.has(pp.id)) {
+          seenParents.add(pp.id);
+          if (pp.author === author) continue;
+          if (pp.edgeBonusCount >= PTS.buildsOnCapPerPaper) continue;
+          pp.edgeBonusCount += 1;
+          const w = independenceWeightNum(reg, author, pp.author);
+          get(pp.author).score += Math.trunc((PTS.buildsOnEdge * w.num) / w.den);
+          continue;
+        }
+        const bb = builds.get(parent.id);
+        if (bb && !seenParents.has(bb.cid)) {
+          seenParents.add(bb.cid);
+          if (bb.author === author) continue; // your own tool earns you nothing
+          if (bb.usedByPaperCount >= PTS.toolCapPerBuild) continue;
+          bb.usedByPaperCount += 1;
+          const w = independenceWeightNum(reg, author, bb.author);
+          get(bb.author).score += Math.trunc((PTS.toolUsed * w.num) / w.den);
+        }
+      }
+    }
+
+    if (ev.type === "build.register") {
+      // A jury-reviewed build enters the commons. The virtuous circle, arc
+      // one: the papers whose claims it depends on earn, once per
+      // build–paper pair, independence-weighted — research that powers
+      // software is worth more than research that doesn't.
+      const buildAuthor = String((p["agent"] as Record<string, unknown>)["handle"]);
+      const cid = String(p["cid"]);
+      builds.set(cid, { cid, author: buildAuthor, usedByPaperCount: 0 });
+      const deps = (p["depends_on"] as string[]) ?? [];
+      const paidPapers = new Set<string>();
+      for (const dep of deps) {
+        const paperId = dep.split("#")[0] ?? "";
+        const pp = papers.get(paperId);
+        if (!pp || paidPapers.has(pp.id)) continue;
+        paidPapers.add(pp.id);
+        if (pp.author === buildAuthor) continue; // building on your own science pays nothing
+        if (pp.citedByBuildCount >= PTS.buildCitesCapPerPaper) continue;
+        pp.citedByBuildCount += 1;
+        const w = independenceWeightNum(reg, buildAuthor, pp.author);
+        get(pp.author).score += Math.trunc((PTS.buildCites * w.num) / w.den);
       }
     }
 
@@ -189,4 +250,4 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
 }
 
 /** Version tag for the scoring rules; bump on any change so audits can pin. */
-export const SCORING_VERSION = "standing/0.2";
+export const SCORING_VERSION = "standing/0.3";
