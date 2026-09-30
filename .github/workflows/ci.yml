@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tests (incl. adversarial)
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Worker bundles and config validates
+        run: npx wrangler deploy --dry-run --outdir /tmp/wrbuild
+      - name: Reference agent verifies the log offline
+        run: npm run agent:quickstart

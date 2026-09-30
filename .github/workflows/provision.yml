@@ -1,0 +1,88 @@
+name: Provision (one-time Cloudflare setup)
+
+# Run manually once, after adding the two repository secrets:
+#   CLOUDFLARE_API_TOKEN   (scopes: Workers Scripts:Edit, D1:Edit)
+#   CLOUDFLARE_ACCOUNT_ID
+#
+# It creates the D1 database, applies migrations, generates the log-signing
+# keypair INSIDE the runner, stores the private half directly as a Worker
+# secret (it never appears in logs or leaves the run), and prints the two
+# values you then save as repository *variables*:
+#   D1_DATABASE_ID, STH_PUBLIC_KEY
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: provision
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Fail early if secrets are missing
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as repository secrets first (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+
+      - name: Create D1 database (idempotent)
+        run: npx wrangler d1 create ecdysis || echo "d1 'ecdysis' already exists — continuing"
+
+      - name: Resolve database id and patch wrangler.toml for this run
+        id: d1
+        run: |
+          UUID=$(npx wrangler d1 list --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);const r=j.find(x=>x.name==='ecdysis');if(!r){console.error('ecdysis db not found');process.exit(1)};console.log(r.uuid)})")
+          echo "uuid=$UUID" >> "$GITHUB_OUTPUT"
+          sed -i "s/REPLACE_WITH_YOUR_D1_ID/$UUID/" wrangler.toml
+
+      - name: Apply migrations (installs append-only triggers)
+        run: npx wrangler d1 migrations apply ecdysis --remote
+
+      - name: Generate log-signing keypair and store the private half as a Worker secret
+        id: sth
+        run: |
+          node --import tsx -e '
+            import("./src/core/crypto.ts").then(async (m) => {
+              const k = await m.generateKeyPair();
+              const fs = await import("node:fs");
+              fs.writeFileSync("/tmp/sth_pub.txt", k.publicKey);
+              fs.writeFileSync("/tmp/sth_priv.txt", k.privateKey);
+            });'
+          echo "::add-mask::$(cat /tmp/sth_priv.txt)"
+          npx wrangler secret put STH_SIGNING_KEY_PKCS8 < /tmp/sth_priv.txt
+          echo "pub=$(cat /tmp/sth_pub.txt)" >> "$GITHUB_OUTPUT"
+          rm -f /tmp/sth_priv.txt
+
+      - name: Summary — the two values to save as repository VARIABLES
+        run: |
+          {
+            echo "## Provisioned. Save these as repository variables"
+            echo ""
+            echo "Settings → Secrets and variables → Actions → **Variables** tab:"
+            echo ""
+            echo '| Variable | Value |'
+            echo '| --- | --- |'
+            echo "| \`D1_DATABASE_ID\` | \`${{ steps.d1.outputs.uuid }}\` |"
+            echo "| \`STH_PUBLIC_KEY\` | \`${{ steps.sth.outputs.pub }}\` |"
+            echo ""
+            echo "Then run the **Deploy** workflow (or push to main)."
+            echo ""
+            echo "The log-signing PRIVATE key was generated in this run, stored"
+            echo "directly as the Worker secret STH_SIGNING_KEY_PKCS8, and deleted."
+            echo "It was never printed. Publish the PUBLIC key so anyone can verify"
+            echo "your Signed Tree Heads. Re-running this workflow ROTATES the key."
+          } >> "$GITHUB_STEP_SUMMARY"

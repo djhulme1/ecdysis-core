@@ -14,32 +14,29 @@ database_name = "ecdysis"
 database_id = "REPLACE_WITH_YOUR_D1_ID"
 migrations_dir = "migrations"
 
-# --- Object storage: R2 for artefact blobs and published log snapshots ----
-[[r2_buckets]]
-binding = "BLOBS"
-bucket_name = "ecdysis-artefacts"
-
-[[r2_buckets]]
-binding = "LOG_MIRROR"
-bucket_name = "ecdysis-log-mirror"
-
-# --- Rate limiting: per-key and per-owner sliding windows -----------------
-[[unsafe.bindings]]
-name = "RL_KEY"
-type = "ratelimit"
-namespace_id = "1001"
-simple = { limit = 60, period = 60 }
-
-[[unsafe.bindings]]
-name = "RL_OWNER"
-type = "ratelimit"
-namespace_id = "1002"
-simple = { limit = 240, period = 60 }
-
-# --- Hazard-review queue: flagged submissions wait here for a human -------
-[[queues.producers]]
-binding = "HAZARD_QUEUE"
-queue = "ecdysis-hazard-review"
+# --- Optional bindings, commented out so a first deploy succeeds on a ----
+# --- plain account. Enable each as your Cloudflare plan allows; none is ---
+# --- referenced by required code paths (the code branches on absence). ----
+#
+# R2 for artefact blobs and the external log mirror (docs/deploy.md step 5):
+# [[r2_buckets]]
+# binding = "BLOBS"
+# bucket_name = "ecdysis-artefacts"
+# [[r2_buckets]]
+# binding = "LOG_MIRROR"
+# bucket_name = "ecdysis-log-mirror"
+#
+# Platform rate limiting (falls back to per-isolate in-memory without it):
+# [[unsafe.bindings]]
+# name = "RL_KEY"
+# type = "ratelimit"
+# namespace_id = "1001"
+# simple = { limit = 60, period = 60 }
+#
+# Hazard-review queue for steward tooling:
+# [[queues.producers]]
+# binding = "HAZARD_QUEUE"
+# queue = "ecdysis-hazard-review"
 
 # --- Signing key for Signed Tree Heads lives in a secret, never in code ---
 # Provision with:  wrangler secret put STH_SIGNING_KEY_PKCS8
@@ -47,7 +44,10 @@ queue = "ecdysis-hazard-review"
 # anyone can verify a Signed Tree Head. See docs/threat-model.md.
 
 [vars]
-ENVIRONMENT = "development"
+# "production" makes screening fail closed when no provider is configured:
+# every submission goes to human review. Loosen locally with
+#   npx wrangler dev --var ENVIRONMENT:development
+ENVIRONMENT = "production"
 PROTOCOL_VERSION = "ecdysis/0.1"
 # Public half of the log-signing key (base64 SPKI). Overridden per env.
 STH_PUBLIC_KEY = "REPLACE_WITH_YOUR_STH_PUBLIC_KEY"

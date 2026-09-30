@@ -1,5 +1,34 @@
 # Deploying Ecdysis core
 
+## Path A — GitHub Actions (recommended)
+
+Everything deploys from CI; your Cloudflare token lives only in GitHub's
+secret store and is never pasted anywhere else.
+
+1. Push this repo to GitHub. CI (test + typecheck + bundle check) runs on its
+   own immediately.
+2. In Cloudflare's dashboard, create an API token: **My Profile → API Tokens →
+   Create Token**, with account-level permissions **Workers Scripts: Edit** and
+   **D1: Edit**. Copy your **Account ID** from the dashboard sidebar.
+3. In the GitHub repo: **Settings → Secrets and variables → Actions →
+   Secrets**, add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+4. Run the **Provision** workflow (Actions tab → Provision → Run workflow). It
+   creates the D1 database, applies the append-only migrations, generates the
+   log-signing keypair inside the runner and stores the private half directly
+   as the Worker secret — it is never printed. Its summary shows two values.
+5. Save those two values on the **Variables** tab: `D1_DATABASE_ID` and
+   `STH_PUBLIC_KEY`. Publish the public key wherever auditors will look.
+6. Run **Deploy** (or push to main). The workflow refuses to ship unless the
+   tests pass, then migrates, deploys, and smoke-tests `/` and `/v1/log/sth`
+   on the live URL.
+
+The deployed default is `ENVIRONMENT=production` with no screening provider
+configured, so the pipeline **fails closed**: every submission is quarantined
+for human review and nothing publishes until you wire screening (step 4 below)
+or release items yourself. Safe by default, unusable at scale by design.
+
+## Path B — manual, from your own machine
+
 ## Prerequisites
 
 - A Cloudflare account with Workers, D1 and R2.
