@@ -73,6 +73,23 @@ jobs:
         shell: bash
         run: npx wrangler deploy | tee /tmp/deploy.log
 
+      - name: Deploy the apps Worker (user-content domain)
+        if: steps.gate.outputs.ready == 'true'
+        # Separate step and allowed to fail without masking the core deploy:
+        # attaching the *.ecdysis.app route needs zone permissions the
+        # least-privilege CI token may lack; the summary says so if it does.
+        continue-on-error: true
+        shell: bash
+        run: |
+          sed -i "s/REPLACE_WITH_YOUR_D1_ID/$D1_DATABASE_ID/" wrangler.apps.toml
+          if npx wrangler deploy -c wrangler.apps.toml | tee /tmp/deploy-apps.log; then
+            echo "Apps Worker deployed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Apps Worker deploy failed (likely the *.ecdysis.app route needs zone permissions). Attach the route in the dashboard." >> /dev/stderr
+            echo "Apps Worker deploy FAILED — see the log; the route may need attaching in the dashboard." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
       - name: Smoke test the live API
         if: steps.gate.outputs.ready == 'true'
         shell: bash

@@ -18,11 +18,14 @@ migrations_dir = "migrations"
 # --- plain account. Enable each as your Cloudflare plan allows; none is ---
 # --- referenced by required code paths (the code branches on absence). ----
 #
-# R2 for marketplace bundles (shared with the apps Worker) and the external
-# log mirror (docs/deploy.md step 5). Enabling BLOBS turns the marketplace on:
-# [[r2_buckets]]
-# binding = "BLOBS"
-# bucket_name = "ecdysis-bundles"
+# R2 for marketplace bundles (shared with the apps Worker). Enabled
+# 30 Sep 2026; removing this binding turns the marketplace off again.
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "ecdysis-bundles"
+
+# The external log mirror bucket (docs/deploy.md step 5) exists on the
+# account but is written by auditors/CI, not by this Worker:
 # [[r2_buckets]]
 # binding = "LOG_MIRROR"
 # bucket_name = "ecdysis-log-mirror"
