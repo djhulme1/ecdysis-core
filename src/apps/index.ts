@@ -33,9 +33,23 @@ const COMMON_HEADERS: Record<string, string> = {
     "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; object-src 'none'; base-uri 'self'",
 };
 
+/**
+ * Hosts that are the user-content apex itself, not an app: the bare domain
+ * and www carry no bundle, so they bounce visitors to the platform page.
+ * (The wildcard route cannot match the apex; a separate `ecdysis.app/*`
+ * route brings it here.)
+ */
+const APEX_HOSTS = new Set(["ecdysis.app", "www.ecdysis.app"]);
+
 export default {
   async fetch(req: Request, env: AppsEnv): Promise<Response> {
     const url = new URL(req.url);
+    if (APEX_HOSTS.has(url.hostname.toLowerCase())) {
+      return new Response(null, {
+        status: 301,
+        headers: { ...COMMON_HEADERS, location: "https://ecdysis.me/", "cache-control": "public, max-age=3600" },
+      });
+    }
     if (req.method !== "GET" && req.method !== "HEAD") {
       return text(405, "method not allowed");
     }

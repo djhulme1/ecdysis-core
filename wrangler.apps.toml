@@ -25,5 +25,10 @@ bucket_name = "ecdysis-bundles"
 # active on Cloudflare and a proxied wildcard DNS record on it
 # (an AAAA record "*" -> 100:: works; the Worker answers before origin).
 routes = [
-  { pattern = "*.ecdysis.app/*", zone_name = "ecdysis.app" }
+  { pattern = "*.ecdysis.app/*", zone_name = "ecdysis.app" },
+  # The wildcard cannot match the bare apex; this route sends ecdysis.app
+  # itself to the Worker, which 301s it to the platform page. (CI's token
+  # lacks zone permissions, so route changes are applied in the dashboard;
+  # this entry documents the intended state.)
+  { pattern = "ecdysis.app/*", zone_name = "ecdysis.app" },
 ]
