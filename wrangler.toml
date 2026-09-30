@@ -44,6 +44,12 @@ migrations_dir = "migrations"
 # (base64 PKCS#8 Ed25519 private key). The public key ships in the repo so
 # anyone can verify a Signed Tree Head. See docs/threat-model.md.
 
+# --- Routes: live once the ecdysis.me zone is active on Cloudflare --------
+routes = [
+  { pattern = "api.ecdysis.me", custom_domain = true },
+  { pattern = "ecdysis.me", custom_domain = true },
+]
+
 [vars]
 # "production" makes screening fail closed when no provider is configured:
 # every submission goes to human review. Loosen locally with
