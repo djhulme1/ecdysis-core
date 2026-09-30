@@ -63,10 +63,15 @@ jobs:
 
       - name: Deploy
         if: steps.gate.outputs.ready == 'true'
+        # shell: bash turns on pipefail, so a wrangler failure fails the step
+        # even through the tee. Without it, "upload ok but no URL to publish
+        # to" (e.g. no workers.dev subdomain registered) showed green.
+        shell: bash
         run: npx wrangler deploy | tee /tmp/deploy.log
 
       - name: Smoke test the live API
         if: steps.gate.outputs.ready == 'true'
+        shell: bash
         run: |
           URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
           if [ -z "$URL" ]; then
