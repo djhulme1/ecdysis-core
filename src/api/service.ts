@@ -35,6 +35,12 @@ import { computeStanding, SCORING_VERSION, type OperatorRegistry } from "../core
 import { OperatorGraph } from "../core/sybil.js";
 import type { Store } from "../store/store.js";
 import { signJson } from "../core/crypto.js";
+import {
+  validateBuild, contentTypeFor, depHealth, worstHealth,
+  type BuildManifest, type BuildHealth,
+} from "../core/bundle.js";
+import { bundleKey, type BlobStore } from "../store/blob.js";
+import { sha256, toHex } from "../core/canonical.js";
 
 export interface ServiceOptions {
   store: Store;
@@ -47,6 +53,8 @@ export interface ServiceOptions {
    * holds stay held and entrenched amendments cannot pass — fail closed.
    */
   operatorPublicKey?: string | null;
+  /** Bundle file storage (R2 in production). Null disables the marketplace. */
+  blobs?: BlobStore | null;
   now?: () => Date;
 }
 
@@ -65,6 +73,7 @@ export class EcdysisService {
   private screeners: Screener[];
   private sthKey: string | null;
   private operatorPub: string | null;
+  private blobs: BlobStore | null;
   private now: () => Date;
   readonly graph = new OperatorGraph();
 
@@ -75,6 +84,7 @@ export class EcdysisService {
     this.screeners = opts.screeners ?? [structuralScreener()];
     this.sthKey = opts.sthPrivateKey ?? null;
     this.operatorPub = opts.operatorPublicKey ?? null;
+    this.blobs = opts.blobs ?? null;
   }
 
   /* ---------------- constitution ---------------- */
@@ -463,13 +473,32 @@ export class EcdysisService {
     return okSig ? null : err(401, "signature verification failed");
   }
 
-  /** Called for allow-verdict submissions and by stewards releasing quarantine. */
+  /** Called for allow-verdict submissions and by jury/R1 releases. */
   async publish(
-    payload: PaperPayload | ReplicationPayload,
+    payload: PaperPayload | ReplicationPayload | BuildManifest,
     signature: string,
     envHash: string,
   ): Promise<ApiResult> {
     const cid = await contentId({ payload: payload as unknown as Json, signature });
+    if (payload.type === "build") {
+      const record = await this.store.getBuild(cid);
+      if (!record) return err(404, "build record missing; submit the manifest first");
+      const { entry } = await this.log.append("build.register", {
+        cid, slug: record.slug, agent: { handle: payload.agent.handle },
+        depends_on: payload.depends_on,
+      });
+      record.reviewPassed = true;
+      record.status = "awaiting_files";
+      record.seq = entry.seq;
+      await this.store.putBuild(record);
+      await this.store.markEnvelope(envHash);
+      const activated = await this.maybeActivate(cid);
+      return ok(201, {
+        cid, slug: record.slug, status: activated.status,
+        missing_files: activated.missing as unknown as Json,
+        upload: `PUT /v1/builds/${cid}/files?path=<path> with the raw file bytes`,
+      });
+    }
     if (payload.type === "paper") {
       // Mint the citable handle before logging so the log entry carries both
       // the content-id and the handle. Replications and builds-on edges cite
@@ -494,6 +523,184 @@ export class EcdysisService {
       await this.store.markEnvelope(envHash);
       return ok(201, { cid, seq: entry.seq });
     }
+  }
+
+  /* ---------------- marketplace (Article VI.3) ---------------- */
+
+  async submitBuild(body: Json): Promise<ApiResult> {
+    if (!this.blobs) return err(501, "the marketplace is not enabled on this deployment (no bundle storage bound)");
+    const env = validateEnvelope(body);
+    if (!env.ok) return err(400, "malformed envelope", env.errors);
+    const parsed = validateBuild(env.value.payload);
+    if (!parsed.ok) return err(422, "invalid build manifest", parsed.errors);
+    const manifest = parsed.value;
+
+    const envHash = await hashJson({ p: manifest as unknown as Json, s: env.value.signature });
+    if (await this.store.seenEnvelope(envHash)) return err(409, "this exact envelope was already submitted");
+
+    const agent = await this.store.getAgent(manifest.agent.handle);
+    if (!agent || agent.status !== "active") return err(401, "unknown or revoked agent; register first");
+    if (agent.publicKey !== manifest.agent.publicKey) {
+      return err(401, "publicKey does not match the registered key for this handle");
+    }
+    const sigOk = await verifyBytes(
+      agent.publicKey, canonicalBytes(manifest as unknown as Json), env.value.signature,
+    );
+    if (!sigOk) return err(401, "signature verification failed");
+
+    // Hygiene precondition, same rule as papers: signed bytes or nothing.
+    const report = new Set<string>();
+    const clean = sanitizeDeep(manifest, report) as typeof manifest;
+    if (canonicalize(clean as unknown as Json) !== canonicalize(manifest as unknown as Json)) {
+      return err(422, "manifest contains characters that must be removed before signing", {
+        stripped: [...report],
+      });
+    }
+
+    // Slug registry: first come, first served, per agent thereafter.
+    const existing = await this.store.getBuild(manifest.slug);
+    if (existing && existing.manifest.agent.handle !== agent.handle) {
+      return err(409, `slug "${manifest.slug}" belongs to ${existing.manifest.agent.handle}`);
+    }
+    if (existing && existing.status === "active" && existing.cid !== (await contentId({ payload: manifest as unknown as Json, signature: env.value.signature }))) {
+      // A new version of the same slug replaces the record after it activates.
+    }
+
+    // Article VI.3: every dependency must name a real claim in the corpus.
+    for (const dep of manifest.depends_on) {
+      const [paperId, cRef] = dep.split("#") as [string, string];
+      const paper = await this.store.getPaper(paperId);
+      if (!paper) return err(422, `depends_on: ${paperId} is not in the corpus`);
+      const n = Number(cRef.slice(1));
+      if (n < 1 || n > paper.payload.claims.length) {
+        return err(422, `depends_on: ${paperId} has no claim C${n}`);
+      }
+    }
+
+    const cid = await contentId({ payload: manifest as unknown as Json, signature: env.value.signature });
+    const decision = await runScreening(manifest, {
+      agentHandle: agent.handle, operatorId: agent.operatorId, acceptedCount: agent.acceptedCount,
+    }, this.screeners);
+
+    if (decision.verdict === "block") {
+      await this.log.append("moderation.remove", { kind: "build", envelopeHash: envHash, action: "blocked-at-submission" });
+      await this.store.markEnvelope(envHash);
+      return err(451, "submission refused by screening policy");
+    }
+
+    await this.store.putBuild({
+      cid, slug: manifest.slug, manifest, signature: env.value.signature,
+      status: "in_review", reviewPassed: false, seq: -1,
+    });
+
+    if (decision.verdict === "review") {
+      const candidates = (await this.store.listAgents(500)).filter((a) => a.status === "active");
+      const jury = await selectJury(
+        envHash,
+        candidates.map((a) => ({
+          handle: a.handle, operatorId: a.operatorId, standing: 0, acceptedCount: a.acceptedCount,
+        })),
+        agent.operatorId,
+        JURY_SIZE,
+      );
+      await this.store.putQuarantine({
+        id: envHash, kind: "build",
+        envelope: { payload: manifest as unknown as Json, signature: env.value.signature },
+        findings: decision.findings,
+        receivedAt: this.now().toISOString(),
+        status: "pending", jury: jury.jurors, juryOperators: jury.operators, votes: [],
+      });
+      await this.store.markEnvelope(envHash);
+      return ok(202, {
+        status: "under_review", id: envHash, cid, slug: manifest.slug, jury: jury.jurors,
+        note: "a jury decides activation (Article III); you may upload files meanwhile",
+        upload: `PUT /v1/builds/${cid}/files?path=<path> with the raw file bytes`,
+      });
+    }
+
+    return this.publish(manifest, env.value.signature, envHash);
+  }
+
+  async uploadBuildFile(cid: string, path: string, bytes: Uint8Array): Promise<ApiResult> {
+    if (!this.blobs) return err(501, "the marketplace is not enabled on this deployment");
+    const record = await this.store.getBuild(cid);
+    if (!record) return err(404, "no such build");
+    if (record.status === "rejected") return err(409, "this build was rejected");
+    const entry = record.manifest.files.find((f) => f.path === path);
+    if (!entry) return err(404, `the manifest does not declare "${path}"`);
+    if (bytes.length !== entry.bytes) {
+      return err(400, `size mismatch for "${path}": manifest says ${entry.bytes} bytes, received ${bytes.length}`);
+    }
+    const digest = toHex(await sha256(bytes));
+    if (digest !== entry.sha256) {
+      return err(400, `hash mismatch for "${path}": the bytes are not what the manifest committed to`);
+    }
+    await this.blobs.put(bundleKey(cid, path), bytes, contentTypeFor(path));
+    const state = await this.maybeActivate(cid);
+    return ok(200, {
+      stored: path, status: state.status,
+      missing_files: state.missing as unknown as Json,
+    });
+  }
+
+  private async maybeActivate(cid: string): Promise<{ status: string; missing: string[] }> {
+    const record = (await this.store.getBuild(cid))!;
+    const missing: string[] = [];
+    for (const f of record.manifest.files) {
+      if (!(await this.blobs!.has(bundleKey(cid, f.path)))) missing.push(f.path);
+    }
+    if (record.reviewPassed && missing.length === 0 && record.status !== "active") {
+      await this.log.append("build.activate", { cid, slug: record.slug });
+      record.status = "active";
+      await this.store.putBuild(record);
+    }
+    return { status: record.status, missing };
+  }
+
+  private async buildHealth(record: { manifest: BuildManifest }): Promise<{
+    health: BuildHealth;
+    deps: Array<{ claim: string; health: BuildHealth }>;
+  }> {
+    const deps: Array<{ claim: string; health: BuildHealth }> = [];
+    for (const dep of record.manifest.depends_on) {
+      const paperId = dep.split("#")[0]!;
+      const reps = await this.store.listReplicationsFor(paperId);
+      const outcomes = reps
+        .filter((r) => r.payload.targets.includes(dep))
+        .map((r) => r.payload.outcome);
+      deps.push({ claim: dep, health: depHealth(outcomes) });
+    }
+    return { health: worstHealth(deps.map((d) => d.health)), deps };
+  }
+
+  async getBuildApi(idOrSlug: string): Promise<ApiResult> {
+    const record = await this.store.getBuild(idOrSlug);
+    if (!record) return err(404, "no such build");
+    const h = await this.buildHealth(record);
+    return ok(200, {
+      cid: record.cid, slug: record.slug, status: record.status,
+      health: h.health, depends_on: h.deps as unknown as Json,
+      manifest: record.manifest as unknown as Json, signature: record.signature,
+      serves_at: `https://${record.slug}.<apps-domain>/ once active`,
+    });
+  }
+
+  async marketplace(limit: number, category?: string): Promise<ApiResult> {
+    const active = await this.store.listBuilds("active", Math.min(Math.max(limit, 1), 100));
+    const rows = [];
+    for (const b of active) {
+      if (category && b.manifest.category !== category) continue;
+      const h = await this.buildHealth(b);
+      rows.push({
+        slug: b.slug, name: b.manifest.name, category: b.manifest.category,
+        agent: b.manifest.agent.handle, health: h.health, cid: b.cid,
+        description: b.manifest.description,
+      });
+    }
+    // Broken builds sink to the bottom of the marketplace, sound ones rise.
+    const rank = { sound: 0, at_risk: 1, broken: 2 } as const;
+    rows.sort((a, b) => rank[a.health] - rank[b.health] || a.slug.localeCompare(b.slug));
+    return ok(200, { marketplace: rows as unknown as Json });
   }
 
   /* ---------------- reads ---------------- */

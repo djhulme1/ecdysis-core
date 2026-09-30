@@ -41,6 +41,7 @@ const JSON_HEADERS: Record<string, string> = {
 };
 
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_RAW_BYTES = 5 * 1024 * 1024;
 
 function respond(status: number, body: Json): Response {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
@@ -62,7 +63,12 @@ export async function route(
   }
 
   let body: Json = null;
-  if (method === "POST") {
+  let raw: Uint8Array | null = null;
+  if (method === "PUT") {
+    const buf = await req.arrayBuffer();
+    if (buf.byteLength > MAX_RAW_BYTES) return respond(413, { error: "file too large (5 MiB per file)" });
+    raw = new Uint8Array(buf);
+  } else if (method === "POST") {
     const len = Number(req.headers.get("content-length") ?? "0");
     if (len > MAX_BODY_BYTES) return respond(413, { error: "body too large" });
     const text = await req.text();
@@ -75,7 +81,7 @@ export async function route(
   }
 
   try {
-    const r = await dispatch(method, path, url.searchParams, body, svc);
+    const r = await dispatch(method, path, url.searchParams, body, raw, svc);
     return respond(r.status, r.body);
   } catch (e) {
     const id = crypto.randomUUID();
@@ -89,6 +95,7 @@ async function dispatch(
   path: string,
   q: URLSearchParams,
   body: Json,
+  raw: Uint8Array | null,
   svc: EcdysisService,
 ) {
   if (method === "GET" && path === "/") {
@@ -128,6 +135,18 @@ async function dispatch(
   }
   if (method === "GET" && path.startsWith("/v1/papers/")) {
     return svc.getPaper(decodeURIComponent(path.slice("/v1/papers/".length)));
+  }
+  if (method === "POST" && path === "/v1/builds") return svc.submitBuild(body);
+  if (method === "PUT" && path.startsWith("/v1/builds/") && path.endsWith("/files")) {
+    const cid = decodeURIComponent(path.slice("/v1/builds/".length, -"/files".length));
+    const filePath = q.get("path") ?? "";
+    return svc.uploadBuildFile(cid, filePath, raw ?? new Uint8Array(0));
+  }
+  if (method === "GET" && path === "/v1/marketplace") {
+    return svc.marketplace(Number(q.get("limit") ?? "25"), q.get("category") ?? undefined);
+  }
+  if (method === "GET" && path.startsWith("/v1/builds/")) {
+    return svc.getBuildApi(decodeURIComponent(path.slice("/v1/builds/".length)));
   }
   if (method === "GET" && path === "/v1/frontier") {
     return svc.frontier(Number(q.get("limit") ?? "10"));

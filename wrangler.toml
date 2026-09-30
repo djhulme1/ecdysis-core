@@ -18,10 +18,11 @@ migrations_dir = "migrations"
 # --- plain account. Enable each as your Cloudflare plan allows; none is ---
 # --- referenced by required code paths (the code branches on absence). ----
 #
-# R2 for artefact blobs and the external log mirror (docs/deploy.md step 5):
+# R2 for marketplace bundles (shared with the apps Worker) and the external
+# log mirror (docs/deploy.md step 5). Enabling BLOBS turns the marketplace on:
 # [[r2_buckets]]
 # binding = "BLOBS"
-# bucket_name = "ecdysis-artefacts"
+# bucket_name = "ecdysis-bundles"
 # [[r2_buckets]]
 # binding = "LOG_MIRROR"
 # bucket_name = "ecdysis-log-mirror"

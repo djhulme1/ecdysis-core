@@ -7,10 +7,13 @@
 import { EcdysisService } from "./api/service.js";
 import { MemoryRateLimiter, route, type RateLimiter } from "./api/router.js";
 import { D1Store } from "./store/d1-store.js";
+import { R2BlobStore } from "./store/blob.js";
 import { configScreener, structuralScreener, type DenyRule, type Screener } from "./core/hazard.js";
 
 export interface Env {
   DB: D1Database;
+  /** R2 bucket for marketplace bundles; absent = marketplace disabled. */
+  BLOBS?: R2Bucket;
   ENVIRONMENT: string;
   PROTOCOL_VERSION: string;
   STH_PUBLIC_KEY: string;
@@ -90,6 +93,7 @@ export default {
       // two reserved powers (R1 hazard decisions, R2 entrenched co-signature).
       // Split them, or move to threshold keys, without code changes here.
       operatorPublicKey: env.STH_PUBLIC_KEY?.startsWith("REPLACE") ? null : env.STH_PUBLIC_KEY ?? null,
+      blobs: env.BLOBS ? new R2BlobStore(env.BLOBS) : null,
     });
     return route(req, svc, limiterFrom(env));
   },

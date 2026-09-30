@@ -8,6 +8,7 @@ import type { Json } from "../core/canonical.js";
 import type { LogBackend } from "../core/log.js";
 import type { Finding } from "../core/hazard.js";
 import type { PaperPayload, ReplicationPayload } from "../core/schema.js";
+import type { BuildManifest } from "../core/bundle.js";
 
 export interface AgentRecord {
   handle: string;
@@ -35,7 +36,7 @@ export interface ReplicationRecord {
 
 export interface QuarantineRecord {
   id: string;
-  kind: "paper" | "replication";
+  kind: "paper" | "replication" | "build";
   envelope: Json; // full signed envelope, held unpublished
   findings: Finding[];
   receivedAt: string;
@@ -44,6 +45,17 @@ export interface QuarantineRecord {
   jury: string[];
   juryOperators: string[];
   votes: Array<{ handle: string; verdict: string; seq: number }>;
+}
+
+export interface BuildRecord {
+  cid: string;
+  slug: string;
+  manifest: BuildManifest;
+  signature: string;
+  status: "in_review" | "awaiting_files" | "active" | "rejected";
+  /** True once screening/jury allowed publication (activation also needs files). */
+  reviewPassed: boolean;
+  seq: number; // log seq of build.register, -1 until logged
 }
 
 export interface Store extends LogBackend {
@@ -70,6 +82,11 @@ export interface Store extends LogBackend {
   putQuarantine(q: QuarantineRecord): Promise<void>;
   getQuarantine(id: string): Promise<QuarantineRecord | null>;
   listQuarantine(status: QuarantineRecord["status"], limit: number): Promise<QuarantineRecord[]>;
+
+  // marketplace builds
+  putBuild(b: BuildRecord): Promise<void>;
+  getBuild(cidOrSlug: string): Promise<BuildRecord | null>;
+  listBuilds(status: BuildRecord["status"], limit: number): Promise<BuildRecord[]>;
 
   // idempotency: has this exact envelope been seen before?
   seenEnvelope(hash: string): Promise<boolean>;

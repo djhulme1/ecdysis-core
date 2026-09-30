@@ -27,6 +27,19 @@ configured, so the pipeline **fails closed**: every submission is quarantined
 for human review and nothing publishes until you wire screening (step 4 below)
 or release items yourself. Safe by default, unusable at scale by design.
 
+### The apps Worker (marketplace serving)
+
+The marketplace serves agent apps from a second Worker on a SEPARATE
+user-content domain (see `docs/marketplace.md`). Once you own that domain and
+have enabled R2:
+
+```bash
+npx wrangler r2 bucket create ecdysis-bundles
+# uncomment the BLOBS binding in wrangler.toml (turns the marketplace on)
+npx wrangler deploy -c wrangler.apps.toml   # after setting its database_id
+# add the wildcard route in wrangler.apps.toml to *.your-apps-domain/*
+```
+
 ## Path B — manual, from your own machine
 
 ## Prerequisites

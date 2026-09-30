@@ -22,6 +22,9 @@
  */
 
 import type { SubmissionPayload } from "./schema.js";
+import type { BuildManifest } from "./bundle.js";
+
+export type Screenable = SubmissionPayload | BuildManifest;
 
 export type Verdict = "allow" | "review" | "block";
 
@@ -43,7 +46,7 @@ export interface ScreeningContext {
 
 export interface Screener {
   name: string;
-  screen(payload: SubmissionPayload, ctx: ScreeningContext): Promise<Finding[]>;
+  screen(payload: Screenable, ctx: ScreeningContext): Promise<Finding[]>;
 }
 
 export interface ScreeningDecision {
@@ -66,7 +69,7 @@ export const DEFAULT_PIPELINE: PipelineOptions = {
 };
 
 export async function runScreening(
-  payload: SubmissionPayload,
+  payload: Screenable,
   ctx: ScreeningContext,
   screeners: Screener[],
   opts: PipelineOptions = DEFAULT_PIPELINE,
@@ -154,7 +157,8 @@ export function structuralScreener(): Screener {
       // Artefacts must be links to inspectable resources, not direct
       // executables or archives with executable extensions.
       const execExt = /\.(exe|dll|so|dylib|bat|cmd|ps1|sh|jar|apk|msi|scr)([?#]|$)/i;
-      for (const u of payload.artefacts ?? []) {
+      const artefactUrls = payload.type === "build" ? [] : payload.artefacts ?? [];
+      for (const u of artefactUrls) {
         if (execExt.test(u)) {
           findings.push({
             screener: "structural",
@@ -236,12 +240,14 @@ export function externalScreener(
   };
 }
 
-function collectTexts(payload: SubmissionPayload): string[] {
+function collectTexts(payload: Screenable): string[] {
   const texts: string[] = [];
   if (payload.type === "paper") {
     texts.push(payload.title, payload.abstract, ...payload.claims.map((c) => c.text));
-  } else {
+  } else if (payload.type === "replication") {
     texts.push(payload.evidence, ...payload.targets);
+  } else {
+    texts.push(payload.slug, payload.name, payload.description, ...payload.files.map((f) => f.path));
   }
   return texts;
 }

@@ -3,7 +3,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, PaperRecord, QuarantineRecord, ReplicationRecord, Store,
+  AgentRecord, BuildRecord, PaperRecord, QuarantineRecord, ReplicationRecord, Store,
 } from "./store.js";
 
 interface LogRow {
@@ -115,6 +115,25 @@ export class MemoryStore implements Store {
   }
   async listQuarantine(status: QuarantineRecord["status"], limit: number): Promise<QuarantineRecord[]> {
     return [...this.quarantine.values()].filter((q) => q.status === status).slice(0, limit);
+  }
+
+  // --- builds ---
+  private builds = new Map<string, BuildRecord>(); // by cid
+  private buildSlugs = new Map<string, string>(); // slug -> cid
+  async putBuild(b: BuildRecord): Promise<void> {
+    this.builds.set(b.cid, structuredClone(b));
+    this.buildSlugs.set(b.slug, b.cid);
+  }
+  async getBuild(cidOrSlug: string): Promise<BuildRecord | null> {
+    const cid = this.builds.has(cidOrSlug) ? cidOrSlug : this.buildSlugs.get(cidOrSlug);
+    const b = cid ? this.builds.get(cid) : undefined;
+    return b ? structuredClone(b) : null;
+  }
+  async listBuilds(status: BuildRecord["status"], limit: number): Promise<BuildRecord[]> {
+    return [...this.builds.values()]
+      .filter((b) => b.status === status)
+      .slice(0, limit)
+      .map((b) => structuredClone(b));
   }
 
   // --- idempotency ---

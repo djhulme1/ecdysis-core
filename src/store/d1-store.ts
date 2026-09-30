@@ -13,7 +13,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, PaperRecord, QuarantineRecord, ReplicationRecord, Store,
+  AgentRecord, BuildRecord, PaperRecord, QuarantineRecord, ReplicationRecord, Store,
 } from "./store.js";
 
 export class D1Store implements Store {
@@ -206,6 +206,32 @@ export class D1Store implements Store {
     return (rs.results ?? []).map(rowToQuarantine);
   }
 
+  // --- builds ---
+  async putBuild(b: BuildRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO builds (cid, slug, manifest_json, signature, status, review_passed, seq)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(cid) DO UPDATE SET status=?5, review_passed=?6, seq=?7`,
+      )
+      .bind(b.cid, b.slug, JSON.stringify(b.manifest), b.signature, b.status, b.reviewPassed ? 1 : 0, b.seq)
+      .run();
+  }
+  async getBuild(cidOrSlug: string): Promise<BuildRecord | null> {
+    const r = await this.db
+      .prepare("SELECT * FROM builds WHERE cid = ?1 OR slug = ?1")
+      .bind(cidOrSlug)
+      .first<Record<string, unknown>>();
+    return r ? rowToBuild(r) : null;
+  }
+  async listBuilds(status: BuildRecord["status"], limit: number): Promise<BuildRecord[]> {
+    const rs = await this.db
+      .prepare("SELECT * FROM builds WHERE status = ?1 ORDER BY seq DESC LIMIT ?2")
+      .bind(status, limit)
+      .all<Record<string, unknown>>();
+    return (rs.results ?? []).map(rowToBuild);
+  }
+
   // --- idempotency ---
   async seenEnvelope(hash: string): Promise<boolean> {
     const r = await this.db
@@ -220,6 +246,18 @@ export class D1Store implements Store {
       .bind(hash)
       .run();
   }
+}
+
+function rowToBuild(r: Record<string, unknown>): BuildRecord {
+  return {
+    cid: r["cid"] as string,
+    slug: r["slug"] as string,
+    manifest: JSON.parse(r["manifest_json"] as string),
+    signature: r["signature"] as string,
+    status: r["status"] as BuildRecord["status"],
+    reviewPassed: (r["review_passed"] as number) === 1,
+    seq: r["seq"] as number,
+  };
 }
 
 function rowToQuarantine(r: Record<string, unknown>): QuarantineRecord {

@@ -1,0 +1,25 @@
+# The apps Worker: serves marketplace bundles on the USER-CONTENT apex.
+# Deploy with:  npx wrangler deploy -c wrangler.apps.toml
+#
+# Buy a SEPARATE domain for this (the way GitHub serves user content from
+# github.io, not github.com) and route a wildcard at it. The platform API and
+# site never share an origin, a cookie, or a certificate with agent apps.
+
+name = "ecdysis-apps"
+main = "src/apps/index.ts"
+compatibility_date = "2026-01-15"
+
+# Same D1 database as the API (slug -> active bundle lookup).
+[[d1_databases]]
+binding = "DB"
+database_name = "ecdysis"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+# Bundle bytes. Enable R2 on the account, then create:
+#   npx wrangler r2 bucket create ecdysis-bundles
+[[r2_buckets]]
+binding = "BUNDLES"
+bucket_name = "ecdysis-bundles"
+
+# Wildcard route on the user-content apex, e.g.:
+# routes = [ { pattern = "*.ecdysapps.example/*", zone_name = "ecdysapps.example" } ]
