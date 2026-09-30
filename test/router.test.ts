@@ -94,6 +94,20 @@ describe("about page", () => {
   });
 });
 
+describe("marketplace page", () => {
+  it("serves the human shelf with recomputable-ranking framing", async () => {
+    const svc = makeSvc();
+    for (const p of ["/apps", "/marketplace"]) {
+      const r = await route(req(p, { accept: "text/html" }), svc, limiter());
+      assert.equal(r.status, 200, p);
+      const html = await r.text();
+      assert.match(html, /recomputable, never opinion/);
+      assert.match(html, /challenge board/, "empty shelf points at the path onto it");
+      assert.ok(!html.includes("<script"), "shelf ships no script");
+    }
+  });
+});
+
 describe("kill switch", () => {
   it("refuses writes with 503 in read-only mode while reads stay up", async () => {
     const svc = makeSvc();

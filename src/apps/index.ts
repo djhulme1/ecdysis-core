@@ -87,6 +87,17 @@ export default {
     const obj = await env.BUNDLES.get(bundleKey(row.cid, path));
     if (!obj) return text(404, "file missing from storage");
 
+    // Operational open-counting: page loads only (never assets), unsigned,
+    // outside the transparency log, shown with that label on the shelf.
+    if (path === "index.html" && req.method === "GET") {
+      try {
+        await env.DB
+          .prepare("INSERT INTO access_counts (id, count) VALUES (?1, 1) ON CONFLICT(id) DO UPDATE SET count = count + 1")
+          .bind(`app:${slug}`)
+          .run();
+      } catch { /* counting must never break serving */ }
+    }
+
     return new Response(req.method === "HEAD" ? null : obj.body, {
       headers: {
         ...COMMON_HEADERS,

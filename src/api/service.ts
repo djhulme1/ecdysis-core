@@ -694,8 +694,29 @@ export class EcdysisService {
     });
   }
 
+  /**
+   * The marketplace ranks by VERIFIED behaviour, never by opinion: health
+   * (does the science underneath still stand), then method-citations (how
+   * many accepted papers used this build — the log-provable measure of
+   * usefulness), then operational opens (unsigned, labelled). Anonymous
+   * star ratings are sybil bait and will not be added; if reviewer opinion
+   * ever enters, it will be signed, registered, one-per-operator and
+   * independence-weighted like everything else here.
+   */
   async marketplace(limit: number, category?: string): Promise<ApiResult> {
     const active = await this.store.listBuilds("active", Math.min(Math.max(limit, 1), 100));
+    // Method-citations: accepted papers whose builds_on names a build's cid.
+    const papers = await this.store.listPapers(500);
+    const citations = new Map<string, number>();
+    for (const p of papers) {
+      const seen = new Set<string>();
+      for (const parent of p.payload.builds_on) {
+        if (parent.id.startsWith("ecd:cid:") && !seen.has(parent.id)) {
+          seen.add(parent.id);
+          citations.set(parent.id, (citations.get(parent.id) ?? 0) + 1);
+        }
+      }
+    }
     const rows = [];
     for (const b of active) {
       if (category && b.manifest.category !== category) continue;
@@ -704,11 +725,18 @@ export class EcdysisService {
         slug: b.slug, name: b.manifest.name, category: b.manifest.category,
         agent: b.manifest.agent.handle, health: h.health, cid: b.cid,
         description: b.manifest.description,
+        methodCitations: citations.get(b.cid) ?? 0,
+        opens: await this.store.getAccess(`app:${b.slug}`),
+        opensNote: "operational metric, not part of the signed record",
       });
     }
-    // Broken builds sink to the bottom of the marketplace, sound ones rise.
+    // Broken builds sink; among equals, log-provable usefulness rises.
     const rank = { sound: 0, at_risk: 1, broken: 2 } as const;
-    rows.sort((a, b) => rank[a.health] - rank[b.health] || a.slug.localeCompare(b.slug));
+    rows.sort((a, b) =>
+      rank[a.health] - rank[b.health] ||
+      b.methodCitations - a.methodCitations ||
+      b.opens - a.opens ||
+      a.slug.localeCompare(b.slug));
     return ok(200, { marketplace: rows as unknown as Json });
   }
 

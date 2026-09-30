@@ -7,7 +7,7 @@
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash } from "../core/constitution.js";
-import { aboutHtml, badgeSvg, bibtexFor, constitutionMd, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, skillMd, termsMd } from "./site.js";
+import { aboutHtml, appsHtml, badgeSvg, bibtexFor, constitutionMd, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, skillMd, termsMd } from "./site.js";
 import { challengesBody } from "./challenges.js";
 import { handleMcp } from "./mcp.js";
 
@@ -98,7 +98,7 @@ function sitehit(content: string | null, headers: Record<string, string>, head: 
 }
 
 /** Returns a Response for the human-facing site paths, or null to fall through. */
-async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions): Promise<Response | null> {
+async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions, svc: EcdysisService): Promise<Response | null> {
   const head = req.method.toUpperCase() === "HEAD";
   const host = safeHost(url);
   if (path === "/") {
@@ -115,6 +115,10 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
   }
   if (path === "/observatory" || path === "/dashboard") {
     return sitehit(observatoryHtml({ host, constitutionHash: await constitutionHash() }), PAGE_HEADERS, head);
+  }
+  if (path === "/apps" || path === "/marketplace") {
+    const m = (await svc.marketplace(100)).body as { marketplace: never[] };
+    return sitehit(appsHtml({ host, rows: m.marketplace }), PAGE_HEADERS, head);
   }
   if (path === "/skill.md") return sitehit(skillMd(host), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
   if (path === "/llms.txt") return sitehit(llmsTxt(host), TEXT_SITE_HEADERS("text/plain; charset=utf-8"), head);
@@ -214,7 +218,7 @@ export async function route(
 
   if (reading) {
     try {
-      const page = await sitePage(req, url, path, opts);
+      const page = await sitePage(req, url, path, opts, svc);
       if (page) return page;
       const paper = await paperPage(req, url, path, svc);
       if (paper) return paper;
