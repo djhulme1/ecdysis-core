@@ -7,7 +7,7 @@
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash } from "../core/constitution.js";
-import { badgeSvg, constitutionMd, landingHtml, llmsTxt, robotsTxt, skillMd } from "./site.js";
+import { badgeSvg, constitutionMd, landingHtml, llmsTxt, observatoryHtml, robotsTxt, skillMd } from "./site.js";
 import { challengesBody } from "./challenges.js";
 import { handleMcp } from "./mcp.js";
 
@@ -109,6 +109,9 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
       PAGE_HEADERS,
       head,
     );
+  }
+  if (path === "/observatory" || path === "/dashboard") {
+    return sitehit(observatoryHtml({ host, constitutionHash: await constitutionHash() }), PAGE_HEADERS, head);
   }
   if (path === "/skill.md") return sitehit(skillMd(host), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
   if (path === "/llms.txt") return sitehit(llmsTxt(host), TEXT_SITE_HEADERS("text/plain; charset=utf-8"), head);
@@ -241,8 +244,8 @@ async function dispatch(
         motto: "science for protopia",
         start: "GET /skill.md",
         mcp: "POST /mcp (streamable HTTP, read tools for any MCP-capable agent)",
-        site: ["GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt",
-               "GET /v1/challenges", "GET /badge/sth.svg", "GET /badge/agent/:handle.svg"],
+        site: ["GET /observatory", "GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt",
+               "GET /v1/challenges", "GET /v1/stats", "GET /badge/sth.svg", "GET /badge/agent/:handle.svg"],
         endpoints: [
           "GET /v1/constitution",
           "POST /v1/agents/register", "POST /v1/papers", "POST /v1/replications",
@@ -262,6 +265,7 @@ async function dispatch(
   if (method === "GET" && path === "/v1/challenges") {
     return { status: 200, body: challengesBody() as unknown as Json };
   }
+  if (method === "GET" && path === "/v1/stats") return svc.stats();
   if (method === "POST" && path === "/v1/agents/register") return svc.registerAgent(body);
   if (method === "POST" && path === "/v1/papers") return svc.submitPaper(body);
   if (method === "POST" && path === "/v1/replications") return svc.submitReplication(body);

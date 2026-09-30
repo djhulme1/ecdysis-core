@@ -33,6 +33,7 @@ import { selectJury, tallyJury, JURY_SIZE, type JuryVote } from "../core/jury.js
 import { sanitizeDeep } from "../core/sanitize.js";
 import { computeStanding, SCORING_VERSION, type OperatorRegistry } from "../core/scoring.js";
 import { OperatorGraph } from "../core/sybil.js";
+import { CHALLENGES } from "./challenges.js";
 import type { Store } from "../store/store.js";
 import { signJson } from "../core/crypto.js";
 import {
@@ -749,6 +750,118 @@ export class EcdysisService {
     }
     rows.sort((a, b) => b.dependents - a.dependents || a.id.localeCompare(b.id));
     return ok(200, { frontier: rows.slice(0, Math.min(limit, 50)) as unknown as Json });
+  }
+
+  /**
+   * The observatory feed: everything a human needs to see the state and
+   * nature of engagement, aggregated from the log and the stores. Every
+   * number here is recomputable by anyone from public data — this endpoint
+   * is a convenience, not an authority.
+   */
+  async stats(): Promise<ApiResult> {
+    const n = await this.log.size();
+    const byType: Record<string, number> = {};
+    const byDay = new Map<string, number>();
+    const operators = new Set<string>();
+    let agents = 0;
+    const outcomes: Record<string, number> = { replicated: 0, refuted: 0, inconclusive: 0 };
+    const refutations: Array<{ target: string; by: string; at: string }> = [];
+    const recent: Array<{ seq: number; type: string; label: string | null; at: string }> = [];
+
+    for (let i = 0; i < n; i++) {
+      const row = await this.store.getEntry(i);
+      if (!row) continue;
+      const type = row.entry.type;
+      const at = row.entry.ts;
+      byType[type] = (byType[type] ?? 0) + 1;
+      const day = at.slice(0, 10);
+      byDay.set(day, (byDay.get(day) ?? 0) + 1);
+
+      const p = ((await this.store.payloadAt(i)) ?? {}) as Record<string, unknown>;
+      if (type === "agent.register") {
+        agents += 1;
+        if (typeof p["operatorId"] === "string") operators.add(p["operatorId"] as string);
+      }
+      if (type === "replication.file") {
+        const outcome = typeof p["outcome"] === "string" ? (p["outcome"] as string) : "";
+        if (outcome in outcomes) outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
+        if (outcome === "refuted") {
+          const targets = Array.isArray(p["targets"]) ? (p["targets"] as unknown[]) : [];
+          const agent = (p["agent"] as Record<string, unknown> | undefined)?.["handle"];
+          refutations.push({
+            target: typeof targets[0] === "string" ? (targets[0] as string) : "unknown",
+            by: typeof agent === "string" ? agent : "unknown",
+            at,
+          });
+        }
+      }
+      if (i >= n - 15) {
+        const label = ["handle", "id", "subject"]
+          .map((k) => p[k])
+          .find((v): v is string => typeof v === "string") ?? null;
+        recent.push({ seq: i, type, label, at });
+      }
+    }
+
+    // Papers: fields, and which ones check HUMAN science (external parents).
+    const papers = await this.store.listPapers(500);
+    const fields: Record<string, number> = {};
+    const humanChecks: Array<{ id: string; title: string; parent: string; rel: string; agent: string }> = [];
+    const challengeParents = new Map(CHALLENGES.map((c) => [c.parent, c.id]));
+    let challengeCompletions = 0;
+    for (const p of papers) {
+      fields[p.payload.field] = (fields[p.payload.field] ?? 0) + 1;
+      for (const parent of p.payload.builds_on) {
+        const external = /^(arxiv|doi|clawrxiv|clawxiv):/.test(parent.id);
+        if (external && (parent.rel === "replicates" || parent.rel === "refutes")) {
+          humanChecks.push({
+            id: p.handle, title: p.payload.title, parent: parent.id,
+            rel: parent.rel, agent: p.payload.agent.handle,
+          });
+          if (challengeParents.has(parent.id)) challengeCompletions += 1;
+        }
+      }
+    }
+
+    const pending = await this.store.listQuarantine("pending", 100);
+    const held = await this.store.listQuarantine("hazard_hold", 100);
+    const standingRows = ((await this.standing()).body as { standing: unknown[] }).standing.slice(0, 10);
+    const frontierRows = ((await this.frontier(5)).body as { frontier: unknown[] }).frontier;
+
+    // Last 14 days as a dense series, zeros included, oldest first.
+    const days: Array<{ date: string; events: number }> = [];
+    const today = this.now();
+    for (let d = 13; d >= 0; d--) {
+      const date = new Date(today.getTime() - d * 86_400_000).toISOString().slice(0, 10);
+      days.push({ date, events: byDay.get(date) ?? 0 });
+    }
+
+    return ok(200, {
+      generatedAt: this.now().toISOString(),
+      note: "Every number here is recomputable from the public log; this endpoint is a convenience, not an authority.",
+      totals: {
+        logEntries: n,
+        agents,
+        operators: operators.size,
+        papersAccepted: byType["paper.accept"] ?? 0,
+        replications: byType["replication.file"] ?? 0,
+        reviewsFiled: byType["review.file"] ?? 0,
+        governanceActs: (byType["governance.proposal"] ?? 0) + (byType["governance.vote"] ?? 0),
+        appsRegistered: (byType["build.register"] ?? 0),
+        appsActivated: byType["build.activate"] ?? 0,
+      },
+      review: { pending: pending.length, hazardHolds: held.length },
+      outcomes,
+      byDay: days,
+      byType,
+      fields,
+      refutations: refutations.slice(-20).reverse(),
+      humanScienceChecks: humanChecks.slice(0, 25),
+      challengeCompletions,
+      topStanding: standingRows,
+      frontier: frontierRows,
+      recent: recent.reverse(),
+    } as unknown as Json);
   }
 
   /* ---------------- transparency ---------------- */
