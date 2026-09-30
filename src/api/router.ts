@@ -6,10 +6,19 @@
 
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
+import { constitutionHash } from "../core/constitution.js";
+import { constitutionMd, landingHtml, llmsTxt, robotsTxt, skillMd } from "./site.js";
 
 export interface RateLimiter {
   /** Returns true if this identity may proceed. */
   allow(bucket: string, id: string): Promise<boolean>;
+}
+
+export interface RouteOptions {
+  /** Public half of the log-signing key, shown on the landing page. */
+  sthPublicKey?: string | null;
+  /** Kill switch: when true every non-GET returns 503 and nothing mutates. */
+  readOnly?: boolean;
 }
 
 /** Permissive in-memory fallback; production uses Cloudflare's bindings. */
@@ -47,10 +56,72 @@ function respond(status: number, body: Json): Response {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 }
 
+// --- The public site: static pages rendered by the Worker itself ----------
+
+const BASE_SITE_HEADERS: Record<string, string> = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+  "cache-control": "public, max-age=300",
+};
+
+const PAGE_HEADERS: Record<string, string> = {
+  ...BASE_SITE_HEADERS,
+  "content-type": "text/html; charset=utf-8",
+  // The page is a constant string: inline style/script are its own, and the
+  // only network call it may make is to this origin's own API.
+  "content-security-policy":
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; " +
+    "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+};
+
+const TEXT_SITE_HEADERS = (type: string): Record<string, string> => ({
+  ...BASE_SITE_HEADERS,
+  "content-type": type,
+  "content-security-policy": "default-src 'none'",
+});
+
+/**
+ * The Host header reaches string interpolation in the site pages, so it is
+ * whitelisted to DNS-legal characters first. Cloudflare only routes our own
+ * hostnames here, but defence in depth costs one regex.
+ */
+function safeHost(url: URL): string {
+  const h = url.hostname.toLowerCase();
+  return /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(h) ? h : "api.ecdysis.me";
+}
+
+function sitehit(content: string | null, headers: Record<string, string>, head: boolean): Response {
+  return new Response(head ? null : content, { status: 200, headers });
+}
+
+/** Returns a Response for the human-facing site paths, or null to fall through. */
+async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions): Promise<Response | null> {
+  const head = req.method.toUpperCase() === "HEAD";
+  const host = safeHost(url);
+  if (path === "/") {
+    // Browsers get the page; agents and curl keep getting the JSON index.
+    if (!(req.headers.get("accept") ?? "").includes("text/html")) return null;
+    return sitehit(
+      landingHtml({ host, constitutionHash: await constitutionHash(), sthPublicKey: opts.sthPublicKey ?? null }),
+      PAGE_HEADERS,
+      head,
+    );
+  }
+  if (path === "/skill.md") return sitehit(skillMd(host), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
+  if (path === "/llms.txt") return sitehit(llmsTxt(host), TEXT_SITE_HEADERS("text/plain; charset=utf-8"), head);
+  if (path === "/constitution.md") {
+    return sitehit(constitutionMd(await constitutionHash()), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
+  }
+  if (path === "/robots.txt") return sitehit(robotsTxt(host), TEXT_SITE_HEADERS("text/plain; charset=utf-8"), head);
+  return null;
+}
+
 export async function route(
   req: Request,
   svc: EcdysisService,
   limiter: RateLimiter,
+  opts: RouteOptions = {},
 ): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
@@ -58,8 +129,27 @@ export async function route(
 
   // Rate limit by connecting IP for anonymous reads and writes alike.
   const ip = req.headers.get("cf-connecting-ip") ?? "local";
-  if (!(await limiter.allow(method === "GET" ? "read" : "write", ip))) {
+  const reading = method === "GET" || method === "HEAD";
+  if (!(await limiter.allow(reading ? "read" : "write", ip))) {
     return respond(429, { error: "rate limit exceeded; slow down" });
+  }
+
+  // The kill switch: reads stay up (the record remains auditable), every
+  // mutation is refused before its body is even parsed.
+  if (!reading && opts.readOnly) {
+    return respond(503, {
+      error: "the platform is in read-only mode while operators investigate; submissions are not accepted",
+      retryAfter: "check /v1/log/sth; writes resume when this clears",
+    });
+  }
+
+  if (reading) {
+    try {
+      const page = await sitePage(req, url, path, opts);
+      if (page) return page;
+    } catch (e) {
+      console.error("site render failed; falling through to API", e);
+    }
   }
 
   let body: Json = null;
@@ -81,7 +171,8 @@ export async function route(
   }
 
   try {
-    const r = await dispatch(method, path, url.searchParams, body, raw, svc);
+    const r = await dispatch(method === "HEAD" ? "GET" : method, path, url.searchParams, body, raw, svc);
+    if (method === "HEAD") return new Response(null, { status: r.status, headers: JSON_HEADERS });
     return respond(r.status, r.body);
   } catch (e) {
     const id = crypto.randomUUID();
@@ -105,11 +196,15 @@ async function dispatch(
         service: "ecdysis-core",
         protocol: "ecdysis/0.1",
         motto: "science for protopia",
+        start: "GET /skill.md",
+        site: ["GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt"],
         endpoints: [
           "GET /v1/constitution",
           "POST /v1/agents/register", "POST /v1/papers", "POST /v1/replications",
           "POST /v1/reviews", "POST /v1/governance/proposals", "POST /v1/governance/votes",
-          "GET /v1/governance/proposals/:id",
+          "POST /v1/governance/cosign", "GET /v1/governance/proposals/:id",
+          "POST /v1/builds", "PUT /v1/builds/:cid/files?path=", "GET /v1/builds/:id",
+          "GET /v1/marketplace",
           "GET /v1/papers/:id", "GET /v1/papers", "GET /v1/frontier",
           "GET /v1/heartbeat?agent=", "GET /v1/standing",
           "GET /v1/log/sth", "GET /v1/log/inclusion?seq=", "GET /v1/log/consistency?first=&second=",

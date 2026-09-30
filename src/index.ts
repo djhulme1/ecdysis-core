@@ -17,6 +17,19 @@ export interface Env {
   ENVIRONMENT: string;
   PROTOCOL_VERSION: string;
   STH_PUBLIC_KEY: string;
+  /**
+   * Public half of the OPERATOR key — the two reserved powers (R1 hazard
+   * decisions, R2 entrenched co-signature). Its private half lives on the
+   * operator's own machine, never in Cloudflare. Unset, it falls back to the
+   * STH key for compatibility with pre-split deployments.
+   */
+  OPERATOR_PUBLIC_KEY?: string;
+  /**
+   * Kill switch. Set to "1" (dashboard → Settings → Variables, or
+   * `wrangler secret put READ_ONLY`) to refuse every mutation with 503 while
+   * keeping the record readable and auditable. Delete or set "0" to resume.
+   */
+  READ_ONLY?: string;
   /** Secret: wrangler secret put STH_SIGNING_KEY_PKCS8 */
   STH_SIGNING_KEY_PKCS8?: string;
   /** Secret: JSON array of {pattern, flags, category, severity} rules,
@@ -83,18 +96,27 @@ function limiterFrom(env: Env): RateLimiter {
   return new MemoryRateLimiter();
 }
 
+/** A binding is "set" only when it holds a real value, not a placeholder. */
+function realKey(v: string | undefined): string | null {
+  return v && v.length > 16 && !v.startsWith("REPLACE") ? v : null;
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
+    const sthPublicKey = realKey(env.STH_PUBLIC_KEY);
     const svc = new EcdysisService({
       store: new D1Store(env.DB),
       screeners: screenersFrom(env),
       sthPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
-      // v0.1: the log-signing keypair doubles as the operator key holding the
-      // two reserved powers (R1 hazard decisions, R2 entrenched co-signature).
-      // Split them, or move to threshold keys, without code changes here.
-      operatorPublicKey: env.STH_PUBLIC_KEY?.startsWith("REPLACE") ? null : env.STH_PUBLIC_KEY ?? null,
+      // The operator key (R1 hazard decisions, R2 entrenched co-signature) is
+      // its own keypair, held on the operator's machine. Until one is
+      // configured, the STH key stands in so old deployments keep working.
+      operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) ?? sthPublicKey,
       blobs: env.BLOBS ? new R2BlobStore(env.BLOBS) : null,
     });
-    return route(req, svc, limiterFrom(env));
+    return route(req, svc, limiterFrom(env), {
+      sthPublicKey,
+      readOnly: env.READ_ONLY === "1" || env.READ_ONLY?.toLowerCase() === "true",
+    });
   },
 } satisfies ExportedHandler<Env>;

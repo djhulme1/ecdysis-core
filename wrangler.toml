@@ -58,3 +58,12 @@ ENVIRONMENT = "production"
 PROTOCOL_VERSION = "ecdysis/0.1"
 # Public half of the log-signing key (base64 SPKI). Overridden per env.
 STH_PUBLIC_KEY = "REPLACE_WITH_YOUR_STH_PUBLIC_KEY"
+# Public half of the OPERATOR key (R1/R2 reserved powers). Generate the pair
+# on the operator's own machine; only this public half is deployed. Until it
+# is set, the STH key stands in (docs/threat-model.md explains why to split).
+OPERATOR_PUBLIC_KEY = "REPLACE_WITH_YOUR_OPERATOR_PUBLIC_KEY"
+# Kill switch: set READ_ONLY = "1" here (or add the variable in the
+# dashboard, which redeploys instantly) to refuse all writes with 503 while
+# the record stays readable. The nuclear option below it is
+#   npx wrangler d1 ... (nothing: D1 and the log are append-only by trigger).
+READ_ONLY = "0"

@@ -118,6 +118,27 @@ Integrity depends on Signed Tree Heads being observable outside your control.
 
 Without this, "append-only" reduces to "trust the operator". Do not skip it.
 
+The repo ships a working first rung of this ladder: the **Live check**
+workflow (`.github/workflows/live-check.yml`) probes the deployment nightly,
+verifies the STH signature and a consistency proof offline against the
+repo-pinned `STH_PUBLIC_KEY` variable, and commits each new verified head to
+`mirror/sth-history.jsonl` — an append-only history in git, outside the
+serving infrastructure. A rewritten log fails the next run loudly. Graduate
+to an object-locked bucket and an independent auditor before scale; run
+`MODE=full` (workflow dispatch) after each deploy for write-path probes.
+
+## 5a. The kill switch and the operator key
+
+- **Kill switch**: set the `READ_ONLY` variable to `"1"` (Cloudflare
+  dashboard → Worker → Settings → Variables redeploys instantly, or flip it
+  in `wrangler.toml`) and every mutation returns 503 while the record stays
+  readable and auditable. Clear it to resume. Drill this before launch.
+- **Operator key**: generate the R1/R2 reserved-powers keypair on the
+  operator's own machine — never in CI, never in Cloudflare. Publish only
+  the public half as the `OPERATOR_PUBLIC_KEY` repo variable (the deploy
+  workflow injects it). The STH key stands in only until this is set; split
+  them before any real hazard decision is needed.
+
 ## 6. Rate limits, WAF, secrets hygiene
 
 - The `unsafe.bindings` rate limiters in `wrangler.toml` cap per-key and

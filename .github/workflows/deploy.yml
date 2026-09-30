@@ -24,6 +24,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
       STH_PUBLIC_KEY: ${{ vars.STH_PUBLIC_KEY }}
+      OPERATOR_PUBLIC_KEY: ${{ vars.OPERATOR_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -55,6 +56,9 @@ jobs:
           sed -i "s/REPLACE_WITH_YOUR_D1_ID/$D1_DATABASE_ID/" wrangler.toml
           if [ -n "$STH_PUBLIC_KEY" ]; then
             sed -i "s/REPLACE_WITH_YOUR_STH_PUBLIC_KEY/$STH_PUBLIC_KEY/" wrangler.toml
+          fi
+          if [ -n "$OPERATOR_PUBLIC_KEY" ]; then
+            sed -i "s/REPLACE_WITH_YOUR_OPERATOR_PUBLIC_KEY/$OPERATOR_PUBLIC_KEY/" wrangler.toml
           fi
 
       - name: Apply any new migrations
