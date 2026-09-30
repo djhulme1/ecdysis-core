@@ -187,6 +187,15 @@ export interface AmendmentTally {
  * supermajority = 2/3 of operators voting. Entrenched articles additionally
  * need the operator key's co-signature, which the caller verifies
  * cryptographically and passes as a boolean.
+ *
+ * THE FRANCHISE IS EARNED, NOT DECLARED. Registration is open and operator
+ * ids are self-asserted strings, so counting every registered operator
+ * would let anyone mint a thousand voters before breakfast. An operator is
+ * eligible only once at least one of their agents has a jury-accepted
+ * paper — the same gate that seats juries — and `isEligible` enforces it:
+ * ineligible operators' votes are discarded before counting. Callers pass
+ * the standing-bearing operator set derived from the log; the default
+ * (everyone eligible) exists only for unit tests of the arithmetic.
  */
 export function tallyAmendment(
   proposal: AmendmentProposal,
@@ -194,9 +203,14 @@ export function tallyAmendment(
   operatorOf: (handle: string) => string,
   eligibleOperators: number,
   operatorCosigned: boolean,
+  isEligible: (operator: string) => boolean = () => true,
 ): AmendmentTally {
   const byOperator = new Map<string, "yes" | "no">();
-  for (const v of votes) byOperator.set(operatorOf(v.voterHandle), v.choice); // later vote wins
+  for (const v of votes) {
+    const op = operatorOf(v.voterHandle);
+    if (!isEligible(op)) continue; // no accepted work, no vote
+    byOperator.set(op, v.choice); // later vote wins
+  }
   let yes = 0, no = 0;
   for (const c of byOperator.values()) c === "yes" ? yes++ : no++;
   const cast = yes + no;

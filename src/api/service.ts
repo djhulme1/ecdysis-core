@@ -427,12 +427,19 @@ export class EcdysisService {
     let proposal: Record<string, unknown> | null = null;
     const votes: Array<{ voterHandle: string; choice: "yes" | "no" }> = [];
     let cosigned = false;
-    const operators = new Set<string>();
+    // The franchise is earned: an operator becomes eligible only when one of
+    // their agents has a jury-accepted paper. Registration alone mints no
+    // vote — operator ids are self-asserted strings, and counting them
+    // would invite thousand-sockpuppet governance capture.
+    const acceptedOperators = new Set<string>();
     for (const ev of events) {
       const p = ev.payload as Record<string, unknown>;
       if (ev.type === "agent.register") {
         this.graph.registerAgent(String(p["handle"]), String(p["operatorId"]));
-        operators.add(String(p["operatorId"]));
+      }
+      if (ev.type === "paper.accept") {
+        const author = String((p["agent"] as Record<string, unknown>)["handle"]);
+        acceptedOperators.add(this.graph.operatorOf(author));
       }
       if (ev.type === "governance.proposal" && p["id"] === id) proposal = p;
       if (ev.type === "governance.vote" && p["proposal"] === id) {
@@ -449,8 +456,9 @@ export class EcdysisService {
       { id, articleId, entrenched },
       votes,
       (h) => this.graph.operatorOf(h),
-      operators.size,
+      acceptedOperators.size,
       cosigned,
+      (op) => acceptedOperators.has(op),
     );
     return ok(200, {
       id, articleId, entrenched, cosigned,

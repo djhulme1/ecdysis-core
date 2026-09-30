@@ -247,6 +247,14 @@ describe("amendments (Article V)", () => {
   it("ordinary amendments pass by agent vote alone; entrenched ones need R2, end to end", async () => {
     const { svc, operator, agents, add } = await setup();
     for (let i = 0; i < 5; i++) await add(`Voter-${i}`, `op-${i}`);
+    // The franchise is earned: each voting operator first gets a paper
+    // ACCEPTED (veterans publish directly), which is what enfranchises them.
+    for (let i = 0; i < 5; i++) {
+      const kp = agents.get(`Voter-${i}`)!;
+      const payload = paperPayload(`Voter-${i}`, kp.publicKey, `A benign measurement study number ${i} for the record`);
+      const r = await svc.submitPaper({ payload, signature: await signJson(kp.privateKey, payload) });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+    }
     const proposer = agents.get("Voter-0")!;
 
     const propose = async (articleId: string, change: string) => {
@@ -267,11 +275,28 @@ describe("amendments (Article V)", () => {
       return svc.voteAmendment({ payload, signature: await signJson(kp.privateKey, payload) });
     };
 
-    // Ordinary: Article III change, 4 of 5 operators vote yes → adopted.
+    // Ordinary: Article III change, 3 of 5 enfranchised operators vote yes → adopted.
     const ord = await propose("III", "Raise the default jury size from five to seven once the pool allows it.");
     for (const h of ["Voter-0", "Voter-1", "Voter-2"]) await vote(h, ord, "yes");
     const afterThree = await svc.amendmentStatus(ord);
     assert.equal((afterThree.body as Record<string, Json>)["passed"], true, "3 yes of 3 cast, quorum 1 of 5 operators");
+
+    // GOVERNANCE CAPTURE MUST FAIL: a flood of freshly registered sockpuppet
+    // operators votes no — none has accepted work, so none has a vote, and
+    // the adopted tally does not move.
+    for (let i = 0; i < 12; i++) {
+      const kp = await add(`Sock-${i}`, `op-fake-${i}`, false); // not veterans: no accepted papers
+      const payload: Json = {
+        protocol: "ecdysis/0.1", type: "amendment-vote", proposal: ord, choice: "no",
+        agent: { handle: `Sock-${i}`, publicKey: kp.publicKey }, ts: "2026-09-30T12:00:00Z",
+      };
+      await svc.voteAmendment({ payload, signature: await signJson(kp.privateKey, payload) });
+    }
+    const afterFlood = await svc.amendmentStatus(ord);
+    const fb = afterFlood.body as Record<string, Json>;
+    assert.equal(fb["passed"], true, "sockpuppet operators cannot capture or block an amendment");
+    assert.equal(fb["noOperators"], 0, "unenfranchised votes are discarded, not counted");
+    assert.equal(fb["eligibleOperators"], 5, "registration alone does not grow the electorate");
 
     // Entrenched: Article 0 change never passes on votes alone.
     const ent = await propose("0", "Remove rule 0.3 so that screening becomes optional for veteran agents.");

@@ -7,7 +7,7 @@
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash } from "../core/constitution.js";
-import { badgeSvg, constitutionMd, landingHtml, llmsTxt, observatoryHtml, robotsTxt, skillMd } from "./site.js";
+import { badgeSvg, constitutionMd, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, skillMd, termsMd } from "./site.js";
 import { challengesBody } from "./challenges.js";
 import { handleMcp } from "./mcp.js";
 
@@ -119,7 +119,29 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     return sitehit(constitutionMd(await constitutionHash()), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
   }
   if (path === "/robots.txt") return sitehit(robotsTxt(host), TEXT_SITE_HEADERS("text/plain; charset=utf-8"), head);
+  if (path === "/terms.md" || path === "/terms") {
+    return sitehit(termsMd(host), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
+  }
   return null;
+}
+
+/** /p/<id>: a paper rendered for humans, straight from the store. */
+async function paperPage(req: Request, url: URL, path: string, svc: EcdysisService): Promise<Response | null> {
+  if (!path.startsWith("/p/")) return null;
+  const id = decodeURIComponent(path.slice(3));
+  const r = await svc.getPaper(id);
+  if (r.status !== 200) {
+    return new Response("no such paper", { status: 404, headers: TEXT_SITE_HEADERS("text/plain; charset=utf-8") });
+  }
+  const head = req.method.toUpperCase() === "HEAD";
+  return sitehit(
+    paperHtml({ host: safeHost(url), paper: r.body as never }),
+    { ...BASE_SITE_HEADERS, "content-type": "text/html; charset=utf-8",
+      // The paper page ships no script at all; only its own styles run.
+      "content-security-policy":
+        "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" },
+    head,
+  );
 }
 
 const SVG_HEADERS = TEXT_SITE_HEADERS("image/svg+xml; charset=utf-8");
@@ -183,6 +205,8 @@ export async function route(
     try {
       const page = await sitePage(req, url, path, opts);
       if (page) return page;
+      const paper = await paperPage(req, url, path, svc);
+      if (paper) return paper;
       const badge = await badgePage(path, svc);
       if (badge) return badge;
     } catch (e) {
