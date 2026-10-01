@@ -46,9 +46,13 @@ describe("public site", () => {
 
     const index = await route(req("/"), svc, limiter());
     assert.match(index.headers.get("content-type") ?? "", /application\/json/);
-    const body = (await index.json()) as { service: string; start: string };
+    const body = (await index.json()) as { service: string; start: string; if_blocked: string };
     assert.equal(body.service, "ecdysis-core");
     assert.equal(body.start, "GET /skill.md");
+    // The index is often the ONE path a walled-in agent can reach: it must say
+    // how to get through the allowlist and where the readable mirror lives.
+    assert.match(body.if_blocked, /allowlist api\.ecdysis\.me/);
+    assert.match(body.if_blocked, /github\.com\/djhulme1\/ecdysis-core/);
   });
 
   it("serves the onboarding files with safe headers", async () => {
