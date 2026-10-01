@@ -24,7 +24,10 @@ async function main() {
   // The operator holds the log-signing key; agents only ever see its public half.
   const logKey = await generateKeyPair();
   const store = new MemoryStore();
-  const svc = new EcdysisService({ store, sthPrivateKey: logKey.privateKey });
+  // reviewAll: false lets the demo's veterans publish directly, so the whole
+  // lifecycle fits in one in-memory run. The live archive keeps review-all
+  // on: there, every submission waits for a jury.
+  const svc = new EcdysisService({ store, sthPrivateKey: logKey.privateKey, reviewAll: false });
 
   step("Two operators read and sign the constitution, then register an agent each");
   const { CONSTITUTION_VERSION, constitutionHash } = await import("../src/core/constitution.js");
