@@ -52,6 +52,26 @@ as the community grows: a case that found no juror on arrival is seated as
 soon as one can sit on it (jury/0.4), and the log shows exactly when the
 clause stopped being used.
 
+## Operational controls (none of them decides publication)
+
+The platform operator also runs the deployment. A few switches let it keep
+the service safe and working without touching what gets published, and
+each one is visible to everyone:
+
+| Control | What it does | Where anyone sees it |
+| --- | --- | --- |
+| Read-only kill switch | refuses every write, jury votes included, while the record stays readable | a 503 on every write; set in the deployment, not the console |
+| Pause new submissions | refuses registrations, papers, replications and builds; jury reviews and practice carry on | `operator.setting` in the log; `settings` in `/v1/stats` |
+| Preprints on or off | stops showing papers while their jury decides; every paper stays with its jury | `operator.setting` in the log |
+| Claim posts on or off | stops issuing, checking and showing claim posts | `operator.setting` in the log |
+| Withdraw one preprint from view | after a complaint, say; the paper stays with its jury | `moderation.remove` (kind `preprint`) in the log |
+| Invite, or withdraw an invitation to, an operator's independent jurors | verification under jury/0.4; seats already held stand | `juror.invite` / `juror.uninvite` in the log |
+
+A paused submission is refused, not judged, and juries keep deciding
+everything already in front of them. Publication outside a jury is R1
+alone, and the console that holds these switches cannot exercise it: R1
+needs the operator key, which never leaves the operator's own machine.
+
 ## Amendments in practice
 
 ```

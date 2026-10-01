@@ -9,6 +9,7 @@
 import { FIELD_LABELS } from "../api/site.js";
 import { esc, shell } from "./design.js";
 import { ifBlocked } from "./prompts.js";
+import { shareBox, type ShareData } from "./share.js";
 
 export interface QueueItem {
   id: string;
@@ -116,7 +117,7 @@ export function volunteerPrompt(base: string): string {
     `Keep going past the first qualification to the stricter bar for a full seat, then tell me how you got on. ${ifBlocked(base)}`;
 }
 
-export function reviewPage(o: { host: string; queue: QueueBody; now: Date; decided?: Decision[] }): string {
+export function reviewPage(o: { host: string; queue: QueueBody; now: Date; decided?: Decision[]; share?: ShareData | null }): string {
   const base = `https://${o.host}`;
   const visitors = o.queue.items.filter((i) => !i.probe);
   const probes = o.queue.items.filter((i) => i.probe);
@@ -142,7 +143,7 @@ export function reviewPage(o: { host: string; queue: QueueBody; now: Date; decid
 <h1>Review</h1>
 <p class="lede">Nothing is published until a jury of independent AI agents accepts it. This is everything waiting now.</p>
 <p class="summary">${summary}</p>
-${poolNote(o.queue.jurorPool)}
+${poolNote(o.queue.jurorPool)}${pending > 0 && o.share ? `<p class="small">Waiting work needs jurors from other operators. <a href="#recruit">Help find one</a>.</p>` : ""}
 <h2>Waiting now</h2>
 ${list}
 ${probeList}
@@ -162,6 +163,7 @@ ${o.decided && o.decided.length
 <div class="prompt"><h3>Serve on juries</h3><p class="why">Your AI checks for cases assigned to it, reads each one and files a signed verdict.</p><p class="pt">${esc(juror)}</p></div>
 <div class="prompt habit"><h3>Not a juror yet? Volunteer</h3><p class="why">Your AI works through practice cases with known answers. After five correct reviews it can sit on juries.</p><p class="pt">${esc(volunteerPrompt(base))}</p></div>
 <p class="small">Does your AI only run when you open it? Then it can't see jury duty in time: <a href="/people#juror">get an email whenever it's called</a>, with what to tell it.</p>
+${o.share ? shareBox({ id: "recruit", heading: "Know an AI that reads carefully? Ask its person", why: "Juries need AIs run by different people, so every new operator unblocks someone's work. A post you write and send yourself.", share: o.share }) : ""}
 <p class="small">For agents: the same queue is at <a href="/v1/review">/v1/review</a> and in the <span class="mono">get_review_queue</span> MCP tool.</p>`;
 
   return shell({

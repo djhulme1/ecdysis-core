@@ -1,0 +1,168 @@
+/**
+ * The D1 store's real SQL, run against SQLite (what D1 is built on) with
+ * every migration applied in order. The in-memory store can't catch a
+ * misspelt column, a binding of undefined, an upsert that clobbers a column,
+ * or a migration that doesn't apply: this does, before a deploy does.
+ */
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { D1Store } from "../src/store/d1-store.js";
+import { EcdysisService } from "../src/api/service.js";
+import { structuralScreener } from "../src/core/hazard.js";
+import { signJson } from "../src/core/crypto.js";
+import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import type { Json } from "../src/core/canonical.js";
+import { seededKeyPair } from "./society-kit.js";
+
+type Sqlite = typeof import("node:sqlite");
+let sqlite: Sqlite | null = null;
+try {
+  sqlite = await import("node:sqlite");
+} catch {
+  sqlite = null; // older Node: skipped, never silently passed
+}
+
+/** The slice of D1's binding the store uses, over node:sqlite. Refuses undefined, as D1 does. */
+function d1Over(db: InstanceType<Sqlite["DatabaseSync"]>): D1Database {
+  const check = (args: unknown[]) => {
+    for (const a of args) if (a === undefined) throw new Error("D1_TYPE_ERROR: Type 'undefined' not supported");
+    return args as Array<string | number | null>;
+  };
+  const prepare = (sql: string) => {
+    let args: unknown[] = [];
+    const stmt = {
+      bind(...a: unknown[]) {
+        args = a;
+        return stmt;
+      },
+      async first<T>() {
+        return (db.prepare(sql).get(...check(args)) ?? null) as T | null;
+      },
+      async all<T>() {
+        return { results: db.prepare(sql).all(...check(args)) as T[], success: true, meta: {} };
+      },
+      async run() {
+        const r = db.prepare(sql).run(...check(args));
+        return { success: true, meta: { changes: Number(r.changes) } };
+      },
+    };
+    return stmt;
+  };
+  return {
+    prepare,
+    async batch(stmts: Array<{ run: () => Promise<unknown> }>) {
+      db.exec("BEGIN");
+      try {
+        const out = [];
+        for (const s of stmts) out.push(await s.run());
+        db.exec("COMMIT");
+        return out;
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
+    },
+    async exec(sql: string) {
+      db.exec(sql);
+      return { count: 0, duration: 0 };
+    },
+  } as unknown as D1Database;
+}
+
+function migrated(): InstanceType<Sqlite["DatabaseSync"]> {
+  const db = new sqlite!.DatabaseSync(":memory:");
+  const dir = join(import.meta.dirname, "..", "migrations");
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".sql")).sort()) db.exec(readFileSync(join(dir, f), "utf8"));
+  return db;
+}
+
+describe("the D1 store against SQLite, every migration applied", { skip: !sqlite && "node:sqlite is not available" }, () => {
+  it("applies every migration in order, from an empty database", () => {
+    const db = migrated();
+    const cols = (db.prepare("PRAGMA table_info(quarantine)").all() as Array<{ name: string }>).map((c) => c.name);
+    assert.ok(cols.includes("preprint_withdrawn_at"));
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((t) => t.name);
+    for (const t of ["settings", "claims", "quarantine", "agents", "juror_operators"]) assert.ok(tables.includes(t), t);
+  });
+
+  it("stores settings and claims, and lists claims newest first by handle and status", async () => {
+    const store = new D1Store(d1Over(migrated()));
+    await store.putSetting({ key: "submissions", value: "paused", updatedAt: "2026-10-01T10:00:00.000Z", updatedBy: "daniel@hulme.ai" });
+    await store.putSetting({ key: "submissions", value: "open", updatedAt: "2026-10-01T11:00:00.000Z", updatedBy: "daniel@hulme.ai" });
+    assert.deepEqual(await store.listSettings(), [{ key: "submissions", value: "open", updatedAt: "2026-10-01T11:00:00.000Z", updatedBy: "daniel@hulme.ai" }]);
+    const base = {
+      handle: "Moth-1", operatorId: "op-moth", status: "issued" as const, expiresAt: "2026-10-15T10:00:00.000Z",
+      platform: null, account: null, postUrl: null, show: true, verifiedAt: null, verifiedBy: null, attempts: 0, lastError: null,
+    };
+    await store.putClaim({ ...base, id: "a".repeat(32), code: "ecd-2222-3333", createdAt: "2026-10-01T10:00:00.000Z" });
+    await store.putClaim({ ...base, id: "b".repeat(32), code: "ecd-4444-5555", createdAt: "2026-10-01T11:00:00.000Z" });
+    await store.putClaim({ ...base, id: "c".repeat(32), code: "ecd-6666-7777", createdAt: "2026-10-01T12:00:00.000Z", handle: "Wasp-1" });
+    await store.putClaim({
+      ...base, id: "a".repeat(32), code: "ecd-2222-3333", createdAt: "2026-10-01T10:00:00.000Z",
+      status: "verified", platform: "x", account: "alice", postUrl: "https://x.com/alice/status/1840000000000000001", show: false,
+      verifiedAt: "2026-10-01T10:05:00.000Z", verifiedBy: "auto", attempts: 1,
+    });
+    const a = (await store.getClaim("a".repeat(32)))!;
+    assert.equal(a.status, "verified");
+    assert.equal(a.show, false);
+    assert.equal(a.account, "alice");
+    assert.equal((await store.getClaimByCode("ecd-4444-5555"))?.id, "b".repeat(32));
+    assert.deepEqual((await store.listClaims({ handle: "Moth-1", limit: 10 })).map((c) => c.id), ["b".repeat(32), "a".repeat(32)]);
+    assert.deepEqual((await store.listClaims({ status: "issued", limit: 10 })).map((c) => c.id), ["c".repeat(32), "b".repeat(32)]);
+    assert.deepEqual((await store.listClaims({ handle: "Moth-1", status: "verified", limit: 10 })).map((c) => c.id), ["a".repeat(32)]);
+    assert.equal((await store.listClaims({ limit: 2 })).length, 2);
+    // The code is unique: a second claim can't reuse one.
+    await assert.rejects(store.putClaim({ ...base, id: "d".repeat(32), code: "ecd-2222-3333", createdAt: "2026-10-01T13:00:00.000Z" }));
+  });
+
+  it("runs registration, a preprint, a switch, a withdrawal and an uninvite through the real SQL", async () => {
+    const store = new D1Store(d1Over(migrated()));
+    let t = Date.UTC(2026, 9, 1, 9, 0, 0);
+    const svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null, now: () => new Date((t += 1000)) });
+    const ack = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
+    const kp = await seededKeyPair("d1/Moth-1");
+    const reg = await svc.registerAgent({ handle: "Moth-1", publicKey: kp.publicKey, operatorId: "op-moth", constitution: ack });
+    assert.equal(reg.status, 201, JSON.stringify(reg.body));
+    const claimUrl = String(((reg.body as Record<string, Json>)["claim"] as Record<string, Json>)["url"]);
+    assert.match(claimUrl, /\/claim\/[0-9a-f]{32}$/);
+    assert.equal((await store.listClaims({ handle: "Moth-1", limit: 5 })).length, 1);
+
+    const payload = {
+      protocol: "ecdysis/0.1", type: "paper", title: "A preprint stored through the real SQL",
+      abstract: "A careful measurement with its configuration, seeds and code attached so that anyone can recompute it.",
+      field: "ml", claims: [{ text: "The effect holds under the stated set-up", confidence: 0.7 }],
+      builds_on: [{ id: "arxiv:2203.15556", rel: "replicates" }], preprint: true,
+      agent: { handle: "Moth-1", publicKey: kp.publicKey }, ts: new Date(t).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    } as unknown as Json;
+    const sub = await svc.submitPaper({ payload, signature: await signJson(kp.privateKey, payload) });
+    assert.equal(sub.status, 202, JSON.stringify(sub.body));
+    const receipt = String((sub.body as Record<string, Json>)["id"]);
+    const before = (await store.getQuarantine(receipt))!;
+    assert.equal(((await svc.preprints()).body as { preprints: unknown[] }).preprints.length, 1);
+
+    // Withdraw: one column, one way; a full-row write from a stale read can't undo it.
+    assert.equal((await svc.withdrawPreprint(receipt)).status, 200);
+    await store.putQuarantine(before);
+    assert.ok((await store.getQuarantine(receipt))!.preprintWithdrawnAt, "COALESCE keeps the withdrawal");
+    assert.equal(((await svc.preprints()).body as { preprints: unknown[] }).preprints.length, 0);
+
+    // A switch: stored, logged, read back by a fresh instance (a new request).
+    assert.equal((await svc.setSetting("submissions", "paused", "daniel@hulme.ai")).status, 200);
+    const next = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null, now: () => new Date((t += 1000)) });
+    assert.equal(await next.setting("submissions"), "paused");
+    assert.equal((await next.registerAgent({ handle: "Late-1", publicKey: (await seededKeyPair("d1/late")).publicKey, operatorId: "op-late", constitution: ack })).status, 503);
+
+    // Invite, then withdraw the invitation.
+    assert.equal((await next.inviteJurorOperator("op-moth")).status, 201);
+    assert.equal((await next.uninviteJurorOperator("op-moth")).status, 200);
+    assert.equal(await store.getJurorOperator("op-moth"), null);
+
+    // The log took every change and is intact.
+    const audit = await next.audit();
+    assert.equal((audit.body as { intact: boolean }).intact, true);
+    const types = (await store.listLog(0, 100)).map((e) => e.type);
+    for (const ty of ["agent.register", "moderation.remove", "operator.setting", "juror.invite", "juror.uninvite"]) assert.ok(types.includes(ty as never), ty);
+  });
+});

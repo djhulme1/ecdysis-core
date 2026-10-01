@@ -13,7 +13,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, JurorOperatorRecord, JurorVouchRecord, JuryAlertRecord,
+  AgentRecord, AuditRecord, BuildRecord, ClaimRecord, DeliveryRecord, HeraldRecord, IssueRecord, JurorOperatorRecord, JurorVouchRecord, JuryAlertRecord, SettingRecord,
   LogRowView, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
 } from "./store.js";
 
@@ -134,6 +134,50 @@ export class D1Store implements Store {
   async listJurorOperators(limit: number): Promise<JurorOperatorRecord[]> {
     const rs = await this.db.prepare("SELECT * FROM juror_operators ORDER BY seq LIMIT ?1").bind(limit).all<Record<string, unknown>>();
     return (rs.results ?? []).map((r) => ({ operatorId: r["operator_id"] as string, via: r["via"] as JurorOperatorRecord["via"], verifiedAt: r["verified_at"] as string, seq: r["seq"] as number }));
+  }
+  async deleteJurorOperator(operatorId: string): Promise<void> {
+    await this.db.prepare("DELETE FROM juror_operators WHERE operator_id = ?1").bind(operatorId).run();
+  }
+
+  // --- runtime switches and claim posts ---
+  async listSettings(): Promise<SettingRecord[]> {
+    const rs = await this.db.prepare("SELECT * FROM settings").all<Record<string, unknown>>();
+    return (rs.results ?? []).map((r) => ({ key: r["key"] as string, value: r["value"] as string, updatedAt: r["updated_at"] as string, updatedBy: r["updated_by"] as string }));
+  }
+  async putSetting(x: SettingRecord): Promise<void> {
+    await this.db
+      .prepare("INSERT INTO settings (key, value, updated_at, updated_by) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(key) DO UPDATE SET value=?2, updated_at=?3, updated_by=?4")
+      .bind(x.key, x.value, x.updatedAt, x.updatedBy).run();
+  }
+  async putClaim(c: ClaimRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO claims (id, handle, operator_id, code, status, created_at, expires_at, platform, account, post_url, show, verified_at, verified_by, attempts, last_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+         ON CONFLICT(id) DO UPDATE SET status=?5, platform=?8, account=?9, post_url=?10, show=?11, verified_at=?12, verified_by=?13, attempts=?14, last_error=?15`,
+      )
+      .bind(c.id, c.handle, c.operatorId, c.code, c.status, c.createdAt, c.expiresAt, c.platform, c.account, c.postUrl, c.show ? 1 : 0, c.verifiedAt, c.verifiedBy, c.attempts, c.lastError)
+      .run();
+  }
+  async getClaim(id: string): Promise<ClaimRecord | null> {
+    const r = await this.db.prepare("SELECT * FROM claims WHERE id = ?1").bind(id).first<Record<string, unknown>>();
+    return r ? rowToClaim(r) : null;
+  }
+  async getClaimByCode(code: string): Promise<ClaimRecord | null> {
+    const r = await this.db.prepare("SELECT * FROM claims WHERE code = ?1").bind(code).first<Record<string, unknown>>();
+    return r ? rowToClaim(r) : null;
+  }
+  async listClaims(q: { handle?: string; status?: ClaimRecord["status"]; limit: number }): Promise<ClaimRecord[]> {
+    // Fixed statements only: the filters are bound, never spliced in.
+    const stmt = q.handle !== undefined && q.status !== undefined
+      ? this.db.prepare("SELECT * FROM claims WHERE handle = ?1 AND status = ?2 ORDER BY created_at DESC, id DESC LIMIT ?3").bind(q.handle, q.status, q.limit)
+      : q.handle !== undefined
+        ? this.db.prepare("SELECT * FROM claims WHERE handle = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2").bind(q.handle, q.limit)
+        : q.status !== undefined
+          ? this.db.prepare("SELECT * FROM claims WHERE status = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2").bind(q.status, q.limit)
+          : this.db.prepare("SELECT * FROM claims ORDER BY created_at DESC, id DESC LIMIT ?1").bind(q.limit);
+    const rs = await stmt.all<Record<string, unknown>>();
+    return (rs.results ?? []).map(rowToClaim);
   }
   async putJurorVouch(v: JurorVouchRecord): Promise<void> {
     await this.db
@@ -480,16 +524,20 @@ export class D1Store implements Store {
   async putQuarantine(q: QuarantineRecord): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO quarantine (id, kind, envelope_json, findings_json, received_at, status, jury_json, jury_ops_json, votes_json, seats_json, preprint_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-         ON CONFLICT(id) DO UPDATE SET status=?6, jury_json=?7, jury_ops_json=?8, votes_json=?9, seats_json=?10, preprint_at=?11`,
+        `INSERT INTO quarantine (id, kind, envelope_json, findings_json, received_at, status, jury_json, jury_ops_json, votes_json, seats_json, preprint_at, preprint_withdrawn_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         ON CONFLICT(id) DO UPDATE SET status=?6, jury_json=?7, jury_ops_json=?8, votes_json=?9, seats_json=?10, preprint_at=?11, preprint_withdrawn_at=COALESCE(?12, preprint_withdrawn_at)`,
       )
       .bind(
         q.id, q.kind, JSON.stringify(q.envelope), JSON.stringify(q.findings), q.receivedAt,
         q.status, JSON.stringify(q.jury), JSON.stringify(q.juryOperators), JSON.stringify(q.votes),
-        q.seats ? JSON.stringify(q.seats) : null, q.preprintAt ?? null,
+        q.seats ? JSON.stringify(q.seats) : null, q.preprintAt ?? null, q.preprintWithdrawnAt ?? null,
       )
       .run();
+  }
+  async markPreprintWithdrawn(id: string, at: string): Promise<void> {
+    // One column, one way: never touches votes or seats being written concurrently.
+    await this.db.prepare("UPDATE quarantine SET preprint_withdrawn_at = ?2 WHERE id = ?1 AND preprint_withdrawn_at IS NULL").bind(id, at).run();
   }
   async getQuarantine(id: string): Promise<QuarantineRecord | null> {
     const r = await this.db
@@ -658,6 +706,27 @@ function rowToQuarantine(r: Record<string, unknown>): QuarantineRecord {
     votes: JSON.parse((r["votes_json"] as string) ?? "[]"),
     ...(r["seats_json"] ? { seats: JSON.parse(r["seats_json"] as string) } : {}),
     ...(r["preprint_at"] ? { preprintAt: r["preprint_at"] as string } : {}),
+    ...(r["preprint_withdrawn_at"] ? { preprintWithdrawnAt: r["preprint_withdrawn_at"] as string } : {}),
+  };
+}
+
+function rowToClaim(r: Record<string, unknown>): ClaimRecord {
+  return {
+    id: r["id"] as string,
+    handle: r["handle"] as string,
+    operatorId: r["operator_id"] as string,
+    code: r["code"] as string,
+    status: r["status"] as ClaimRecord["status"],
+    createdAt: r["created_at"] as string,
+    expiresAt: r["expires_at"] as string,
+    platform: (r["platform"] as ClaimRecord["platform"]) ?? null,
+    account: (r["account"] as string | null) ?? null,
+    postUrl: (r["post_url"] as string | null) ?? null,
+    show: (r["show"] as number) === 1,
+    verifiedAt: (r["verified_at"] as string | null) ?? null,
+    verifiedBy: (r["verified_by"] as ClaimRecord["verifiedBy"]) ?? null,
+    attempts: Number(r["attempts"] ?? 0),
+    lastError: (r["last_error"] as string | null) ?? null,
   };
 }
 

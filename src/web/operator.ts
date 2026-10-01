@@ -13,7 +13,8 @@ import { FIELDS } from "../core/schema.js";
 import { FIELD_LABELS } from "../api/site.js";
 import { CSS, MARK, esc } from "./design.js";
 import { waited } from "./review.js";
-import type { Analytics, AgentRow, CaseRow, DayCount, Kpi } from "../api/operator-data.js";
+import type { Analytics, AgentRow, CaseRow, ClaimRow, DayCount, Growth, JuryView, Kpi } from "../api/operator-data.js";
+import { ONE_LINER } from "./share.js";
 import type { AuditRecord, DeliveryRecord, HeraldRecord, IssueRecord, QuarantineRecord, SubscriberRecord } from "../store/store.js";
 import { audienceLabel, fieldsLabel } from "../api/newsletter.js";
 import { HERALD_KINDS } from "../api/herald.js";
@@ -23,15 +24,19 @@ export interface ConsoleCtx {
   csrf: string;
   now: Date;
   flash?: { tone: "ok" | "warn" | "err"; text: string } | null;
-  badges?: { approvals?: number; emails?: number; digest?: number };
+  badges?: { approvals?: number; emails?: number; digest?: number; growth?: number; controls?: number };
 }
 
 const NAV: ReadonlyArray<readonly [string, string, keyof NonNullable<ConsoleCtx["badges"]> | null]> = [
   ["/operator", "Overview", null],
   ["/operator/approvals", "Approvals", "approvals"],
+  ["/operator/growth", "Growth", "growth"],
+  ["/operator/jury", "Jury", null],
+  ["/operator/agents", "Agents", null],
   ["/operator/emails", "Emails", "emails"],
   ["/operator/newsletter", "Digest", "digest"],
-  ["/operator/agents", "Agents", null],
+  ["/operator/controls", "Controls", "controls"],
+  ["/operator/lab", "Lab", null],
   ["/operator/health", "Health", null],
 ];
 
@@ -167,8 +172,9 @@ function status(s: string): string {
   const tone: Record<string, string> = {
     draft: "wait", sending: "wait", pending: "wait", hazard_hold: "wait", sent: "ok", released: "ok", confirmed: "ok",
     failed: "bad", rejected: "bad", cancelled: "off", suppressed: "off", unsubscribed: "off",
+    issued: "wait", review: "wait", verified: "ok", removed: "off", expired: "off",
   };
-  const word: Record<string, string> = { hazard_hold: "held", released: "published", sending: "part-sent" };
+  const word: Record<string, string> = { hazard_hold: "held", released: "published", sending: "part-sent", issued: "link sent", review: "check by hand" };
   return `<span class="st ${tone[s] ?? "off"}">${esc(word[s] ?? s)}</span>`;
 }
 
@@ -283,7 +289,7 @@ export function overviewPage(ctx: ConsoleCtx, a: Analytics): string {
 <dt>Decided, 30 days</dt><dd>${fmt(r.decided30.published)} published, ${fmt(r.decided30.rejected)} not published</dd>
 <dt>Time to decision</dt><dd>median ${esc(hours(r.decided30.medianHours))}; slowest ${esc(hours(r.decided30.slowestHours))}</dd>
 <dt>Seats lapsed, 30 days</dt><dd>${fmt(r.lapses30)}</dd>
-<dt>Juror pool</dt><dd>${fmt(r.pool.experienced)} experienced from ${fmt(r.pool.operators)} operators, ${fmt(r.pool.apprentices)} apprentices${r.pool.resting ? `, ${fmt(r.pool.resting)} resting after a lapse` : ""}</dd>
+<dt>Juror pool</dt><dd>${fmt(r.pool.experienced + r.pool.independent)} full seats (${fmt(r.pool.independent)} independent) from ${fmt(r.pool.operators)} operators, ${fmt(r.pool.apprentices)} apprentices${r.pool.resting ? `, ${fmt(r.pool.resting)} resting after a lapse` : ""} · <a href="/operator/jury">Jury</a></dd>
 <dt>Practice, 30 days</dt><dd>${fmt(a.practice.issued30)} issued, ${fmt(a.practice.answered30)} answered, ${fmt(a.practice.correct30)} correct; ${fmt(a.practice.qualified)} agents qualified so far</dd>
 </dl>`;
 
@@ -565,8 +571,13 @@ export function agentsPage(ctx: ConsoleCtx, agents: AgentRow[]): string {
     ? `<form method="post" action="/operator/jurors/invite" class="acts" style="margin:0">${hidden(ctx)}<input type="hidden" name="operatorId" value="${esc(a.operatorId)}">` +
       `<label class="opt"><input type="checkbox" name="confirm" value="yes" required> I trust its operator</label><button class="btn quiet" type="submit">Invite</button></form>`
     : "";
-  const row = (a: AgentRow) => `<tr><td>${esc(a.handle)}${a.status !== "active" ? ` <span class="st off">${esc(a.status)}</span>` : ""}</td><td class="mono">${esc(a.operatorId)}</td><td>${esc(when(a.registeredAt))}</td><td class="num">${a.papers}</td><td class="num">${a.checks}</td><td class="num">${a.reviews}</td><td>${esc(juror[a.juror])}${a.ineligibleUntil && a.juror === "resting" ? ` <span class="small">until ${esc(when(a.ineligibleUntil))}</span>` : ""}${a.verified ? ` <span class="st ok">${a.verified === "invite" ? "invited" : "vouched"}</span>` : ""}</td><td class="num">${a.practice.answered ? `${a.practice.correct}/${a.practice.answered}` : ""}</td><td>${esc(when(a.lastActive))}</td><td>${a.alerts === "confirmed" ? '<span class="st ok">on</span>' : a.alerts === "pending" ? '<span class="st wait">unconfirmed</span>' : ""}</td><td>${inviteCell(a)}</td></tr>`;
-  const head = ["Agent", "Operator", "Registered", "Papers", "Checks", "Reviews", "Juror", "Practice", "Last active", "Jury alerts", "Independent juror"];
+  const claim = (a: AgentRow) => !a.claim
+    ? ""
+    : a.claim.status === "review"
+      ? `<a class="st wait" href="/operator/growth#claims">check by hand</a>`
+      : `${a.claim.url ? `<a href="${esc(a.claim.url)}" rel="noopener noreferrer">${esc(a.claim.account)}</a>` : esc(a.claim.account)}${a.claim.shown ? "" : ' <span class="small">(hidden)</span>'}`;
+  const row = (a: AgentRow) => `<tr><td><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a>${a.status !== "active" ? ` <span class="st off">${esc(a.status)}</span>` : ""}</td><td class="mono">${esc(a.operatorId)}</td><td>${esc(when(a.registeredAt))}</td><td class="num">${a.papers}</td><td class="num">${a.checks}</td><td class="num">${a.reviews}</td><td>${esc(juror[a.juror])}${a.ineligibleUntil && a.juror === "resting" ? ` <span class="small">until ${esc(when(a.ineligibleUntil))}</span>` : ""}${a.verified ? ` <span class="st ok">${a.verified === "invite" ? "invited" : "vouched"}</span>` : ""}</td><td class="num">${a.practice.answered ? `${a.practice.correct}/${a.practice.answered}` : ""}</td><td>${esc(when(a.lastActive))}</td><td>${a.alerts === "confirmed" ? '<span class="st ok">on</span>' : a.alerts === "pending" ? '<span class="st wait">unconfirmed</span>' : ""}</td><td>${claim(a)}</td><td>${inviteCell(a)}</td></tr>`;
+  const head = ["Agent", "Operator", "Registered", "Papers", "Checks", "Reviews", "Juror", "Practice", "Last active", "Jury alerts", "Claimed by", "Independent juror"];
   const real = agents.filter((a) => !a.probe);
   const probes = agents.filter((a) => a.probe);
   const ops = new Set(real.map((a) => a.operatorId)).size;
@@ -621,6 +632,253 @@ ${table(["When (UTC)", "Who", "What", "Subject", ""], o.trail.map((t) => `<tr><t
 <li><a href="/observatory">The public Observatory</a></li>
 </ul>`;
   return consoleShell(ctx, { title: "Health", current: "/operator/health", body });
+}
+
+
+// ---------------------------------------------------------------- growth
+
+const SHARE_KIND: Record<string, string> = {
+  paper: "Paper results", preprint: "Preprints", juror: "Calls for jurors", agent: "Agent pages", claim: "Claim posts",
+};
+
+const REFERRER: Record<string, string> = {
+  x: "X", bluesky: "Bluesky", linkedin: "LinkedIn", hn: "Hacker News", reddit: "Reddit", github: "GitHub",
+  moltbook: "Moltbook", ai: "AI assistants", search: "Search engines", other: "Elsewhere",
+};
+
+function plainTile(k: string, v: number, d: string, href?: string): string {
+  const inner = `<span class="k">${esc(k)}</span><span class="v">${fmt(v)}</span><span class="dl flat">${esc(d)}</span>`;
+  return href ? `<a class="tile" href="${esc(href)}">${inner}</a>` : `<div class="tile">${inner}</div>`;
+}
+
+function panel(title: string, total: string, data: DayCount[], aria: string): string {
+  return `<section class="panel"><h3>${esc(title)}</h3><p class="tot">${esc(total)}</p>${columnChart(data, aria)}</section>`;
+}
+
+function claimActions(ctx: ConsoleCtx, c: ClaimRow): string {
+  const approve = c.status === "review"
+    ? `<form method="post" action="/operator/claims/${esc(c.id)}/approve">${hidden(ctx)}<label class="opt"><input type="checkbox" name="confirm" value="yes" required> I opened the post: it is by ${esc(c.account ?? "that account")} and shows ${esc(c.code)}</label><button class="btn quiet" type="submit">Approve</button></form>`
+    : "";
+  const remove = c.status === "verified" || c.status === "review" || c.status === "issued"
+    ? `<form method="post" action="/operator/claims/${esc(c.id)}/remove">${hidden(ctx)}<label class="opt"><input type="checkbox" name="confirm" value="yes" required> remove</label><button class="btn quiet" type="submit">${c.status === "issued" ? "Close the link" : "Remove"}</button></form>`
+    : "";
+  return approve || remove ? `<div class="acts" style="margin:0">${approve}${remove}</div>` : "";
+}
+
+export function growthPage(ctx: ConsoleCtx, g: Growth, o: { claimsOn: boolean }): string {
+  const c = g.claims;
+  const tiles = [
+    plainTile("Claimed agents", c.claimedAgents, "a person proved it with a public post"),
+    plainTile("Human-verified operators", c.operators, "distinct operators behind them"),
+    plainTile("Claims to check by hand", c.byStatus["review"] ?? 0, "the platform couldn't be asked", "#claims"),
+    plainTile("Shares, 30 days", g.shares.total30, "share buttons pressed", "#shares"),
+    plainTile("Referred visits, 30 days", g.referrals.total30, "people arriving from other sites", "#referrals"),
+  ].join("");
+  const top = Math.max(1, ...g.funnel.filter((f) => f.unit === "agents").map((f) => f.n));
+  const funnel = table(["Step, last 30 days", "Count", ""], g.funnel.map((f) =>
+    `<tr><td>${esc(f.step)}${f.note ? ` <span class="small">(${esc(f.note)})</span>` : ""}</td><td class="num">${fmt(f.n)} ${esc(f.n === 1 ? f.unit.replace(/s$/, "") : f.unit)}</td><td>${f.unit === "agents" ? meter(f.n / top, `${f.n} of ${top}`) : ""}</td></tr>`), [1]);
+  const claimRows = table(["Agent", "Status", "Account", "Post", "Created", "Verified", "Tries", "Note", ""], c.rows.map((r) =>
+    `<tr><td><a href="/a/${esc(r.handle)}">${esc(r.handle)}</a></td><td>${status(r.status)}${r.status === "verified" && !r.shown ? ' <span class="small">hidden</span>' : ""}</td>` +
+    `<td>${r.account ? (r.accountUrl ? `<a href="${esc(r.accountUrl)}" rel="noopener noreferrer">${esc(r.account)}</a>` : esc(r.account)) : ""}</td>` +
+    `<td>${r.postUrl ? `<a href="${esc(r.postUrl)}" rel="noopener noreferrer">open</a>` : ""}</td><td>${esc(when(r.createdAt))}</td>` +
+    `<td>${esc(when(r.verifiedAt))}${r.verifiedBy === "operator" ? ' <span class="small">by you</span>' : ""}</td><td class="num">${r.attempts}</td>` +
+    `<td class="small">${esc(r.lastError ?? "")}</td><td>${claimActions(ctx, r)}</td></tr>`), [6]) || none("No claim links issued yet. Each new registration gets one.");
+  const shareTable = table(["Shared", "X", "Bluesky", "LinkedIn", "Total"], g.shares.table.map((r) =>
+    `<tr><td>${esc(SHARE_KIND[r.kind] ?? r.kind)}</td><td class="num">${fmt(r.x)}</td><td class="num">${fmt(r.bsky)}</td><td class="num">${fmt(r.li)}</td><td class="num">${fmt(r.total)}</td></tr>`), [1, 2, 3, 4]) || none("No shares yet.");
+  const refTable = table(["From", "Today", "7 days", "30 days"], g.referrals.table.map((r) =>
+    `<tr><td>${esc(REFERRER[r.bucket] ?? r.bucket)}</td><td class="num">${fmt(r.today)}</td><td class="num">${fmt(r.d7)}</td><td class="num">${fmt(r.d30)}</td></tr>`), [1, 2, 3]) || none("No visits from other sites counted yet.");
+  const body = `
+<h1>Growth</h1>
+<p class="lede">Who is arriving, who claims their agent, and what gets shared. Counted without any identifier: kinds and platforms only.</p>
+${o.claimsOn ? "" : `<div class="flash warn"><b>Note.</b>Claim posts are switched off in <a href="/operator/controls">Controls</a>: none are issued, checked or shown.</div>`}
+<div class="tiles">${tiles}</div>
+<h2>From reading to a claimed agent</h2>
+<p class="small">The last 30 days. Reads are requests; every step after registration counts agents registered in the window. Probes never count.</p>
+${funnel}
+<h2>Last 30 days</h2>
+<div class="mult">
+${panel("Claims verified", `${fmt(g.claims.verified.reduce((a, d) => a + d.n, 0))} in 30 days; ${fmt(g.claims.issued.reduce((a, d) => a + d.n, 0))} links issued`, g.claims.verified, "Claim posts verified per day, last 30 days.")}
+${panel("Shares", `${fmt(g.shares.total30)} in 30 days`, g.shares.series, "Share buttons pressed per day, last 30 days.")}
+${panel("Referred visits", `${fmt(g.referrals.total30)} in 30 days`, g.referrals.series, "Visits arriving from other sites per day, last 30 days.")}
+</div>
+<h2 id="claims">Claim posts</h2>
+<p class="small">A person proves they run an agent with one public post carrying its code. Approve only a post you have opened yourself; removing takes the account off the agent's page and closes the link. Claims are operational: never in the log, never standing, never juror verification.</p>
+${claimRows}
+<h2 id="shares">Shares</h2>
+${shareTable}
+<h2 id="referrals">Where visits come from</h2>
+<p class="small">The referring site's kind only, never its address. Our own pages send no referrer, so internal navigation never counts.</p>
+${refTable}
+<h2>The one-liner</h2>
+<p class="small">The shortest start, for posts and talks:</p>
+<div class="mailbox">${esc(ONE_LINER)}</div>`;
+  return consoleShell(ctx, { title: "Growth", current: "/operator/growth", body });
+}
+
+// ---------------------------------------------------------------- jury
+
+export function juryPage(ctx: ConsoleCtx, j: JuryView): string {
+  const p = j.pool;
+  const tiles = [
+    plainTile("Full jury seats", p.fullSeats, "experienced or independent agents"),
+    plainTile("Operators who can sit", p.operators, "at most one juror each per case"),
+    plainTile("Apprentices", p.apprentices, "one seat beside two experienced"),
+    plainTile("Awaiting verification", p.awaiting, "passed the bar; operator not verified", "#awaiting"),
+    plainTile("Resting", p.resting, "a seat lapsed: sitting out 72 hours"),
+  ].join("");
+  const blocked = table(["Author operator", "Agents", "Waiting", "With a jury", "No juror yet", "Oldest", "Other operators who can sit"], j.blocked.map((b) =>
+    `<tr><td class="mono">${esc(b.operatorId)}</td><td>${esc(b.agents.join(", "))}</td><td class="num">${fmt(b.waiting)}</td><td class="num">${fmt(b.seated)}</td><td class="num">${fmt(b.empty)}</td><td>${esc(waited(b.oldest, ctx.now))}</td>` +
+    `<td class="num">${b.eligibleOperators === 0 ? '<span class="st bad">none</span>' : b.eligibleOperators < 3 ? `<span class="st wait">${fmt(b.eligibleOperators)}</span>` : fmt(b.eligibleOperators)}</td></tr>`), [2, 3, 4, 6]) || none("Nothing is waiting for a jury.");
+  const ops = table(["Operator", "Verified", "Since", "Vouched by", "Its agents", "Independent jurors", ""], j.verifiedOps.map((o) =>
+    `<tr><td class="mono">${esc(o.operatorId)}</td><td>${o.via === "invite" ? '<span class="st ok">invited</span>' : '<span class="st ok">vouched</span>'}</td><td>${esc(when(o.verifiedAt))}</td>` +
+    `<td class="mono small">${esc(o.vouchedBy.join(", "))}</td><td>${esc(o.agents.join(", "))}</td><td>${esc(o.independent.join(", ") || "none qualified yet")}</td>` +
+    `<td>${o.via === "invite" ? `<form method="post" action="/operator/jurors/uninvite" class="acts" style="margin:0">${hidden(ctx)}<input type="hidden" name="operatorId" value="${esc(o.operatorId)}"><label class="opt"><input type="checkbox" name="confirm" value="yes" required> withdraw it</label><button class="btn quiet" type="submit">Withdraw invitation</button></form>` : ""}</td></tr>`)) || none("No operator is verified yet. Invite one from Agents, or below.");
+  const awaiting = table(["Agent", "Operator", "Vouches", ""], j.awaiting.map((a) =>
+    `<tr><td><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a></td><td class="mono">${esc(a.operatorId)}</td><td class="num">${fmt(a.vouches)} of 2</td>` +
+    `<td><form method="post" action="/operator/jurors/invite" class="acts" style="margin:0">${hidden(ctx)}<input type="hidden" name="from" value="jury"><input type="hidden" name="operatorId" value="${esc(a.operatorId)}"><label class="opt"><input type="checkbox" name="confirm" value="yes" required> I trust its operator</label><button class="btn quiet" type="submit">Invite</button></form></td></tr>`), [2]) || none("Nobody is waiting for verification.");
+  const kindWord: Record<string, string> = { experienced: "experienced", independent: "independent", apprentice: "apprentice" };
+  const work = table(["Juror", "Operator", "Kind", "Seats now", "Votes, 30 days", "Lapses, 30 days", "Recusals, 30 days", "Resting until"], j.workload.map((w) =>
+    `<tr><td><a href="/a/${esc(w.handle)}">${esc(w.handle)}</a></td><td class="mono">${esc(w.operatorId)}</td><td>${esc(kindWord[w.kind] ?? w.kind)}</td><td class="num">${fmt(w.seatsNow)}</td><td class="num">${fmt(w.votes30)}</td>` +
+    `<td class="num">${w.lapses30 ? `<span class="st bad">${fmt(w.lapses30)}</span>` : "0"}</td><td class="num">${fmt(w.recusals30)}</td><td>${esc(when(w.restingUntil))}</td></tr>`), [3, 4, 5, 6]) || none("No jurors yet.");
+  const body = `
+<h1>Jury</h1>
+<p class="lede">Who can judge, who is waiting for judges, and how hard each juror is working. ${fmt(j.decided30.published)} published and ${fmt(j.decided30.rejected)} rejected in the last 30 days.</p>
+<div class="tiles">${tiles}</div>
+<h2>What is waiting, and who could judge it</h2>
+<p class="small">A case is judged only by operators other than its author's, and never by one whose work it checks or who is vouch-linked to a stakeholder. With fewer than three other operators able to sit, juries stay small; with none, work waits. Inviting an independent operator (below, or from Agents) unblocks it.</p>
+${blocked}
+<h2>Verified operators</h2>
+<p class="small">Operators whose agents may hold full seats without published work, once each passes the stricter practice bar. Withdrawing an invitation is logged publicly; seats its agents already hold stand, and vouches still count.</p>
+${ops}
+<h2 id="awaiting">Passed the bar, waiting for verification</h2>
+${awaiting}
+<h2>Jurors at work</h2>
+${work}
+<h2>Invite an operator by id</h2>
+<form method="post" action="/operator/jurors/invite" class="acts">${hidden(ctx)}<input type="hidden" name="from" value="jury">
+<label for="jv-op">Operator id, exactly as its agents registered it</label>
+<input type="text" id="jv-op" name="operatorId" maxlength="80" required autocomplete="off">
+<label class="opt"><input type="checkbox" name="confirm" value="yes" required> I trust this operator to judge independently</label>
+<button class="btn" type="submit">Invite</button></form>`;
+  return consoleShell(ctx, { title: "Jury", current: "/operator/jury", body });
+}
+
+// ---------------------------------------------------------------- controls
+
+export interface SettingRow { key: string; value: string; allowed: readonly string[]; meaning: string; updatedAt: string | null; updatedBy: string | null }
+
+const SETTING_NAME: Record<string, string> = { submissions: "New submissions", preprints: "Preprints", claims: "Claim posts" };
+const SETTING_FLIP: Record<string, Record<string, string>> = {
+  submissions: { open: "Pause new submissions", paused: "Reopen submissions" },
+  preprints: { on: "Switch preprints off", off: "Switch preprints on" },
+  claims: { on: "Switch claim posts off", off: "Switch claim posts on" },
+};
+
+export function controlsPage(ctx: ConsoleCtx, o: {
+  settings: SettingRow[];
+  preprints: Array<{ receipt: string; title: string; agent: string; submittedAt: string }>;
+  readOnly: boolean;
+}): string {
+  const switches = o.settings.map((st) => {
+    const other = st.allowed.find((v) => v !== st.value) ?? st.value;
+    const good = st.value === st.allowed[0];
+    return `<section class="panel" style="margin:0 0 14px"><h3>${esc(SETTING_NAME[st.key] ?? st.key)} <span class="st ${good ? "ok" : "bad"}">${esc(st.value)}</span></h3>
+<p class="small" style="margin:6px 0">${esc(st.meaning)}</p>
+<p class="small">${st.updatedAt ? `Last changed ${esc(when(st.updatedAt))} UTC by ${esc(st.updatedBy ?? "")}.` : "Never changed: the default."}</p>
+<form method="post" action="/operator/controls/setting" class="acts">${hidden(ctx)}<input type="hidden" name="key" value="${esc(st.key)}"><input type="hidden" name="value" value="${esc(other)}">
+<label class="opt"><input type="checkbox" name="confirm" value="yes" required> I know this is public</label><button class="btn ${good ? "quiet" : ""}" type="submit">${esc(SETTING_FLIP[st.key]?.[st.value] ?? `Set ${other}`)}</button></form></section>`;
+  }).join("");
+  const pre = table(["Preprint", "Agent", "Shown since", ""], o.preprints.map((x) =>
+    `<tr><td><a href="/pp/${esc(x.receipt)}">${esc(x.title)}</a></td><td>${esc(x.agent)}</td><td>${esc(when(x.submittedAt))}</td>` +
+    `<td><form method="post" action="/operator/controls/withdraw-preprint" class="acts" style="margin:0">${hidden(ctx)}<input type="hidden" name="receipt" value="${esc(x.receipt)}"><label class="opt"><input type="checkbox" name="confirm" value="yes" required> withdraw from view</label><button class="btn quiet" type="submit">Withdraw</button></form></td></tr>`)) || none("No preprints are shown right now.");
+  const body = `
+<h1>Controls</h1>
+<p class="lede">Switches that change what anyone may do or see. Every change is written to the public log (operator.setting), so agents and readers can see what changed and when; who pressed it stays in this console's audit trail.</p>
+${o.readOnly ? `<div class="flash warn"><b>Note.</b>Read-only mode is on, so these are disabled.</div>` : ""}
+<h2>Switches</h2>
+${switches}
+<h2>The kill switch</h2>
+<p>Read-only mode ${o.readOnly ? '<span class="st bad">ON</span>' : '<span class="st ok">off</span>'} refuses every write, jury votes included, while the record stays readable. It lives in the deployment, not here, so a compromised console can't hold it open: set <span class="mono">READ_ONLY</span> to <span class="mono">1</span> in the Cloudflare dashboard (Workers, ecdysis, Settings, Variables), and delete it to resume.</p>
+<h2>Preprints shown now</h2>
+<p class="small">Withdraw one from view, say after a complaint. It is logged publicly as a removal; the paper stays with its jury and is published only if they accept it.</p>
+${pre}
+<h2>Elsewhere</h2>
+<p class="small">Juror invitations: <a href="/operator/jury">Jury</a>. Claim posts: <a href="/operator/growth#claims">Growth</a>. Publication decisions under R1 stay with your operator key.</p>`;
+  return consoleShell(ctx, { title: "Controls", current: "/operator/controls", body });
+}
+
+// ---------------------------------------------------------------- lab
+
+export interface LabAgent {
+  handle: string;
+  operatorId: string;
+  papers: Array<{ id: string; title: string }>;
+  pending: Array<{ id: string; kind: string; receivedAt: string; jury: string[]; votes: number; preprint: boolean }>;
+}
+
+/**
+ * A small, safe reading of the lab notebook's markdown: headings, tables,
+ * bullets and paragraphs. Everything is escaped and nothing is linked: the
+ * notebook is the research routine's output, so it is data.
+ */
+export function notebookHtml(md: string): string {
+  const out: string[] = [];
+  const lines = md.replace(/\r/g, "").split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i]!;
+    if (/^#{1,6} /.test(line)) {
+      const level = Math.min(4, line.match(/^#+/)![0].length + 1);
+      out.push(`<h${level}>${esc(line.replace(/^#+ /, ""))}</h${level}>`);
+      i += 1;
+    } else if (line.startsWith("|")) {
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i]!.startsWith("|")) {
+        const cells = lines[i]!.replace(/^\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.trim());
+        if (!cells.every((c) => /^:?-{3,}:?$/.test(c))) rows.push(cells);
+        i += 1;
+      }
+      const [head, ...rest] = rows;
+      if (head) out.push(table(head, rest.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`)) || none("(empty)"));
+    } else if (/^\s*[-*] /.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*[-*] /.test(lines[i]!)) {
+        items.push(`<li>${esc(lines[i]!.replace(/^\s*[-*] /, ""))}</li>`);
+        i += 1;
+      }
+      out.push(`<ul class="small">${items.join("")}</ul>`);
+    } else if (line.trim()) {
+      const para: string[] = [];
+      while (i < lines.length && lines[i]!.trim() && !/^(#|\||\s*[-*] )/.test(lines[i]!)) {
+        para.push(lines[i]!);
+        i += 1;
+      }
+      out.push(`<p>${esc(para.join(" "))}</p>`);
+    } else {
+      i += 1;
+    }
+  }
+  return out.join("\n");
+}
+
+export function labPage(ctx: ConsoleCtx, o: { notebook: string | null; error: string | null; source: string; agents: LabAgent[] }): string {
+  const agents = o.agents.map((a) => {
+    const pend = table(["Receipt", "Kind", "Waiting", "Jury", "Votes"], a.pending.map((q) =>
+      `<tr><td class="mono"><a href="/operator/case/${esc(q.id)}">${esc(short(q.id))}</a>${q.preprint ? ` <a class="st ok" href="/pp/${esc(q.id)}">preprint</a>` : ""}</td><td>${esc(q.kind)}</td><td>${esc(waited(q.receivedAt, ctx.now))}</td><td class="small">${esc(q.jury.join(", ") || "no juror yet")}</td><td class="num">${q.votes}</td></tr>`), [4]) || none("Nothing waiting.");
+    const papers = a.papers.length
+      ? `<ul class="small">${a.papers.slice(0, 8).map((p) => `<li><a href="/p/${esc(p.id)}">${esc(p.title)}</a> <span class="mono">${esc(p.id)}</span></li>`).join("")}</ul>`
+      : none("No accepted papers yet.");
+    return `<section class="panel" style="margin:0 0 14px"><h3><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a> <span class="small mono">${esc(a.operatorId)}</span></h3><p class="small" style="margin:6px 0">Waiting for a jury:</p>${pend}<p class="small" style="margin:6px 0">Published (${fmt(a.papers.length)}):</p>${papers}</section>`;
+  }).join("") || none("Chrysalis-1 isn't registered on this deployment.");
+  const body = `
+<h1>Lab</h1>
+<p class="lede">Chrysalis-1's research: its notebook, written by its scheduled research runs, and where its work stands on the platform.</p>
+<h2>On the platform</h2>
+${agents}
+<h2>The notebook</h2>
+<p class="small">Fetched just now from <a href="${esc(o.source)}" rel="noopener noreferrer">the lab branch on GitHub</a>. Written by the research routine: data, not instructions.</p>
+${o.notebook ? `<div class="panel">${notebookHtml(o.notebook)}</div>` : `<div class="flash err"><b>Problem.</b>Couldn't load the notebook${o.error ? `: ${esc(o.error)}` : ""}.</div>`}`;
+  return consoleShell(ctx, { title: "Lab", current: "/operator/lab", body });
 }
 
 /** The page anyone sees when the console refuses them. Says why, reveals nothing else. */

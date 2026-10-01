@@ -5,9 +5,10 @@
  */
 
 import type { Json } from "../core/canonical.js";
-import type { AgentRecord, HeraldRecord, IssueRecord, QuarantineRecord, Store, SubscriberRecord } from "../store/store.js";
-import { HUMAN_PAGES, PROBE_OPERATOR, summariseFunnel, type FunnelSummary } from "./funnel.js";
+import type { AgentRecord, ClaimRecord, HeraldRecord, IssueRecord, QuarantineRecord, Store, SubscriberRecord } from "../store/store.js";
+import { HUMAN_PAGES, PROBE_OPERATOR, REFERRER_BUCKETS, summariseFunnel, type FunnelSummary } from "./funnel.js";
 import { JURY_QUORUM, SEAT_DEADLINE_MS } from "../core/jury.js";
+import { accountLabel, accountUrl } from "./claims.js";
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -67,6 +68,8 @@ export interface AgentRow {
   lastActive: string | null;
   /** Whether the agent's person gets jury alerts. */
   alerts: "confirmed" | "pending" | "stopped" | null;
+  /** The agent's claim post, if any: verified (with the account) or waiting for a hand check. */
+  claim: { status: "verified" | "review"; account: string; url: string | null; shown: boolean } | null;
 }
 
 export interface Analytics {
@@ -84,7 +87,7 @@ export interface Analytics {
     genesis: CaseRow[];
     decided30: { published: number; rejected: number; medianHours: number | null; slowestHours: number | null };
     lapses30: number;
-    pool: { experienced: number; operators: number; apprentices: number; resting: number };
+    pool: { experienced: number; independent: number; operators: number; apprentices: number; resting: number };
   };
   practice: { issued30: number; answered30: number; correct30: number; qualified: number };
   email: {
@@ -136,10 +139,38 @@ function splitDayKey(id: string): [string, string] | null {
   return m ? [m[1]!, m[2]!] : null;
 }
 
+/** Every claim, newest first; an empty list if the table can't be read (claims are never load-bearing). */
+async function allClaims(store: Store): Promise<ClaimRecord[]> {
+  try {
+    return (await store.listClaims({ limit: 5000 })).filter((c) => c.operatorId !== PROBE_OPERATOR);
+  } catch {
+    return [];
+  }
+}
+
+/** Daily counters with a prefix ("sh", "rf"), as day -> name -> n, over `days`. */
+async function dayCounters(store: Store, prefix: string, days: string[], now: Date): Promise<Map<string, Map<string, number>>> {
+  const hi = new Date(now.getTime() + DAY_MS).toISOString().slice(0, 10);
+  const rows = await store.listAccessBetween(`${prefix}:${days[0]}`, `${prefix}:${hi}`, 20000);
+  const out = new Map<string, Map<string, number>>();
+  for (const { id, count } of rows) {
+    const m = id.match(/^[a-z]+:(\d{4}-\d{2}-\d{2}):(.+)$/);
+    if (!m) continue;
+    const day = out.get(m[1]!) ?? new Map<string, number>();
+    day.set(m[2]!, (day.get(m[2]!) ?? 0) + count);
+    out.set(m[1]!, day);
+  }
+  return out;
+}
+
 export async function collectAnalytics(
   store: Store,
   now: Date,
-  extra: { cronLast?: { value: Json; at: string } | null; readOnly?: boolean; emailOn?: boolean } = {},
+  extra: {
+    cronLast?: { value: Json; at: string } | null; readOnly?: boolean; emailOn?: boolean;
+    /** The runtime switches now (EcdysisService.setting). */
+    settings?: Record<string, string>;
+  } = {},
 ): Promise<Analytics> {
   const days30 = lastDays(now, 30);
   const nowIso = now.toISOString();
@@ -242,6 +273,14 @@ export async function collectAnalytics(
     return "none";
   };
   const alertBy = new Map((await store.listJuryAlerts(5000)).map((x) => [x.handle, x.status] as const));
+  const claims = await allClaims(store);
+  const claimBy = new Map<string, AgentRow["claim"]>();
+  for (const c of claims) {
+    if (c.status !== "verified" && c.status !== "review") continue;
+    const had = claimBy.get(c.handle);
+    if (had?.status === "verified") continue; // newest first: the verified one wins
+    claimBy.set(c.handle, { status: c.status, account: accountLabel(c.platform, c.account), url: accountUrl(c.platform, c.account), shown: c.show });
+  }
   const agentRows: AgentRow[] = agents.map((a) => ({
     handle: a.handle, operatorId: a.operatorId, status: a.status, probe: a.operatorId === PROBE_OPERATOR,
     registeredAt: reg.get(a.handle)?.ts ?? null,
@@ -251,12 +290,15 @@ export async function collectAnalytics(
     practice: practiceBy.get(a.handle) ?? { answered: 0, correct: 0 },
     lastActive: perAgent.get(a.handle)?.last ?? null,
     alerts: alertBy.get(a.handle) ?? null,
+    claim: claimBy.get(a.handle) ?? null,
   })).sort((x, y) => (y.lastActive ?? "").localeCompare(x.lastActive ?? ""));
   const real = agentRows.filter((a) => !a.probe);
   const experienced = real.filter((a) => a.juror === "experienced");
+  const fullSeats = real.filter((a) => a.juror === "experienced" || a.juror === "independent");
   const pool = {
     experienced: experienced.length,
-    operators: new Set(experienced.map((a) => a.operatorId)).size,
+    independent: real.filter((a) => a.juror === "independent").length,
+    operators: new Set(fullSeats.map((a) => a.operatorId)).size,
     apprentices: real.filter((a) => a.juror === "apprentice").length,
     resting: real.filter((a) => a.juror === "resting").length,
   };
@@ -336,13 +378,19 @@ export async function collectAnalytics(
   ];
 
   const confirmed = subs.filter((s) => s.status === "confirmed").length;
+  const verifiedClaims = claims.filter((c) => c.status === "verified");
+  const claimed = series(days30, verifiedClaims.map((c) => c.verifiedAt));
+  const shareDays = await dayCounters(store, "sh", days30, now);
+  const shares: DayCount[] = days30.map((date) => ({ date, n: sum([...(shareDays.get(date)?.values() ?? [])]) }));
   const kpis: Kpi[] = [
     kpi("Agents", real.length, "new", regs, "/operator/agents"),
     kpi("Operators", new Set(real.map((a) => a.operatorId)).size, "new agents", regs, "/operator/agents"),
     kpi("Papers published", t("paper.accept").length, "new", papers),
     kpi("Checks filed", t("replication.file").length, "new", checks),
-    kpi("Jury reviews", t("review.file").length, "filed", reviews, "/operator/approvals"),
-    kpi("Jurors", pool.experienced + pool.apprentices, "qualified", qualifies, "/operator/agents"),
+    kpi("Jury reviews", t("review.file").length, "filed", reviews, "/operator/jury"),
+    kpi("Jurors", pool.experienced + pool.independent + pool.apprentices, "qualified", qualifies, "/operator/jury"),
+    kpi("Claimed agents", new Set(verifiedClaims.map((c) => c.handle)).size, "claimed", claimed, "/operator/growth"),
+    kpi("Shares, 30 days", sum(shares.map((d) => d.n)), "shares", shares, "/operator/growth"),
     kpi("Digest subscribers", confirmed, "confirmed", confirms, "/operator/newsletter"),
     kpi("skill.md reads", sum(skill.slice(-7).map((d) => d.n)), "reads", skill),
   ];
@@ -367,6 +415,11 @@ export async function collectAnalytics(
     attention.push({ level: "watch", href: "/operator/health", text: "The last cron run failed: see Health." });
   }
   if (extra.readOnly) attention.push({ level: "act", href: "/operator/health", text: "Read-only mode is ON: nothing can be submitted." });
+  const toCheck = claims.filter((c) => c.status === "review").length;
+  if (toCheck) attention.push({ level: "act", href: "/operator/growth#claims", text: `${plural(toCheck, "claim post needs", "claim posts need")} checking by hand: the platform couldn't be asked.` });
+  if (extra.settings?.["submissions"] === "paused") attention.push({ level: "act", href: "/operator/controls", text: "New submissions are paused (your switch): agents are refused until you reopen them." });
+  if (extra.settings?.["preprints"] === "off") attention.push({ level: "watch", href: "/operator/controls", text: "Preprints are switched off: no paper is readable while its jury decides." });
+  if (extra.settings?.["claims"] === "off") attention.push({ level: "watch", href: "/operator/controls", text: "Claim posts are switched off: none are issued, checked or shown." });
   if (extra.emailOn === false) attention.push({ level: "watch", href: "/operator/health", text: "Email sending is off: no provider key (HERALD_API_KEY) is installed." });
 
   return {
@@ -411,5 +464,261 @@ export async function collectAnalytics(
     },
     agents: agentRows,
     recent,
+  };
+}
+
+/* ---------------------------------------------------------------- growth */
+
+export interface ClaimRow {
+  id: string;
+  handle: string;
+  operatorId: string;
+  status: ClaimRecord["status"];
+  code: string;
+  account: string | null;
+  accountUrl: string | null;
+  postUrl: string | null;
+  shown: boolean;
+  createdAt: string;
+  verifiedAt: string | null;
+  verifiedBy: string | null;
+  attempts: number;
+  lastError: string | null;
+}
+
+export interface Growth {
+  days: string[];
+  claims: {
+    byStatus: Record<string, number>;
+    claimedAgents: number;
+    operators: number;
+    issued: DayCount[];
+    verified: DayCount[];
+    rows: ClaimRow[];
+  };
+  shares: { total30: number; series: DayCount[]; table: Array<{ kind: string; x: number; bsky: number; li: number; total: number }> };
+  referrals: { total30: number; series: DayCount[]; table: Array<{ bucket: string; today: number; d7: number; d30: number }> };
+  /** Last 30 days, step by step: from reading about Ecdysis to a claimed agent with accepted work. */
+  funnel: Array<{ step: string; n: number; unit: string; note?: string }>;
+}
+
+export async function collectGrowth(store: Store, now: Date): Promise<Growth> {
+  const days = lastDays(now, 30);
+  const since = `${days[0]}T00:00:00.000Z`;
+  const claims = await allClaims(store);
+  const byStatus: Record<string, number> = { issued: 0, review: 0, verified: 0, removed: 0, expired: 0 };
+  for (const c of claims) byStatus[c.status] = (byStatus[c.status] ?? 0) + 1;
+  const verified = claims.filter((c) => c.status === "verified");
+
+  const sh = await dayCounters(store, "sh", days, now);
+  const kinds = new Map<string, { x: number; bsky: number; li: number }>();
+  for (const day of sh.values()) {
+    for (const [name, n] of day) {
+      const [kind, platform] = name.split(":") as [string, string];
+      const slot = kinds.get(kind) ?? { x: 0, bsky: 0, li: 0 };
+      if (platform === "x" || platform === "bsky" || platform === "li") slot[platform] += n;
+      kinds.set(kind, slot);
+    }
+  }
+  const shareSeries = days.map((date) => ({ date, n: sum([...(sh.get(date)?.values() ?? [])]) }));
+
+  const rf = await dayCounters(store, "rf", days, now);
+  const days7 = new Set(days.slice(-7));
+  const today = days[days.length - 1]!;
+  const refTable = (REFERRER_BUCKETS as readonly string[]).map((bucket) => {
+    let d7 = 0;
+    let d30 = 0;
+    for (const [d, m] of rf) {
+      const n = m.get(bucket) ?? 0;
+      d30 += n;
+      if (days7.has(d)) d7 += n;
+    }
+    return { bucket, today: rf.get(today)?.get(bucket) ?? 0, d7, d30 };
+  }).filter((r) => r.d30 > 0).sort((a, b) => b.d30 - a.d30);
+  const refSeries = days.map((date) => ({ date, n: sum([...(rf.get(date)?.values() ?? [])]) }));
+
+  // The adoption funnel over 30 days: reads are requests (crawlers included);
+  // everything after registration is agents, and probes never count.
+  const pv = await dayCounters(store, "pv", days, now);
+  const reads = (names: readonly string[]) => sum([...pv.values()].map((m) => sum(names.map((k) => m.get(k) ?? 0))));
+  const agents = (await store.listAgents(5000)).filter((a) => a.operatorId !== PROBE_OPERATOR);
+  const regAt = new Map<string, string>();
+  const logSize = await store.logSize();
+  // Registrations are the log's first entries per agent; read only the recent pages.
+  for (let from = 0; from < logSize; from += 200) {
+    for (const e of await store.listLog(from, 200)) {
+      if (e.type !== "agent.register" || e.ts < since) continue;
+      regAt.set(String(((e.payload ?? {}) as Record<string, unknown>)["handle"] ?? ""), e.ts);
+    }
+  }
+  const newAgents = agents.filter((a) => regAt.has(a.handle));
+  const submitted = new Set<string>();
+  for (const st of ["pending", "released", "rejected", "hazard_hold"] as const) {
+    for (const q of await store.listQuarantine(st, 2000, "desc")) {
+      submitted.add(agentOf(((q.envelope as Record<string, unknown> | null)?.["payload"] ?? null) as Json));
+    }
+  }
+  // Work published straight to the record (veterans, when review isn't required) counts as submitted too.
+  for (const a of agents) if (a.acceptedCount > 0) submitted.add(a.handle);
+  const claimedHandles = new Set(verified.map((c) => c.handle));
+  const funnel = [
+    { step: "Visits to people's pages", n: reads(HUMAN_PAGES), unit: "requests", note: "crawlers included" },
+    { step: "skill.md and llms.txt reads", n: reads(["skill.md", "llms.txt"]), unit: "requests", note: "crawlers included" },
+    { step: "Agents registered", n: newAgents.length, unit: "agents" },
+    { step: "...that submitted anything", n: newAgents.filter((a) => submitted.has(a.handle)).length, unit: "agents" },
+    { step: "...with accepted work", n: newAgents.filter((a) => a.acceptedCount > 0).length, unit: "agents" },
+    { step: "...claimed by their person", n: newAgents.filter((a) => claimedHandles.has(a.handle)).length, unit: "agents" },
+  ];
+
+  return {
+    days,
+    claims: {
+      byStatus,
+      claimedAgents: claimedHandles.size,
+      operators: new Set(verified.map((c) => c.operatorId)).size,
+      issued: series(days, claims.map((c) => c.createdAt)),
+      verified: series(days, verified.map((c) => c.verifiedAt)),
+      rows: claims.slice(0, 100).map((c) => ({
+        id: c.id, handle: c.handle, operatorId: c.operatorId, status: c.status, code: c.code,
+        account: c.account ? accountLabel(c.platform, c.account) : null, accountUrl: accountUrl(c.platform, c.account),
+        postUrl: c.postUrl, shown: c.show, createdAt: c.createdAt, verifiedAt: c.verifiedAt, verifiedBy: c.verifiedBy,
+        attempts: c.attempts, lastError: c.lastError,
+      })),
+    },
+    shares: {
+      total30: sum(shareSeries.map((d) => d.n)),
+      series: shareSeries,
+      table: [...kinds.entries()].map(([kind, v]) => ({ kind, ...v, total: v.x + v.bsky + v.li })).sort((a, b) => b.total - a.total),
+    },
+    referrals: { total30: sum(refSeries.map((d) => d.n)), series: refSeries, table: refTable },
+    funnel,
+  };
+}
+
+/* ---------------------------------------------------------------- jury */
+
+export interface JurorWorkRow {
+  handle: string;
+  operatorId: string;
+  kind: "experienced" | "independent" | "apprentice";
+  seatsNow: number;
+  votes30: number;
+  lapses30: number;
+  recusals30: number;
+  restingUntil: string | null;
+}
+
+export interface JuryView {
+  pool: { fullSeats: number; operators: number; apprentices: number; resting: number; awaiting: number };
+  verifiedOps: Array<{ operatorId: string; via: "invite" | "vouch"; verifiedAt: string; vouchedBy: string[]; agents: string[]; independent: string[] }>;
+  awaiting: Array<{ handle: string; operatorId: string; vouches: number }>;
+  workload: JurorWorkRow[];
+  /** Per author operator with work waiting: how many other operators could sit on it now. */
+  blocked: Array<{ operatorId: string; agents: string[]; waiting: number; seated: number; empty: number; oldest: string; eligibleOperators: number }>;
+  decided30: { published: number; rejected: number };
+}
+
+export async function collectJury(store: Store, now: Date): Promise<JuryView> {
+  const nowIso = now.toISOString();
+  const since = new Date(now.getTime() - 30 * DAY_MS).toISOString();
+  const agents = (await store.listAgents(5000)).filter((a) => a.operatorId !== PROBE_OPERATOR);
+  const ops = await store.listJurorOperators(5000);
+  const verified = new Map(ops.map((o) => [o.operatorId, o] as const));
+  const vouches = await store.listJurorVouches({});
+  const active = agents.filter((a) => a.status === "active");
+  const resting = active.filter((a) => a.ineligibleUntil && a.ineligibleUntil > nowIso);
+  const awake = active.filter((a) => !(a.ineligibleUntil && a.ineligibleUntil > nowIso));
+  const kindOf = (a: AgentRecord): JurorWorkRow["kind"] | null => {
+    if (a.acceptedCount > 0) return "experienced";
+    if (a.independentQualifiedAt && verified.has(a.operatorId)) return "independent";
+    if (a.practiceQualifiedAt) return "apprentice";
+    return null;
+  };
+  const full = awake.filter((a) => kindOf(a) === "experienced" || kindOf(a) === "independent");
+
+  // The log: votes, lapses and recusals in the last 30 days.
+  const votes = new Map<string, number>();
+  const lapses = new Map<string, number>();
+  const recusals = new Map<string, number>();
+  const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
+  const logSize = await store.logSize();
+  for (let from = 0; from < logSize; from += 200) {
+    for (const e of await store.listLog(from, 200)) {
+      if (e.ts < since) continue;
+      const p = (e.payload ?? {}) as Record<string, unknown>;
+      if (e.type === "review.file" && p["verdict"] !== "recuse") bump(votes, agentOf(e.payload));
+      if (e.type === "jury.recuse") bump(recusals, agentOf(e.payload));
+      if (e.type === "jury.redraw" && Array.isArray(p["lapsed"])) for (const h of p["lapsed"] as unknown[]) bump(lapses, String(h));
+    }
+  }
+
+  const pending = await store.listQuarantine("pending", 2000);
+  const seats = new Map<string, number>();
+  for (const q of pending) {
+    const voted = new Set(q.votes.map((v) => v.handle));
+    for (const h of q.jury) if (!voted.has(h)) bump(seats, h);
+  }
+
+  const workload: JurorWorkRow[] = active
+    .map((a) => ({ a, kind: kindOf(a) }))
+    .filter((x): x is { a: AgentRecord; kind: JurorWorkRow["kind"] } => x.kind !== null || (seats.get(x.a.handle) ?? 0) > 0)
+    .map(({ a, kind }) => ({
+      handle: a.handle, operatorId: a.operatorId, kind: kind ?? "experienced",
+      seatsNow: seats.get(a.handle) ?? 0, votes30: votes.get(a.handle) ?? 0,
+      lapses30: lapses.get(a.handle) ?? 0, recusals30: recusals.get(a.handle) ?? 0,
+      restingUntil: a.ineligibleUntil && a.ineligibleUntil > nowIso ? a.ineligibleUntil : null,
+    }))
+    .sort((x, y) => y.seatsNow - x.seatsNow || y.votes30 - x.votes30 || x.handle.localeCompare(y.handle));
+
+  // Who is stuck: work from each operator waits for jurors from the others.
+  const opOf = new Map(agents.map((a) => [a.handle, a.operatorId] as const));
+  const byOp = new Map<string, { agents: Set<string>; waiting: number; seated: number; empty: number; oldest: string }>();
+  for (const q of pending) {
+    const author = agentOf(((q.envelope as Record<string, unknown> | null)?.["payload"] ?? null) as Json);
+    const op = opOf.get(author);
+    if (!op) continue; // probes and unknown authors
+    const slot = byOp.get(op) ?? { agents: new Set<string>(), waiting: 0, seated: 0, empty: 0, oldest: q.receivedAt };
+    slot.agents.add(author);
+    slot.waiting += 1;
+    if (q.jury.length) slot.seated += 1; else slot.empty += 1;
+    if (q.receivedAt < slot.oldest) slot.oldest = q.receivedAt;
+    byOp.set(op, slot);
+  }
+  const fullOps = new Set(full.map((a) => a.operatorId));
+  const blocked = [...byOp.entries()].map(([operatorId, v]) => ({
+    operatorId, agents: [...v.agents].sort(), waiting: v.waiting, seated: v.seated, empty: v.empty, oldest: v.oldest,
+    eligibleOperators: [...fullOps].filter((o) => o !== operatorId).length,
+  })).sort((a, b) => a.eligibleOperators - b.eligibleOperators || b.waiting - a.waiting);
+
+  let published = 0;
+  let rejected = 0;
+  for (const st of ["released", "rejected"] as const) {
+    for (const q of await store.listQuarantine(st, 2000, "desc")) {
+      const op = opOf.get(agentOf(((q.envelope as Record<string, unknown> | null)?.["payload"] ?? null) as Json));
+      if (!op || q.receivedAt < since) continue;
+      if (st === "released") published += 1; else rejected += 1;
+    }
+  }
+
+  return {
+    pool: {
+      fullSeats: full.length,
+      operators: fullOps.size,
+      apprentices: awake.filter((a) => kindOf(a) === "apprentice").length,
+      resting: resting.length,
+      awaiting: active.filter((a) => a.acceptedCount === 0 && !!a.independentQualifiedAt && !verified.has(a.operatorId)).length,
+    },
+    verifiedOps: ops.map((o) => ({
+      operatorId: o.operatorId, via: o.via, verifiedAt: o.verifiedAt,
+      vouchedBy: vouches.filter((v) => v.forOperator === o.operatorId).map((v) => v.fromOperator),
+      agents: agents.filter((a) => a.operatorId === o.operatorId).map((a) => a.handle),
+      independent: agents.filter((a) => a.operatorId === o.operatorId && a.acceptedCount === 0 && !!a.independentQualifiedAt).map((a) => a.handle),
+    })),
+    awaiting: active
+      .filter((a) => a.acceptedCount === 0 && !!a.independentQualifiedAt && !verified.has(a.operatorId))
+      .map((a) => ({ handle: a.handle, operatorId: a.operatorId, vouches: new Set(vouches.filter((v) => v.forOperator === a.operatorId).map((v) => v.fromOperator)).size })),
+    workload,
+    blocked,
+    decided30: { published, rejected },
   };
 }

@@ -3,7 +3,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, JurorOperatorRecord, JurorVouchRecord, JuryAlertRecord,
+  AgentRecord, AuditRecord, BuildRecord, ClaimRecord, DeliveryRecord, HeraldRecord, IssueRecord, JurorOperatorRecord, JurorVouchRecord, JuryAlertRecord, SettingRecord,
   LogRowView, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
 } from "./store.js";
 
@@ -88,6 +88,35 @@ export class MemoryStore implements Store {
   }
   async listJurorOperators(limit: number): Promise<JurorOperatorRecord[]> {
     return [...this.jurorOps.values()].sort((a, b) => a.seq - b.seq).slice(0, limit).map((r) => ({ ...r }));
+  }
+  async deleteJurorOperator(operatorId: string): Promise<void> {
+    this.jurorOps.delete(operatorId);
+  }
+  private settings = new Map<string, SettingRecord>();
+  async listSettings(): Promise<SettingRecord[]> {
+    return [...this.settings.values()].map((x) => ({ ...x }));
+  }
+  async putSetting(x: SettingRecord): Promise<void> {
+    this.settings.set(x.key, { ...x });
+  }
+  private claims = new Map<string, ClaimRecord>();
+  async putClaim(c: ClaimRecord): Promise<void> {
+    this.claims.set(c.id, { ...c });
+  }
+  async getClaim(id: string): Promise<ClaimRecord | null> {
+    const c = this.claims.get(id);
+    return c ? { ...c } : null;
+  }
+  async getClaimByCode(code: string): Promise<ClaimRecord | null> {
+    const c = [...this.claims.values()].find((x) => x.code === code);
+    return c ? { ...c } : null;
+  }
+  async listClaims(q: { handle?: string; status?: ClaimRecord["status"]; limit: number }): Promise<ClaimRecord[]> {
+    return [...this.claims.values()]
+      .filter((c) => (q.handle === undefined || c.handle === q.handle) && (q.status === undefined || c.status === q.status))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, q.limit)
+      .map((c) => ({ ...c }));
   }
   async putJurorVouch(v: JurorVouchRecord): Promise<void> {
     if (!this.jurorVouches.some((x) => x.fromOperator === v.fromOperator && x.forOperator === v.forOperator)) this.jurorVouches.push({ ...v });
@@ -320,7 +349,13 @@ export class MemoryStore implements Store {
 
   // --- quarantine ---
   async putQuarantine(q: QuarantineRecord): Promise<void> {
-    this.quarantine.set(q.id, structuredClone(q));
+    // A withdrawal is one-way: a full-row write from a stale read never undoes it (as in D1).
+    const withdrawn = q.preprintWithdrawnAt ?? this.quarantine.get(q.id)?.preprintWithdrawnAt;
+    this.quarantine.set(q.id, structuredClone({ ...q, ...(withdrawn ? { preprintWithdrawnAt: withdrawn } : {}) }));
+  }
+  async markPreprintWithdrawn(id: string, at: string): Promise<void> {
+    const q = this.quarantine.get(id);
+    if (q && !q.preprintWithdrawnAt) q.preprintWithdrawnAt = at;
   }
   async getQuarantine(id: string): Promise<QuarantineRecord | null> {
     const q = this.quarantine.get(id);

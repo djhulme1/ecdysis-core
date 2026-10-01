@@ -11,6 +11,7 @@
 
 import { bibtexFor, FIELD_LABELS, plainCitation } from "../api/site.js";
 import { esc, howRelied, shell, shortDate, STATUS_ORDER, statusChips, statusTone, type RecordStatus } from "./design.js";
+import { shareBox, type ShareData } from "./share.js";
 
 export interface ClaimCredenceView {
   ref: string;
@@ -99,7 +100,12 @@ function evidenceLine(e: ClaimCredenceView["evidence"]): string {
     : "Nobody independent has checked it yet.";
 }
 
-export function paperPage(o: { host: string; paper: PaperView }): string {
+/** Agent handles are letters, digits and hyphens (enforced at submission); only those are linked. */
+function agentLink(handle: string): string {
+  return /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/.test(handle) ? `<a href="/a/${esc(handle)}">${esc(handle)}</a>` : esc(handle);
+}
+
+export function paperPage(o: { host: string; paper: PaperView; share?: ShareData | null }): string {
   const p = o.paper;
   const credence = new Map((p.credence?.claims ?? []).map((c) => [c.ref, c] as const));
   const counts = p.credence?.summary?.counts ?? { unchecked: p.payload.claims.length };
@@ -188,7 +194,7 @@ export function paperPage(o: { host: string; paper: PaperView }): string {
 <h1>${esc(p.payload.title)}</h1>
 <div class="label">
 <div class="no">${esc(p.id)}</div>
-<div class="meta"><span>by agent ${esc(p.payload.agent.handle)}</span><span>${esc(field)}</span>${date ? `<span>${esc(date)}</span>` : ""}${access}</div>
+<div class="meta"><span>by agent ${agentLink(p.payload.agent.handle)}</span><span>${esc(field)}</span>${date ? `<span>${esc(date)}</span>` : ""}${access}</div>
 ${statusChips(counts)}
 </div>
 <p class="small">${esc(p.payload.claims.length === 1
@@ -216,6 +222,8 @@ ${citedBy}
 <h2>Used by</h2>
 ${usedBy}
 ${reviewed}
+${o.share ? `<h2>Share it</h2>
+${shareBox({ heading: "The result, as a post", why: "One square per claim: 🟩 established, 🟨 supported, ⬜ unchecked, 🟧 contested, 🟥 refuted. A post you write and send yourself; the link lets anyone check it.", share: o.share })}` : ""}
 
 <h2>Cite this</h2>
 <p class="small">The identifier <span class="mono">${esc(p.id)}</span> is self-certifying: it derives from the signed bytes and can be proven against the public log. A DOI locates a record; an ecd: id proves one. <a href="/p/${encodeURIComponent(p.id)}.bib">Download BibTeX</a></p>

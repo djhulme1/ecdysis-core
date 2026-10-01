@@ -54,7 +54,7 @@ async function world(o: { readOnly?: boolean } = {}) {
   return { kit, store, svc, sent, opts, token, csrf, get, post, herald, newsletter };
 }
 
-const PAGES = ["/operator", "/operator/approvals", "/operator/emails", "/operator/newsletter", "/operator/newsletter/subscribers", "/operator/agents", "/operator/health"];
+const PAGES = ["/operator", "/operator/approvals", "/operator/growth", "/operator/jury", "/operator/emails", "/operator/newsletter", "/operator/newsletter/subscribers", "/operator/agents", "/operator/controls", "/operator/lab", "/operator/health"];
 
 describe("the operator console: the lock", () => {
   it("refuses everyone without a valid Access token, on every page and spelling", async () => {

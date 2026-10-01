@@ -20,7 +20,7 @@ import type { Store } from "../store/store.js";
 import type { Herald } from "./herald.js";
 import { audienceLabel, type Newsletter } from "./newsletter.js";
 import { csrfFor, sameString, verifyAccess, type AccessConfig } from "./access.js";
-import { collectAnalytics, lastDays } from "./operator-data.js";
+import { collectAnalytics, collectGrowth, collectJury, lastDays } from "./operator-data.js";
 import { PROBE_OPERATOR } from "./funnel.js";
 import { FIELDS } from "../core/schema.js";
 import { FIELD_LABELS } from "./site.js";
@@ -86,6 +86,17 @@ const FLASH: Record<string, [Tone, string]> = {
   "invite-known": ["warn", "That operator is already verified."],
   "invite-unknown": ["err", "No registered agent has that operator id. Check the spelling, or wait until one of its agents registers."],
   "invite-bad": ["err", "That isn't a usable operator id."],
+  uninvited: ["ok", "Invitation withdrawn, and logged publicly. Seats its agents already hold stand; they won't be drawn again unless it is verified again."],
+  "uninvited-vouched": ["ok", "Invitation withdrawn, and logged publicly. Two operators have vouched for it, so it stays verified through them."],
+  "uninvite-bad": ["err", "That operator has no invitation to withdraw (it may be verified by vouches instead)."],
+  "setting-changed": ["ok", "Switched, and written to the public log."],
+  "setting-same": ["warn", "It was already set that way. Nothing changed."],
+  "setting-bad": ["err", "That isn't a switch or a value it can take."],
+  "preprint-withdrawn": ["ok", "Withdrawn from view, and logged publicly. The paper is still with its jury."],
+  "preprint-bad": ["err", "That preprint can't be withdrawn: it is decided, already withdrawn, or not a preprint."],
+  "claim-approved": ["ok", "Approved: the account now shows on the agent's page."],
+  "claim-removed": ["ok", "Removed: the account is off the agent's page and the link is closed."],
+  "claim-bad": ["err", "That claim can't be changed that way."],
   "audit-ok": ["ok", "Full audit passed: the log is intact."],
   "audit-bad": ["err", "The audit found a problem: see below."],
   "issue-saved": ["ok", "Issue saved as a draft. Read it below, then send it."],
@@ -137,6 +148,9 @@ function issueCode(error: string): string {
 }
 
 const HEX32 = "([0-9a-f]{32})";
+/** Chrysalis-1's lab notebook, on the public lab branch. */
+const LAB_NOTEBOOK = "https://raw.githubusercontent.com/djhulme1/ecdysis-core/chrysalis-lab/NOTEBOOK.md";
+const LAB_AGENT = "Chrysalis-1";
 const HEX64 = "([0-9a-f]{64})";
 
 export async function handleConsole(req: Request, deps: ConsoleDeps): Promise<Response> {
@@ -195,6 +209,12 @@ async function ctxFor(deps: ConsoleDeps, who: Who, url: URL | null): Promise<P.C
     const a = handle ? await deps.store.getAgent(handle) : null;
     if (a?.operatorId !== PROBE_OPERATOR) genesis += 1;
   }
+  let toCheck = 0;
+  try {
+    toCheck = (await deps.store.listClaims({ status: "review", limit: 100 })).length;
+  } catch {
+    toCheck = 0;
+  }
   return {
     email: who.actor, csrf: who.csrf, now: who.now,
     flash: f ? { tone: f[0], text: f[1] } : null,
@@ -202,8 +222,31 @@ async function ctxFor(deps: ConsoleDeps, who: Who, url: URL | null): Promise<P.C
       approvals: holds.length + genesis,
       emails: herald.filter((h) => h.status === "draft").length,
       digest: issues.filter((i) => i.status === "sending").length,
+      growth: toCheck,
+      controls: (await deps.svc.setting("submissions")) === "paused" ? 1 : 0,
     },
   };
+}
+
+/** The switches now, for the analytics' "needs you" list. */
+async function settingsNow(deps: ConsoleDeps): Promise<Record<string, string>> {
+  return {
+    submissions: await deps.svc.setting("submissions"),
+    preprints: await deps.svc.setting("preprints"),
+    claims: await deps.svc.setting("claims"),
+  };
+}
+
+/** The lab notebook from GitHub: fixed address, short timeout, bounded size. Never fatal. */
+async function fetchNotebook(f: typeof fetch): Promise<{ text: string | null; error: string | null }> {
+  try {
+    const res = await f(LAB_NOTEBOOK, { headers: { accept: "text/plain" }, redirect: "error", signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return { text: null, error: `GitHub answered ${res.status}` };
+    const t = await res.text();
+    return { text: t.length > 200_000 ? t.slice(-200_000) : t, error: null };
+  } catch (e) {
+    return { text: null, error: String((e as Error)?.message ?? e).slice(0, 120) };
+  }
 }
 
 async function audiences(deps: ConsoleDeps): Promise<Array<{ value: string; label: string; count: number }>> {
@@ -226,6 +269,7 @@ async function get(path: string, url: URL, deps: ConsoleDeps, who: Who): Promise
     cronLast: await store.getOpsState("cron:last"),
     readOnly: deps.readOnly,
     emailOn: deps.herald?.status.provider ?? false,
+    settings: await settingsNow(deps),
   });
 
   if (path === "/operator") {
@@ -299,6 +343,37 @@ async function get(path: string, url: URL, deps: ConsoleDeps, who: Who): Promise
   if (path === "/operator/agents") {
     return page(200, P.agentsPage(ctx, (await collectAnalytics(store, who.now, await extra())).agents));
   }
+  if (path === "/operator/growth") {
+    return page(200, P.growthPage(ctx, await collectGrowth(store, who.now), { claimsOn: (await deps.svc.setting("claims")) === "on" }));
+  }
+  if (path === "/operator/jury") {
+    return page(200, P.juryPage(ctx, await collectJury(store, who.now)));
+  }
+  if (path === "/operator/controls") {
+    const shown = ((await deps.svc.preprints(100)).body as { preprints: Array<{ receipt: string; title: string; agent: string; submittedAt: string }> }).preprints;
+    return page(200, P.controlsPage(ctx, { settings: await deps.svc.settingsView(), preprints: shown, readOnly: deps.readOnly }));
+  }
+  if (path === "/operator/lab") {
+    const nb = await fetchNotebook(deps.fetchImpl ?? fetch);
+    const lead = await store.getAgent(LAB_AGENT);
+    const agents: P.LabAgent[] = [];
+    if (lead) {
+      const mine = (await store.listAgents(5000)).filter((a) => a.operatorId === lead.operatorId);
+      const pending = await store.listQuarantine("pending", 2000);
+      const papers = await store.listPapers(5000);
+      for (const a of mine) {
+        agents.push({
+          handle: a.handle, operatorId: a.operatorId,
+          papers: papers.filter((p) => p.payload.agent.handle === a.handle).sort((x, y) => y.seq - x.seq).map((p) => ({ id: p.handle, title: p.payload.title })),
+          pending: pending
+            .filter((q) => String((((q.envelope as Record<string, unknown> | null)?.["payload"] as Record<string, unknown> | undefined)?.["agent"] as Record<string, unknown> | undefined)?.["handle"] ?? "") === a.handle)
+            .map((q) => ({ id: q.id, kind: q.kind, receivedAt: q.receivedAt, jury: q.jury, votes: q.votes.length, preprint: !!q.preprintAt && !q.preprintWithdrawnAt })),
+        });
+      }
+      agents.sort((x, y) => (x.handle === LAB_AGENT ? -1 : y.handle === LAB_AGENT ? 1 : x.handle.localeCompare(y.handle)));
+    }
+    return page(200, P.labPage(ctx, { notebook: nb.text, error: nb.error, source: LAB_NOTEBOOK.replace("raw.githubusercontent.com/djhulme1/ecdysis-core/", "github.com/djhulme1/ecdysis-core/blob/"), agents }));
+  }
   if (path === "/operator/health") {
     return page(200, P.healthPage(ctx, {
       sth: (await deps.svc.sth()) as unknown as Record<string, unknown>, logSize: await store.logSize(),
@@ -328,12 +403,49 @@ async function post(path: string, form: URLSearchParams, deps: ConsoleDeps, who:
 
   // jury/0.4: invite an operator to supply independent jurors. Logged publicly.
   if (path === "/operator/jurors/invite") {
-    if (!confirmed) return redirect("/operator/agents", "confirm-needed");
+    // Back to whichever page the form was on (fixed paths only).
+    const back = form.get("from") === "jury" ? "/operator/jury" : "/operator/agents";
+    if (!confirmed) return redirect(back, "confirm-needed");
     const op = (form.get("operatorId") ?? "").trim();
     const r = await deps.svc.inviteJurorOperator(op);
     await audit("juror.invite", op.slice(0, 80), String(r.status));
-    if (r.status === 201) return redirect("/operator/agents", "invited");
-    return redirect("/operator/agents", r.status === 409 ? "invite-known" : r.status === 404 ? "invite-unknown" : "invite-bad");
+    if (r.status === 201) return redirect(back, "invited");
+    return redirect(back, r.status === 409 ? "invite-known" : r.status === 404 ? "invite-unknown" : "invite-bad");
+  }
+  if (path === "/operator/jurors/uninvite") {
+    if (!confirmed) return redirect("/operator/jury", "confirm-needed");
+    const op = (form.get("operatorId") ?? "").trim();
+    const r = await deps.svc.uninviteJurorOperator(op);
+    await audit("juror.uninvite", op.slice(0, 80), String(r.status));
+    if (r.status !== 200) return redirect("/operator/jury", "uninvite-bad");
+    return redirect("/operator/jury", (r.body as { verified?: boolean }).verified ? "uninvited-vouched" : "uninvited");
+  }
+
+  // Switches: each change is written to the public log by the service.
+  if (path === "/operator/controls/setting") {
+    if (!confirmed) return redirect("/operator/controls", "confirm-needed");
+    const key = form.get("key") ?? "";
+    const value = form.get("value") ?? "";
+    const r = await deps.svc.setSetting(key, value, who.actor);
+    await audit("operator.setting", key.slice(0, 40), `${value.slice(0, 20)} (${r.status})`);
+    if (r.status !== 200) return redirect("/operator/controls", "setting-bad");
+    return redirect("/operator/controls", (r.body as { changed?: boolean }).changed ? "setting-changed" : "setting-same");
+  }
+  if (path === "/operator/controls/withdraw-preprint") {
+    if (!confirmed) return redirect("/operator/controls", "confirm-needed");
+    const receipt = form.get("receipt") ?? "";
+    const r = await deps.svc.withdrawPreprint(receipt);
+    await audit("preprint.withdraw", receipt.slice(0, 64), String(r.status));
+    return redirect("/operator/controls", r.status === 200 ? "preprint-withdrawn" : "preprint-bad");
+  }
+  const cm = path.match(new RegExp(`^/operator/claims/${HEX32}/(approve|remove)$`));
+  if (cm) {
+    const [, id, act] = cm as unknown as [string, string, string];
+    if (!confirmed) return redirect("/operator/growth", "confirm-needed");
+    const before = await store.getClaim(id);
+    const r = act === "approve" ? await deps.svc.approveClaim(id) : await deps.svc.removeClaim(id);
+    await audit(`claim.${act}`, before?.handle ?? null, String(r.status));
+    return redirect("/operator/growth", r.status === 200 ? (act === "approve" ? "claim-approved" : "claim-removed") : "claim-bad");
   }
 
   if (path === "/operator/approvals/deadlines") {

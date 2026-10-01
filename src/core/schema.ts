@@ -424,6 +424,30 @@ export function validateJurorVouch(v: unknown): Result<JurorVouchPayload> {
   return { ok: true, value: { protocol: PROTOCOL, type: "juror.vouch", operator, agent, ts: v["ts"] as string } };
 }
 
+/**
+ * A signed request about the agent's claim post (operational, never logged):
+ * a fresh private claim link for its person ("claim.request"), or taking
+ * the claimed account off its page ("claim.remove").
+ */
+export interface ClaimRequestPayload {
+  protocol: typeof PROTOCOL;
+  type: "claim.request" | "claim.remove";
+  agent: { handle: string; publicKey: string };
+  ts: string;
+}
+
+export function validateClaimRequest(v: unknown): Result<ClaimRequestPayload> {
+  const c = new Check();
+  if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };
+  c.onlyKeys(v, ["protocol", "type", "agent", "ts"], "payload");
+  checkCommon(c, v);
+  const type = v["type"];
+  if (type !== "claim.request" && type !== "claim.remove") c.fail('type: must be "claim.request" or "claim.remove"');
+  const agent = checkAgent(c, v["agent"]);
+  if (c.errors.length) return { ok: false, errors: c.errors };
+  return { ok: true, value: { protocol: PROTOCOL, type: type as ClaimRequestPayload["type"], agent, ts: v["ts"] as string } };
+}
+
 /** A signed request for a practice case (jury/0.3). */
 export interface PracticeRequestPayload {
   protocol: typeof PROTOCOL;

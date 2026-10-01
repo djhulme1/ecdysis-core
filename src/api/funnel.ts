@@ -23,7 +23,7 @@ export const PROBE_OPERATOR = "op-live-check";
 export type Endpoint =
   | "register" | "paper" | "replication" | "review" | "jury-read" | "case-read"
   | "practice-case" | "practice-answer" | "herald" | "unsubscribe" | "subscribe" | "subscribe-confirm"
-  | "alerts" | "alerts-confirm" | "juror-vouch"
+  | "alerts" | "alerts-confirm" | "juror-vouch" | "claim-request" | "claim-verify"
   | "build" | "build-file" | "hazard-decision" | "gov-proposal" | "gov-vote" | "gov-cosign" | "wrong-path";
 
 /** Which tracked write a request is, or null for reads and MCP. */
@@ -42,6 +42,9 @@ export function endpointOf(method: string, path: string): Endpoint | null {
   if (path.startsWith("/subscribe/confirm/")) return "subscribe-confirm";
   if (path === "/v1/agents/alerts") return "alerts";
   if (path.startsWith("/alerts/confirm/")) return "alerts-confirm";
+  // A claim page's form: its handler counts the outcome itself (the page is
+  // HTML, so the outcome can't be read back from a JSON error).
+  if (path.startsWith("/claim/")) return null;
   if (m === "POST") {
     switch (path) {
       case "/v1/agents/register": return "register";
@@ -54,6 +57,7 @@ export function endpointOf(method: string, path: string): Endpoint | null {
       case "/v1/practice/case": return "practice-case";
       case "/v1/practice/answer": return "practice-answer";
       case "/v1/jurors/vouch": return "juror-vouch";
+      case "/v1/agents/claim": return "claim-request";
       case "/v1/builds": return "build";
       case "/v1/hazard/decision": return "hazard-decision";
       case "/v1/governance/proposals": return "gov-proposal";
@@ -96,12 +100,14 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/name the claims|builds have no claims|cite a build with rel/, "citation-basis"],
   [/characters (or formatting )?that must be removed/, "unsanitised-text"],
   [/refused by screening/, "screening-block"],
-  [/already submitted|already voted|already proposed|already vouched|already verified/, "duplicate"],
+  [/already submitted|already sent|already voted|already proposed|already vouched|already verified/, "duplicate"],
   [/can vouch|vouch for itself|vouch for at most|sits on an open case/, "vouch-refused"],
   [/not on this item's jury/, "not-a-juror"],
   [/reviews are closed|R1 applies only/, "closed"],
   [/reasons are shared once/, "not-decided"],
   [/practice limit/, "practice-limit"],
+  [/claim limit/, "claim-limit"],
+  [/paused by the operator|switched off/, "paused"],
   [/already answered|has expired/, "practice-closed"],
   [/only the case's author and jurors/, "not-a-party"],
   [/stale request/, "stale-request"],
@@ -123,9 +129,22 @@ export function funnelKeys(method: string, path: string, status: number, error: 
   const ep = endpointOf(method, path);
   if (!ep) return [];
   const where = ep === "wrong-path" ? `wrong-path(${wrongPathHint(path)})` : ep;
+  return keysFor(where, status, status >= 400 ? (error ? reasonOf(error) : "other") : null);
+}
+
+function keysFor(where: string, status: number, reason: string | null): string[] {
   const keys = [`funnel:${where}:${status}`];
-  if (status >= 400) keys.push(`funnel:${where}:${status}:${error ? reasonOf(error) : "other"}`);
+  if (status >= 400) keys.push(`funnel:${where}:${status}:${reason ?? "other"}`);
   return keys;
+}
+
+/**
+ * Counters for a step its handler counts itself (a page, not JSON), with
+ * the reason given directly from that handler's own fixed vocabulary: both
+ * the all-time and the daily counter.
+ */
+export function stepKeys(ep: Endpoint, status: number, reason: string | null, day: string): string[] {
+  return [...keysFor(ep, status, status >= 400 ? reason : null), `fd:${day}:${ep}:${status < 400 ? "ok" : "no"}`];
 }
 
 /**
@@ -166,6 +185,8 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
   if (path.startsWith("/p/")) return "paper";
   if (path === "/preprints") return "preprints";
   if (path.startsWith("/pp/")) return "preprint";
+  if (path.startsWith("/a/")) return "agent-page";
+  if (path.startsWith("/claim/")) return "claim";
   if (path.startsWith("/v1/preprints")) return "preprints-api";
   if (path.startsWith("/feeds/")) return "feeds";
   if (path.startsWith("/v1/papers")) return "papers-api";
@@ -174,7 +195,38 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
 }
 
 /** Which page names are people's pages (HTML), for "human page views". */
-export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms"] as const;
+export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms", "agent-page", "claim"] as const;
+
+/**
+ * Where a visit to a person's page came from, as one word from a fixed
+ * list, for `rf:<day>:<bucket>` counters: only the referring site's kind,
+ * never its address, the page or anything about the visitor. Visits from
+ * our own pages and visits with no referrer are not counted.
+ */
+export const REFERRER_BUCKETS = ["x", "bluesky", "linkedin", "hn", "reddit", "github", "moltbook", "ai", "search", "other"] as const;
+export type ReferrerBucket = (typeof REFERRER_BUCKETS)[number];
+
+export function referrerBucket(referer: string | null): ReferrerBucket | null {
+  if (!referer) return null;
+  let host: string;
+  try {
+    host = new URL(referer).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  const is = (...domains: string[]) => domains.some((d) => host === d || host.endsWith(`.${d}`));
+  if (is("ecdysis.me", "ecdysis.app")) return null;
+  if (is("t.co", "x.com", "twitter.com")) return "x";
+  if (is("bsky.app", "bsky.social", "blueskyweb.xyz")) return "bluesky";
+  if (is("linkedin.com", "lnkd.in")) return "linkedin";
+  if (is("news.ycombinator.com")) return "hn";
+  if (is("reddit.com", "redd.it")) return "reddit";
+  if (is("github.com", "github.io")) return "github";
+  if (is("moltbook.com")) return "moltbook";
+  if (is("chatgpt.com", "chat.openai.com", "claude.ai", "perplexity.ai", "gemini.google.com", "copilot.microsoft.com", "poe.com", "you.com", "chat.mistral.ai", "deepseek.com")) return "ai";
+  if (/(^|\.)(google|bing|duckduckgo|yahoo|ecosia|kagi|yandex|baidu|startpage|qwant)\.[a-z.]+$/.test(host) || is("search.brave.com")) return "search";
+  return "other";
+}
 
 export interface FunnelSummary {
   [endpoint: string]: { accepted: number; refused: number; reasons: Record<string, number> };

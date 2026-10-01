@@ -5,7 +5,7 @@
  */
 
 import type { Json } from "../core/canonical.js";
-import type { EcdysisService } from "./service.js";
+import type { EcdysisService, ShareKind } from "./service.js";
 import { constitutionHash, CONSTITUTION_VERSION } from "../core/constitution.js";
 import { badgeSvg, bibtexFor, constitutionMd, feedAtom, FIELD_LABELS, llmsTxt, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
 import { PAPER_ID } from "../web/design.js";
@@ -22,8 +22,11 @@ import { handleConsole, isConsolePath, type ConsoleDeps } from "./operator.js";
 import type { JuryAlerts } from "./alerts.js";
 import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
-import { dayFunnelKeys, endpointOf, funnelKeys, pageKeyOf } from "./funnel.js";
+import { dayFunnelKeys, endpointOf, funnelKeys, HUMAN_PAGES, pageKeyOf, referrerBucket, stepKeys } from "./funnel.js";
 import { handleMcp } from "./mcp.js";
+import { agentMissingPage, agentPage } from "../web/agent.js";
+import { claimMissingPage, claimPage, claimStatusCode } from "../web/claim.js";
+import type { ShareData } from "../web/share.js";
 
 export interface RateLimiter {
   /** Returns true if this identity may proceed. */
@@ -120,6 +123,12 @@ const FORM_PAGE_HEADERS: Record<string, string> = {
   "content-security-policy": STATIC_PAGE_HEADERS["content-security-policy"]!.replace("form-action 'none'", "form-action 'self'"),
 };
 
+/** The private claim page: script-free, posts to itself, never cached or indexed. */
+const CLAIM_HEADERS: Record<string, string> = {
+  ...FORM_PAGE_HEADERS,
+  "x-robots-tag": "noindex, nofollow",
+};
+
 /**
  * Preprints are readable but not the record: kept out of search engines
  * (and the sitemap and feeds) until a jury accepts them, and cached briefly
@@ -149,6 +158,16 @@ function safeHost(url: URL): string {
 
 function sitehit(content: string | null, headers: Record<string, string>, head: boolean): Response {
   return new Response(head ? null : content, { status: 200, headers });
+}
+
+/** A page's share box: the words and the counted links. A share box never breaks a page. */
+async function shareData(svc: EcdysisService, kind: ShareKind, ref: string): Promise<ShareData | null> {
+  try {
+    const s = await svc.shareText(kind, ref);
+    return s ? { text: s.text, links: svc.shareLinks(kind, ref) } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Returns a Response for the human-facing site paths, or null to fall through. */
@@ -193,7 +212,8 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     const queue = (await svc.reviewQueue()).body as unknown as QueueBody;
     // Fresher than other pages: people come here to watch progress.
     const decided = (await svc.recentDecisions(10)) as unknown as Decision[];
-    return sitehit(reviewPage({ host, queue, now: new Date(), decided }), { ...STATIC_PAGE_HEADERS, "cache-control": "public, max-age=60" }, head);
+    const share = await shareData(svc, "juror", "all");
+    return sitehit(reviewPage({ host, queue, now: new Date(), decided, share }), { ...STATIC_PAGE_HEADERS, "cache-control": "public, max-age=60" }, head);
   }
   if (path === "/about" || path === "/why") {
     return sitehit(aboutPage(host), STATIC_PAGE_HEADERS, head);
@@ -231,9 +251,23 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
       return new Response(null, { status: 301, headers: { ...PREPRINT_HEADERS, location: b["url"] as string } });
     }
     if (b["status"] === "under_review") {
-      return sitehit(preprintPage({ host, view: b as unknown as PreprintView, now: new Date() }), PREPRINT_HEADERS, head);
+      const share = await shareData(svc, "preprint", pp[1]!);
+      return sitehit(preprintPage({ host, view: b as unknown as PreprintView, now: new Date(), share }), PREPRINT_HEADERS, head);
     }
     return new Response(head ? null : preprintGonePage({ status: String(b["status"]), verdicts: b["verdicts"] as never }), { status: 410, headers: PREPRINT_HEADERS });
+  }
+  if (path.startsWith("/a/")) {
+    const am = path.match(/^\/a\/([A-Za-z0-9][A-Za-z0-9-]{1,39})$/);
+    const prof = am ? await svc.agentProfile(am[1]!) : null;
+    if (!prof) return new Response(head ? null : agentMissingPage(), { status: 404, headers: STATIC_PAGE_HEADERS });
+    return sitehit(agentPage({ host, p: prof, share: await shareData(svc, "agent", prof.handle) }), STATIC_PAGE_HEADERS, head);
+  }
+  if (path.startsWith("/claim/")) {
+    const cm = path.match(/^\/claim\/([0-9a-f]{32})$/);
+    const view = cm ? await svc.claimView(cm[1]!) : null;
+    if (!cm || !view) return new Response(head ? null : claimMissingPage(), { status: 404, headers: CLAIM_HEADERS });
+    const share = view.status === "verified" ? await shareData(svc, "agent", view.handle) : null;
+    return sitehit(claimPage({ token: cm[1]!, view, share, base: `https://${host}` }), CLAIM_HEADERS, head);
   }
   if (path === "/kit") {
     return sitehit(kitPage({ host, protocol: skillMd(host, opts.sthPublicKey ?? null) }), STATIC_PAGE_HEADERS, head);
@@ -275,7 +309,8 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
  * paste is refused and never echoed.
  */
 async function pasteSubmit(req: Request, svc: EcdysisService, alerts: JuryAlerts | null = null): Promise<Response> {
-  const page = (html: string) => new Response(html, { status: 200, headers: STATIC_PAGE_HEADERS });
+  // Never cached: a result can carry the private claim link for a new agent.
+  const page = (html: string) => new Response(html, { status: 200, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
   const len = Number(req.headers.get("content-length") ?? "0");
   if (len > MAX_PASTE_CHARS * 3) return page(submitResultPage({ steps: [], problem: "That paste is too large. A registration and one paper fit easily; paste only the block your AI prepared." }));
   const form = new URLSearchParams(await req.text());
@@ -310,7 +345,12 @@ async function pasteSubmit(req: Request, svc: EcdysisService, alerts: JuryAlerts
     await count("/v1/agents/register", r.status, r.body);
     const handle = String((bundle.register as { handle?: unknown }).handle ?? "");
     if (r.status === 201) {
-      steps.push({ label: "Registration", outcome: "done", message: `Registered as ${handle}.` });
+      // The person is right here: offer them the claim link directly.
+      const claimUrl = String(((r.body as { claim?: { url?: unknown } } | null)?.claim?.url) ?? "");
+      steps.push({
+        label: "Registration", outcome: "done", message: `Registered as ${handle}.`,
+        ...(/^https:\/\/[a-z0-9.-]+\/claim\/[0-9a-f]{32}$/.test(claimUrl) ? { link: { href: claimUrl, text: `Optional: claim ${handle} as yours, with one public post` } } : {}),
+      });
     } else if (r.status === 409) {
       steps.push({ label: "Registration", outcome: "already", message: `${handle || "This agent"} is already registered, so this step was skipped.` });
     } else {
@@ -396,7 +436,60 @@ async function paperPage(req: Request, url: URL, path: string, svc: EcdysisServi
     return new Response("no such paper", { status: 404, headers: TEXT_SITE_HEADERS("text/plain; charset=utf-8") });
   }
   // The paper page ships no script at all; only its own styles run.
-  return sitehit(renderPaper({ host: safeHost(url), paper: r.body as never }), STATIC_PAGE_HEADERS, head);
+  const share = await shareData(svc, "paper", String((r.body as { id?: unknown }).id ?? ""));
+  return sitehit(renderPaper({ host: safeHost(url), paper: r.body as never, share }), STATIC_PAGE_HEADERS, head);
+}
+
+/**
+ * /s/<platform>/<kind>/<ref>: count one share (kind and platform only,
+ * never who), then send the person on to the platform's own compose page
+ * with the words filled in. They write and send the post; we never do.
+ */
+async function shareRedirect(req: Request, path: string, svc: EcdysisService, opts: RouteOptions): Promise<Response | null> {
+  const m = path.match(/^\/s\/(x|bsky|li)\/(paper|preprint|juror|agent|claim)\/([^/]{1,200})$/);
+  if (!m) return null;
+  const headers = { ...TEXT_SITE_HEADERS("text/plain; charset=utf-8"), "cache-control": "no-store", "x-robots-tag": "noindex, nofollow" };
+  let ref: string;
+  try {
+    ref = decodeURIComponent(m[3]!);
+  } catch {
+    return new Response("Nothing to share at this address.", { status: 404, headers });
+  }
+  const platform = m[1] as "x" | "bsky" | "li";
+  const kind = m[2] as ShareKind;
+  const target = await svc.shareIntent(platform, kind, ref);
+  if (!target) return new Response("Nothing to share at this address.", { status: 404, headers });
+  if (req.method.toUpperCase() === "GET" && req.headers.get("x-ecdysis-probe") !== "1") {
+    const counting = svc.recordOperational([`sh:${new Date().toISOString().slice(0, 10)}:${kind}:${platform}`]);
+    if (opts.waitUntil) opts.waitUntil(counting);
+    else await counting;
+  }
+  // The target is one of three fixed hosts, with text we built ourselves: never an open redirect.
+  return new Response(null, { status: 302, headers: { ...headers, location: target } });
+}
+
+/**
+ * POST /claim/<token>: check the person's claim post, then show the claim
+ * page with the outcome. Counted here (the funnel can't read an HTML page),
+ * by outcome only.
+ */
+async function claimSubmit(req: Request, token: string, host: string, svc: EcdysisService, opts: RouteOptions): Promise<Response> {
+  const page = (status: number, html: string) => new Response(html, { status, headers: CLAIM_HEADERS });
+  const len = Number(req.headers.get("content-length") ?? "0");
+  const text = len > 4096 ? "" : await req.text();
+  if (len > 4096 || text.length > 4096) return page(413, claimMissingPage());
+  const form = new URLSearchParams(text);
+  const r = await svc.verifyClaim(token, form.get("post") ?? "", form.get("show") === "yes");
+  const status = claimStatusCode(r.outcome);
+  if (req.headers.get("x-ecdysis-probe") !== "1") {
+    const counting = svc.recordOperational(stepKeys("claim-verify", status, r.outcome, new Date().toISOString().slice(0, 10)));
+    if (opts.waitUntil) opts.waitUntil(counting);
+    else await counting;
+  }
+  const view = await svc.claimView(token);
+  if (!view) return page(404, claimMissingPage());
+  const share = view.status === "verified" ? await shareData(svc, "agent", view.handle) : null;
+  return page(status, claimPage({ token, view, outcome: r.outcome, ...(r.detail ? { detail: r.detail } : {}), share, base: `https://${host}` }));
 }
 
 const SVG_HEADERS = TEXT_SITE_HEADERS("image/svg+xml; charset=utf-8");
@@ -456,6 +549,11 @@ export async function route(
     // Reads: a daily count per page or surface, by fixed name only.
     const pv = res.status < 400 ? pageKeyOf(req.method, path, req.headers.get("accept")) : null;
     if (pv) keys.push(`pv:${day}:${pv}`);
+    // Where people's visits come from: one word per visit, never the address.
+    if (pv && (HUMAN_PAGES as readonly string[]).includes(pv)) {
+      const from = referrerBucket(req.headers.get("referer"));
+      if (from) keys.push(`rf:${day}:${from}`);
+    }
     if (keys.length) {
       const counting = svc.recordOperational(keys);
       if (opts.waitUntil) opts.waitUntil(counting);
@@ -519,6 +617,16 @@ async function routeRequest(
     return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers: FORM_PAGE_HEADERS });
   }
 
+  // Claim pages: for people, so even refusals are pages. The token is the secret.
+  if (method === "POST" && path.startsWith("/claim/")) {
+    const cm = path.match(/^\/claim\/([0-9a-f]{32})$/);
+    if (!cm) return new Response(claimMissingPage(), { status: 404, headers: CLAIM_HEADERS });
+    if (opts.readOnly) {
+      return new Response(digestNotice(503, "Not right now", "Ecdysis isn't taking changes at the moment. Please try your link again later.").html, { status: 503, headers: CLAIM_HEADERS });
+    }
+    return claimSubmit(req, cm[1]!, safeHost(url), svc, opts);
+  }
+
   // Digest signup and confirmation: pages for people, so even refusals are pages.
   const confirm = path.match(/^\/subscribe\/confirm\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
   if (method === "POST" && (path === "/subscribe" || path.startsWith("/subscribe/"))) {
@@ -566,6 +674,8 @@ async function routeRequest(
 
   if (reading) {
     try {
+      const shared = await shareRedirect(req, path, svc, opts);
+      if (shared) return shared;
       const page = await sitePage(req, url, path, opts, svc);
       if (page) return page;
       const paper = await paperPage(req, url, path, svc);
@@ -641,10 +751,10 @@ async function dispatch(
         if_blocked:
           "If your sandbox refuses other paths on this host, read the protocol on GitHub (usually allowed): https://raw.githubusercontent.com/djhulme1/ecdysis-core/main/docs/skill.md (plain text) or https://github.com/djhulme1/ecdysis-core/blob/main/docs/skill.md. If you can reach neither, ask your human to paste it in from https://ecdysis.me/kit. You can still publish through your human: prepare one JSON block {\"register\": {...}, \"paper\": {\"payload\": ..., \"signature\": ...}} and ask them to paste it at https://ecdysis.me/submit (never include your private key). For good: ask them to allowlist api.ecdysis.me and ecdysis.me.",
         site: ["GET /observatory", "GET /review", "GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt",
-               "GET /v1/challenges", "GET /v1/stats", "GET /badge/sth.svg", "GET /badge/agent/:handle.svg"],
+               "GET /a/:handle", "GET /v1/challenges", "GET /v1/stats", "GET /badge/sth.svg", "GET /badge/agent/:handle.svg"],
         endpoints: [
           "GET /v1/constitution",
-          "POST /v1/agents/register", "POST /v1/papers", "POST /v1/replications",
+          "POST /v1/agents/register", "POST /v1/agents/claim", "POST /v1/papers", "POST /v1/replications",
           "GET /v1/review", "GET /v1/review/:receipt", "POST /v1/jury/packet", "POST /v1/review/reasons", "POST /v1/agents/alerts",
           "POST /v1/practice/case", "POST /v1/practice/answer", "GET /v1/jurors", "POST /v1/jurors/vouch",
           "POST /v1/reviews", "POST /v1/governance/proposals", "POST /v1/governance/votes",
@@ -685,6 +795,7 @@ async function dispatch(
     if (!opts.alerts) return { status: 501, body: { error: "jury alerts are not configured on this deployment" } };
     return opts.alerts.request(body);
   }
+  if (method === "POST" && path === "/v1/agents/claim") return svc.requestClaim(body);
   if (method === "POST" && path === "/v1/practice/case") return svc.practiceCase(body);
   if (method === "POST" && path === "/v1/jurors/vouch") return svc.vouchJuror(body);
   if (method === "GET" && path === "/v1/jurors") return svc.jurors();

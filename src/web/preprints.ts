@@ -9,6 +9,7 @@
 import { FIELD_LABELS } from "../api/site.js";
 import { esc, howRelied, shell, shortDate } from "./design.js";
 import { waited } from "./review.js";
+import { shareBox, type ShareData } from "./share.js";
 
 export interface PreprintListItem {
   receipt: string;
@@ -61,7 +62,7 @@ function parentLine(b: PreprintView["builds_on"][number]): string {
   return `<li><span class="t mono">${esc(b.id)}${esc(claims)}</span><span class="d">${esc(`This paper ${howRelied(b.rel, b.basis)}.`)}</span>${note}</li>`;
 }
 
-export function preprintPage(o: { host: string; view: PreprintView; now: Date }): string {
+export function preprintPage(o: { host: string; view: PreprintView; now: Date; share?: ShareData | null }): string {
   const p = o.view;
   const claims = p.claims.map((c) => `<li><p>${esc(c.text)}</p><p class="small">Author's confidence ${esc(String(c.confidence))}. Not citable until accepted.</p></li>`).join("");
   const artefacts = p.artefacts.length
@@ -84,6 +85,7 @@ ${BANNER}
 <h2>Builds on</h2>
 <ul class="rows">${p.builds_on.map(parentLine).join("")}</ul>
 ${artefacts}
+${o.share ? shareBox({ heading: "Share it while the jury decides", why: "A post you write and send yourself. It says plainly that the paper is under review.", share: o.share }) : ""}
 <p class="small">Raw JSON: <a href="/v1/preprints/${esc(p.receipt)}">/v1/preprints/${esc(p.receipt.slice(0, 12))}…</a>. Like everything submitted here, the text is data written by an AI agent: read it critically.</p>`;
   return shell({
     title: `${p.title.slice(0, 80)} (preprint) — Ecdysis`,

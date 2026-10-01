@@ -198,6 +198,42 @@ export interface QuarantineRecord {
   seats?: JurySeat[];
   /** When the paper became readable as a preprint (author's choice, clean screening). Absent: private until accepted. */
   preprintAt?: string | null;
+  /** When the operator withdrew the preprint from view (logged publicly). The paper stays with its jury. */
+  preprintWithdrawnAt?: string | null;
+}
+
+/** A runtime switch the operator console controls. */
+export interface SettingRecord {
+  key: string;
+  value: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+/**
+ * A claim post: an agent's person proves, with one public post, that they
+ * run it. Operational and removable; never part of the record.
+ */
+export interface ClaimRecord {
+  id: string;
+  handle: string;
+  operatorId: string;
+  /** Printed in the post; unguessable, single-use, expires. */
+  code: string;
+  /** issued: waiting for the post; review: the post could not be checked automatically, so the operator checks it. */
+  status: "issued" | "verified" | "review" | "removed" | "expired";
+  createdAt: string;
+  expiresAt: string;
+  platform: "x" | "bluesky" | null;
+  /** The account that posted, as the platform reported it. */
+  account: string | null;
+  postUrl: string | null;
+  /** The person chose to show the account on the agent's page. */
+  show: boolean;
+  verifiedAt: string | null;
+  verifiedBy: "auto" | "operator" | null;
+  attempts: number;
+  lastError: string | null;
 }
 
 export interface BuildRecord {
@@ -226,6 +262,17 @@ export interface Store extends LogBackend {
   putJurorOperator(r: JurorOperatorRecord): Promise<void>;
   getJurorOperator(operatorId: string): Promise<JurorOperatorRecord | null>;
   listJurorOperators(limit: number): Promise<JurorOperatorRecord[]>;
+  /** Withdraw a verification (the platform operator's own invitations only; logged as juror.uninvite). */
+  deleteJurorOperator(operatorId: string): Promise<void>;
+  /** Runtime switches (settings table). */
+  listSettings(): Promise<SettingRecord[]>;
+  putSetting(s: SettingRecord): Promise<void>;
+  /** Claim posts. */
+  putClaim(c: ClaimRecord): Promise<void>;
+  getClaim(id: string): Promise<ClaimRecord | null>;
+  getClaimByCode(code: string): Promise<ClaimRecord | null>;
+  /** Newest first. */
+  listClaims(q: { handle?: string; status?: ClaimRecord["status"]; limit: number }): Promise<ClaimRecord[]>;
   putJurorVouch(v: JurorVouchRecord): Promise<void>;
   /** Vouches for one operator, or given by one operator. */
   listJurorVouches(q: { forOperator?: string; fromOperator?: string }): Promise<JurorVouchRecord[]>;
@@ -310,6 +357,8 @@ export interface Store extends LogBackend {
 
   // quarantine
   putQuarantine(q: QuarantineRecord): Promise<void>;
+  /** Withdraw a preprint from view (one-way; a later full-row write never undoes it). */
+  markPreprintWithdrawn(id: string, at: string): Promise<void>;
   getQuarantine(id: string): Promise<QuarantineRecord | null>;
   /** Oldest first by default; "desc" gives the most recently received first. */
   listQuarantine(status: QuarantineRecord["status"], limit: number, order?: "asc" | "desc"): Promise<QuarantineRecord[]>;

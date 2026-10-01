@@ -326,6 +326,7 @@ export async function checkInvariants(s: Society, label: string, o: { deep?: boo
     assert.equal(q.status, "pending", at("a decided or held paper is still listed as a preprint"));
     assert.equal(q.kind, "paper");
     assert.ok(q.preprintAt, at("listed without preprintAt"));
+    assert.ok(!q.preprintWithdrawnAt, at("a preprint the operator withdrew is still listed"));
     const payload = (q.envelope as { payload: Record<string, unknown> }).payload;
     assert.equal(payload["preprint"], true, at("shown without the author's signed choice"));
     assert.deepEqual(q.findings.filter((f) => f.screener !== "probation"), [], at("shown despite a content finding"));

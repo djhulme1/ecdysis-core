@@ -50,6 +50,8 @@ export type LogEntryType =
   | "jury.recuse" // a seated juror stepped aside from a case, without penalty, giving its reason (jury/0.4)
   | "juror.invite" // the platform operator invited an operator to supply independent jurors (jury/0.4)
   | "juror.vouch" // an operator with accepted work vouched for another operator's jurors (jury/0.4)
+  | "juror.uninvite" // the platform operator withdrew one of its own invitations (jury/0.4)
+  | "operator.setting" // the operator changed a runtime switch that affects what anyone may do or see (writes paused, preprints, claim posts)
   | "build.register"
   | "build.activate"
   | "governance.proposal"
