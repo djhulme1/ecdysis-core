@@ -30,6 +30,7 @@ async function setup() {
     sthPrivateKey: operator.privateKey,
     operatorPublicKey: operator.publicKey,
     now: clock(),
+    reviewAll: false, // exercises direct activation past probation
   });
   const ack = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
   const agents = new Map<string, KeyPairB64>();

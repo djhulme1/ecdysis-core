@@ -240,6 +240,92 @@ export function externalScreener(
   };
 }
 
+/**
+ * A safety classifier running inside the operator's own Cloudflare account
+ * (Workers AI), so screening needs no word lists in this repo (a published
+ * list is an evasion map) and no third-party key. The model is Meta's Llama
+ * Guard 3, which labels text against a public taxonomy (S1 to S14). This
+ * table says only what the archive does with each label:
+ *  - "hazard:" categories freeze the submission for a human decision (R1);
+ *  - severity 3 refuses it outright;
+ *  - severity 2 sends it to the jury;
+ *  - severity 1 is informational.
+ * An unsafe verdict with no label we recognise is treated as a hazard.
+ */
+export interface AiLike {
+  run(model: string, input: unknown): Promise<unknown>;
+}
+
+export const GUARD_MODEL = "@cf/meta/llama-guard-3-8b";
+
+export const GUARD_POLICY: Readonly<Record<string, { severity: 1 | 2 | 3; category: string }>> = {
+  S1: { severity: 2, category: "hazard:violent-crime" },
+  S2: { severity: 2, category: "hazard:non-violent-crime" },
+  S3: { severity: 2, category: "hazard:sex-crime" },
+  S4: { severity: 3, category: "child-exploitation" },
+  S5: { severity: 2, category: "defamation" },
+  S6: { severity: 1, category: "specialised-advice" },
+  S7: { severity: 2, category: "privacy" },
+  S8: { severity: 1, category: "intellectual-property" },
+  S9: { severity: 2, category: "hazard:indiscriminate-weapons" },
+  S10: { severity: 2, category: "hate" },
+  S11: { severity: 2, category: "self-harm" },
+  S12: { severity: 2, category: "sexual-content" },
+  S13: { severity: 1, category: "elections" },
+  S14: { severity: 2, category: "hazard:code-abuse" },
+};
+
+/** Read the classifier's answer in either of its known shapes; anything else throws (and so fails closed). */
+export function parseGuard(out: unknown): { safe: boolean; categories: string[] } {
+  const r = (out as { response?: unknown } | null)?.response;
+  if (r && typeof r === "object") {
+    const o = r as { safe?: unknown; categories?: unknown };
+    if (typeof o.safe === "boolean") {
+      const cats = Array.isArray(o.categories) ? o.categories.map((c) => String(c).trim().toUpperCase()) : [];
+      return { safe: o.safe, categories: cats };
+    }
+  }
+  if (typeof r === "string") {
+    const t = r.trim().toLowerCase();
+    if (t.startsWith("unsafe")) return { safe: false, categories: (r.match(/S\d{1,2}/gi) ?? []).map((s) => s.toUpperCase()) };
+    if (t.startsWith("safe")) return { safe: true, categories: [] };
+  }
+  throw new Error("unrecognised classifier response");
+}
+
+export function guardScreener(ai: AiLike, model: string = GUARD_MODEL): Screener {
+  return {
+    name: "guard",
+    async screen(payload) {
+      // The text is classified as content offered for publication: the
+      // classifier's response-checking mode, not prompt checking.
+      const text = collectTexts(payload).join("\n\n").slice(0, 60_000);
+      const out = await ai.run(model, {
+        messages: [
+          { role: "user", content: "Share your research for publication in an open archive." },
+          { role: "assistant", content: text },
+        ],
+        temperature: 0,
+        max_tokens: 32,
+      });
+      const v = parseGuard(out);
+      if (v.safe) return [];
+      const labels = v.categories.length ? [...new Set(v.categories)] : ["?"];
+      return labels.slice(0, 8).map((c) => {
+        const p = GUARD_POLICY[c];
+        return p
+          ? { screener: "guard", severity: p.severity, category: p.category }
+          : { screener: "guard", severity: 2 as const, category: "hazard:unclassified" };
+      });
+    },
+  };
+}
+
+/** True when a decision rests on a screening finding that must go to a human (R1). */
+export function needsHumanHold(findings: Finding[]): boolean {
+  return findings.some((f) => f.category.startsWith("hazard:"));
+}
+
 function collectTexts(payload: Screenable): string[] {
   const texts: string[] = [];
   if (payload.type === "paper") {

@@ -24,6 +24,9 @@ async function setup(withSth = true) {
     screeners: [structuralScreener()],
     sthPrivateKey: sth?.privateKey ?? null,
     now: clock(),
+    // These tests exercise the direct-publication path for agents past
+    // probation, which production keeps switched off (reviewAll).
+    reviewAll: false,
   });
   return { store, svc, sth };
 }

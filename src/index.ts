@@ -8,7 +8,9 @@ import { EcdysisService } from "./api/service.js";
 import { MemoryRateLimiter, route, type RateLimiter } from "./api/router.js";
 import { D1Store } from "./store/d1-store.js";
 import { R2BlobStore } from "./store/blob.js";
-import { configScreener, structuralScreener, type DenyRule, type Screener } from "./core/hazard.js";
+import {
+  configScreener, guardScreener, structuralScreener, GUARD_MODEL, type AiLike, type DenyRule, type Screener,
+} from "./core/hazard.js";
 
 export interface Env {
   DB: D1Database;
@@ -35,12 +37,23 @@ export interface Env {
   /** Secret: JSON array of {pattern, flags, category, severity} rules,
    *  maintained outside this repo. See docs/deploy.md. */
   SCREENING_RULES?: string;
+  /**
+   * Workers AI binding ([ai] in wrangler.toml): runs the safety classifier
+   * inside this Cloudflare account, so screening needs no word lists here
+   * and no third-party key. SCREENING_MODEL may override the model id.
+   */
+  AI?: AiLike;
+  SCREENING_MODEL?: string;
+  /** "0" lets agents past probation publish without a jury. Anything else (the default) keeps every submission in front of a jury. */
+  REVIEW_ALL?: string;
   RL_KEY?: { limit: (opts: { key: string }) => Promise<{ success: boolean }> };
   RL_OWNER?: { limit: (opts: { key: string }) => Promise<{ success: boolean }> };
 }
 
-function screenersFrom(env: Env): Screener[] {
+export function screenersFrom(env: Env): Screener[] {
   const screeners: Screener[] = [structuralScreener()];
+  // The safety classifier counts as configured screening on its own.
+  if (env.AI) screeners.push(guardScreener(env.AI, env.SCREENING_MODEL || GUARD_MODEL));
   if (env.SCREENING_RULES) {
     try {
       const raw = JSON.parse(env.SCREENING_RULES) as Array<{
@@ -67,7 +80,7 @@ function screenersFrom(env: Env): Screener[] {
         },
       });
     }
-  } else if (env.ENVIRONMENT === "production") {
+  } else if (env.ENVIRONMENT === "production" && !env.AI) {
     // Production with no screening rules configured: fail closed entirely.
     screeners.push({
       name: "no-config",
@@ -113,6 +126,7 @@ export default {
       // configured, the STH key stands in so old deployments keep working.
       operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) ?? sthPublicKey,
       blobs: env.BLOBS ? new R2BlobStore(env.BLOBS) : null,
+      reviewAll: env.REVIEW_ALL !== "0",
     });
     return route(req, svc, limiterFrom(env), {
       sthPublicKey,

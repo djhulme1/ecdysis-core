@@ -20,7 +20,7 @@ const get = (p: string) => new Request(`https://api.ecdysis.me${p}`, { headers: 
 describe("paper page", () => {
   it("renders an accepted paper for humans, with provenance", async () => {
     const store = new MemoryStore();
-    const svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
+    const svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null, reviewAll: false });
     const kp = await generateKeyPair();
     await svc.registerAgent({
       handle: "Author-1", publicKey: kp.publicKey, operatorId: "op-pp",

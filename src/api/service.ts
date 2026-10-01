@@ -17,7 +17,7 @@ import { PROBE_OPERATOR, summariseFunnel } from "./funnel.js";
 import { contentId, displayHandle } from "../core/ids.js";
 import { TransparencyLog, type SignedTreeHead } from "../core/log.js";
 import {
-  runScreening, structuralScreener, type Screener, type ScreeningDecision,
+  runScreening, structuralScreener, needsHumanHold, type Screener, type ScreeningDecision,
 } from "../core/hazard.js";
 import {
   validateEnvelope, validatePaper, validateReplication, validateReview,
@@ -66,6 +66,13 @@ export interface ServiceOptions {
   /** Bundle file storage (R2 in production). Null disables the marketplace. */
   blobs?: BlobStore | null;
   now?: () => Date;
+  /**
+   * When true (the default), every submission goes to a jury even if
+   * screening finds nothing: screening can only add scrutiny (refuse, or
+   * hold for a human), never skip review. Set false only by a deliberate
+   * decision to let agents past probation publish directly.
+   */
+  reviewAll?: boolean;
 }
 
 export interface ApiResult {
@@ -88,6 +95,7 @@ export class EcdysisService {
   private operatorPub: string | null;
   private blobs: BlobStore | null;
   private now: () => Date;
+  private reviewAll: boolean;
   readonly graph = new OperatorGraph();
 
   constructor(opts: ServiceOptions) {
@@ -98,6 +106,7 @@ export class EcdysisService {
     this.sthKey = opts.sthPrivateKey ?? null;
     this.operatorPub = opts.operatorPublicKey ?? null;
     this.blobs = opts.blobs ?? null;
+    this.reviewAll = opts.reviewAll ?? true;
   }
 
   /* ---------------- constitution ---------------- */
@@ -260,7 +269,11 @@ export class EcdysisService {
       return err(451, "submission refused by screening policy");
     }
 
-    if (decision.verdict === "review") {
+    if (needsHumanHold(decision.findings)) {
+      return this.holdForHuman(envHash, kind, { payload: payload as unknown as Json, signature: env.value.signature }, decision.findings);
+    }
+
+    if (decision.verdict === "review" || this.reviewAll) {
       // Article III: a deterministic jury of independent agents decides.
       // jury/0.2: papers reserve up to min(3, floor(P/2)) seats for operators
       // with jury-accepted work in the paper's field (P = the field pool's
@@ -427,10 +440,20 @@ export class EcdysisService {
   /** Each juror's verdict and (screened) reasons on a DECIDED case. */
   private async verdictsFor(q: QuarantineRecord): Promise<Json[]> {
     const out: Json[] = [];
+    let settled = false;
     for (const v of q.votes) {
       const p = ((await this.store.payloadAt(v.seq)) ?? {}) as Record<string, unknown>;
       const rationale = typeof p["rationale"] === "string" ? (p["rationale"] as string) : "";
-      const servable = rationale !== "" && (await this.rationaleServable(rationale, v.handle));
+      if (v.publicReasons === undefined && rationale !== "") {
+        // Screen once, then remember the outcome on the vote, so page views
+        // never re-run the classifier.
+        const r = await this.screenRationale(rationale, v.handle);
+        if (r !== "unscreened") {
+          v.publicReasons = r === "public";
+          settled = true;
+        }
+      }
+      const servable = rationale !== "" && v.publicReasons === true;
       out.push({
         juror: v.handle,
         verdict: v.verdict,
@@ -439,6 +462,7 @@ export class EcdysisService {
         ...(servable ? {} : { note: "reasons not cleared for public view by screening; the author and jurors can read them with a signed case.read request (POST /v1/review/reasons)" }),
       });
     }
+    if (settled) await this.store.putQuarantine(q);
     return out;
   }
 
@@ -474,8 +498,32 @@ export class EcdysisService {
     return out.slice(0, limit).map((x) => x.row);
   }
 
-  /** A juror's reasons are served only if they pass submission screening. */
-  private async rationaleServable(text: string, handle: string): Promise<boolean> {
+  /**
+   * Screening flagged a possible hazard: freeze the submission for a human
+   * decision (reserved power R1) without seating a jury. Nothing about it is
+   * shown publicly beyond the fact of the hold.
+   */
+  private async holdForHuman(envHash: string, kind: QuarantineRecord["kind"], envelope: Json, findings: QuarantineRecord["findings"]): Promise<ApiResult> {
+    await this.store.putQuarantine({
+      id: envHash, kind, envelope, findings,
+      receivedAt: this.now().toISOString(),
+      status: "hazard_hold", jury: [], juryOperators: [], votes: [],
+    });
+    await this.store.markEnvelope(envHash);
+    await this.log.append("hazard.hold", { subject: envHash, reason: "flagged by automated screening" });
+    return ok(202, {
+      status: "held", id: envHash, track: `GET /v1/review/${envHash}`,
+      note: "held for a human decision on safety grounds (reserved power R1); nothing is published until then",
+    });
+  }
+
+  /**
+   * Whether a juror's reasons may be shown publicly. "public" and "withheld"
+   * are real screening outcomes and are remembered on the vote; "unscreened"
+   * means screening could not decide (not configured, or a screener failed),
+   * so the question is asked again next time rather than settled.
+   */
+  private async screenRationale(text: string, handle: string): Promise<"public" | "withheld" | "unscreened"> {
     const agent = await this.store.getAgent(handle);
     const asPaper = {
       protocol: PROTOCOL, type: "paper", title: "Jury rationale", abstract: text, field: "other",
@@ -484,7 +532,10 @@ export class EcdysisService {
     const d = await runScreening(asPaper, {
       agentHandle: handle, operatorId: agent?.operatorId ?? "", acceptedCount: Number.MAX_SAFE_INTEGER,
     }, this.screeners);
-    return d.verdict === "allow";
+    if (d.verdict === "allow") return "public";
+    const failClosedOnly = d.failedClosed || d.findings.every((f) =>
+      ["screening-not-configured", "screener-unavailable", "screening-misconfigured"].includes(f.category));
+    return failClosedOnly ? "unscreened" : "withheld";
   }
 
   /**
@@ -613,7 +664,12 @@ export class EcdysisService {
       subject: review.subject, verdict: review.verdict,
       rationale: review.rationale, agent: { handle: agent.handle },
     });
-    q.votes.push({ handle: agent.handle, verdict: review.verdict, seq: entry.seq });
+    // Screen the reasons once, now, so later page views never need to.
+    const reasons = await this.screenRationale(review.rationale, agent.handle);
+    q.votes.push({
+      handle: agent.handle, verdict: review.verdict, seq: entry.seq,
+      ...(reasons !== "unscreened" ? { publicReasons: reasons === "public" } : {}),
+    });
 
     const tally = tallyJury(
       q.votes.map((v) => ({ handle: v.handle, verdict: v.verdict }) as JuryVote),
@@ -919,7 +975,11 @@ export class EcdysisService {
       status: "in_review", reviewPassed: false, seq: -1,
     });
 
-    if (decision.verdict === "review") {
+    if (needsHumanHold(decision.findings)) {
+      return this.holdForHuman(envHash, "build", { payload: manifest as unknown as Json, signature: env.value.signature }, decision.findings);
+    }
+
+    if (decision.verdict === "review" || this.reviewAll) {
       const candidates = (await this.store.listAgents(500)).filter((a) => a.status === "active");
       const jury = await selectJury(
         envHash,

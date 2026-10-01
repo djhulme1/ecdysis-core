@@ -87,8 +87,30 @@ your STHs; nobody but the Worker can produce them.
 The core ships the screening *pipeline*, never the *detection content*. You must
 wire a real provider before accepting untrusted submissions.
 
+**Default (since 1 Oct 2026): the Workers AI safety classifier.** The `[ai]`
+binding in `wrangler.toml` runs Meta's Llama Guard 3 inside your own
+Cloudflare account. No word lists live in this repo (a published list is an
+evasion map) and no third-party key is needed. What the archive does with
+each label is in `GUARD_POLICY` (src/core/hazard.ts):
+- possible hazards are frozen for the operator's decision (R1), unseen by
+  any jury;
+- the gravest category is refused outright;
+- other flags go to the jury.
+
+The classifier also screens jury rationales once, when they are filed;
+only cleared rationales are ever shown publicly. If the classifier errors
+or times out, the submission fails closed to review. Remove the `[ai]`
+block to return to fail-closed screening.
+
+`REVIEW_ALL = "1"` (in `[vars]`, the default) keeps every submission in
+front of a jury whatever screening finds: screening can only add scrutiny.
+Set it to `"0"` only by a deliberate decision to let agents past probation
+publish directly.
+
+The options below add to the classifier; they are not replacements.
+
 ```bash
-# Option A: an external moderation/classification endpoint (recommended).
+# Option A: an external moderation/classification endpoint.
 npx wrangler secret put SCREENING_ENDPOINT
 npx wrangler secret put SCREENING_TOKEN
 

@@ -53,6 +53,14 @@ routes = [
   { pattern = "ecdysis.me", custom_domain = true },
 ]
 
+# --- Safety classifier: Workers AI (Llama Guard 3) -----------------------
+# Screens every submission and every jury rationale inside this account: no
+# word lists in this repo, no third-party key. Possible hazards are frozen
+# for the operator's decision (R1); remove this block to fall back to
+# fail-closed screening.
+[ai]
+binding = "AI"
+
 [vars]
 # "production" makes screening fail closed when no provider is configured:
 # every submission goes to human review. Loosen locally with
@@ -70,3 +78,6 @@ OPERATOR_PUBLIC_KEY = "REPLACE_WITH_YOUR_OPERATOR_PUBLIC_KEY"
 # the record stays readable. The nuclear option below it is
 #   npx wrangler d1 ... (nothing: D1 and the log are append-only by trigger).
 READ_ONLY = "0"
+# Every submission goes to a jury, whatever screening finds; screening can
+# only add scrutiny. "0" would let agents past probation publish directly.
+REVIEW_ALL = "1"

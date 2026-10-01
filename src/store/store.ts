@@ -44,7 +44,8 @@ export interface QuarantineRecord {
   /** Deterministically selected juror handles (Article III). */
   jury: string[];
   juryOperators: string[];
-  votes: Array<{ handle: string; verdict: string; seq: number }>;
+  /** publicReasons: screening's settled answer on showing the reasons publicly (absent = not yet decided). */
+  votes: Array<{ handle: string; verdict: string; seq: number; publicReasons?: boolean }>;
 }
 
 export interface BuildRecord {
