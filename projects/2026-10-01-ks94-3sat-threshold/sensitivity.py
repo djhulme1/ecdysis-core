@@ -1,12 +1,15 @@
 """Post-review sensitivity analysis (not pre-registered): the A1 50% points, A2/A3 collapses and A4 effective exponent under both
 instance models (duplicates allowed: counts.csv; no duplicate clauses: counts_nodup.csv), with overdispersion-corrected
-(quasi-likelihood) profile intervals for alpha_c and nu. -> results/sensitivity.json. Bootstrap seed 20261002."""
+(quasi-likelihood) profile intervals for alpha_c and nu. -> results/sensitivity_<model>.json. Bootstrap seed 20261002 per model.
+Usage: python sensitivity.py [with_duplicates] [no_duplicates]   (one model per process to use both cores).
+Profile grids: alpha_c 3.95-4.30 step 0.01, nu 1.10-2.00 step 0.02, warm-started sweeps."""
 import csv, json, os, itertools
 import numpy as np
 from scipy.optimize import minimize
 from scipy.special import expit
 HERE = os.path.dirname(os.path.abspath(__file__))
-opt = {"xatol": 1e-8, "fatol": 1e-10, "maxiter": 40000}
+import sys
+opt = {"xatol": 1e-6, "fatol": 1e-7, "maxiter": 20000}
 def load(name):
     D = {}
     for r in csv.DictReader(open(os.path.join(HERE, "results", name))):
@@ -23,15 +26,28 @@ def F(th, D, nl, fix=None):
         i, v = fix; th.insert(i, v)
     ac, nu, y50, s = th
     if nu <= 0.2 or s <= 0: return 1e18
-    return sum(nll(expit((N ** (1 / nu) * (D[N][:, 0] - ac) / ac - y50) / s), D[N][:, 2], D[N][:, 1]) for N in nl)
-def best(D, nl, fix=None, x0=None):
-    if fix and x0 is not None:  # profile point: start from the free optimum and two perturbations
-        b = [x for j, x in enumerate(x0) if j != fix[0]]
-        starts = [b, [x * 1.15 for x in b], [x * 0.85 for x in b]]
-        return min((minimize(F, s, args=(D, nl, fix), method="Nelder-Mead", options=opt) for s in starts), key=lambda r: r.fun)
-    full = list(itertools.product([4.0, 4.17, 4.27], [1.2, 1.5, 2.0], [0.4, 1.0], [0.4, 0.8]))
-    starts = [[x for j, x in enumerate(s) if j != fix[0]] for s in full] if fix else full
-    return min((minimize(F, s, args=(D, nl, fix), method="Nelder-Mead", options=opt) for s in starts), key=lambda r: r.fun)
+    Ns, a, n, k = cat(D, nl)
+    return nll(expit((Ns ** (1 / nu) * (a - ac) / ac - y50) / s), k, n)
+_C = {}
+def cat(D, nl):
+    key = (id(D), tuple(nl))
+    if key not in _C:
+        _C[key] = (np.concatenate([np.full(len(D[N]), float(N)) for N in nl]),) + tuple(np.concatenate([D[N][:, j] for N in nl]) for j in (0, 1, 2))
+    return _C[key]
+def best(D, nl):
+    full = list(itertools.product([4.0, 4.17, 4.27], [1.2, 1.5, 2.0], [0.4, 1.0], [0.6]))
+    return min((minimize(F, s, args=(D, nl), method="Nelder-Mead", options=opt) for s in full), key=lambda r: r.fun)
+def profile(D, nl, idx, grid, x0):
+    """Profile deviance on a grid, swept outwards from the free optimum, each point warm-started from its neighbour
+    (and from the free optimum); the better of the two is kept."""
+    free = [x for j, x in enumerate(x0) if j != idx]; out = {}
+    c = int(np.argmin(np.abs(grid - x0[idx])))
+    for order in (grid[c:], grid[:c][::-1]):
+        prev = free
+        for v in order:
+            r = min((minimize(F, st, args=(D, nl, (idx, v)), method="Nelder-Mead", options=opt) for st in (prev, free)), key=lambda r: r.fun)
+            prev = list(r.x); out[round(float(v), 3)] = r.fun
+    return out
 def analyse(D, rng):
     o = {"A1": {}}
     for N in sorted(D):
@@ -43,8 +59,8 @@ def analyse(D, rng):
         r = best(D, nl)
         sat = sum(nll(np.clip(D[N][:, 2] / D[N][:, 1], 1e-12, 1 - 1e-12), D[N][:, 2], D[N][:, 1]) for N in nl)
         df = sum(len(D[N]) for N in nl) - 4; phi = 2 * (r.fun - sat) / df
-        prof_ac = {round(float(a), 3): 2 * (best(D, nl, (0, a), r.x).fun - r.fun) for a in np.arange(4.00, 4.3001, 0.005)}
-        prof_nu = {round(float(v), 3): 2 * (best(D, nl, (1, v), r.x).fun - r.fun) for v in np.arange(1.20, 1.9001, 0.01)}
+        prof_ac = {k: 2 * (v - r.fun) for k, v in profile(D, nl, 0, np.round(np.arange(3.95, 4.3001, 0.01), 3), r.x).items()}
+        prof_nu = {k: 2 * (v - r.fun) for k, v in profile(D, nl, 1, np.round(np.arange(1.10, 2.0001, 0.02), 3), r.x).items()}
         ks = minimize(lambda t: F([4.17, 1.5, 0.74, t[0]], D, nl), [0.5], method="Nelder-Mead", options=opt)
         inside = lambda pr: [min(k for k, d in pr.items() if d / phi <= 3.84), max(k for k, d in pr.items() if d / phi <= 3.84)]
         o[key] = {"N": nl, "alpha_c": r.x[0], "nu": r.x[1], "y50": r.x[2], "s": r.x[3], "residual_deviance": 2 * (r.fun - sat), "df": df, "phi": phi,
@@ -56,9 +72,12 @@ def analyse(D, rng):
     o["A4"] = {"slope": sl, "nu_eff": -1 / sl}
     o["A5"] = {N: {"obs": o["A1"][N]["alpha50"], "obs_minus_KS": o["A1"][N]["alpha50"] - (4.17 + 3.1 * N ** (-2 / 3))} for N in (150, 200)}
     return o
-rng = np.random.default_rng(20261002)
-out = {"with_duplicates": analyse(load("counts.csv"), rng), "no_duplicates": analyse(load("counts_nodup.csv"), rng)}
-json.dump(out, open(os.path.join(HERE, "results", "sensitivity.json"), "w"), indent=1, default=float)
+files = {"with_duplicates": "counts.csv", "no_duplicates": "counts_nodup.csv"}
+which = sys.argv[1:] or list(files)
+out = {}
+for m in which:
+    out[m] = analyse(load(files[m]), np.random.default_rng(20261002))
+    json.dump(out[m], open(os.path.join(HERE, "results", "sensitivity_%s.json" % m), "w"), indent=1, default=float)
 for m, o in out.items():
     print(m)
     for N, a in o["A1"].items(): print("  N=%d a50=%.3f [%.3f, %.3f] w=%.3f" % (N, a["alpha50"], *a["alpha50_ci"], a["width10_90"]))
