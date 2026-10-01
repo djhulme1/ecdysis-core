@@ -283,6 +283,16 @@ export class D1Store implements Store {
       .first<{ count: number }>();
     return row?.count ?? 0;
   }
+
+  async listAccessPrefix(prefix: string): Promise<Array<{ id: string; count: number }>> {
+    // Range scan instead of LIKE: no wildcard semantics to escape, and the
+    // primary-key index serves it. "￿" sorts after any id character.
+    const rs = await this.db
+      .prepare("SELECT id, count FROM access_counts WHERE id >= ?1 AND id < ?2 ORDER BY id LIMIT 500")
+      .bind(prefix, prefix + "￿")
+      .all<{ id: string; count: number }>();
+    return rs.results ?? [];
+  }
 }
 
 function rowToBuild(r: Record<string, unknown>): BuildRecord {

@@ -12,7 +12,8 @@
  */
 
 import { canonicalBytes, canonicalize, hashJson, type Json } from "../core/canonical.js";
-import { verifyBytes, verifyJson } from "../core/crypto.js";
+import { publicKeyProblem, verifyBytes, verifyJson } from "../core/crypto.js";
+import { summariseFunnel } from "./funnel.js";
 import { contentId, displayHandle } from "../core/ids.js";
 import { TransparencyLog, type SignedTreeHead } from "../core/log.js";
 import {
@@ -108,7 +109,13 @@ export class EcdysisService {
   /* ---------------- agents ---------------- */
 
   async registerAgent(body: Json): Promise<ApiResult> {
-    const b = body as Record<string, unknown>;
+    const b = (body ?? {}) as Record<string, unknown>;
+    // Trap 1: every other write is a signed {payload, signature} envelope,
+    // so agents reasonably wrap registration too. Say so precisely, rather
+    // than letting it surface as a baffling "bad handle".
+    if (typeof b["handle"] !== "string" && ("payload" in b || "signature" in b)) {
+      return err(400, "registration is plain JSON, not a signed envelope: send {handle, publicKey, operatorId, constitution} at the top level, with no payload or signature wrapper");
+    }
     const handle = typeof b["handle"] === "string" ? b["handle"] : "";
     const publicKey = typeof b["publicKey"] === "string" ? b["publicKey"] : "";
     const operatorId = typeof b["operatorId"] === "string" ? b["operatorId"] : "";
@@ -117,6 +124,15 @@ export class EcdysisService {
     }
     if (publicKey.length < 20 || operatorId.length < 2 || operatorId.length > 80) {
       return err(400, "publicKey and operatorId are required");
+    }
+    // Trap 2: a key that registers but can never verify. Refuse it here,
+    // with the fix, instead of failing every submission later.
+    const keyProblem = await publicKeyProblem(publicKey);
+    if (keyProblem === "raw32") {
+      return err(400, "publicKey must be the DER SPKI encoding of your Ed25519 key, base64url (44 bytes, beginning MCowBQYDK2VwAyEA). You sent the raw 32-byte key: prefix it with the 12 bytes 302a300506032b6570032100 (hex), then base64url-encode the 44 bytes");
+    }
+    if (keyProblem) {
+      return err(400, "publicKey must be the DER SPKI encoding of an Ed25519 public key, base64url (44 bytes, beginning MCowBQYDK2VwAyEA); this value did not import as one");
     }
 
     // Article I.2: registration is assent. No signature on the constitution
@@ -835,6 +851,17 @@ export class EcdysisService {
     return { ...latest, outcomes: reps.map((r) => r.payload.outcome) };
   }
 
+  /** Bump operational counters (the write funnel). Best-effort, never fatal. */
+  async recordOperational(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      try {
+        await this.store.bumpAccess(id);
+      } catch {
+        /* operational counting must never break a request */
+      }
+    }
+  }
+
   /** Public page handles for /sitemap.xml: one per published paper. */
   async sitemapTargets(): Promise<string[]> {
     const ps = await this.store.listPapers(500);
@@ -981,6 +1008,10 @@ export class EcdysisService {
       generatedAt: this.now().toISOString(),
       note: "Every number here is recomputable from the public log; this endpoint is a convenience, not an authority.",
       juryVersion: JURY_VERSION,
+      operational: {
+        note: "Attempted writes, counted operationally and outside the signed record: aggregate only, never who sent them or what they contained. Accepted writes also land in the log; refused ones appear only here, so a failure is never invisible.",
+        writes: summariseFunnel(await this.store.listAccessPrefix("funnel:")),
+      },
       totals: {
         logEntries: n,
         agents,

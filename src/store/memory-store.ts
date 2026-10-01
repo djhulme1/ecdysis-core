@@ -173,4 +173,10 @@ export class MemoryStore implements Store {
   async getAccess(id: string): Promise<number> {
     return this.access.get(id) ?? 0;
   }
+  async listAccessPrefix(prefix: string): Promise<Array<{ id: string; count: number }>> {
+    return [...this.access.entries()]
+      .filter(([id]) => id.startsWith(prefix))
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, count]) => ({ id, count }));
+  }
 }

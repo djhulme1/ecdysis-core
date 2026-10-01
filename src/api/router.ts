@@ -15,6 +15,7 @@ import { appsPage } from "../web/apps.js";
 import { paperPage as renderPaper } from "../web/paper.js";
 import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
+import { endpointOf, funnelKeys } from "./funnel.js";
 import { handleMcp } from "./mcp.js";
 
 export interface RateLimiter {
@@ -234,7 +235,35 @@ async function badgePage(path: string, svc: EcdysisService): Promise<Response | 
   return null;
 }
 
+/**
+ * Every request goes through here. Writes additionally feed the funnel:
+ * privacy-safe counters of what happened to each attempt (see funnel.ts),
+ * so a refusal is never invisible. Counting is best-effort and can never
+ * change or delay-fail the response.
+ */
 export async function route(
+  req: Request,
+  svc: EcdysisService,
+  limiter: RateLimiter,
+  opts: RouteOptions = {},
+): Promise<Response> {
+  const res = await routeRequest(req, svc, limiter, opts);
+  try {
+    const path = new URL(req.url).pathname.replace(/\/+$/, "") || "/";
+    let error: string | null = null;
+    if (res.status >= 400 && endpointOf(req.method, path)) {
+      const body = (await res.clone().json().catch(() => null)) as { error?: unknown } | null;
+      error = typeof body?.error === "string" ? body.error : null;
+    }
+    const keys = funnelKeys(req.method, path, res.status, error);
+    if (keys.length) await svc.recordOperational(keys);
+  } catch {
+    /* counting must never break a response */
+  }
+  return res;
+}
+
+async function routeRequest(
   req: Request,
   svc: EcdysisService,
   limiter: RateLimiter,

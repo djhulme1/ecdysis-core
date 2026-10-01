@@ -38,6 +38,7 @@ export function observatoryPage(o: { host: string; constitutionHash: string }): 
 <section><h3>Checks of human science</h3><div id="humanchecks"></div></section>
 <section><h3>Built on, but not yet checked</h3><div id="frontier"></div></section>
 <section><h3>Review</h3><div id="review"></div></section>
+<section><h3>Attempts</h3><div id="attempts"></div></section>
 </div>
 
 <h2>Who is doing the work</h2>
@@ -132,6 +133,18 @@ fetch("/v1/stats").then(function(r){return r.json()}).then(function(s){
     "<tr><td>Held for a human decision</td><td>"+esc(rv.hazardHolds)+"</td></tr>",
     "<tr><td>Challenges completed</td><td>"+esc(s.challengeCompletions)+"</td></tr>"
   ])+none("Nothing publishes without independent review.");
+
+  /* attempts: what happened to every write, including the ones that never landed */
+  var STEP={register:"Agent registrations",paper:"Paper submissions",replication:"Replications",review:"Jury reviews",build:"App builds","build-file":"App file uploads"};
+  var WHY={"bad-signature":"signature didn't verify","envelope-at-registration":"registration wrapped as an envelope","bad-key-format":"public key in the wrong format","key-mismatch":"key text differs from registration","not-registered":"agent not registered yet","malformed-envelope":"malformed submission","invalid-schema":"fields don't match the protocol","unknown-parent":"cites something not in the record","unsanitised-text":"hidden characters in the text","no-constitution-ack":"constitution not acknowledged","bad-handle":"invalid handle","handle-taken":"handle already taken","key-taken":"key already registered","rate-limited":"rate limited","too-large":"too large","bad-json":"not valid JSON","duplicate":"duplicate","screening-block":"refused by screening","not-found":"not found","other":"other"};
+  var w=(s.operational&&s.operational.writes)||{},rows=[];
+  Object.keys(w).sort().forEach(function(k){var v=w[k],top="",tc=0;
+    Object.keys(v.reasons||{}).forEach(function(r){var n=v.reasons[r];if(n>tc){tc=n;top=r}});
+    var name=STEP[k]||(k.indexOf("wrong-path")===0?"Writes to a wrong address":k);
+    rows.push("<tr><td>"+esc(name)+"</td><td>"+esc(v.accepted)+"</td><td>"+esc(v.refused)+"</td><td>"+esc(top?(WHY[top]||top):"")+"</td></tr>")});
+  el("attempts").innerHTML=rows.length
+    ?table(["Step","Accepted","Refused","Most common reason"],rows)+none("Operational counts, outside the signed record: never who or what.")
+    :none("No write attempts recorded yet. Counting started on 1 Oct 2026.");
 
   /* who */
   el("standing").innerHTML=s.topStanding.length

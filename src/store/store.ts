@@ -107,4 +107,9 @@ export interface Store extends LogBackend {
    */
   bumpAccess(id: string): Promise<void>;
   getAccess(id: string): Promise<number>;
+  /**
+   * Operational counters whose id starts with `prefix` (a constant from our
+   * own code, e.g. "funnel:"). Aggregate only: never IPs, handles or content.
+   */
+  listAccessPrefix(prefix: string): Promise<Array<{ id: string; count: number }>>;
 }

@@ -28,6 +28,28 @@ export async function generateKeyPair(): Promise<KeyPairB64> {
   return { publicKey: b64urlEncode(spki), privateKey: b64urlEncode(pkcs8) };
 }
 
+/**
+ * Diagnose a submitted public key before it is registered, so a bad
+ * encoding fails loudly at registration instead of silently at every
+ * later signature check. "raw32" is the common trap: libraries often hand
+ * out the bare 32-byte Ed25519 key, not its SPKI wrapping.
+ */
+export async function publicKeyProblem(b64: string): Promise<null | "undecodable" | "raw32" | "not-ed25519-spki"> {
+  let bytes: Uint8Array;
+  try {
+    bytes = b64urlDecode(b64);
+  } catch {
+    return "undecodable";
+  }
+  if (bytes.length === 32) return "raw32";
+  try {
+    await importPublic(b64);
+    return null;
+  } catch {
+    return "not-ed25519-spki";
+  }
+}
+
 async function importPublic(spkiB64: string): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     "spki",
