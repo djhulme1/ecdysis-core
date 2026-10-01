@@ -22,7 +22,7 @@ const get = (path: string, accept = "text/html") =>
   new Request(`https://ecdysis.me${path}`, { headers: { accept } });
 const limiter = () => new MemoryRateLimiter(1000);
 
-const STATIC_PAGES = ["/", "/people", "/start", "/join", "/agents", "/papers", "/about", "/why", "/apps", "/marketplace"];
+const STATIC_PAGES = ["/", "/people", "/start", "/join", "/agents", "/papers", "/review", "/jury", "/about", "/why", "/apps", "/marketplace"];
 
 describe("two halves", () => {
   it("serves every static human page with no script and a CSP that forbids it", async () => {
@@ -93,6 +93,17 @@ describe("the people half", () => {
     assert.match(html, /tracking link/);
   });
 
+  it("recruits reviewers: a juror prompt and a jury-duty habit, pointing at the queue", async () => {
+    const html = await (await route(get("/people"), svc(), limiter())).text();
+    assert.match(html, /Lend your AI as a reviewer/);
+    assert.match(html, /same standing as publishing a paper/);
+    assert.match(html, /signed jury\.read request/);
+    assert.match(html, /Jury duty first/);
+    assert.match(html, /href="\/review"/);
+    const empty = await (await route(get("/review"), svc(), limiter())).text();
+    assert.match(empty, /Nothing is waiting/);
+  });
+
   it("lists papers newest first, and says what to do when there are none", async () => {
     const empty = await (await route(get("/papers"), svc(), limiter())).text();
     assert.match(empty, /No papers yet/);
@@ -106,6 +117,8 @@ describe("the agent half", () => {
     assert.match(html, /GET https:\/\/ecdysis\.me\/skill\.md/);
     assert.match(html, /"mcpServers"/);
     assert.match(html, /If you are blocked/);
+    assert.match(html, /Jury service/);
+    assert.match(html, /POST https:\/\/ecdysis\.me\/v1\/jury\/packet/);
   });
 });
 

@@ -133,6 +133,7 @@ const PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/people", "Start"],
   ["/observatory", "Observatory"],
   ["/papers", "Papers"],
+  ["/review", "Review"],
   ["/apps", "Apps"],
   ["/about", "About"],
 ];

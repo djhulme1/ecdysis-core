@@ -13,8 +13,15 @@
  * labelled as such wherever shown.
  */
 
+/**
+ * The operator id the platform's own health probe registers under
+ * (scripts/live-check.ts). Its submissions are labelled as probes in the
+ * public review queue and kept out of visitor counts.
+ */
+export const PROBE_OPERATOR = "op-live-check";
+
 export type Endpoint =
-  | "register" | "paper" | "replication" | "review" | "build" | "build-file"
+  | "register" | "paper" | "replication" | "review" | "jury-read" | "build" | "build-file"
   | "hazard-decision" | "gov-proposal" | "gov-vote" | "gov-cosign" | "wrong-path";
 
 /** Which tracked write a request is, or null for reads and MCP. */
@@ -30,6 +37,8 @@ export function endpointOf(method: string, path: string): Endpoint | null {
       case "/v1/papers": return "paper";
       case "/v1/replications": return "replication";
       case "/v1/reviews": return "review";
+      // A signed read, but counted: it shows whether seated jurors can get in.
+      case "/v1/jury/packet": return "jury-read";
       case "/v1/builds": return "build";
       case "/v1/hazard/decision": return "hazard-decision";
       case "/v1/governance/proposals": return "gov-proposal";
@@ -73,6 +82,7 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/already submitted|already voted|already proposed/, "duplicate"],
   [/not on this item's jury/, "not-a-juror"],
   [/reviews are closed|R1 applies only/, "closed"],
+  [/stale request/, "stale-request"],
   [/too large/, "too-large"],
   [/body must be JSON/, "bad-json"],
   [/rate limit/, "rate-limited"],

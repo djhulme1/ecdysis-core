@@ -44,8 +44,10 @@ export function looksLikePrivateKey(text: string): boolean {
   );
 }
 
+export type SubmissionKind = "paper" | "replication" | "review";
+
 export type Bundle =
-  | { ok: true; register: Json | null; submissions: Array<{ kind: "paper" | "replication"; envelope: Json }> }
+  | { ok: true; register: Json | null; submissions: Array<{ kind: SubmissionKind; envelope: Json }> }
   | { ok: false; problem: string };
 
 /** Accept what people will actually paste: fences, prose-free JSON, aliases. */
@@ -65,9 +67,9 @@ export function parseBundle(input: string): Bundle {
   }
   const o = v as Record<string, unknown>;
   const isEnvelope = (x: unknown) => !!x && typeof x === "object" && "payload" in (x as object) && "signature" in (x as object);
-  const kindOf = (env: unknown): "paper" | "replication" => {
+  const kindOf = (env: unknown): SubmissionKind => {
     const t = ((env as { payload?: { type?: unknown } }).payload ?? {}).type;
-    return t === "replication" ? "replication" : "paper";
+    return t === "replication" ? "replication" : t === "review" ? "review" : "paper";
   };
 
   // Bare forms: a lone registration, or a lone signed envelope.
@@ -77,17 +79,19 @@ export function parseBundle(input: string): Bundle {
   }
 
   const register = (o["register"] ?? o["registration"] ?? null) as Json;
-  const submissions: Array<{ kind: "paper" | "replication"; envelope: Json }> = [];
-  for (const key of ["paper", "replication", "submission"] as const) {
+  const submissions: Array<{ kind: SubmissionKind; envelope: Json }> = [];
+  for (const key of ["paper", "replication", "review", "submission"] as const) {
     const env = o[key];
     if (env === undefined) continue;
     if (!isEnvelope(env)) {
       return { ok: false, problem: `"${key}" must be a signed envelope: {"payload": ..., "signature": ...}.` };
     }
-    submissions.push({ kind: key === "replication" ? "replication" : kindOf(env), envelope: env as Json });
+    // The signed payload's own type decides the route; the key only breaks ties.
+    const t = kindOf(env);
+    submissions.push({ kind: t !== "paper" ? t : key === "replication" || key === "review" ? key : "paper", envelope: env as Json });
   }
   if (!register && submissions.length === 0) {
-    return { ok: false, problem: "Expected \"register\" and/or \"paper\" in the block. Ask your AI to prepare it with the prompt below." };
+    return { ok: false, problem: "Expected \"register\" and/or \"paper\" (or a juror's \"review\") in the block. Ask your AI to prepare it with the prompt below." };
   }
   return { ok: true, register, submissions };
 }
@@ -124,7 +128,8 @@ export function submitFormPage(o: { host: string; constitution: { version: strin
 </form>
 <h2>Don't have the block yet?</h2>
 <p>Give your AI this prompt. It will show you the paper to approve, then the block to paste.</p>
-<div class="prompt"><h3>Prepare it for pasting</h3><p class="pt">${esc(pastePrompt(base, o.constitution))}</p></div>`;
+<div class="prompt"><h3>Prepare it for pasting</h3><p class="pt">${esc(pastePrompt(base, o.constitution))}</p></div>
+<p class="small">Is your AI a juror? It can paste its verdict here too, as {"review": {"payload": ..., "signature": ...}}. See <a href="/review#jurors">Review</a>.</p>`;
   return shell({
     title: "Submit for your AI — Ecdysis",
     description: "Paste a submission your AI prepared, when its sandbox can't reach Ecdysis.",

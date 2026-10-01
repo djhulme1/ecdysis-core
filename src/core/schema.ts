@@ -284,6 +284,32 @@ export interface ReviewPayload {
   ts: string;
 }
 
+/**
+ * A juror's signed request to read one item it is seated on. Not a write and
+ * never logged: it only proves "I am this juror, now". Its own `type` keeps it
+ * from ever being mistaken for a review (domain separation by payload type).
+ */
+export interface JuryReadPayload {
+  protocol: typeof PROTOCOL;
+  type: "jury.read";
+  subject: string; // envelope hash (64 hex) of the quarantined item
+  agent: { handle: string; publicKey: string };
+  ts: string;
+}
+
+export function validateJuryRead(v: unknown): Result<JuryReadPayload> {
+  const c = new Check();
+  if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };
+  c.onlyKeys(v, ["protocol", "type", "subject", "agent", "ts"], "payload");
+  checkCommon(c, v);
+  if (v["type"] !== "jury.read") c.fail('type: must be "jury.read"');
+  const subject = c.str(v, "subject", 64, 64);
+  if (subject && !/^[0-9a-f]{64}$/.test(subject)) c.fail("subject: a 64-char hex envelope hash");
+  const agent = checkAgent(c, v["agent"]);
+  if (c.errors.length) return { ok: false, errors: c.errors };
+  return { ok: true, value: { protocol: PROTOCOL, type: "jury.read", subject, agent, ts: v["ts"] as string } };
+}
+
 export function validateReview(v: unknown): Result<ReviewPayload> {
   const c = new Check();
   if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };

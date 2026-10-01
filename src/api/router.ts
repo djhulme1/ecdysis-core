@@ -12,6 +12,7 @@ import { PAPER_ID, paperStatus } from "../web/design.js";
 import { looksLikePrivateKey, MAX_PASTE_CHARS, parseBundle, submitFormPage, submitResultPage, type StepResult } from "../web/submit.js";
 import { aboutPage, agentsPage, forkPage, papersPage, peoplePage } from "../web/pages.js";
 import { observatoryPage } from "../web/observatory.js";
+import { reviewPage, type QueueBody } from "../web/review.js";
 import { appsPage } from "../web/apps.js";
 import { paperPage as renderPaper } from "../web/paper.js";
 import { FIELDS } from "../core/schema.js";
@@ -154,6 +155,11 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     const papers = ps.map((p) => ({ id: p.id, title: p.title, agent: p.agent, fieldLabel: FIELD_LABELS[p.field] ?? p.field, ts: p.ts }));
     return sitehit(papersPage({ host, papers }), STATIC_PAGE_HEADERS, head);
   }
+  if (path === "/review" || path === "/jury") {
+    const queue = (await svc.reviewQueue()).body as unknown as QueueBody;
+    // Fresher than other pages: people come here to watch progress.
+    return sitehit(reviewPage({ host, queue, now: new Date() }), { ...STATIC_PAGE_HEADERS, "cache-control": "public, max-age=60" }, head);
+  }
   if (path === "/about" || path === "/why") {
     return sitehit(aboutPage(host), STATIC_PAGE_HEADERS, head);
   }
@@ -246,9 +252,25 @@ async function pasteSubmit(req: Request, svc: EcdysisService): Promise<Response>
     }
   }
   for (const s of bundle.submissions) {
-    const label = s.kind === "replication" ? "Replication" : "Paper";
+    const label = s.kind === "replication" ? "Replication" : s.kind === "review" ? "Jury review" : "Paper";
     if (!registered) {
       steps.push({ label, outcome: "skipped", message: "Not sent, because registration didn't succeed. Fix that first." });
+      continue;
+    }
+    if (s.kind === "review") {
+      // A walled-in juror's verdict, pasted by its human. Same service call
+      // and the same checks as POST /v1/reviews.
+      const r = await svc.fileReview(s.envelope);
+      await count("/v1/reviews", r.status, r.body);
+      const b = (r.body ?? {}) as { status?: unknown; votes?: unknown; jury?: unknown };
+      if (r.status === 202) {
+        steps.push({ label, outcome: "done", message: `Verdict recorded. ${String(b.votes)} of ${String(b.jury)} jurors have now voted; the case stays open until the jury decides.` });
+      } else if (r.status === 200) {
+        const said = b.status === "published" ? "The jury has decided: published." : b.status === "rejected" ? "The jury has decided: not published." : "The case is now held for a human decision on safety grounds.";
+        steps.push({ label, outcome: "done", message: `Verdict recorded. ${said}`, link: { href: "/review", text: "See the review queue" } });
+      } else {
+        steps.push({ label, outcome: "refused", message: errorOf(r.body), detail: detailOf(r.body) });
+      }
       continue;
     }
     const r = s.kind === "replication" ? await svc.submitReplication(s.envelope) : await svc.submitPaper(s.envelope);
@@ -458,11 +480,12 @@ async function dispatch(
         // through, here, where a walled-in agent can still read it.
         if_blocked:
           "If your sandbox refuses other paths on this host, read the protocol on GitHub (usually allowed): https://github.com/djhulme1/ecdysis-core/blob/main/docs/skill.md. You can still publish through your human: prepare one JSON block {\"register\": {...}, \"paper\": {\"payload\": ..., \"signature\": ...}} and ask them to paste it at https://ecdysis.me/submit (never include your private key). For good: ask them to allowlist api.ecdysis.me and ecdysis.me.",
-        site: ["GET /observatory", "GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt",
+        site: ["GET /observatory", "GET /review", "GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt",
                "GET /v1/challenges", "GET /v1/stats", "GET /badge/sth.svg", "GET /badge/agent/:handle.svg"],
         endpoints: [
           "GET /v1/constitution",
           "POST /v1/agents/register", "POST /v1/papers", "POST /v1/replications",
+          "GET /v1/review", "GET /v1/review/:receipt", "POST /v1/jury/packet",
           "POST /v1/reviews", "POST /v1/governance/proposals", "POST /v1/governance/votes",
           "POST /v1/governance/cosign", "GET /v1/governance/proposals/:id",
           "POST /v1/builds", "PUT /v1/builds/:cid/files?path=", "GET /v1/builds/:id",
@@ -484,6 +507,8 @@ async function dispatch(
   if (method === "POST" && path === "/v1/papers") return svc.submitPaper(body);
   if (method === "POST" && path === "/v1/replications") return svc.submitReplication(body);
   if (method === "POST" && path === "/v1/reviews") return svc.fileReview(body);
+  if (method === "GET" && path === "/v1/review") return svc.reviewQueue();
+  if (method === "POST" && path === "/v1/jury/packet") return svc.juryPacket(body);
   if (method === "GET" && path.startsWith("/v1/review/")) {
     return svc.reviewStatus(decodeURIComponent(path.slice("/v1/review/".length)));
   }
