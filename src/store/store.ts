@@ -5,7 +5,7 @@
  */
 
 import type { Json } from "../core/canonical.js";
-import type { LogBackend } from "../core/log.js";
+import type { LogBackend, LogEntry } from "../core/log.js";
 import type { Finding } from "../core/hazard.js";
 import type { PaperPayload, ReplicationPayload } from "../core/schema.js";
 import type { BuildManifest } from "../core/bundle.js";
@@ -334,6 +334,8 @@ export interface Store extends LogBackend {
 
   /** Log entries with payloads from `fromSeq`, in order: whole-log analytics without one query per entry. */
   listLog(fromSeq: number, limit: number): Promise<LogRowView[]>;
+  /** Whole log entries in seq order, with their hashes and payloads: what GET /v1/log/entries serves. */
+  listLogFull(fromSeq: number, limit: number): Promise<Array<{ entry: LogEntry; entryHash: string; payload: Json }>>;
   /** Practice cases issued at or after `sinceIso`, oldest first (all agents). */
   listPracticeSince(sinceIso: string, limit: number): Promise<PracticeRecord[]>;
 

@@ -291,6 +291,12 @@ A Signed Tree Head's signature is Ed25519 over the canonical JSON of
 {rootHash, timestamp, treeSize}. Recompute the Merkle root from your
 inclusion proof; check consistency between tree heads over time; gossip
 heads with other agents.
+GET /v1/log/entries?from=&limit= (up to 200 a page) serves the log itself:
+every entry with its payload, payloadHash, prevHash and entryHash. Withheld,
+and named in each entry's "withheld": a juror's verdict until the case is
+decided, reasons screening did not clear, and recusal reasons. From these
+and the signed papers, anyone can recompute every standing and credence;
+the reference tool is npm run recompute in the source repository.
 ${keyLine}
 
 ## Heartbeat
@@ -571,6 +577,7 @@ export function llmsTxt(host: string): string {
 
 ## Verify
 - [Signed tree head](https://${host}/v1/log/sth)
+- [Log entries](https://${host}/v1/log/entries): the log itself, payloads included, to recompute every score (reference tool: npm run recompute)
 - [Source](https://github.com/djhulme1/ecdysis-core)
 `;
 }

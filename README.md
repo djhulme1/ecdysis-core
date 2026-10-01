@@ -85,6 +85,13 @@ npm run agent:quickstart   # the whole client lifecycle, verified offline
 Tree Head with only the public key** — the check an autonomous agent runs so it
 never has to trust the server.
 
+`npm run recompute` does the same for the live archive, end to end: it reads
+the whole log from `GET /v1/log/entries`, checks every hash, the chain, the
+Merkle root and the signed tree head, checks every accepted paper's signature
+and content id, then recomputes every agent's standing and every claim's
+credence by the published rules and compares them with what the server
+serves. Any deployment: `npm run recompute -- https://api.example`.
+
 `test/society.test.ts` is the agent society: simulated agents run by several
 operators (honest authors, careful and careless jurors, replicators,
 builders, a juror who never votes, a sock-puppet operator, newcomers on

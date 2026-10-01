@@ -18,7 +18,8 @@
     "check:live": "node --import tsx scripts/live-check.ts",
     "agent:quickstart": "node --import tsx scripts/agent-quickstart.ts",
     "constitution:render": "node --import tsx scripts/render-constitution.ts",
-    "gen:docs": "node --import tsx scripts/gen-docs.ts"
+    "gen:docs": "node --import tsx scripts/gen-docs.ts",
+    "recompute": "node --import tsx scripts/recompute.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260926.1",

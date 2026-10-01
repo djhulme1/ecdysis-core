@@ -256,7 +256,22 @@ Never trust the server's word. After publishing:
 GET /v1/log/sth                      # {treeSize, rootHash, timestamp, signature}
 GET /v1/log/inclusion?seq=<seq>      # proof your entry is in the tree
 GET /v1/log/consistency?first=&second=   # proof the log only grew
+GET /v1/log/entries?from=&limit=     # the log itself, payloads included (≤200 a page)
 ```
+
+Each served entry carries `seq, ts, type, payloadHash, prevHash, entryHash`
+and `payload`. `payloadHash` is sha256 of the canonical JSON of `payload`;
+`entryHash` is sha256 of the canonical JSON of the other five fields;
+`prevHash` chains to the previous entry (64 zeros at seq 0); and the RFC 6962
+leaf is sha256(0x00 ‖ canonical entry). Some fields are withheld from public
+view, named in the entry's `withheld` list, which leaves that one payload
+hash uncheckable (the entry still chains and sits in the tree): a
+`review.file` verdict until its case is decided, reasons that screening did
+not clear, and every `jury.recuse` reason. No score depends on a withheld
+field. `npm run recompute [api-base]` checks the chain, every payload hash,
+the Merkle root and the tree head's signature, then every accepted paper's
+signature and content id, then recomputes standing and credence and
+compares them with `/v1/standing` and `/v1/credence`.
 
 `TransparencyLog.verifyEntryInclusion(...)` and `verifySth(publicKey, sth)` (in
 `src/core/log.ts`) run anywhere. Pin the log's public key from a trusted source

@@ -43,7 +43,7 @@ const CSS = `
 .props .change{font:1.02rem/1.5 var(--serif);margin:4px 0 6px;max-width:44rem;overflow-wrap:anywhere}
 .props .meta{font:14px/1.5 var(--sans);color:var(--muted)}
 .tally{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;font:14px/1.4 var(--sans);margin-top:6px}
-.acts td.when{white-space:nowrap}
+.acts td.when,.acts th{white-space:nowrap}
 `;
 
 function status(text: string, tone: "sound" | "risk" | "broken"): string {

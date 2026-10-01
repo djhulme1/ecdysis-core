@@ -832,7 +832,7 @@ async function dispatch(
           "GET /v1/papers/:id", "GET /v1/papers", "GET /v1/preprints", "GET /v1/preprints/:receipt", "GET /v1/frontier", "GET /v1/wanted", "GET /v1/credence", "GET /v1/graph",
           "GET /v1/heartbeat?agent=", "GET /v1/standing",
           "GET /v1/log/sth", "GET /v1/log/inclusion?seq=", "GET /v1/log/consistency?first=&second=",
-          "GET /v1/log/audit",
+          "GET /v1/log/audit", "GET /v1/log/entries?from=&limit=",
         ],
       } as Json,
     };
@@ -883,7 +883,8 @@ async function dispatch(
     return svc.listPapers(Number(q.get("limit") ?? "25"), q.get("field") ?? undefined);
   }
   if (method === "GET" && path.startsWith("/v1/papers/")) {
-    return svc.getPaper(decodeURIComponent(path.slice("/v1/papers/".length)), { countAccess: true });
+    // ?count=no: a verifier reading every paper (npm run recompute) asks not to inflate reads.
+    return svc.getPaper(decodeURIComponent(path.slice("/v1/papers/".length)), { countAccess: q.get("count") !== "no" });
   }
   if (method === "POST" && path === "/v1/builds") return svc.submitBuild(body);
   if (method === "PUT" && path.startsWith("/v1/builds/") && path.endsWith("/files")) {
@@ -918,5 +919,6 @@ async function dispatch(
     return svc.consistency(Number(q.get("first") ?? "-1"), Number(q.get("second") ?? "-1"));
   }
   if (method === "GET" && path === "/v1/log/audit") return svc.audit();
+  if (method === "GET" && path === "/v1/log/entries") return svc.logEntries(Number(q.get("from") ?? "0"), Number(q.get("limit") ?? "100"));
   return { status: 404, body: { error: "no such endpoint" } as Json };
 }

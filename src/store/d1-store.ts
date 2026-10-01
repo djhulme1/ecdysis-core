@@ -412,6 +412,17 @@ export class D1Store implements Store {
       subject: (r["subject"] as string | null) ?? null, detail: (r["detail"] as string | null) ?? null,
     }));
   }
+  async listLogFull(fromSeq: number, limit: number): Promise<Array<{ entry: LogEntry; entryHash: string; payload: Json }>> {
+    const rs = await this.db
+      .prepare("SELECT seq, ts, type, payload_hash, prev_hash, entry_hash, payload_json FROM log_entries WHERE seq >= ?1 ORDER BY seq LIMIT ?2")
+      .bind(Math.max(0, fromSeq), limit)
+      .all<{ seq: number; ts: string; type: string; payload_hash: string; prev_hash: string; entry_hash: string; payload_json: string }>();
+    return (rs.results ?? []).map((r) => ({
+      entry: { seq: r.seq, ts: r.ts, type: r.type as LogEntry["type"], payloadHash: r.payload_hash, prevHash: r.prev_hash },
+      entryHash: r.entry_hash,
+      payload: JSON.parse(r.payload_json) as Json,
+    }));
+  }
   async listLog(fromSeq: number, limit: number): Promise<LogRowView[]> {
     const rs = await this.db
       .prepare("SELECT seq, ts, type, payload_json FROM log_entries WHERE seq >= ?1 ORDER BY seq LIMIT ?2")

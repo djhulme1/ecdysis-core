@@ -3230,6 +3230,66 @@ export class EcdysisService {
     }
   }
 
+  /**
+   * GET /v1/log/entries: the log itself, payloads included, so anyone can
+   * recompute every score and verify every hash (Article 0.4). Withheld,
+   * and marked so: a juror's verdict and reasons until the case is decided
+   * (a pending verdict must not anchor the jurors still to vote), reasons
+   * that screening did not clear for public view, and recusal reasons
+   * (never screened). Who served on a case stays visible, as in the review
+   * queue. A withheld entry still chains and sits in the Merkle tree; only
+   * its payload hash cannot be checked from what is shown.
+   */
+  async logEntries(from: number, limit: number): Promise<ApiResult> {
+    const size = await this.log.size();
+    const start = Number.isInteger(from) && from >= 0 ? from : 0;
+    const n = Math.min(Math.max(Number.isInteger(limit) ? limit : 100, 1), 200);
+    const rows = start < size ? await this.store.listLogFull(start, n) : [];
+    const cases = new Map<string, QuarantineRecord | null>();
+    const caseOf = async (id: string): Promise<QuarantineRecord | null> => {
+      if (!cases.has(id)) cases.set(id, /^[0-9a-f]{64}$/.test(id) ? await this.store.getQuarantine(id) : null);
+      return cases.get(id) ?? null;
+    };
+    const entries: Json[] = [];
+    for (const r of rows) {
+      let payload = r.payload as Record<string, unknown>;
+      const withheld: string[] = [];
+      if (r.entry.type === "review.file") {
+        const q = await caseOf(String(payload["subject"] ?? ""));
+        const decided = !!q && (q.status === "released" || q.status === "rejected");
+        const vote = q?.votes.find((v) => v.seq === r.entry.seq);
+        const shown = { ...payload };
+        if (!decided) {
+          shown["verdict"] = null;
+          withheld.push("verdict");
+        }
+        if (typeof payload["rationale"] === "string" && !(decided && vote?.publicReasons === true)) {
+          shown["rationale"] = null;
+          withheld.push("rationale");
+        }
+        payload = shown;
+      }
+      if (r.entry.type === "jury.recuse" && typeof payload["reason"] === "string") {
+        payload = { ...payload, reason: null };
+        withheld.push("reason");
+      }
+      entries.push({
+        seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type,
+        payloadHash: r.entry.payloadHash, prevHash: r.entry.prevHash, entryHash: r.entryHash,
+        payload: payload as Json,
+        ...(withheld.length ? { withheld } : {}),
+      } as unknown as Json);
+    }
+    const next = start + entries.length < size && entries.length > 0 ? start + entries.length : null;
+    return ok(200, {
+      version: "log-entries/0.1",
+      treeSize: size, from: start, count: entries.length, next,
+      verify: "For each entry: payloadHash = sha256 of the canonical JSON of payload (unless fields are withheld); entryHash = sha256 of the canonical JSON of {seq, ts, type, payloadHash, prevHash}; prevHash = the previous entry's entryHash (64 zeros for seq 0); the Merkle root over leaf hashes sha256(0x00 || canonical entry) matches the signed tree head (GET /v1/log/sth). npm run recompute does all of it, then recomputes standing and credence.",
+      withheld: "review.file: the verdict until the case is decided, and reasons not cleared for public view by screening; jury.recuse: the reason. The rest of each payload is shown.",
+      entries,
+    });
+  }
+
   async consistency(first: number, second: number): Promise<ApiResult> {
     const n = await this.log.size();
     if (!(Number.isInteger(first) && Number.isInteger(second)) || first < 0 || second > n || first > second) {

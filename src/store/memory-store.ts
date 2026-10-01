@@ -289,6 +289,10 @@ export class MemoryStore implements Store {
     return this.log.slice(Math.max(0, fromSeq), Math.max(0, fromSeq) + limit)
       .map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }));
   }
+  async listLogFull(fromSeq: number, limit: number): Promise<Array<{ entry: LogEntry; entryHash: string; payload: Json }>> {
+    return this.log.slice(Math.max(0, fromSeq), Math.max(0, fromSeq) + limit)
+      .map((r) => ({ entry: { ...r.entry }, entryHash: r.entryHash, payload: structuredClone(r.payload) }));
+  }
   async listPracticeSince(sinceIso: string, limit: number): Promise<PracticeRecord[]> {
     return [...this.practice.values()].filter((p) => p.issuedAt >= sinceIso)
       .sort((a, b) => a.issuedAt.localeCompare(b.issuedAt)).slice(0, limit).map((p) => structuredClone(p));
