@@ -102,9 +102,44 @@ describe("the operator console: the lock", () => {
     }), w.svc, new MemoryRateLimiter(100), w.opts);
     assert.equal(noOrigin.status, 403, "no Origin header, no action");
     assert.equal((await w.post("/operator/emails/draft", { ...draft, csrf: "0".repeat(40) })).status, 403);
+    // A null Origin is only acceptable when the browser itself vouches for same-origin.
+    assert.equal((await w.post("/operator/emails/draft", draft, { origin: "null", "sec-fetch-site": "cross-site" })).status, 403);
+    const nullNoSite = await route(new Request("https://ecdysis.me/operator/emails/draft", {
+      method: "POST", headers: { "cf-access-jwt-assertion": w.token, "content-type": "application/x-www-form-urlencoded", origin: "null" }, body: new URLSearchParams({ csrf: w.csrf, ...draft }).toString(),
+    }), w.svc, new MemoryRateLimiter(100), w.opts);
+    assert.equal(nullNoSite.status, 403, "Origin null without Sec-Fetch-Site, no action");
     assert.equal((await w.store.listHerald(10)).length, 0, "nothing was drafted");
     const ok = await w.post("/operator/emails/draft", draft);
     assert.equal(ok.status, 303);
+  });
+
+  it("accepts the console's own form posts as real browsers send them", async () => {
+    const w = await world();
+    // The console's pages must not use no-referrer: under it, browsers send
+    // `Origin: null` on every form post, and the console refused its own forms.
+    const page = await w.get("/operator/agents");
+    assert.equal(page.headers.get("referrer-policy"), "same-origin");
+    const draft = { to: "author@example.edu", subject: "Your result was reproduced", kind: "replication", body: "A".repeat(80) };
+    const r = await w.post("/operator/emails/draft", draft, { origin: "null", "sec-fetch-site": "same-origin" });
+    assert.equal(r.status, 303, "a same-origin post with Origin null goes through");
+    assert.equal((await w.store.listHerald(10)).length, 1);
+  });
+
+  it("invites an operator straight from its agent's row", async () => {
+    const w = await world();
+    const { generateKeyPair } = await import("../src/core/crypto.js");
+    const { constitutionHash, CONSTITUTION_VERSION } = await import("../src/core/constitution.js");
+    const kp = await generateKeyPair();
+    const reg = await w.svc.registerAgent({ handle: "Instar-1", publicKey: kp.publicKey, operatorId: "op-instar", constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() } });
+    assert.equal(reg.status, 201);
+    const html = await (await w.get("/operator/agents")).text();
+    assert.match(html, /name="operatorId" value="op-instar"/, "a one-click invite form on the row");
+    const r = await w.post("/operator/jurors/invite", { operatorId: "op-instar", confirm: "yes" }, { origin: "null" });
+    assert.equal(r.status, 303);
+    assert.match(r.headers.get("location") ?? "", /m=invited/);
+    assert.ok(await w.store.getJurorOperator("op-instar"));
+    const after = await (await w.get("/operator/agents")).text();
+    assert.doesNotMatch(after, /name="operatorId" value="op-instar"/, "no button once invited");
   });
 });
 

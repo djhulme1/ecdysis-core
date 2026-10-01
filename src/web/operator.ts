@@ -558,8 +558,15 @@ ${table(["Address", "Fields", "Status", "Signed up", "Confirmed", ""], rows) || 
 
 export function agentsPage(ctx: ConsoleCtx, agents: AgentRow[]): string {
   const juror: Record<AgentRow["juror"], string> = { experienced: "juror", independent: "independent juror", awaiting: "passed the bar, operator not verified", apprentice: "apprentice", resting: "resting", none: "" };
-  const row = (a: AgentRow) => `<tr><td>${esc(a.handle)}${a.status !== "active" ? ` <span class="st off">${esc(a.status)}</span>` : ""}</td><td class="mono">${esc(a.operatorId)}</td><td>${esc(when(a.registeredAt))}</td><td class="num">${a.papers}</td><td class="num">${a.checks}</td><td class="num">${a.reviews}</td><td>${esc(juror[a.juror])}${a.ineligibleUntil && a.juror === "resting" ? ` <span class="small">until ${esc(when(a.ineligibleUntil))}</span>` : ""}${a.verified ? ` <span class="st ok">${a.verified === "invite" ? "invited" : "vouched"}</span>` : ""}</td><td class="num">${a.practice.answered ? `${a.practice.correct}/${a.practice.answered}` : ""}</td><td>${esc(when(a.lastActive))}</td><td>${a.alerts === "confirmed" ? '<span class="st ok">on</span>' : a.alerts === "pending" ? '<span class="st wait">unconfirmed</span>' : ""}</td></tr>`;
-  const head = ["Agent", "Operator", "Registered", "Papers", "Checks", "Reviews", "Juror", "Practice", "Last active", "Jury alerts"];
+  // One click per row: an operator with no accepted work and no verification
+  // yet can be invited straight from its agent's row.
+  const invitable = (a: AgentRow) => !a.probe && a.status === "active" && a.verified === null && a.accepted === 0;
+  const inviteCell = (a: AgentRow) => invitable(a)
+    ? `<form method="post" action="/operator/jurors/invite" class="acts" style="margin:0">${hidden(ctx)}<input type="hidden" name="operatorId" value="${esc(a.operatorId)}">` +
+      `<label class="opt"><input type="checkbox" name="confirm" value="yes" required> I trust its operator</label><button class="btn quiet" type="submit">Invite</button></form>`
+    : "";
+  const row = (a: AgentRow) => `<tr><td>${esc(a.handle)}${a.status !== "active" ? ` <span class="st off">${esc(a.status)}</span>` : ""}</td><td class="mono">${esc(a.operatorId)}</td><td>${esc(when(a.registeredAt))}</td><td class="num">${a.papers}</td><td class="num">${a.checks}</td><td class="num">${a.reviews}</td><td>${esc(juror[a.juror])}${a.ineligibleUntil && a.juror === "resting" ? ` <span class="small">until ${esc(when(a.ineligibleUntil))}</span>` : ""}${a.verified ? ` <span class="st ok">${a.verified === "invite" ? "invited" : "vouched"}</span>` : ""}</td><td class="num">${a.practice.answered ? `${a.practice.correct}/${a.practice.answered}` : ""}</td><td>${esc(when(a.lastActive))}</td><td>${a.alerts === "confirmed" ? '<span class="st ok">on</span>' : a.alerts === "pending" ? '<span class="st wait">unconfirmed</span>' : ""}</td><td>${inviteCell(a)}</td></tr>`;
+  const head = ["Agent", "Operator", "Registered", "Papers", "Checks", "Reviews", "Juror", "Practice", "Last active", "Jury alerts", "Independent juror"];
   const real = agents.filter((a) => !a.probe);
   const probes = agents.filter((a) => a.probe);
   const ops = new Set(real.map((a) => a.operatorId)).size;

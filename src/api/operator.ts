@@ -45,7 +45,10 @@ const HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "no-store, private",
   "x-robots-tag": "noindex, nofollow, noarchive",
-  "referrer-policy": "no-referrer",
+  // Not "no-referrer": under that policy browsers send `Origin: null` on the
+  // console's own form posts, which the same-origin check below would refuse.
+  // "same-origin" still sends nothing to any other site.
+  "referrer-policy": "same-origin",
   "x-content-type-options": "nosniff",
   "strict-transport-security": "max-age=31536000; includeSubDomains",
   "cross-origin-opener-policy": "same-origin",
@@ -152,9 +155,18 @@ export async function handleConsole(req: Request, deps: ConsoleDeps): Promise<Re
   const actor = v.email;
 
   if (method === "POST") {
+    // Same-origin posts only. Browsers set Sec-Fetch-Site themselves and page
+    // script cannot forge it, so "same-origin" is the strong signal; with it,
+    // an Origin of "null" (what browsers send under a strict referrer policy)
+    // is fine. Without Sec-Fetch-Site (older browsers) the Origin must be this
+    // console's own. The form token bound to the sign-in is required always.
     const origin = req.headers.get("origin");
     const site = req.headers.get("sec-fetch-site");
-    if (origin !== `https://${deps.access.host}` || (site !== null && site !== "same-origin")) return page(403, P.refusedPage("cross-site"));
+    const own = `https://${deps.access.host}`;
+    const sameOrigin = site === "same-origin"
+      ? origin === null || origin === "null" || origin === own
+      : site === null && origin === own;
+    if (!sameOrigin) return page(403, P.refusedPage("cross-site"));
     if (Number(req.headers.get("content-length") ?? "0") > MAX_FORM_BYTES) return page(413, P.refusedPage("too-large"));
     const text = await req.text();
     if (text.length > MAX_FORM_BYTES) return page(413, P.refusedPage("too-large"));
