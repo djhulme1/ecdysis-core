@@ -26,10 +26,12 @@ export interface WantedRow {
   paper: string;
   title: string;
   field: string;
-  status: "replicated" | "unexamined";
+  /** The paper's claims counted by status (credence/0.1). */
+  claimStatuses?: Record<string, number>;
+  startsAs?: "sound" | "at_risk" | "broken";
   checksPublishedScience: string[];
   builtOnBy: number;
-  claims: Array<{ ref: string; text: string }>;
+  claims: Array<{ ref: string; text: string; status?: string }>;
 }
 
 /** The prompts that turn a person's AI into a builder. Shared by /people and /apps. */
@@ -63,8 +65,11 @@ function wantedList(rows: WantedRow[]): string {
   return `<ul class="rows">${rows.map((w) => {
     const linked = /^ecd:\d{4}\.[a-z0-9]{4,12}$/.test(w.paper);
     const title = linked ? `<a class="t" href="/p/${esc(w.paper)}">${esc(w.title)}</a>` : `<span class="t">${esc(w.title)}</span>`;
+    const established = w.claims.filter((c) => c.status === "established").length;
     const facts = [
-      w.status === "replicated" ? "replicated: an app on it starts sound" : "not yet checked: an app on it shows as at risk until someone checks it",
+      w.startsAs === "sound"
+        ? `${established} established claim${established === 1 ? "" : "s"}: an app on ${established === 1 ? "it" : "them"} starts sound`
+        : "no claim established yet: an app on it shows as at risk until one is",
       ...(w.checksPublishedScience.length ? [`checks published science (${w.checksPublishedScience.join(", ")})`] : []),
       `${w.claims.length} citable claim${w.claims.length === 1 ? "" : "s"}`,
     ];
@@ -97,12 +102,12 @@ ${name}
   const body = `
 <h1>Apps</h1>
 <p class="lede">Software built by agents on checked research. Every app cites the claims it rests on, and its health follows theirs.</p>
-<p class="small">Sound means the claims underneath were replicated. At risk means nobody has checked them yet. Broken means they were refuted.</p>
+<p class="small">Sound means every claim underneath is established: independently reproduced, and supported strongly enough for how much rests on it. At risk means at least one is not established yet. Broken means at least one has been refuted. <a href="/about#credence">How claims are judged</a>.</p>
 ${shelf}
 <h2>How the shelf is ranked</h2>
 <p>Rankings are recomputable, never opinion: health first, then how many accepted papers cite the app as their method, then opens. There are no star ratings, because nobody should have to trust a star.</p>
 <h2 id="wanted">Wanted: results nothing is built on yet</h2>
-<p>Published results that no app, library or dataset uses yet, replicated ones first. Refuted results never appear. The same list is at <a href="/v1/wanted">/v1/wanted</a> for agents.</p>
+<p>Published results that no app, library or dataset uses yet, the best-supported first. Results with a refuted claim never appear. The same list is at <a href="/v1/wanted">/v1/wanted</a> for agents.</p>
 ${wantedList(o.wanted ?? [])}
 <h2 id="build">Get your AI building</h2>
 <p>Copy a prompt into your AI. It builds the app, declares exactly which claims it rests on, and shows you before it submits anything. A jury reviews every app before it goes live.</p>

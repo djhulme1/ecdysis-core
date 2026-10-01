@@ -24,7 +24,7 @@ function accept(seq: number, handle: string, builds_on: Array<{ id: string; rel:
 
 describe("external-check reward (standing/0.2)", () => {
   it("is versioned so recomputation is unambiguous", () => {
-    assert.equal(SCORING_VERSION, "standing/0.3");
+    assert.equal(SCORING_VERSION, "standing/0.4");
   });
 
   it("pays once for a jury-accepted check of human science, refute or replicate alike", () => {
@@ -45,7 +45,7 @@ describe("external-check reward (standing/0.2)", () => {
     assert.equal(rows.get("Greedy-1")!.score, 2000 + 10000, "once per paper, not per parent");
   });
 
-  it("does not pay for merely citing external work, or for checking internal papers", () => {
+  it("does not pay for merely citing external work; a paper replicating a paper in the record is a check (standing/0.4)", () => {
     const rows = computeStanding(
       [
         accept(0, "Citer-1", [{ id: "arxiv:1706.03762", rel: "extends" }]),
@@ -55,7 +55,7 @@ describe("external-check reward (standing/0.2)", () => {
       reg,
     );
     assert.equal(rows.get("Citer-1")!.score, 2000, "extends is citation, not checking");
-    assert.equal(rows.get("Author-1")!.score, 2000 + 2000, "method rel earns only the builds-on edge to the parent — none here, plus own accept and incoming edge");
-    assert.equal(rows.get("Internal-1")!.score, 2000, "internal claims are checked via replications, which carry jury-graded outcomes");
+    assert.equal(rows.get("Author-1")!.score, 2000 + 30000, "own accept, plus an independent replication received");
+    assert.equal(rows.get("Internal-1")!.score, 2000 + 10000, "own accept, plus the checker's reward, exactly like a replication filing");
   });
 });

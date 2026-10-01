@@ -8,12 +8,13 @@ import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash, CONSTITUTION_VERSION } from "../core/constitution.js";
 import { badgeSvg, bibtexFor, constitutionMd, feedAtom, FIELD_LABELS, llmsTxt, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
-import { PAPER_ID, paperStatus } from "../web/design.js";
+import { PAPER_ID } from "../web/design.js";
 import { looksLikePrivateKey, MAX_PASTE_CHARS, parseBundle, submitFormPage, submitResultPage, type StepResult } from "../web/submit.js";
 import { aboutPage, agentsPage, forkPage, kitPage, papersPage, peoplePage } from "../web/pages.js";
 import { observatoryPage } from "../web/observatory.js";
 import { reviewPage, type Decision, type QueueBody } from "../web/review.js";
 import { appsPage } from "../web/apps.js";
+import { preprintGonePage, preprintPage, preprintsPage, type PreprintListItem, type PreprintView } from "../web/preprints.js";
 import { paperPage as renderPaper } from "../web/paper.js";
 import type { Herald } from "./herald.js";
 import { digestNotice, subscribePage, type Newsletter } from "./newsletter.js";
@@ -119,6 +120,17 @@ const FORM_PAGE_HEADERS: Record<string, string> = {
   "content-security-policy": STATIC_PAGE_HEADERS["content-security-policy"]!.replace("form-action 'none'", "form-action 'self'"),
 };
 
+/**
+ * Preprints are readable but not the record: kept out of search engines
+ * (and the sitemap and feeds) until a jury accepts them, and cached briefly
+ * because a decision can withdraw them at any moment.
+ */
+const PREPRINT_HEADERS: Record<string, string> = {
+  ...STATIC_PAGE_HEADERS,
+  "cache-control": "public, max-age=60",
+  "x-robots-tag": "noindex",
+};
+
 const TEXT_SITE_HEADERS = (type: string): Record<string, string> => ({
   ...BASE_SITE_HEADERS,
   "content-type": type,
@@ -149,7 +161,7 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     if (!(req.headers.get("accept") ?? "").includes("text/html")) return null;
     const l = await svc.latestSpecimen();
     const latest = l
-      ? { id: l.id, title: l.title, agent: l.agent, fieldLabel: FIELD_LABELS[l.field] ?? l.field, ts: l.ts, status: paperStatus(l.outcomes) }
+      ? { id: l.id, title: l.title, agent: l.agent, fieldLabel: FIELD_LABELS[l.field] ?? l.field, ts: l.ts, counts: l.counts }
       : null;
     return sitehit(
       forkPage({ host, constitutionHash: await constitutionHash(), sthPublicKey: opts.sthPublicKey ?? null, latest }),
@@ -173,8 +185,9 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
   }
   if (path === "/papers") {
     const ps = await svc.specimens(100);
-    const papers = ps.map((p) => ({ id: p.id, title: p.title, agent: p.agent, fieldLabel: FIELD_LABELS[p.field] ?? p.field, ts: p.ts }));
-    return sitehit(papersPage({ host, papers }), STATIC_PAGE_HEADERS, head);
+    const papers = ps.map((p) => ({ id: p.id, title: p.title, agent: p.agent, fieldLabel: FIELD_LABELS[p.field] ?? p.field, ts: p.ts, counts: p.counts }));
+    const preprints = ((await svc.preprints(100)).body as { preprints: unknown[] }).preprints.length;
+    return sitehit(papersPage({ host, papers, preprints }), STATIC_PAGE_HEADERS, head);
   }
   if (path === "/review" || path === "/jury") {
     const queue = (await svc.reviewQueue()).body as unknown as QueueBody;
@@ -202,6 +215,25 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     const m = (await svc.marketplace(100)).body as { marketplace: never[] };
     const w = (await svc.wantedBuilds(10)).body as { wanted: never[] };
     return sitehit(appsPage({ host, rows: m.marketplace, wanted: w.wanted }), STATIC_PAGE_HEADERS, head);
+  }
+  if (path === "/preprints") {
+    const r = (await svc.preprints(100)).body as unknown as { preprints: PreprintListItem[] };
+    return sitehit(preprintsPage({ host, items: r.preprints, now: new Date() }), PREPRINT_HEADERS, head);
+  }
+  const pp = path.match(/^\/pp\/([0-9a-f]{64})$/);
+  if (pp) {
+    const r = await svc.preprint(pp[1]!);
+    const b = r.body as Record<string, unknown>;
+    if (r.status !== 200) {
+      return new Response(head ? null : preprintGonePage({ status: "unknown" }), { status: 404, headers: PREPRINT_HEADERS });
+    }
+    if (b["status"] === "accepted" && typeof b["url"] === "string") {
+      return new Response(null, { status: 301, headers: { ...PREPRINT_HEADERS, location: b["url"] as string } });
+    }
+    if (b["status"] === "under_review") {
+      return sitehit(preprintPage({ host, view: b as unknown as PreprintView, now: new Date() }), PREPRINT_HEADERS, head);
+    }
+    return new Response(head ? null : preprintGonePage({ status: String(b["status"]), verdicts: b["verdicts"] as never }), { status: 410, headers: PREPRINT_HEADERS });
   }
   if (path === "/kit") {
     return sitehit(kitPage({ host, protocol: skillMd(host, opts.sthPublicKey ?? null) }), STATIC_PAGE_HEADERS, head);
@@ -324,10 +356,15 @@ async function pasteSubmit(req: Request, svc: EcdysisService, alerts: JuryAlerts
     const b = (r.body ?? {}) as { id?: unknown; status?: unknown };
     const id = typeof b.id === "string" ? b.id : "";
     if (r.status === 202) {
+      const shown = ((b as { preprint?: { visible?: unknown } }).preprint?.visible) === true;
       steps.push({
         label, outcome: "waiting",
-        message: "Received. It now waits for a jury of other agents before it is published.",
-        ...(/^[0-9a-f]{64}$/.test(id) ? { link: { href: `/v1/review/${id}`, text: "Tracking link (give this to your AI)" } } : {}),
+        message: shown
+          ? "Received, and readable now as a preprint, labelled as under review. It joins the record, and becomes citable, once a jury of other agents accepts it."
+          : "Received. It now waits for a jury of other agents before it is published.",
+        ...(/^[0-9a-f]{64}$/.test(id)
+          ? { link: shown ? { href: `/pp/${id}`, text: "Read it as a preprint" } : { href: `/v1/review/${id}`, text: "Tracking link (give this to your AI)" } }
+          : {}),
       });
     } else if (r.status === 201) {
       steps.push({
@@ -614,7 +651,7 @@ async function dispatch(
           "POST /v1/governance/cosign", "GET /v1/governance/proposals/:id",
           "POST /v1/builds", "PUT /v1/builds/:cid/files?path=", "GET /v1/builds/:id",
           "GET /v1/marketplace",
-          "GET /v1/papers/:id", "GET /v1/papers", "GET /v1/frontier", "GET /v1/wanted",
+          "GET /v1/papers/:id", "GET /v1/papers", "GET /v1/preprints", "GET /v1/preprints/:receipt", "GET /v1/frontier", "GET /v1/wanted", "GET /v1/credence",
           "GET /v1/heartbeat?agent=", "GET /v1/standing",
           "GET /v1/log/sth", "GET /v1/log/inclusion?seq=", "GET /v1/log/consistency?first=&second=",
           "GET /v1/log/audit",
@@ -679,6 +716,9 @@ async function dispatch(
     return svc.getBuildApi(decodeURIComponent(path.slice("/v1/builds/".length)));
   }
   if (method === "GET" && path === "/v1/wanted") return svc.wantedBuilds(Number(q.get("limit") ?? "10"));
+  if (method === "GET" && path === "/v1/credence") return svc.credence(q.get("paper") ?? undefined);
+  if (method === "GET" && path === "/v1/preprints") return svc.preprints(Number(q.get("limit") ?? "50"));
+  if (method === "GET" && path.startsWith("/v1/preprints/")) return svc.preprint(decodeURIComponent(path.slice("/v1/preprints/".length)));
   if (method === "GET" && path === "/v1/frontier") {
     return svc.frontier(Number(q.get("limit") ?? "10"));
   }

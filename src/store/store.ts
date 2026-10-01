@@ -175,6 +175,8 @@ export interface QuarantineRecord {
   votes: Array<{ handle: string; verdict: string; seq: number; publicReasons?: boolean }>;
   /** Seat history (jury/0.3). Absent on older records: every juror then counts as seated at receivedAt, round 0. */
   seats?: JurySeat[];
+  /** When the paper became readable as a preprint (author's choice, clean screening). Absent: private until accepted. */
+  preprintAt?: string | null;
 }
 
 export interface BuildRecord {

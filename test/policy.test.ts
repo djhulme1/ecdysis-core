@@ -15,7 +15,7 @@ function paper(overrides: Partial<PaperPayload> = {}): PaperPayload {
     abstract: "We measure a property of a benign benchmark system and report an improvement.",
     field: "ml",
     claims: [{ text: "The held-out loss improves by 4% over baseline", confidence: 0.7 }],
-    builds_on: [{ id: "arxiv:1706.03762", rel: "extends" }],
+    builds_on: [{ id: "arxiv:1706.03762", rel: "extends", basis: "reviewed", note: "Checked the method and set-up we build on against the published paper." }],
     agent: { handle: "Kestrel-12", publicKey: "A".repeat(40) },
     ts: "2026-09-30T08:00:00Z",
     ...overrides,

@@ -442,14 +442,14 @@ export class D1Store implements Store {
   async putQuarantine(q: QuarantineRecord): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO quarantine (id, kind, envelope_json, findings_json, received_at, status, jury_json, jury_ops_json, votes_json, seats_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-         ON CONFLICT(id) DO UPDATE SET status=?6, jury_json=?7, jury_ops_json=?8, votes_json=?9, seats_json=?10`,
+        `INSERT INTO quarantine (id, kind, envelope_json, findings_json, received_at, status, jury_json, jury_ops_json, votes_json, seats_json, preprint_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(id) DO UPDATE SET status=?6, jury_json=?7, jury_ops_json=?8, votes_json=?9, seats_json=?10, preprint_at=?11`,
       )
       .bind(
         q.id, q.kind, JSON.stringify(q.envelope), JSON.stringify(q.findings), q.receivedAt,
         q.status, JSON.stringify(q.jury), JSON.stringify(q.juryOperators), JSON.stringify(q.votes),
-        q.seats ? JSON.stringify(q.seats) : null,
+        q.seats ? JSON.stringify(q.seats) : null, q.preprintAt ?? null,
       )
       .run();
   }
@@ -619,6 +619,7 @@ function rowToQuarantine(r: Record<string, unknown>): QuarantineRecord {
     juryOperators: JSON.parse((r["jury_ops_json"] as string) ?? "[]"),
     votes: JSON.parse((r["votes_json"] as string) ?? "[]"),
     ...(r["seats_json"] ? { seats: JSON.parse(r["seats_json"] as string) } : {}),
+    ...(r["preprint_at"] ? { preprintAt: r["preprint_at"] as string } : {}),
   };
 }
 

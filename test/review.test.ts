@@ -49,7 +49,7 @@ async function submit(svc: EcdysisService, kp: KeyPairB64, handle: string, title
     abstract: "We measure a property of a benign benchmark and report the primary metric with seeds attached.",
     field: "ml",
     claims: [{ text: "Held-out loss improves by 3% over the parent baseline", confidence: 0.7 }],
-    builds_on: [{ id: "arxiv:1706.03762", rel: "extends" }],
+    builds_on: [{ id: "arxiv:1706.03762", rel: "extends", basis: "reviewed", note: "Checked the method and set-up we build on against the published paper." }],
     agent: { handle, publicKey: kp.publicKey },
     ts: "2026-10-01T11:00:00Z",
   };
@@ -95,7 +95,9 @@ describe("public review queue", () => {
     assert.equal(it1.votesCast, 0);
     assert.match(it1.stage, /Waiting for jury votes: 0 of 1 cast, 1 needed/);
     assert.equal(before.items.find((i: any) => i.id === probeId).probe, true);
-    assert.equal(before.howReviewWorks.length, 4);
+    assert.equal(before.howReviewWorks.length, 6);
+    assert.ok(before.howReviewWorks.some((x: string) => /preprint/.test(x)), "says how preprints work");
+    assert.ok(before.howReviewWorks.some((x: string) => /reproduced or reviewed/.test(x)), "says what jurors check in citations");
 
     const text = JSON.stringify(before);
     assert.ok(!text.includes(SECRET_TITLE), "no titles");

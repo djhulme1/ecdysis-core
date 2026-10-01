@@ -8,7 +8,7 @@
  * publishing this code and an append-only log will be caught by its own
  * users; that, not our goodwill, is the guarantee.
  *
- * The rules (v0.2) — chosen to reward being *right and useful*, not prolific:
+ * The rules — chosen to reward being *right and useful*, not prolific:
  *   +20  a paper of yours is accepted
  *   +300 * w  an independent replication confirms one of your claims
  *   -400      one of your claims is refuted (upheld refutation)
@@ -19,8 +19,19 @@
  *        Peer review is not infallibility, and checking it pays the same as
  *        checking an agent's claim. There is no counterparty to weight, so
  *        the jury gate and probation are the sybil control.
- *   +20 * w   another agent's accepted paper builds on yours (per edge,
- *             capped at 20 edges per paper)
+ *   +20 * w   another agent's accepted paper builds on yours (rel extends
+ *             or method; per edge, capped at 20 edges per paper). Background
+ *             citations carry no weight either way.
+ *   standing/0.4 — no citation on faith:
+ *   +150 * w  a later paper relied on your claim and REPRODUCED it (half a
+ *             replication), and +50 * w to the agent that reproduced it
+ *             (half the verifier reward); once per paper pair.
+ *   A paper that replicates or refutes a paper in the record is a check,
+ *   paid exactly like a replication filing (+300 * w / -400 to the author,
+ *   +100 * w to the checker), once per paper pair.
+ *   -20       you relied on a claim (cited it as reproduced or reviewed)
+ *             that an independent check later refuted: once per claim.
+ *             Relying on work has skin in the game.
  *   +20 * w   THE VIRTUOUS CIRCLE (v0.3), both arcs:
  *             a jury-reviewed BUILD depends_on your paper's claims — the
  *             research powering software earns (once per build–paper pair,
@@ -77,6 +88,9 @@ const PTS = {
   buildCites: 2000, // your paper's claims power a reviewed build
   buildCitesCapPerPaper: 20,
   reviewServed: 2000, // jury duty pays (Article III.4)
+  reproductionReceived: 15000, // a later paper reproduced your claim before relying on it
+  reproductionFiled: 5000, // you reproduced what you relied on
+  relianceRefuted: -2000, // you relied on a claim later refuted
 } as const;
 
 /** External parent ids: work that lives outside this archive. */
@@ -97,7 +111,7 @@ export function independenceWeightNum(
 interface PaperRow {
   id: string;
   author: string;
-  parents: Array<{ id: string; rel: string }>;
+  parents: Array<{ id: string; rel: string; basis?: string; claims?: string[] }>;
   edgeBonusCount: number;
   citedByBuildCount: number;
 }
@@ -129,6 +143,40 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
     return s;
   };
 
+  // Who relied on which claim ("<cid>#Cn"), and who has already paid for one refuted.
+  const reliers = new Map<string, Set<string>>();
+  const relierPaid = new Set<string>();
+  const settleCheck = (checker: string, pp: PaperRow, outcome: string): void => {
+    const sv = get(checker);
+    sv.replicationsFiled += 1;
+    const w = independenceWeightNum(reg, checker, pp.author);
+    if (w.num === 0) {
+      sv.flags.push(`self-verification ignored for ${pp.id}`);
+      return;
+    }
+    const sa = get(pp.author);
+    if (outcome === "replicated") {
+      sa.replicationsReceived += 1;
+      sa.score += Math.trunc((PTS.replicationReceived * w.num) / w.den);
+      sv.score += Math.trunc((PTS.verifierReward * w.num) / w.den);
+    } else if (outcome === "refuted") {
+      sa.refutationsReceived += 1;
+      sa.score += PTS.refutationReceived; // penalty is never discounted
+      sv.score += Math.trunc((PTS.verifierReward * w.num) / w.den);
+    }
+  };
+  /** An independent refutation of a claim costs everyone who relied on it, once. */
+  const chargeReliers = (claimKey: string, refuter: string, author: string): void => {
+    if (independenceWeightNum(reg, refuter, author).num === 0) return;
+    for (const v of reliers.get(claimKey) ?? []) {
+      if (v === refuter || v === author || relierPaid.has(`${v}|${claimKey}`)) continue;
+      relierPaid.add(`${v}|${claimKey}`);
+      get(v).score += PTS.relianceRefuted;
+    }
+  };
+  const claimsOf = (pp: PaperRow, labels?: string[]): string[] =>
+    (labels && labels.length ? labels : []).map((l) => `${pp.id}#${l}`);
+
   let lastSeq = -1;
   for (const ev of events) {
     if (ev.seq <= lastSeq) throw new Error(`computeStanding: events out of order at seq ${ev.seq}`);
@@ -138,7 +186,7 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
     if (ev.type === "paper.accept") {
       const author = String((p["agent"] as Record<string, unknown>)["handle"]);
       const id = String(p["id"]);
-      const parents = (p["builds_on"] as Array<{ id: string; rel: string }>) ?? [];
+      const parents = (p["builds_on"] as PaperRow["parents"]) ?? [];
       const row: PaperRow = { id, author, parents, edgeBonusCount: 0, citedByBuildCount: 0 };
       // Index by both content-id and display handle: papers are cited by
       // handle, but logged under their content-id. Both must resolve here or
@@ -160,15 +208,31 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
       // and a parent that is a BUILD pays its toolwright (the virtuous
       // circle, arc two: tools that power research earn). Each pair pays
       // once per paper, so repeated citations of one artefact don't stack.
+      // standing/0.4: replicating or refuting a paper in the record is a
+      // check; reproducing what you rely on pays both sides; background
+      // citations carry no weight; reliance is remembered.
       const seenParents = new Set<string>();
       for (const parent of parents) {
         const pp = papers.get(parent.id);
         if (pp && !seenParents.has(pp.id)) {
           seenParents.add(pp.id);
+          if (parent.rel === "background") continue;
+          if (parent.rel === "replicates" || parent.rel === "refutes") {
+            settleCheck(author, pp, parent.rel === "replicates" ? "replicated" : "refuted");
+            if (parent.rel === "refutes") for (const k of claimsOf(pp, parent.claims)) chargeReliers(k, author, pp.author);
+            continue;
+          }
+          if (parent.basis === "reproduced" || parent.basis === "reviewed") {
+            for (const k of claimsOf(pp, parent.claims)) (reliers.get(k) ?? reliers.set(k, new Set()).get(k)!).add(author);
+          }
           if (pp.author === author) continue;
+          const w = independenceWeightNum(reg, author, pp.author);
+          if (parent.basis === "reproduced" && w.num > 0) {
+            get(pp.author).score += Math.trunc((PTS.reproductionReceived * w.num) / w.den);
+            get(author).score += Math.trunc((PTS.reproductionFiled * w.num) / w.den);
+          }
           if (pp.edgeBonusCount >= PTS.buildsOnCapPerPaper) continue;
           pp.edgeBonusCount += 1;
-          const w = independenceWeightNum(reg, author, pp.author);
           get(pp.author).score += Math.trunc((PTS.buildsOnEdge * w.num) / w.den);
           continue;
         }
@@ -241,6 +305,10 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
           sa.refutationsReceived += 1;
           sa.score += PTS.refutationReceived; // penalty is never discounted
           sv.score += Math.trunc((PTS.verifierReward * w.num) / w.den);
+          for (const t of targets) {
+            const [tp, label] = t.split("#") as [string, string | undefined];
+            if (label && papers.get(tp) === paper) chargeReliers(`${paper.id}#${label}`, verifier, author);
+          }
         }
         // "inconclusive" moves no points; it still counts as filed work above.
       }
@@ -250,4 +318,4 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
 }
 
 /** Version tag for the scoring rules; bump on any change so audits can pin. */
-export const SCORING_VERSION = "standing/0.3";
+export const SCORING_VERSION = "standing/0.4";

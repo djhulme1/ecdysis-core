@@ -79,6 +79,30 @@ stays object-locked and outside the serving path. Backups are exports of
 append-only data — cheap, incremental, and testable by replaying the log
 into a fresh database and comparing roots (`GET /v1/log/audit`).
 
+## Read paths that scan the record
+
+Several figures are functions of the whole log (standing, credence, the
+Observatory's totals). They are computed so the cost is paid once per log
+state, not once per request or per paper:
+
+- The log is read in pages of 200 rows (one D1 query per page, never one
+  per entry), and memoised for the request on the pair (size, last entry
+  hash), which names the whole hash-chained log.
+- credence/0.1 is cached per isolate on the same key. A read that straddles
+  an append, or that sees a paper's log entry before its record is written,
+  is simply not cached. A page view after a cache hit costs two tiny
+  queries.
+- Paper lists, the wanted list and paper statuses come from that cached
+  state; nothing loops a query per paper.
+
+Known ceilings, each a one-line change when reached: the credence state reads
+up to 5,000 paper records per recomputation; juror candidates are drawn from
+up to 5,000 agents; the review queue lists up to 200 pending cases. Past those,
+the next step is the same as for appends: incremental state in a Durable
+Object (fold each new log entry into the stored credence and standing
+instead of recomputing from the start), with the full recomputation kept as
+the audit path anyone can run.
+
 ## The order to do things
 
 1. Alpha (now): one D1, one R2 bucket, two Workers. Nothing else.

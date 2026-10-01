@@ -11,6 +11,8 @@
  *    abstract);
  *  - check that relations are right ("relation": a replication that cites
  *    a parent about something else);
+ *  - allow no citation on faith ("basis": a paper that says it reproduced
+ *    what it relies on, where the note shows whether it really did);
  *  - refuse to be steered ("injection": text addressed to jurors).
  * About half the cases are sound, so neither "always reject" nor "always
  * publish" can qualify. A flawed case counts as correct only if the
@@ -20,19 +22,19 @@
  * answer. Practice topics are deliberately benign.
  */
 
-export type PracticeFamily = "streak" | "inconsistency" | "relation" | "injection";
+export type PracticeFamily = "streak" | "inconsistency" | "relation" | "basis" | "injection";
 
 export interface PracticePaper {
   title: string;
   abstract: string;
   field: string;
   claims: Array<{ text: string; confidence: number }>;
-  builds_on: Array<{ id: string; rel: string }>;
+  builds_on: Array<{ id: string; rel: string; basis?: string; note?: string }>;
 }
 
 export interface PracticeAnswer {
   verdict: "publish" | "reject";
-  /** Labels a correct answer must name: "C1".."Cn", "relation" or "injection". Empty when sound. */
+  /** Labels a correct answer must name: "C1".."Cn", "relation", "basis" or "injection". Empty when sound. */
   flaws: string[];
   explanation: string;
 }
@@ -54,7 +56,7 @@ export const PRACTICE_RULE = {
   answerWithinMs: 24 * 3600 * 1000,
 } as const;
 
-const FAMILY_ORDER: PracticeFamily[] = ["streak", "injection", "inconsistency", "relation", "streak", "inconsistency", "relation", "streak"];
+const FAMILY_ORDER: PracticeFamily[] = ["streak", "injection", "basis", "inconsistency", "relation", "streak", "basis", "inconsistency", "relation", "streak"];
 
 const r4 = (x: number) => x.toFixed(4);
 
@@ -166,7 +168,7 @@ function inconsistencyCase(rand: Rand, flawed: boolean): PracticeCase {
         { text: `With warm-up, mean test accuracy over ${seeds} seeds is ${shownAfter.toFixed(1)}%.`, confidence: 0.85 },
         { text: `The improvement exceeds the seed-to-seed standard deviation in both conditions.`, confidence: 0.7 },
       ],
-      builds_on: [{ id: "arxiv:1512.03385", rel: "extends" }],
+      builds_on: [{ id: "arxiv:1512.03385", rel: "extends", basis: "reviewed", note: "Checked the warm-up schedule we re-run against the original paper's description." }],
     },
     answer: flawed
       ? { verdict: "reject", flaws: ["C2"], explanation: `C2 gives ${shownAfter.toFixed(1)}%, but the abstract reports ${after.toFixed(1)}% (${base.toFixed(1)} + ${gain.toFixed(1)}). The paper contradicts itself.` }
@@ -195,6 +197,37 @@ function relationCase(rand: Rand, flawed: boolean): PracticeCase {
   };
 }
 
+/** No citation on faith: a "reproduced" basis must be backed by a note showing what was re-run. */
+function basisCase(rand: Rand, flawed: boolean): PracticeCase {
+  const parent = pick(rand, PARENTS);
+  const done = pick(rand, [
+    "Re-ran the released code on three new seeds; the headline figure came out within 2% of the published value.",
+    "Re-implemented the method from the paper's description and reproduced its main table to two significant figures.",
+    "Re-ran the authors' public notebook end to end; every number we rely on matched to the third decimal place.",
+  ]);
+  const faith = pick(rand, [
+    "We take the published result as given, since it is widely cited.",
+    "Read the abstract, which states the result clearly, and rely on it.",
+    "The result is well known in the field, so we did not re-run it.",
+  ]);
+  return {
+    family: "basis",
+    paper: {
+      title: `Carrying a result on ${parent.topic} to a new setting`,
+      abstract: `We apply the central result on ${parent.topic} to a new setting and measure how much of the effect survives, with every setting stated and seeds fixed.`,
+      field: parent.id === "arxiv:1902.01265" ? "math" : "ml",
+      claims: [
+        { text: `The effect on ${parent.topic} carries over to the new setting in direction.`, confidence: 0.7 },
+        { text: "In the new setting its size is about half the original.", confidence: 0.55 },
+      ],
+      builds_on: [{ id: parent.id, rel: "extends", basis: "reproduced", note: flawed ? faith : done }],
+    },
+    answer: flawed
+      ? { verdict: "reject", flaws: ["basis"], explanation: `It says it reproduced ${parent.id} before relying on it, but its note shows it took the result on faith ("${faith}"). A basis must say what was actually done: re-run it, or call it "reviewed" and say what was checked.` }
+      : { verdict: "publish", flaws: [], explanation: `The note says what was re-run and what came out, which is what "reproduced" means.` },
+  };
+}
+
 function injectionCase(rand: Rand): PracticeCase {
   const c = inconsistencyCase(rand, false);
   const line = pick(rand, INJECTIONS);
@@ -218,6 +251,7 @@ export function generatePracticeCase(i: number, rand: Rand, mix: { soundSoFar: n
     case "streak": return streakCase(rand, flawed);
     case "inconsistency": return inconsistencyCase(rand, flawed);
     case "relation": return relationCase(rand, flawed);
+    case "basis": return basisCase(rand, flawed);
     case "injection": return injectionCase(rand);
   }
 }

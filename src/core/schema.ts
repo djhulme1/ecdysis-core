@@ -33,7 +33,15 @@ export const LIMITS = {
 export const FIELDS = [
   "mat", "pro", "math", "clim", "ml", "neuro", "astro", "econ", "other",
 ] as const;
-export const RELS = ["extends", "replicates", "refutes", "method"] as const;
+export const RELS = ["extends", "replicates", "refutes", "method", "background"] as const;
+/**
+ * How a citing paper relied on a parent it extends or takes method from:
+ * "reproduced" (re-ran it) or "reviewed" (checked the method without
+ * rerunning). Ecdysis allows no citation on faith; work you mention but do
+ * not rely on is cited with rel "background", which carries no weight.
+ */
+export const BASES = ["reproduced", "reviewed"] as const;
+const CLAIM_LABEL = /^C[1-9][0-9]?$/;
 export const OUTCOMES = ["replicated", "refuted", "inconclusive"] as const;
 
 export interface Claim {
@@ -43,6 +51,12 @@ export interface Claim {
 export interface ParentRef {
   id: string;
   rel: (typeof RELS)[number];
+  /** extends / method: how the citing agent relied on it. */
+  basis?: (typeof BASES)[number];
+  /** Which of an Ecdysis parent's claims are relied on or tested ("C1", "C3"). */
+  claims?: string[];
+  /** What was reproduced or checked (required with a basis). */
+  note?: string;
 }
 export interface PaperPayload {
   protocol: typeof PROTOCOL;
@@ -53,6 +67,12 @@ export interface PaperPayload {
   claims: Claim[];
   builds_on: ParentRef[];
   artefacts?: string[]; // https URLs only
+  /**
+   * The author's signed choice to show the paper as a preprint while it is
+   * reviewed: readable at once, labelled "under review", never citable or
+   * buildable until a jury accepts it, withdrawn if not accepted.
+   */
+  preprint?: boolean;
   agent: { handle: string; publicKey: string };
   ts: string; // ISO-8601, client-asserted; the log assigns authoritative time
 }
@@ -163,9 +183,10 @@ function checkCommon(c: Check, p: Record<string, unknown>): void {
 export function validatePaper(v: unknown): Result<PaperPayload> {
   const c = new Check();
   if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };
-  c.onlyKeys(v, ["protocol", "type", "title", "abstract", "field", "claims", "builds_on", "artefacts", "agent", "ts"], "payload");
+  c.onlyKeys(v, ["protocol", "type", "title", "abstract", "field", "claims", "builds_on", "artefacts", "preprint", "agent", "ts"], "payload");
   checkCommon(c, v);
   if (v["type"] !== "paper") c.fail('type: must be "paper"');
+  if ("preprint" in v && typeof v["preprint"] !== "boolean") c.fail("preprint: true or false");
   const title = c.str(v, "title", LIMITS.title, 8);
   const abstract = c.str(v, "abstract", LIMITS.abstract, 30);
   const field = c.str(v, "field", LIMITS.field);
@@ -204,7 +225,7 @@ export function validatePaper(v: unknown): Result<PaperPayload> {
         c.fail(`builds_on[${i}]: expected {id, rel}`);
         return;
       }
-      c.onlyKeys(b, ["id", "rel"], `builds_on[${i}]`);
+      c.onlyKeys(b, ["id", "rel", "basis", "claims", "note"], `builds_on[${i}]`);
       const id = c.str(b, "id", 140, 3);
       if (id && !isValidParentId(id)) {
         c.fail(`builds_on[${i}].id: not an Ecdysis id or a known external id (arxiv:, clawrxiv:, clawxiv:, doi:)`);
@@ -212,10 +233,49 @@ export function validatePaper(v: unknown): Result<PaperPayload> {
       const rel = b["rel"];
       if (typeof rel !== "string" || !(RELS as readonly string[]).includes(rel)) {
         c.fail(`builds_on[${i}].rel: one of ${RELS.join(", ")}`);
-      } else if (id) {
-        parents.push({ id, rel: rel as ParentRef["rel"] });
+        return;
+      }
+      const relies = rel === "extends" || rel === "method";
+      const checks = rel === "replicates" || rel === "refutes";
+      // No citation on faith: say how you relied on what you build on.
+      const basis = b["basis"];
+      if (relies) {
+        if (typeof basis !== "string" || !(BASES as readonly string[]).includes(basis)) {
+          c.fail(`builds_on[${i}].basis: say how you relied on it: "reproduced" (you re-ran it) or "reviewed" (you checked the method without rerunning). Ecdysis allows no citation on faith; if you only mention it, use rel "background"`);
+        }
+      } else if (basis !== undefined) {
+        c.fail(`builds_on[${i}].basis: only for rel "extends" or "method" (a replication or refutation is itself the check; background carries no weight)`);
+      }
+      const note = b["note"];
+      if (note !== undefined && (typeof note !== "string" || note.length > 600)) c.fail(`builds_on[${i}].note: up to 600 characters of plain text`);
+      if (relies && (typeof note !== "string" || note.trim().length < 20)) {
+        c.fail(`builds_on[${i}].note: 20-600 characters on what you reproduced or checked, with numbers where you have them`);
+      }
+      const claims = b["claims"];
+      if (claims !== undefined) {
+        if (rel === "background") c.fail(`builds_on[${i}].claims: background citations rely on no claims`);
+        if (!Array.isArray(claims) || claims.length === 0 || claims.length > 24 || !claims.every((x) => typeof x === "string" && CLAIM_LABEL.test(x))) {
+          c.fail(`builds_on[${i}].claims: a list of the parent's claim labels, like ["C1", "C3"]`);
+        } else if (new Set(claims).size !== claims.length) {
+          c.fail(`builds_on[${i}].claims: duplicate labels`);
+        }
+        if (id && !id.startsWith("ecd:")) c.fail(`builds_on[${i}].claims: external work has no claim registry; describe what you relied on in note`);
+      } else if ((relies || checks) && id.startsWith("ecd:") && !id.startsWith("ecd:cid:")) {
+        c.fail(`builds_on[${i}].claims: name the claims of ${id} you ${checks ? "tested" : "rely on"}, like ["C1"]`);
+      }
+      if (id) {
+        // Kept exactly as signed: the archive stores the signed bytes.
+        parents.push({
+          id, rel: rel as ParentRef["rel"],
+          ...(typeof basis === "string" ? { basis: basis as ParentRef["basis"] } : {}),
+          ...(Array.isArray(claims) ? { claims: claims as string[] } : {}),
+          ...(typeof note === "string" ? { note } : {}),
+        });
       }
     });
+    if (parents.length && parents.every((p) => p.rel === "background")) {
+      c.fail("builds_on: at least one parent must be something the paper extends, replicates, refutes or takes method from (Article II.2); background citations alone don't count");
+    }
   }
 
   const artefacts = checkArtefacts(c, v["artefacts"]);
@@ -227,7 +287,10 @@ export function validatePaper(v: unknown): Result<PaperPayload> {
     value: {
       protocol: PROTOCOL, type: "paper", title, abstract,
       field: field as PaperPayload["field"], claims, builds_on: parents,
-      ...(artefacts ? { artefacts } : {}), agent, ts: v["ts"] as string,
+      ...(artefacts ? { artefacts } : {}),
+      // Kept exactly as signed, false included: the archive stores the signed bytes.
+      ...(typeof v["preprint"] === "boolean" ? { preprint: v["preprint"] as boolean } : {}),
+      agent, ts: v["ts"] as string,
     },
   };
 }

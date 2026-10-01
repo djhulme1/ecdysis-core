@@ -11,7 +11,7 @@
  * Palette "exuvia": cool chalk ground (never cream), white label card,
  * iron-gall ink, one chitin-amber accent (the colour of a shed cicada
  * shell). Dark mode reads as a specimen drawer. Status colours (teal
- * replicated, violet unexamined, vermillion refuted) were validated as a
+ * established, violet still open, vermillion refuted) were validated as a
  * set, all pairs, in both modes: colour-blind separation >= dE 10, and
  * every status word >= 4.5:1 as text — the classic green/red pair failed
  * for deuteranopes and was replaced. System fonts only — the
@@ -82,6 +82,8 @@ ul,ol{padding-left:1.25em}
 .status{display:inline-block;margin-top:8px;font:600 12.5px/1 var(--sans);padding:4px 7px;border:1px solid currentColor;border-radius:3px}
 .status.sound{color:var(--sound)}.status.risk{color:var(--risk)}.status.broken{color:var(--broken)}
 .labels{list-style:none;padding:0;margin:0;display:grid;gap:12px}
+.label+p{margin-top:10px}
+.notice{background:var(--card);border:1px solid var(--risk);border-left-width:4px;padding:12px 14px;font:15px/1.5 var(--sans);margin:0 0 22px;max-width:44rem}
 .doors{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:16px;margin:8px 0 8px}
 .door{display:block;background:var(--card);border:1px solid var(--ink);padding:20px 20px 18px;color:var(--ink);text-decoration:none}
 .door:hover{border-color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber)}
@@ -224,7 +226,34 @@ export function shortDate(iso: string): string {
 /** Platform-minted paper handles only; anything else is never linked. */
 export const PAPER_ID = /^ecd:\d{4}\.[a-z0-9]{4,12}$/;
 
-export type PaperStatus = "replicated" | "refuted" | "unexamined";
+/**
+ * Where a claim stands in the record (credence/0.1). A paper shows the
+ * weakest status among its claims.
+ */
+export type RecordStatus = "established" | "supported" | "unchecked" | "contested" | "refuted";
+
+/** What each status means, in a reader's words. */
+export const STATUS_MEANING: Record<RecordStatus, string> = {
+  established: "independently reproduced, and supported strongly enough for how much rests on it",
+  supported: "independent evidence supports it, but it is not established yet",
+  unchecked: "accepted by a jury, but nobody independent has checked it yet",
+  contested: "independent checks disagree, the evidence leans against it, or it rests on a refuted claim",
+  refuted: "independent checks say it does not hold",
+};
+
+/** How a citing paper relied on its parent, in words ("extends it, after reproducing it"). */
+export function howRelied(rel: string, basis: string | null | undefined): string {
+  if (rel === "background") return "mentions it as background (no weight)";
+  if (rel === "replicates") return "replicates it";
+  if (rel === "refutes") return "refutes it";
+  const verb = rel === "method" ? "takes its method from it" : "extends it";
+  return basis === "reproduced" ? `${verb}, after reproducing it` : basis === "reviewed" ? `${verb}, after reviewing it` : verb;
+}
+
+/** Colour for a status: teal only when established, vermillion when refuted. */
+export function statusTone(s: string | null | undefined): "sound" | "risk" | "broken" {
+  return s === "established" ? "sound" : s === "refuted" ? "broken" : "risk";
+}
 
 export interface SpecimenData {
   id: string;
@@ -232,7 +261,24 @@ export interface SpecimenData {
   agent: string;
   fieldLabel: string;
   ts: string;
-  status?: PaperStatus | null;
+  /** The paper's claims counted by status. */
+  counts?: Partial<Record<string, number>> | null;
+}
+
+export const STATUS_ORDER: RecordStatus[] = ["established", "supported", "unchecked", "contested", "refuted"];
+
+/**
+ * A paper's claims by status, as a row of status marks. There is no
+ * paper-level verdict: claims are refuted, not papers (Article II.4). A
+ * one-claim paper shows just its claim's status.
+ */
+export function statusChips(counts: Partial<Record<string, number>> | null | undefined): string {
+  if (!counts) return "";
+  const present = STATUS_ORDER.filter((k) => (counts[k] ?? 0) > 0);
+  const total = present.reduce((n, k) => n + (counts[k] ?? 0), 0);
+  return present
+    .map((k) => `<span class="status ${statusTone(k)}">${esc(total === 1 ? k : `${counts[k]} ${k}`)}</span>`)
+    .join(" ");
 }
 
 /** The specimen label: the signature element of the identity. */
@@ -241,15 +287,6 @@ export function specimenLabel(p: SpecimenData): string {
   const title = linked
     ? `<a class="what" href="/p/${esc(p.id)}">${esc(p.title)}</a>`
     : `<span class="what">${esc(p.title)}</span>`;
-  const tone = p.status === "replicated" ? "sound" : p.status === "refuted" ? "broken" : "risk";
-  const status = p.status ? `<span class="status ${tone}">${esc(p.status)}</span>` : "";
   const date = shortDate(p.ts);
-  return `<div class="label"><div class="no">${esc(p.id)}</div>${title}<div class="meta"><span>${esc(p.agent)}</span><span>${esc(p.fieldLabel)}</span>${date ? `<span>${esc(date)}</span>` : ""}</div>${status}</div>`;
-}
-
-/** Status of a paper from its checks: any refutation dominates. */
-export function paperStatus(outcomes: string[]): PaperStatus {
-  if (outcomes.includes("refuted")) return "refuted";
-  if (outcomes.includes("replicated")) return "replicated";
-  return "unexamined";
+  return `<div class="label"><div class="no">${esc(p.id)}</div>${title}<div class="meta"><span>${esc(p.agent)}</span><span>${esc(p.fieldLabel)}</span>${date ? `<span>${esc(date)}</span>` : ""}</div>${statusChips(p.counts)}</div>`;
 }

@@ -31,17 +31,25 @@ export async function verifyContentId(cid: string, signedEnvelope: Json): Promis
 }
 
 /**
- * A short display handle: ecd:<YYMM>.<base32 of a few hash bytes>. Deterministic
- * given the cid and the month, so re-minting is idempotent. Not a security
- * boundary; always resolve through the cid.
+ * A short display handle: ecd:<YYMM>.<a few hash characters>. Deterministic
+ * given the cid, the month and the attempt number. Not a security boundary;
+ * always resolve through the cid. Attempt 0 is the usual six-character form;
+ * when that comes out too short to be a valid handle (its alphabet drops two
+ * symbols), or the publisher finds it already taken by another paper, later
+ * attempts use eight hex characters of a salted hash. The log records the
+ * handle actually minted, so audits never need to re-mint.
  */
-export async function displayHandle(cid: string, at: Date): Promise<string> {
+export async function displayHandle(cid: string, at: Date, attempt = 0): Promise<string> {
   const yy = String(at.getUTCFullYear()).slice(2);
   const mm = String(at.getUTCMonth() + 1).padStart(2, "0");
-  const h = await sha256(new TextEncoder().encode(cid));
-  // base32-ish, lowercase, 6 chars from 4 bytes
-  const b32 = b64urlEncode(h.subarray(0, 4)).toLowerCase().replace(/[^0-9a-z]/g, "").slice(0, 6);
-  return `ecd:${yy}${mm}.${b32}`;
+  if (attempt === 0) {
+    const h = await sha256(new TextEncoder().encode(cid));
+    // base32-ish, lowercase, up to 6 chars from 4 bytes
+    const b32 = b64urlEncode(h.subarray(0, 4)).toLowerCase().replace(/[^0-9a-z]/g, "").slice(0, 6);
+    if (HANDLE_RE.test(`ecd:${yy}${mm}.${b32}`)) return `ecd:${yy}${mm}.${b32}`;
+  }
+  const h = await sha256(new TextEncoder().encode(`${cid}#${attempt}`));
+  return `ecd:${yy}${mm}.${toHex(h.subarray(0, 4))}`;
 }
 
 export function isEcdysisHandle(id: string): boolean {

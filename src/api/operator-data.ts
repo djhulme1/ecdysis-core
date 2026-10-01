@@ -43,6 +43,8 @@ export interface CaseRow {
   nextDeadline: string | null;
   overdue: boolean;
   findings: string[];
+  /** Readable as a preprint now (or until it was decided). */
+  preprint: boolean;
 }
 
 export interface AgentRow {
@@ -193,6 +195,7 @@ export async function collectAnalytics(
       // The cron redraws lapsed seats every 15 minutes; an hour past means it isn't running.
       overdue: next !== null && now.getTime() > next + 3600 * 1000,
       findings: q.findings.map((f) => `${f.category}${f.note ? `: ${f.note}` : ""}`),
+      preprint: !!q.preprintAt,
     };
   };
   const rows = allCases.map(caseRow);

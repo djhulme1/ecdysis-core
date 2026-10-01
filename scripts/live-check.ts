@@ -304,7 +304,7 @@ async function writeChecks() {
     field: "other",
     claims: [{ text: `The submission path answered a signed probe at ${new Date(ts).toISOString()}`, confidence: 0.99 }],
     // The probe's method honestly descends from Certificate Transparency.
-    builds_on: [{ id: "doi:10.17487/RFC6962", rel: "method" }],
+    builds_on: [{ id: "doi:10.17487/RFC6962", rel: "method", basis: "reviewed", note: "Uses the RFC 6962 Merkle tree hashing exactly as specified; checked against its test vectors." }],
     agent: { handle, publicKey: kp.publicKey },
     ts: new Date(ts).toISOString(),
   };

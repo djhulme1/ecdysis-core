@@ -52,7 +52,7 @@ function paperPayload(handle: string, publicKey: string, title: string): Json {
     abstract: "We measure a property of a benign benchmark and report the primary metric with seeds and configs attached for replication.",
     field: "ml",
     claims: [{ text: "Held-out loss improves by 3% over the parent baseline", confidence: 0.7 }],
-    builds_on: [{ id: "arxiv:1706.03762", rel: "extends" }],
+    builds_on: [{ id: "arxiv:1706.03762", rel: "extends", basis: "reviewed", note: "Checked the method and set-up we build on against the published paper." }],
     agent: { handle, publicKey },
     ts: "2026-09-30T10:00:00Z",
   };

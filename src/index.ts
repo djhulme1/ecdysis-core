@@ -4,7 +4,7 @@
  * through bindings; nothing sensitive is in this file or this repo.
  */
 
-import { EcdysisService } from "./api/service.js";
+import { EcdysisService, PREPRINT_DAILY_CAP } from "./api/service.js";
 import { MemoryRateLimiter, route, type RateLimiter } from "./api/router.js";
 import { D1Store } from "./store/d1-store.js";
 import { R2BlobStore } from "./store/blob.js";
@@ -65,6 +65,8 @@ export interface Env {
   ALERTS_FROM?: string;
   /** Every email Ecdysis sends shares this cap per 24 hours: set it to the provider plan's daily quota. */
   EMAIL_DAILY_CAP?: string;
+  /** Preprints shown per operator in any 24 hours; "0" switches preprints off (papers still go to their jury, privately). */
+  PREPRINT_DAILY_CAP?: string;
   /**
    * The operator console's lock (Cloudflare Access): the team domain, the
    * application's Audience tag, and SHA-256 hashes of the allowed addresses.
@@ -150,7 +152,14 @@ function serviceFrom(env: Env, store: Store = new D1Store(env.DB)): EcdysisServi
     operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) ?? sthPublicKey,
     blobs: env.BLOBS ? new R2BlobStore(env.BLOBS) : null,
     reviewAll: env.REVIEW_ALL !== "0",
+    preprintDailyCap: preprintCap(env),
   });
+}
+
+/** The preprint cap from configuration; anything unreadable keeps the default. */
+function preprintCap(env: Env): number {
+  const n = Number(env.PREPRINT_DAILY_CAP);
+  return env.PREPRINT_DAILY_CAP !== undefined && Number.isInteger(n) && n >= 0 ? n : PREPRINT_DAILY_CAP;
 }
 
 const readOnly = (env: Env) => env.READ_ONLY === "1" || env.READ_ONLY?.toLowerCase() === "true";
@@ -222,6 +231,7 @@ function switchesFrom(env: Env, access: AccessConfig): Switch[] {
     { name: "Console lock (Cloudflare Access)", ...on(accessConfigured(access), "configured", "not configured", "Team domain, audience tag and allowed address hashes.") },
     { name: "Read-only kill switch", ...on(!readOnly(env), "off", "ON", "READ_ONLY: when on, every write is refused.") },
     { name: "Every submission to a jury", ...on(env.REVIEW_ALL !== "0", "yes", "no", "REVIEW_ALL") },
+    { name: "Preprints", ok: true, value: preprintCap(env) === 0 ? "off" : `up to ${preprintCap(env)} per operator a day`, note: "PREPRINT_DAILY_CAP: 0 switches preprints off; papers still go to their jury." },
     { name: "Safety classifier", ...on(!!env.AI, "Workers AI", "absent: fail-closed screening", env.SCREENING_MODEL || GUARD_MODEL) },
     { name: "Log signing key", ...on(!!env.STH_SIGNING_KEY_PKCS8, "installed", "missing", "Tree heads are unsigned without it.") },
     { name: "Operator key (R1, R2)", ...on(!!realKey(env.OPERATOR_PUBLIC_KEY), "configured", "falls back to the log key") },

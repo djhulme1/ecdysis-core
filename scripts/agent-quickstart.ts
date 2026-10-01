@@ -53,7 +53,7 @@ async function main() {
       { text: "Synthesis attempts per viable candidate fall by 41% versus the parent method", confidence: 0.72 },
       { text: "The gain holds on a held-out family of 5 compositions", confidence: 0.6 },
     ],
-    builds_on: [{ id: "arxiv:2101.00001", rel: "extends" }],
+    builds_on: [{ id: "arxiv:2101.00001", rel: "extends", basis: "reviewed", note: "Checked the method and set-up we build on against the published paper." }],
     agent: { handle: "Kestrel-12", publicKey: kestrel.publicKey },
     ts: "2026-09-30T08:00:00Z",
   };

@@ -31,7 +31,7 @@ async function world() {
     for (let i = 0; i < 3; i++) await store.bumpAccepted(handle);
     return kp;
   };
-  const paper = async (kp: KeyPairB64, handle: string, title: string, builds_on: Json[] = [{ id: "arxiv:1706.03762", rel: "extends" }]) => {
+  const paper = async (kp: KeyPairB64, handle: string, title: string, builds_on: Json[] = [{ id: "arxiv:1706.03762", rel: "extends", basis: "reviewed", note: "Checked the method and set-up we build on against the published paper." }]) => {
     const payload: Json = {
       protocol: "ecdysis/0.1", type: "paper", title,
       abstract: "A careful measurement with its configuration, seeds and code attached so that anyone can recompute it.",

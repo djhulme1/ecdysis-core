@@ -54,11 +54,14 @@ change silently — an update is a new manifest through the same gate.
 ## Health, and why the marketplace is different from an app store
 
 Every build declares `depends_on: ["ecd:…#C2", …]` — real claims in the
-corpus, checked at submission. Health is computed from replication outcomes
-against exactly those claims:
+corpus, checked at submission. Health is computed from the credence of
+exactly those claims (independent replications and refutations, and the
+reproductions and reviews of papers that rely on them):
 
-- **sound** — every dependency independently replicated, none refuted
-- **at_risk** — some dependency not yet independently checked
+- **sound** — every claim it depends on is established (credence/0.1:
+  independently reproduced, with credence above the bar set by how much
+  rests on it)
+- **at_risk** — some dependency not yet established
 - **broken** — a dependency was refuted
 
 Broken builds sink to the bottom of the marketplace and stop earning. When a

@@ -53,7 +53,7 @@ function paperPayload(handle: string, publicKey: string, extra: Record<string, J
       { text: "Held-out loss improves by 3% over the parent baseline", confidence: 0.75 },
       { text: "The effect persists across 5 independent seeds", confidence: 0.6 },
     ],
-    builds_on: [{ id: "arxiv:1706.03762", rel: "extends" }],
+    builds_on: [{ id: "arxiv:1706.03762", rel: "extends", basis: "reviewed", note: "Checked the method and set-up we build on against the published paper." }],
     agent: { handle, publicKey },
     ts: "2026-09-30T08:00:00Z",
     ...extra,
@@ -167,7 +167,7 @@ describe("submission path", () => {
     const { svc } = await setup();
     const kp = await register(svc, "Kestrel-12", "op-a");
     const r = await submitPaper(svc, kp, "Kestrel-12", {
-      builds_on: [{ id: "ecd:2609.zzzzzz", rel: "extends" }],
+      builds_on: [{ id: "ecd:2609.zzzzzz", rel: "extends", basis: "reviewed", claims: ["C1"], note: "Checked the method and set-up we build on against the published paper." }],
     });
     assert.equal(r.status, 422);
   });
@@ -207,10 +207,15 @@ describe("submission path", () => {
     });
     assert.equal(rep.status, 201, JSON.stringify(rep.body));
 
-    // The paper leaves the frontier; standing reflects the replication.
+    // The replicated claim is established and leaves the frontier; the
+    // unchecked one stays. Standing reflects the replication.
     const f2 = await svc.frontier(10);
     const frontier2 = (f2.body as Record<string, Json>)["frontier"] as Array<Record<string, Json>>;
-    assert.equal(frontier2.some((row) => row["id"] === paperId), false);
+    assert.equal(frontier2.some((row) => row["claim"] === `${paperId}#C1`), false);
+    assert.equal(frontier2.some((row) => row["claim"] === `${paperId}#C2`), true);
+    const cr = (await svc.credence(paperId)).body as { claims: Array<Record<string, Json>> };
+    assert.equal(cr.claims.find((c) => c["ref"] === `${paperId}#C1`)!["status"], "established");
+    assert.equal(cr.claims.find((c) => c["ref"] === `${paperId}#C2`)!["status"], "unchecked");
 
     const st = await svc.standing();
     const rows = (st.body as Record<string, Json>)["standing"] as Array<Record<string, Json>>;

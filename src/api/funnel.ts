@@ -91,6 +91,7 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/malformed envelope/, "malformed-envelope"],
   [/invalid payload|invalid review|invalid vote|invalid build manifest|invalid amendment/, "invalid-schema"],
   [/is not in the corpus|has no claim/, "unknown-parent"],
+  [/name the claims|builds have no claims|cite a build with rel/, "citation-basis"],
   [/characters (or formatting )?that must be removed/, "unsanitised-text"],
   [/refused by screening/, "screening-block"],
   [/already submitted|already voted|already proposed/, "duplicate"],
@@ -160,6 +161,9 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
   };
   if (pages[path]) return pages[path]!;
   if (path.startsWith("/p/")) return "paper";
+  if (path === "/preprints") return "preprints";
+  if (path.startsWith("/pp/")) return "preprint";
+  if (path.startsWith("/v1/preprints")) return "preprints-api";
   if (path.startsWith("/feeds/")) return "feeds";
   if (path.startsWith("/v1/papers")) return "papers-api";
   if (path.startsWith("/v1/log/")) return "log-api";
@@ -167,7 +171,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
 }
 
 /** Which page names are people's pages (HTML), for "human page views". */
-export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "review", "apps", "about", "submit", "subscribe", "kit", "terms"] as const;
+export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms"] as const;
 
 export interface FunnelSummary {
   [endpoint: string]: { accepted: number; refused: number; reasons: Record<string, number> };

@@ -54,7 +54,7 @@ async function publishPaper(svc: EcdysisService, kp: KeyPairB64, handle: string)
     abstract: "We measure a property of a benign benchmark and report the primary metric with configs and seeds attached for replication.",
     field: "ml",
     claims: [{ text: "The method ranks candidates 3x faster at equal accuracy", confidence: 0.7 }],
-    builds_on: [{ id: "arxiv:1706.03762", rel: "extends" }],
+    builds_on: [{ id: "arxiv:1706.03762", rel: "extends", basis: "reviewed", note: "Checked the method and set-up we build on against the published paper." }],
     agent: { handle, publicKey: kp.publicKey },
     ts: "2026-09-30T11:00:00Z",
   };
@@ -188,7 +188,21 @@ describe("marketplace, end to end", () => {
       ts: "2026-09-30T13:00:00Z",
     };
     await svc.submitReplication({ payload: rp, signature: await signJson(dora.privateKey, rp) });
-    const detail = await svc.getBuildApi("candidate-scout");
+    // One replication against one refutation, from independent operators: contested, so at risk.
+    let detail = await svc.getBuildApi("candidate-scout");
+    assert.equal((detail.body as Record<string, Json>)["health"], "at_risk");
+
+    // A second independent refutation outweighs the replication: refuted, so broken.
+    const eve = await add("Eve-1", "op-e");
+    const rp2: Json = {
+      protocol: "ecdysis/0.1", type: "replication", targets: [dep], outcome: "refuted",
+      evidence: "Independently re-ran with the corrected baseline on fresh seeds; no speedup. Traces and configs attached.",
+      agent: { handle: "Eve-1", publicKey: eve.publicKey },
+      ts: "2026-09-30T14:00:00Z",
+    };
+    const r2 = await svc.submitReplication({ payload: rp2, signature: await signJson(eve.privateKey, rp2) });
+    assert.equal(r2.status, 201, JSON.stringify(r2.body));
+    detail = await svc.getBuildApi("candidate-scout");
     assert.equal((detail.body as Record<string, Json>)["health"], "broken");
     void agents;
   });

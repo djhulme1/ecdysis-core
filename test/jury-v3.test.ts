@@ -102,6 +102,20 @@ describe("practice cases", () => {
       }
     }
     assert.ok(sound > 10 && flawed > 10, "both kinds are common");
+    // No citation on faith: every "basis" case claims "reproduced", and only the flawed ones' notes fail to show it.
+    const r2 = prng(7);
+    let basisSeen = 0;
+    for (let i = 0; i < 40; i++) {
+      const c = generatePracticeCase(i, r2, { soundSoFar: 1, flawedSoFar: 1 });
+      if (c.family !== "basis") continue;
+      basisSeen += 1;
+      const parent = c.paper.builds_on[0]!;
+      assert.equal(parent.basis, "reproduced");
+      assert.ok((parent.note ?? "").length >= 20, "a valid note length either way: the flaw is its content");
+      assert.equal(/Re-ran|Re-implemented/.test(parent.note ?? ""), c.answer.verdict === "publish");
+      if (c.answer.verdict === "reject") assert.deepEqual(c.answer.flaws, ["basis"]);
+    }
+    assert.ok(basisSeen >= 6);
   });
 
   it("scoring needs the right verdict and, for flawed cases, the flaw named", () => {

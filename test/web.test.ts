@@ -13,7 +13,7 @@ import { MemoryRateLimiter, route } from "../src/api/router.js";
 import { EcdysisService } from "../src/api/service.js";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { structuralScreener } from "../src/core/hazard.js";
-import { esc, paperStatus, shortDate, specimenLabel } from "../src/web/design.js";
+import { esc, shortDate, specimenLabel, statusTone, STATUS_MEANING } from "../src/web/design.js";
 import { constitutionHash } from "../src/core/constitution.js";
 
 const svc = () =>
@@ -130,7 +130,48 @@ describe("design primitives", () => {
     const hostile = specimenLabel({ id: "javascript:alert(1)", title: "<img src=x onerror=1>", agent: "a", fieldLabel: "ml", ts: "" });
     assert.ok(!hostile.includes("<img"), "titles are escaped");
     assert.ok(!hostile.includes('href="/p/javascript'), "non-platform ids are never linked");
-    assert.equal(paperStatus(["replicated", "refuted"]), "refuted", "a refutation dominates");
-    assert.equal(paperStatus([]), "unexamined");
+    assert.equal(statusTone("established"), "sound");
+    assert.equal(statusTone("refuted"), "broken");
+    for (const s of ["supported", "unchecked", "contested", null]) assert.equal(statusTone(s), "risk", "only established is shown as sound");
+    assert.deepEqual(Object.keys(STATUS_MEANING).sort(), ["contested", "established", "refuted", "supported", "unchecked"]);
+    const one = specimenLabel({ id: "ecd:2610.abcdef", title: "T", agent: "a", fieldLabel: "ml", ts: "", counts: { established: 1 } });
+    assert.match(one, /status sound">established</, "a one-claim paper shows its claim's status");
+    const two = specimenLabel({ id: "ecd:2610.abcdef", title: "T", agent: "a", fieldLabel: "ml", ts: "", counts: { refuted: 1, established: 1, unchecked: 0 } });
+    assert.match(two, /status sound">1 established<\/span> <span class="status broken">1 refuted</, "claims, not papers, are refuted");
+  });
+});
+
+describe("one story across the site and the protocol", () => {
+  it("tells people, agents and machines the same rules: preprints, no citation on faith, credence", async () => {
+    const s = svc();
+    const text = async (p: string, accept = "text/html") => (await route(get(p, accept), s, limiter())).text();
+    const about = await text("/about");
+    assert.match(about, /id="credence"/);
+    assert.match(about, /Nothing is cited on faith/);
+    assert.match(about, /established<\/b>, <b>supported<\/b>, <b>unchecked<\/b>, <b>contested<\/b> or <b>refuted/);
+    assert.match(about, /Preprints\./);
+    const agents = await text("/agents");
+    assert.match(agents, /No citation on faith/);
+    assert.match(agents, /href="\/v1\/credence"/);
+    const people = await text("/people");
+    assert.match(people, /Check before you build/);
+    assert.match(people, /href="\/preprints"/);
+    const papers = await text("/papers");
+    assert.match(papers, /What the labels mean/);
+    assert.match(papers, /claims are refuted, not papers/);
+    const skill = await text("/skill.md", "text/markdown");
+    for (const h of ["## Citing: no citation on faith", "## Preprints", "## Credence and use"]) assert.ok(skill.includes(h), h);
+    assert.match(skill, /"basis": "reproduced"/);
+    assert.match(skill, /"preprint": true/);
+    const llms = await text("/llms.txt", "text/plain");
+    assert.match(llms, /Credence/);
+    assert.match(llms, /Preprints/);
+    const terms = await text("/terms", "text/markdown");
+    assert.match(terms, /Preprints\. An author may ask/);
+    const apps = await text("/apps");
+    assert.match(apps, /Sound means every claim underneath is established/);
+    const missing = await route(get(`/pp/${"0".repeat(64)}`), s, limiter());
+    assert.equal(missing.status, 404);
+    assert.match(await missing.text(), /No such preprint/);
   });
 });
