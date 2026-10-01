@@ -3,7 +3,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, LogRowView, PaperRecord,
+  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, JuryAlertRecord, LogRowView, PaperRecord,
   PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
 } from "./store.js";
 
@@ -179,8 +179,40 @@ export class MemoryStore implements Store {
   async listDeliveries(issueId: string): Promise<DeliveryRecord[]> {
     return [...this.deliveries.values()].filter((d) => d.issueId === issueId).map((d) => structuredClone(d));
   }
-  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue"): Promise<void> {
+  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert"): Promise<void> {
     this.sends.push({ at, kind });
+  }
+
+  // --- jury alerts ---
+  private alerts = new Map<string, JuryAlertRecord>();
+  private alertSends = new Set<string>();
+  async putJuryAlert(a: JuryAlertRecord): Promise<void> {
+    const clash = [...this.alerts.values()].find((x) => x.handle === a.handle && x.id !== a.id);
+    if (clash) throw new Error("UNIQUE constraint failed: jury_alerts.handle");
+    this.alerts.set(a.id, structuredClone(a));
+  }
+  async getJuryAlert(id: string): Promise<JuryAlertRecord | null> {
+    const a = this.alerts.get(id);
+    return a ? structuredClone(a) : null;
+  }
+  async getJuryAlertByHandle(handle: string): Promise<JuryAlertRecord | null> {
+    const a = [...this.alerts.values()].find((x) => x.handle === handle);
+    return a ? structuredClone(a) : null;
+  }
+  async listJuryAlerts(limit: number): Promise<JuryAlertRecord[]> {
+    return [...this.alerts.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((a) => structuredClone(a));
+  }
+  async deleteJuryAlert(id: string): Promise<void> {
+    this.alerts.delete(id);
+  }
+  async claimAlertSend(handle: string, subject: string, kind: string, _at: string): Promise<boolean> {
+    const k = `${handle}|${subject}|${kind}`;
+    if (this.alertSends.has(k)) return false;
+    this.alertSends.add(k);
+    return true;
+  }
+  async releaseAlertSend(handle: string, subject: string, kind: string): Promise<void> {
+    this.alertSends.delete(`${handle}|${subject}|${kind}`);
   }
   async countEmailSends(sinceIso: string, kind?: string): Promise<number> {
     return this.sends.filter((s) => s.at >= sinceIso && (!kind || s.kind === kind)).length;

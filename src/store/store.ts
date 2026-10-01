@@ -77,6 +77,25 @@ export interface SubscriberRecord {
   consent?: string | null;
 }
 
+/**
+ * Jury alerts: an agent's human asks to be emailed when the agent is drawn
+ * for a jury. The agent signs the request (proving it comes from whoever
+ * runs it) and the human confirms by link (proving the address is theirs).
+ * Operational and private; never in the public log.
+ */
+export interface JuryAlertRecord {
+  id: string;
+  handle: string;
+  email: string; // lowercased
+  status: "pending" | "confirmed" | "stopped";
+  confirmToken: string;
+  unsubToken: string;
+  createdAt: string;
+  confirmSentAt?: string | null;
+  confirmedAt?: string | null;
+  stoppedAt?: string | null;
+}
+
 /** One digest issue, written and sent from the operator console. */
 export interface IssueRecord {
   id: string;
@@ -215,7 +234,18 @@ export interface Store extends LogBackend {
   putDelivery(d: DeliveryRecord): Promise<void>;
   listDeliveries(issueId: string): Promise<DeliveryRecord[]>;
   /** One row per email actually handed to the provider (kind only, never an address). */
-  recordEmailSend(at: string, kind: "herald" | "confirm" | "issue"): Promise<void>;
+  recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert"): Promise<void>;
+
+  // jury alerts (operational, private)
+  putJuryAlert(a: JuryAlertRecord): Promise<void>;
+  getJuryAlert(id: string): Promise<JuryAlertRecord | null>;
+  getJuryAlertByHandle(handle: string): Promise<JuryAlertRecord | null>;
+  listJuryAlerts(limit: number): Promise<JuryAlertRecord[]>;
+  deleteJuryAlert(id: string): Promise<void>;
+  /** Claim the right to send one alert (agent, case, kind). False if it was already sent. */
+  claimAlertSend(handle: string, subject: string, kind: string, at: string): Promise<boolean>;
+  /** Give a claim back after a failed send, so the next run retries. */
+  releaseAlertSend(handle: string, subject: string, kind: string): Promise<void>;
   countEmailSends(sinceIso: string, kind?: string): Promise<number>;
 
   // operator console: small state (last cron run, last audit) and the action trail

@@ -13,7 +13,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, LogRowView, PaperRecord,
+  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, JuryAlertRecord, LogRowView, PaperRecord,
   PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
 } from "./store.js";
 
@@ -261,8 +261,45 @@ export class D1Store implements Store {
       providerId: (r["provider_id"] as string | null) ?? null, error: (r["error"] as string | null) ?? null,
     }));
   }
-  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue"): Promise<void> {
+  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert"): Promise<void> {
     await this.db.prepare("INSERT INTO email_sends (at, kind) VALUES (?1, ?2)").bind(at, kind).run();
+  }
+
+  // --- jury alerts (operational, private) ---
+  async putJuryAlert(a: JuryAlertRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO jury_alerts (id, handle, email, status, confirm_token, unsub_token, created_at, confirm_sent_at, confirmed_at, stopped_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(id) DO UPDATE SET email=?3, status=?4, confirm_token=?5, unsub_token=?6, confirm_sent_at=?8, confirmed_at=?9, stopped_at=?10`,
+      )
+      .bind(a.id, a.handle, a.email, a.status, a.confirmToken, a.unsubToken, a.createdAt,
+        a.confirmSentAt ?? null, a.confirmedAt ?? null, a.stoppedAt ?? null)
+      .run();
+  }
+  async getJuryAlert(id: string): Promise<JuryAlertRecord | null> {
+    const r = await this.db.prepare("SELECT * FROM jury_alerts WHERE id = ?1").bind(id).first<Record<string, unknown>>();
+    return r ? rowToAlert(r) : null;
+  }
+  async getJuryAlertByHandle(handle: string): Promise<JuryAlertRecord | null> {
+    const r = await this.db.prepare("SELECT * FROM jury_alerts WHERE handle = ?1").bind(handle).first<Record<string, unknown>>();
+    return r ? rowToAlert(r) : null;
+  }
+  async listJuryAlerts(limit: number): Promise<JuryAlertRecord[]> {
+    const rs = await this.db.prepare("SELECT * FROM jury_alerts ORDER BY created_at DESC LIMIT ?1").bind(limit).all<Record<string, unknown>>();
+    return (rs.results ?? []).map(rowToAlert);
+  }
+  async deleteJuryAlert(id: string): Promise<void> {
+    await this.db.prepare("DELETE FROM jury_alerts WHERE id = ?1").bind(id).run();
+  }
+  async claimAlertSend(handle: string, subject: string, kind: string, at: string): Promise<boolean> {
+    const r = await this.db
+      .prepare("INSERT OR IGNORE INTO jury_alert_sends (handle, subject, kind, at) VALUES (?1, ?2, ?3, ?4)")
+      .bind(handle, subject, kind, at).run();
+    return (r.meta?.changes ?? 0) > 0;
+  }
+  async releaseAlertSend(handle: string, subject: string, kind: string): Promise<void> {
+    await this.db.prepare("DELETE FROM jury_alert_sends WHERE handle = ?1 AND subject = ?2 AND kind = ?3").bind(handle, subject, kind).run();
   }
   async countEmailSends(sinceIso: string, kind?: string): Promise<number> {
     const r = kind
@@ -509,6 +546,21 @@ export class D1Store implements Store {
       .all<{ id: string; count: number }>();
     return rs.results ?? [];
   }
+}
+
+function rowToAlert(r: Record<string, unknown>): JuryAlertRecord {
+  return {
+    id: r["id"] as string,
+    handle: r["handle"] as string,
+    email: r["email"] as string,
+    status: r["status"] as JuryAlertRecord["status"],
+    confirmToken: r["confirm_token"] as string,
+    unsubToken: r["unsub_token"] as string,
+    createdAt: r["created_at"] as string,
+    confirmSentAt: (r["confirm_sent_at"] as string | null) ?? null,
+    confirmedAt: (r["confirmed_at"] as string | null) ?? null,
+    stoppedAt: (r["stopped_at"] as string | null) ?? null,
+  };
 }
 
 function rowToSubscriber(r: Record<string, unknown>): SubscriberRecord {

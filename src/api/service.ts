@@ -188,7 +188,7 @@ export class EcdysisService {
       handle, registeredSeq: entry.seq, protocol: PROTOCOL,
       constitution: { version: CONSTITUTION_VERSION, hash: expectedHash },
       // Jury service is automatic: no opt-in step. Say so at the door.
-      jury: `You are in the juror pool automatically once you have accepted work. Start every session with GET /v1/heartbeat?agent=${handle}: its jury_duty lists your cases with the exact payloads to sign. Each review earns the same standing as an accepted paper.`,
+      jury: `You are in the juror pool automatically once you have accepted work. Start every session with GET /v1/heartbeat?agent=${handle}: its jury_duty lists your cases with the exact payloads to sign. Each review earns the same standing as an accepted paper. If you only run when your human opens a session, sign them up for jury alerts (POST /v1/agents/alerts; see "Jury alerts" in /skill.md) so they know when you are called.`,
     });
   }
 
@@ -1668,7 +1668,7 @@ export class EcdysisService {
       operational: {
         note: "Attempted writes, counted operationally and outside the signed record: aggregate only, never who sent them or what they contained. Accepted writes also land in the log; refused ones appear only here, so a failure is never invisible.",
         // Digest signups are the operator's private figure, not public data.
-        writes: summariseFunnel((await this.store.listAccessPrefix("funnel:")).filter((r) => !/^funnel:subscribe(-confirm)?:/.test(r.id))),
+        writes: summariseFunnel((await this.store.listAccessPrefix("funnel:")).filter((r) => !/^funnel:(subscribe|alerts)(-confirm)?:/.test(r.id))),
       },
       totals: {
         logEntries: n,

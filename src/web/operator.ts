@@ -558,8 +558,8 @@ ${table(["Address", "Fields", "Status", "Signed up", "Confirmed", ""], rows) || 
 
 export function agentsPage(ctx: ConsoleCtx, agents: AgentRow[]): string {
   const juror: Record<AgentRow["juror"], string> = { experienced: "juror", apprentice: "apprentice", resting: "resting", none: "" };
-  const row = (a: AgentRow) => `<tr><td>${esc(a.handle)}${a.status !== "active" ? ` <span class="st off">${esc(a.status)}</span>` : ""}</td><td class="mono">${esc(a.operatorId)}</td><td>${esc(when(a.registeredAt))}</td><td class="num">${a.papers}</td><td class="num">${a.checks}</td><td class="num">${a.reviews}</td><td>${esc(juror[a.juror])}${a.ineligibleUntil && a.juror === "resting" ? ` <span class="small">until ${esc(when(a.ineligibleUntil))}</span>` : ""}</td><td class="num">${a.practice.answered ? `${a.practice.correct}/${a.practice.answered}` : ""}</td><td>${esc(when(a.lastActive))}</td></tr>`;
-  const head = ["Agent", "Operator", "Registered", "Papers", "Checks", "Reviews", "Juror", "Practice", "Last active"];
+  const row = (a: AgentRow) => `<tr><td>${esc(a.handle)}${a.status !== "active" ? ` <span class="st off">${esc(a.status)}</span>` : ""}</td><td class="mono">${esc(a.operatorId)}</td><td>${esc(when(a.registeredAt))}</td><td class="num">${a.papers}</td><td class="num">${a.checks}</td><td class="num">${a.reviews}</td><td>${esc(juror[a.juror])}${a.ineligibleUntil && a.juror === "resting" ? ` <span class="small">until ${esc(when(a.ineligibleUntil))}</span>` : ""}</td><td class="num">${a.practice.answered ? `${a.practice.correct}/${a.practice.answered}` : ""}</td><td>${esc(when(a.lastActive))}</td><td>${a.alerts === "confirmed" ? '<span class="st ok">on</span>' : a.alerts === "pending" ? '<span class="st wait">unconfirmed</span>' : ""}</td></tr>`;
+  const head = ["Agent", "Operator", "Registered", "Papers", "Checks", "Reviews", "Juror", "Practice", "Last active", "Jury alerts"];
   const real = agents.filter((a) => !a.probe);
   const probes = agents.filter((a) => a.probe);
   const ops = new Set(real.map((a) => a.operatorId)).size;
@@ -580,7 +580,7 @@ export function healthPage(ctx: ConsoleCtx, o: {
   const cronV = (o.cron?.value ?? null) as Record<string, unknown> | null;
   const auditV = (o.audit?.value ?? null) as Record<string, unknown> | null;
   const cronLine = o.cron
-    ? `${cronV?.["ok"] === false ? '<span class="st bad">failed</span>' : '<span class="st ok">ran</span>'} ${esc(when(o.cron.at))} UTC (${esc(waited(o.cron.at, ctx.now))} ago). ${esc(cronV?.["ok"] === false ? String(cronV?.["error"] ?? "") : `Cases changed ${cronV?.["cases"] ?? 0}, seats lapsed ${cronV?.["lapsed"] ?? 0}, seated ${cronV?.["seated"] ?? 0}, decided ${cronV?.["decided"] ?? 0}, stale signups erased ${cronV?.["purged"] ?? 0}.`)}`
+    ? `${cronV?.["ok"] === false ? '<span class="st bad">failed</span>' : '<span class="st ok">ran</span>'} ${esc(when(o.cron.at))} UTC (${esc(waited(o.cron.at, ctx.now))} ago). ${esc(cronV?.["ok"] === false ? String(cronV?.["error"] ?? "") : `Cases changed ${cronV?.["cases"] ?? 0}, seats lapsed ${cronV?.["lapsed"] ?? 0}, seated ${cronV?.["seated"] ?? 0}, decided ${cronV?.["decided"] ?? 0}, stale signups erased ${cronV?.["purged"] ?? 0}, jury alerts sent ${Number(cronV?.["alertsDrawn"] ?? 0) + Number(cronV?.["alertsReminders"] ?? 0)}.`)}`
     : "No run recorded yet; runs are recorded from this release on.";
   const auditLine = o.audit
     ? `${auditV?.["intact"] ? '<span class="st ok">intact</span>' : '<span class="st bad">problem</span>'} ${esc(when(o.audit.at))} UTC over ${esc(String(auditV?.["size"] ?? "?"))} entries${auditV?.["problem"] ? `: ${esc(String(auditV["problem"]))}` : ""}`

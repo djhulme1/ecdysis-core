@@ -23,6 +23,7 @@ export const PROBE_OPERATOR = "op-live-check";
 export type Endpoint =
   | "register" | "paper" | "replication" | "review" | "jury-read" | "case-read"
   | "practice-case" | "practice-answer" | "herald" | "unsubscribe" | "subscribe" | "subscribe-confirm"
+  | "alerts" | "alerts-confirm"
   | "build" | "build-file" | "hazard-decision" | "gov-proposal" | "gov-vote" | "gov-cosign" | "wrong-path";
 
 /** Which tracked write a request is, or null for reads and MCP. */
@@ -39,6 +40,8 @@ export function endpointOf(method: string, path: string): Endpoint | null {
   if (path.startsWith("/u/")) return "unsubscribe";
   if (path === "/subscribe") return "subscribe";
   if (path.startsWith("/subscribe/confirm/")) return "subscribe-confirm";
+  if (path === "/v1/agents/alerts") return "alerts";
+  if (path.startsWith("/alerts/confirm/")) return "alerts-confirm";
   if (m === "POST") {
     switch (path) {
       case "/v1/agents/register": return "register";

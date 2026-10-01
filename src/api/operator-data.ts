@@ -59,6 +59,8 @@ export interface AgentRow {
   ineligibleUntil: string | null;
   practice: { answered: number; correct: number };
   lastActive: string | null;
+  /** Whether the agent's person gets jury alerts. */
+  alerts: "confirmed" | "pending" | "stopped" | null;
 }
 
 export interface Analytics {
@@ -229,6 +231,7 @@ export async function collectAnalytics(
     if (a.practiceQualifiedAt) return "apprentice";
     return "none";
   };
+  const alertBy = new Map((await store.listJuryAlerts(5000)).map((x) => [x.handle, x.status] as const));
   const agentRows: AgentRow[] = agents.map((a) => ({
     handle: a.handle, operatorId: a.operatorId, status: a.status, probe: a.operatorId === PROBE_OPERATOR,
     registeredAt: reg.get(a.handle)?.ts ?? null,
@@ -237,6 +240,7 @@ export async function collectAnalytics(
     juror: jurorOf(a), ineligibleUntil: a.ineligibleUntil ?? null,
     practice: practiceBy.get(a.handle) ?? { answered: 0, correct: 0 },
     lastActive: perAgent.get(a.handle)?.last ?? null,
+    alerts: alertBy.get(a.handle) ?? null,
   })).sort((x, y) => (y.lastActive ?? "").localeCompare(x.lastActive ?? ""));
   const real = agentRows.filter((a) => !a.probe);
   const experienced = real.filter((a) => a.juror === "experienced");

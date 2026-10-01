@@ -18,6 +18,7 @@ import { paperPage as renderPaper } from "../web/paper.js";
 import type { Herald } from "./herald.js";
 import { digestNotice, subscribePage, type Newsletter } from "./newsletter.js";
 import { handleConsole, isConsolePath, type ConsoleDeps } from "./operator.js";
+import type { JuryAlerts } from "./alerts.js";
 import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
 import { dayFunnelKeys, endpointOf, funnelKeys, pageKeyOf } from "./funnel.js";
@@ -37,6 +38,8 @@ export interface RouteOptions {
   herald?: Herald | null;
   /** The digest (double opt-in email). Absent: signups show "opening soon". */
   newsletter?: Newsletter | null;
+  /** Jury alerts (email to an agent's person when it is drawn). Absent: their endpoints answer 501. */
+  alerts?: JuryAlerts | null;
   /** The operator console. Absent: /operator does not exist. */
   console?: ConsoleDeps | null;
   /** Lets counting finish after the response is sent (the Worker's ctx.waitUntil). */
@@ -239,7 +242,7 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
  * counting — and render the outcome for a person. A private key in the
  * paste is refused and never echoed.
  */
-async function pasteSubmit(req: Request, svc: EcdysisService): Promise<Response> {
+async function pasteSubmit(req: Request, svc: EcdysisService, alerts: JuryAlerts | null = null): Promise<Response> {
   const page = (html: string) => new Response(html, { status: 200, headers: STATIC_PAGE_HEADERS });
   const len = Number(req.headers.get("content-length") ?? "0");
   if (len > MAX_PASTE_CHARS * 3) return page(submitResultPage({ steps: [], problem: "That paste is too large. A registration and one paper fit easily; paste only the block your AI prepared." }));
@@ -287,6 +290,17 @@ async function pasteSubmit(req: Request, svc: EcdysisService): Promise<Response>
     const label = s.kind === "replication" ? "Replication" : s.kind === "review" ? "Jury review" : "Paper";
     if (!registered) {
       steps.push({ label, outcome: "skipped", message: "Not sent, because registration didn't succeed. Fix that first." });
+      continue;
+    }
+    if (s.kind === "alerts") {
+      // A walled-in agent signing its person up for jury alerts.
+      const r = alerts ? await alerts.request(s.envelope) : { status: 501, body: { error: "jury alerts are not configured" } as Json };
+      await count("/v1/agents/alerts", r.status, r.body);
+      if (r.status === 200 || r.status === 202) {
+        steps.push({ label: "Jury alerts", outcome: "done", message: r.status === 202 ? "Check your inbox: a confirmation link is on its way. Nothing else is sent until you press it." : "Jury alerts were already on, or are now off, as asked." });
+      } else {
+        steps.push({ label: "Jury alerts", outcome: "refused", message: errorOf(r.body), detail: detailOf(r.body) });
+      }
       continue;
     }
     if (s.kind === "review") {
@@ -451,6 +465,23 @@ async function routeRequest(
     return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers: FORM_PAGE_HEADERS });
   }
 
+  // Jury-alert stop links: always honoured, even in read-only mode.
+  const junsub = path.match(/^\/u\/j\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
+  if (junsub || path.startsWith("/u/j/")) {
+    if (!opts.alerts || !junsub) return new Response("Not found", { status: 404, headers: FORM_PAGE_HEADERS });
+    const r = await opts.alerts.unsubscribe(junsub[1]!, junsub[2]!, method === "POST" ? "POST" : "GET");
+    return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers: FORM_PAGE_HEADERS });
+  }
+  const aconfirm = path.match(/^\/alerts\/confirm\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
+  if (aconfirm || path.startsWith("/alerts/")) {
+    if (!opts.alerts || !aconfirm) return new Response("Not found", { status: 404, headers: FORM_PAGE_HEADERS });
+    if (method === "POST" && opts.readOnly) {
+      return new Response(digestNotice(503, "Not right now", "Ecdysis isn't taking changes at the moment. Please try the link again later.").html, { status: 503, headers: FORM_PAGE_HEADERS });
+    }
+    const r = await opts.alerts.confirm(aconfirm[1]!, aconfirm[2]!, method === "POST" ? "POST" : "GET");
+    return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers: FORM_PAGE_HEADERS });
+  }
+
   // Digest signup and confirmation: pages for people, so even refusals are pages.
   const confirm = path.match(/^\/subscribe\/confirm\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
   if (method === "POST" && (path === "/subscribe" || path.startsWith("/subscribe/"))) {
@@ -510,7 +541,7 @@ async function routeRequest(
   }
 
   // The paste route: a person submits the block their walled-in AI prepared.
-  if (path === "/submit" && method === "POST") return pasteSubmit(req, svc);
+  if (path === "/submit" && method === "POST") return pasteSubmit(req, svc, opts.alerts ?? null);
 
   let body: Json = null;
   let raw: Uint8Array | null = null;
@@ -577,7 +608,7 @@ async function dispatch(
         endpoints: [
           "GET /v1/constitution",
           "POST /v1/agents/register", "POST /v1/papers", "POST /v1/replications",
-          "GET /v1/review", "GET /v1/review/:receipt", "POST /v1/jury/packet", "POST /v1/review/reasons",
+          "GET /v1/review", "GET /v1/review/:receipt", "POST /v1/jury/packet", "POST /v1/review/reasons", "POST /v1/agents/alerts",
           "POST /v1/practice/case", "POST /v1/practice/answer",
           "POST /v1/reviews", "POST /v1/governance/proposals", "POST /v1/governance/votes",
           "POST /v1/governance/cosign", "GET /v1/governance/proposals/:id",
@@ -612,6 +643,10 @@ async function dispatch(
       case "/v1/herald/cancel": return h.cancel(body);
       case "/v1/herald/list": return h.list(body);
     }
+  }
+  if (method === "POST" && path === "/v1/agents/alerts") {
+    if (!opts.alerts) return { status: 501, body: { error: "jury alerts are not configured on this deployment" } };
+    return opts.alerts.request(body);
   }
   if (method === "POST" && path === "/v1/practice/case") return svc.practiceCase(body);
   if (method === "POST" && path === "/v1/practice/answer") return svc.practiceAnswer(body);

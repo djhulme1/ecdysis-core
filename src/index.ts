@@ -13,6 +13,7 @@ import {
 } from "./core/hazard.js";
 import { EMAIL_DAILY_CAP_DEFAULT, Herald, resendBatchSender, resendSender } from "./api/herald.js";
 import { Newsletter } from "./api/newsletter.js";
+import { JuryAlerts } from "./api/alerts.js";
 import { accessConfigured, type AccessConfig } from "./api/access.js";
 import type { ConsoleDeps } from "./api/operator.js";
 import type { Switch } from "./web/operator.js";
@@ -60,6 +61,8 @@ export interface Env {
   HERALD_PAUSED?: string;
   /** From-address for the digest (same verified sending domain as the Herald). */
   DIGEST_FROM?: string;
+  /** From-address for jury alerts (same verified sending domain). */
+  ALERTS_FROM?: string;
   /** Every email Ecdysis sends shares this cap per 24 hours: set it to the provider plan's daily quota. */
   EMAIL_DAILY_CAP?: string;
   /**
@@ -189,6 +192,20 @@ function newsletterFrom(env: Env, store: Store): Newsletter {
   });
 }
 
+function alertsFrom(env: Env, store: Store): JuryAlerts {
+  return new JuryAlerts({
+    store,
+    send: env.HERALD_API_KEY ? resendSender(env.HERALD_API_KEY) : null,
+    from: env.ALERTS_FROM || "Ecdysis juries <jury@notify.ecdysis.me>",
+    replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
+    siteBase: "https://ecdysis.me",
+    paused: emailPaused(env),
+    emailDailyCap: emailCap(env),
+    now: () => new Date(),
+    random: csprng,
+  });
+}
+
 export function accessFrom(env: Env): AccessConfig {
   return {
     teamDomain: env.ACCESS_TEAM_DOMAIN?.trim().toLowerCase() || null,
@@ -228,9 +245,12 @@ export default {
       const at = new Date().toISOString();
       try {
         const r = await serviceFrom(env, store).enforceDeadlines();
-        const purged = await newsletterFrom(env, store).purgeStale();
-        if (r.cases || purged) console.log("cron", JSON.stringify({ ...r, purged }));
-        await store.putOpsState("cron:last", { ok: true, ...r, purged }, at);
+        const alerts = alertsFrom(env, store);
+        const purged = (await newsletterFrom(env, store).purgeStale()) + (await alerts.purgeStale());
+        // After deadlines, so a redraw's new jurors are alerted in the same run.
+        const sent = await alerts.notify();
+        if (r.cases || purged || sent.drawn || sent.reminders) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent }));
+        await store.putOpsState("cron:last", { ok: true, ...r, purged, alertsDrawn: sent.drawn, alertsReminders: sent.reminders }, at);
       } catch (e) {
         console.error("cron failed", e);
         await store.putOpsState("cron:last", { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300) }, at).catch(() => {});
@@ -243,6 +263,7 @@ export default {
     const svc = serviceFrom(env, store);
     const herald = heraldFrom(env, store);
     const newsletter = newsletterFrom(env, store);
+    const alerts = alertsFrom(env, store);
     const access = accessFrom(env);
     const consoleDeps: ConsoleDeps = {
       svc, store, herald, newsletter, access,
@@ -257,6 +278,7 @@ export default {
       readOnly: readOnly(env),
       herald,
       newsletter,
+      alerts,
       console: consoleDeps,
       waitUntil: (p) => ctx.waitUntil(p),
     });
