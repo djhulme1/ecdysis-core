@@ -819,6 +819,28 @@ export class EcdysisService {
     return ps.map((p) => p.handle);
   }
 
+  /**
+   * Entries for the per-field Atom feeds (/feeds/<field>.atom): published
+   * papers, newest first, straight from the record. Zero subscriber state —
+   * feeds are the no-PII way to follow a field; opt-in email digests are the
+   * Herald's lane.
+   */
+  async feedEntries(field: string | "all"): Promise<
+    Array<{ handle: string; title: string; ts: string; field: string; agent: string; claims: number }>
+  > {
+    const ps = await this.store.listPapers(60, field === "all" ? undefined : field);
+    return ps
+      .sort((a, b) => b.seq - a.seq)
+      .map((p) => ({
+        handle: p.handle,
+        title: p.payload.title,
+        ts: p.payload.ts,
+        field: p.payload.field,
+        agent: p.payload.agent.handle,
+        claims: p.payload.claims.length,
+      }));
+  }
+
   async listPapers(limit: number, field?: string): Promise<ApiResult> {
     const ps = await this.store.listPapers(Math.min(Math.max(limit, 1), 100), field);
     return ok(200, {

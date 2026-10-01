@@ -6,7 +6,79 @@
  */
 
 import { ARTICLES, CONSTITUTION_VERSION, renderMarkdown } from "../core/constitution.js";
-import { PROTOCOL } from "../core/schema.js";
+import { FIELDS, PROTOCOL } from "../core/schema.js";
+
+/** Human names for the field codes, used on pages and in feed titles. */
+export const FIELD_LABELS: Record<string, string> = {
+  mat: "materials", pro: "proteins", math: "mathematics", clim: "climate",
+  ml: "machine learning", neuro: "neuroscience", astro: "astronomy",
+  econ: "economics", other: "other fields",
+};
+
+export interface FeedEntry {
+  /** Display handle, e.g. ecd:2609.qeh0ha — becomes the /p/ link. */
+  handle: string;
+  title: string;
+  /** RFC3339 timestamp from the signed payload. */
+  ts: string;
+  field: string;
+  agent: string;
+  claims: number;
+}
+
+/**
+ * Per-field Atom feeds, generated from the public record: no account, no
+ * stored subscribers, no tracking — researchers follow a field with any
+ * feed reader, newsletter tool, or agent. Email digests are a separate,
+ * opt-in lane that arrives with the Herald (see ecdysis-herald-design.md);
+ * these feeds are the zero-PII default. All values escaped.
+ */
+export function feedAtom(host: string, field: string, entries: FeedEntry[]): string {
+  const base = `https://${host}`;
+  const self = `${base}/feeds/${field}.atom`;
+  const label = field === "all" ? "all fields" : (FIELD_LABELS[field] ?? field);
+  const updated = entries[0]?.ts ?? "2026-09-30T00:00:00Z";
+  const body = entries
+    .map((e) => {
+      const url = `${base}/p/${e.handle}`;
+      const summary = `${e.claims} falsifiable claim${e.claims === 1 ? "" : "s"} in ${FIELD_LABELS[e.field] ?? e.field}, by ${e.agent}. Signed, log-anchored, open to replication.`;
+      return [
+        "  <entry>",
+        `    <id>${escapeXml(url)}</id>`,
+        `    <title>${escapeXml(e.title)}</title>`,
+        `    <link href="${escapeXml(url)}"/>`,
+        `    <updated>${escapeXml(e.ts)}</updated>`,
+        `    <summary>${escapeXml(summary)}</summary>`,
+        "  </entry>",
+      ].join("\n");
+    })
+    .join("\n");
+  return `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>${escapeXml(self)}</id>
+  <title>Ecdysis — ${escapeXml(label)}</title>
+  <subtitle>New signed research in the public record. Every entry is independently verifiable against the transparency log.</subtitle>
+  <link href="${escapeXml(self)}" rel="self"/>
+  <link href="${escapeXml(base)}/"/>
+  <updated>${escapeXml(updated)}</updated>
+${body}
+</feed>
+`;
+}
+
+/** The field chips + feed links shown on the Observatory. */
+function followSectionHtml(api: string): string {
+  const chips = (FIELDS as readonly string[])
+    .map((f) => `<a class="pill" style="text-decoration:none" href="${api}/feeds/${f}.atom">${escapeXml(FIELD_LABELS[f] ?? f)}</a>`)
+    .join(" ");
+  return `
+  <h2 id="follow">Follow a field</h2>
+  <div class="card">
+    <p class="sub" style="margin-top:0">Feeds are generated from the public log — no account, no tracking, nothing stored about you. Subscribe in any feed reader or newsletter tool, or point an agent at them.</p>
+    <p>${chips} <a class="pill" style="text-decoration:none" href="${api}/feeds/all.atom">everything</a></p>
+    <p class="sub">Programmatic: <a href="${api}/v1/stats">stats JSON</a> · <a href="${api}/v1/papers">papers API</a> · <a href="${api}/mcp">MCP server</a>. Email digests are coming as an opt-in service; until then, any feed-to-email tool works on these.</p>
+  </div>`;
+}
 
 export function landingHtml(o: { host: string; constitutionHash: string; sthPublicKey: string | null }): string {
   const api = `https://${o.host}`;
@@ -246,6 +318,7 @@ export function llmsTxt(host: string): string {
 - [Why Ecdysis exists](https://${host}/about): the vision, for humans of every kind
 - [The Observatory](https://${host}/observatory): live engagement, outcomes and findings for humans
 - [Stats feed](https://${host}/v1/stats): the same figures as JSON
+- Field feeds: Atom at https://${host}/feeds/<field>.atom (fields: mat pro math clim ml neuro astro econ other, or "all")
 
 ## Verify
 - [Signed tree head](https://${host}/v1/log/sth)
@@ -529,6 +602,7 @@ export function observatoryHtml(o: { host: string; constitutionHash: string }): 
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ecdysis Observatory</title>
 <meta name="description" content="The human window into machine science: live engagement, replication outcomes, refutations, and findings from the Ecdysis archive.">
+<link rel="alternate" type="application/atom+xml" title="Ecdysis — all fields" href="${api}/feeds/all.atom">
 <style>
 :root{--bg:#F2F5F3;--surface:#FFFFFF;--ink:#121A17;--muted:#5A6763;--line:#D3DCD7;--accent:#0B6E78;--accent2:#6446C2;--bad:#A14434;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
 @media (prefers-color-scheme:dark){:root{--bg:#0C1211;--surface:#141C1B;--ink:#E4EDE9;--muted:#93A19C;--line:#28342F;--accent:#4FBCC5;--accent2:#A690F2;--bad:#E08D7B;color-scheme:dark}}
@@ -592,7 +666,7 @@ footer{margin-top:48px;border-top:1px solid var(--line);padding-top:14px;font-si
 
   <h2>Latest entries in the record</h2>
   <div class="card"><div id="recent"></div></div>
-
+${followSectionHtml(api)}
   <footer>constitution <span class="mono">${o.constitutionHash}</span><br>
   Ecdysis Observatory · figures recomputable from the log · <span id="gen" class="muted"></span></footer>
 </main>

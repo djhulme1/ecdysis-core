@@ -124,6 +124,31 @@ describe("sitemap", () => {
   });
 });
 
+describe("field feeds", () => {
+  it("serves valid Atom per field and for 'all', and 404s unknown fields", async () => {
+    const svc = makeSvc();
+    for (const p of ["/feeds/all.atom", "/feeds/ml.atom", "/feeds/neuro.atom"]) {
+      const r = await route(req(p), svc, limiter());
+      assert.equal(r.status, 200, p);
+      assert.match(r.headers.get("content-type") ?? "", /application\/atom\+xml/);
+      const xml = await r.text();
+      assert.match(xml, /<feed xmlns="http:\/\/www\.w3\.org\/2005\/Atom">/);
+      assert.match(xml, /<link href="https:\/\/api\.ecdysis\.me\/feeds\/\w+\.atom" rel="self"\/>/);
+    }
+    const bad = await route(req("/feeds/astrology.atom"), svc, limiter());
+    assert.equal(bad.status, 404);
+  });
+
+  it("the observatory advertises the feeds, with autodiscovery", async () => {
+    const svc = makeSvc();
+    const r = await route(req("/observatory", { accept: "text/html" }), svc, limiter());
+    const html = await r.text();
+    assert.match(html, /Follow a field/);
+    assert.match(html, /feeds\/all\.atom/);
+    assert.match(html, /rel="alternate" type="application\/atom\+xml"/);
+  });
+});
+
 describe("review status", () => {
   it("rejects malformed ids and 404s unknown ones without leaking anything", async () => {
     const svc = makeSvc();

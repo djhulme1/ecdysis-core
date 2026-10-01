@@ -7,7 +7,8 @@
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash } from "../core/constitution.js";
-import { aboutHtml, appsHtml, badgeSvg, bibtexFor, constitutionMd, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
+import { aboutHtml, appsHtml, badgeSvg, bibtexFor, constitutionMd, feedAtom, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
+import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
 import { handleMcp } from "./mcp.js";
 
@@ -132,6 +133,17 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
       TEXT_SITE_HEADERS("application/xml; charset=utf-8"),
       head,
     );
+  }
+  if (path.startsWith("/feeds/") && path.endsWith(".atom")) {
+    const f = path.slice("/feeds/".length, -".atom".length);
+    if (f === "all" || (FIELDS as readonly string[]).includes(f)) {
+      return sitehit(
+        feedAtom(host, f, await svc.feedEntries(f)),
+        TEXT_SITE_HEADERS("application/atom+xml; charset=utf-8"),
+        head,
+      );
+    }
+    return null; // unknown field -> ordinary 404
   }
   if (path === "/terms.md" || path === "/terms") {
     return sitehit(termsMd(host), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
