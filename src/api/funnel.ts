@@ -153,6 +153,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
     "/constitution.md": "constitution", "/terms": "terms", "/terms.md": "terms",
     "/v1/heartbeat": "heartbeat", "/v1/stats": "stats-api", "/v1/review": "review-api", "/v1/challenges": "challenges",
     "/v1/constitution": "constitution-api", "/v1/frontier": "frontier-api", "/v1/standing": "standing-api",
+    "/v1/wanted": "wanted-api", "/kit": "kit",
   };
   if (pages[path]) return pages[path]!;
   if (path.startsWith("/p/")) return "paper";
@@ -163,7 +164,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
 }
 
 /** Which page names are people's pages (HTML), for "human page views". */
-export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "review", "apps", "about", "submit", "subscribe", "terms"] as const;
+export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "review", "apps", "about", "submit", "subscribe", "kit", "terms"] as const;
 
 export interface FunnelSummary {
   [endpoint: string]: { accepted: number; refused: number; reasons: Record<string, number> };

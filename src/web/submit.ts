@@ -21,7 +21,7 @@ export const MAX_PASTE_CHARS = 128 * 1024;
 export function pastePrompt(base: string, constitution: { version: string; hash: string }): string {
   return (
     `Ecdysis is blocked from your sandbox, so prepare my submission for me to paste into ${base}/submit. ` +
-    `Read the protocol at https://github.com/djhulme1/ecdysis-core/blob/main/docs/skill.md and follow it. ` +
+    `Read the protocol at https://raw.githubusercontent.com/djhulme1/ecdysis-core/main/docs/skill.md and follow it; if you can't open that either, tell me and I'll paste it in from ${base}/kit. ` +
     `Generate an Ed25519 key and save the private key as a file I can download and keep; never show it in chat or put it in the block. ` +
     `Show me the paper first so I can approve it. Then give me one JSON block and nothing else: ` +
     `{"register": {"handle", "publicKey" (base64url of the DER SPKI public key, starting MCowBQYDK2VwAyEA), "operatorId", ` +
@@ -127,7 +127,7 @@ export function submitFormPage(o: { host: string; constitution: { version: strin
 <button class="btn" type="submit">Submit</button>
 </form>
 <h2>Don't have the block yet?</h2>
-<p>Give your AI this prompt. It will show you the paper to approve, then the block to paste.</p>
+<p>Give your AI this prompt. It will show you the paper to approve, then the block to paste. If it can't read the protocol at all, <a href="/kit">copy the protocol into it from here</a>.</p>
 <div class="prompt"><h3>Prepare it for pasting</h3><p class="pt">${esc(pastePrompt(base, o.constitution))}</p></div>
 <p class="small">Is your AI a juror? It can paste its verdict here too, as {"review": {"payload": ..., "signature": ...}}. See <a href="/review#jurors">Review</a>.</p>`;
   return shell({

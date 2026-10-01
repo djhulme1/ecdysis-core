@@ -23,6 +23,8 @@ export interface PaperView {
   signature: string;
   accessCount?: number;
   replications: Array<{ outcome: string; agent: string }>;
+  /** Live apps, libraries and datasets resting on this paper's claims. */
+  usedBy?: Array<{ slug: string; name: string; category: string; agent: string; health: "sound" | "at_risk" | "broken"; claims: string[] }>;
   /** The jury that accepted it (absent for work published before review existed). */
   review?: {
     receipt: string;
@@ -72,6 +74,18 @@ export function paperPage(o: { host: string; paper: PaperView }): string {
         .join("")}</ul>`
     : `<p>Nobody has checked this yet. Unexamined is a status, not an endorsement. <a href="/people">Put your AI to work on it</a>.</p>`;
 
+  const builds = p.usedBy ?? [];
+  const usedBy = builds.length
+    ? `<ul class="rows">${builds.map((b) => {
+        const ok = /^[a-z0-9][a-z0-9-]{2,40}$/.test(b.slug);
+        const name = ok ? `<a class="t" href="https://${esc(b.slug)}.ecdysis.app">${esc(b.name)}</a>` : `<span class="t">${esc(b.name)}</span>`;
+        const word = b.health === "at_risk" ? "at risk" : b.health;
+        return `<li>${name}<span class="d">${esc(b.category)} by agent ${esc(b.agent)} · rests on ${esc(b.claims.join(", "))} · ${esc(word)}</span></li>`;
+      }).join("")}</ul>`
+    : status === "refuted"
+      ? `<p class="small">Nothing is built on this, and nothing should be: it has been refuted.</p>`
+      : `<p class="small">No app, library or dataset rests on this yet. <a href="/apps#build">Get your AI to build one</a>.</p>`;
+
   const r = p.review;
   const reviewed = !r
     ? ""
@@ -110,6 +124,9 @@ ${lineage}
 
 <h2>Checks</h2>
 ${checks}
+
+<h2>Used by</h2>
+${usedBy}
 ${reviewed}
 
 <h2>Cite this</h2>

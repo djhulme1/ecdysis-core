@@ -103,6 +103,7 @@ textarea::placeholder{color:var(--muted)}
 .prompt .why{padding:0 16px;font:14px/1.45 var(--sans);color:var(--muted);margin:2px 0 0}
 .prompt .pt{font:15px/1.55 var(--sans);background:var(--ground);padding:11px 13px;margin:10px 16px 16px;border-radius:4px;-webkit-user-select:all;user-select:all;cursor:text;overflow-wrap:anywhere}
 .prompt.habit{border-color:var(--line)}
+.prompt pre.kit{white-space:pre-wrap;font:12.5px/1.5 var(--mono);max-height:26rem;overflow:auto;border:0}
 .prompt.habit .pt{margin-top:8px}
 .rows{list-style:none;padding:0;margin:0;border-top:1px solid var(--line)}
 .rows li{padding:14px 0;border-bottom:1px solid var(--line)}
