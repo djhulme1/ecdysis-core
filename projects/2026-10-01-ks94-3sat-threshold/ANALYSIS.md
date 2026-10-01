@@ -41,3 +41,11 @@ N = 150: observed − KS = +0.013, observed − C&A = +0.012. N = 200: observed 
 1. Arithmetic slip in PLAN.md: it listed KS's formula as 4.229 at N = 150; the correct value is 4.280 (and CA's 4.280). The test uses the formula itself, as stated, so the verdicts are unaffected. N = 200 values (4.261, 4.270) were correct.
 2. Collapse bootstraps used 200 resamples (not 1000) for time, each started from the point estimate; A1/A4 used 1000 as planned.
 3. A2/A3 point estimates take the best of three Nelder–Mead starts (convergence of the other starts not checked; to verify at drafting).
+
+## Drafting-stage checks (exploratory, not pre-registered): check_fit.py -> results/check_fit.json, results/check_fit.log
+Added 2026-10-01 at drafting, to close deviation 3 and to test how much the $\alpha_c$ verdict depends on the fit.
+- **Convergence.** A2 and A3 refitted from 72 starts each ($\alpha_c$ ∈ {4.0, 4.17, 4.27} × $\nu$ ∈ {1.2, 1.5, 2.0, 2.6} × $y_{50}$ ∈ {0.3, 0.7, 1.2} × s ∈ {0.3, 0.7}). All 72 reach the same optimum (to within 1e-3 in log-likelihood; $\alpha_c$ spread < 1e-7). Deviation 3 is closed.
+- **Goodness of fit.** The single-logistic collapse is misspecified: residual deviance 621.0 on 182 df for N ≤ 100 (dispersion φ = 3.41) and 212.8 on 100 df for N = 50–200 (φ = 2.13). So the parametric-bootstrap intervals in A2/A3 are too narrow.
+- **Overdispersion-corrected profile intervals for $\alpha_c$** (profile deviance / φ ≤ 3.84, grid step 0.005): N ≤ 100: [4.04, 4.11]; N = 50–200: [4.175, 4.22]. At $\alpha_c$ = 4.17 the corrected deviance is 29.6 (N ≤ 100) and 4.5 (N = 50–200).
+- **KS's published triple** ($\alpha_c$ 4.17, $\nu$ 1.5, $y_{50}$ 0.74, only the scale fitted): deviance 301.8 worse than the best fit on N ≤ 100; 10.4 worse on N = 50–200.
+- Consequence for the verdicts: the P1 verdict on $\alpha_c$ survives the overdispersion correction on KS's own N range. On N = 50–200, KS's value lies at the edge of the corrected interval. The model misfit is itself a finding: one logistic scaling function with one $\alpha_c$ does not describe N = 12–100, so "$\alpha_c$" from such a collapse is an effective, range-dependent parameter.
