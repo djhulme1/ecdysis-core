@@ -89,6 +89,13 @@ ul,ol{padding-left:1.25em}
 .door .what{display:block;font:15px/1.5 var(--sans);color:var(--muted);margin:0 0 16px}
 .btn{display:inline-block;background:var(--amber);color:var(--on-amber);font:600 15px/1 var(--sans);padding:10px 14px;border-radius:6px;text-decoration:none;border:0;cursor:pointer}
 form label{display:block;margin:0 0 6px}
+input[type=email],input[type=text],input[type=number],select{display:block;font:15px/1.4 var(--sans);color:var(--ink);background:var(--card);border:1px solid var(--ink);border-radius:0;padding:8px 10px;width:100%;max-width:32rem;margin:0 0 12px}
+fieldset{border:1px solid var(--line);padding:8px 12px 10px;margin:0 0 12px;max-width:44rem}
+legend{font:14px/1.3 var(--sans);color:var(--muted);padding:0 4px}
+form label.opt{display:inline-flex;align-items:center;gap:6px;margin:4px 18px 4px 0;font:15px/1.4 var(--sans)}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.btn.quiet{background:transparent;color:var(--ink);border:1px solid var(--ink)}
+.btn.danger{background:var(--broken);color:var(--on-amber)}
 textarea{display:block;width:100%;font:13.5px/1.5 var(--mono);color:var(--ink);background:var(--card);border:1px solid var(--ink);border-radius:0;padding:10px 12px;margin:0 0 8px;resize:vertical}
 textarea::placeholder{color:var(--muted)}
 .prompt{background:var(--card);border:1px solid var(--ink);margin:12px 0 22px}

@@ -16,9 +16,11 @@ import { reviewPage, type Decision, type QueueBody } from "../web/review.js";
 import { appsPage } from "../web/apps.js";
 import { paperPage as renderPaper } from "../web/paper.js";
 import type { Herald } from "./herald.js";
+import { digestNotice, subscribePage, type Newsletter } from "./newsletter.js";
+import { handleConsole, isConsolePath, type ConsoleDeps } from "./operator.js";
 import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
-import { endpointOf, funnelKeys } from "./funnel.js";
+import { dayFunnelKeys, endpointOf, funnelKeys, pageKeyOf } from "./funnel.js";
 import { handleMcp } from "./mcp.js";
 
 export interface RateLimiter {
@@ -33,6 +35,12 @@ export interface RouteOptions {
   readOnly?: boolean;
   /** The Herald (author emails). Absent: its endpoints answer 501. */
   herald?: Herald | null;
+  /** The digest (double opt-in email). Absent: signups show "opening soon". */
+  newsletter?: Newsletter | null;
+  /** The operator console. Absent: /operator does not exist. */
+  console?: ConsoleDeps | null;
+  /** Lets counting finish after the response is sent (the Worker's ctx.waitUntil). */
+  waitUntil?: (p: Promise<unknown>) => void;
 }
 
 /** Permissive in-memory fallback; production uses Cloudflare's bindings. */
@@ -99,6 +107,13 @@ const STATIC_PAGE_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
   "content-security-policy":
     "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+};
+
+/** Script-free pages with a form that posts back to this origin; never cached. */
+const FORM_PAGE_HEADERS: Record<string, string> = {
+  ...STATIC_PAGE_HEADERS,
+  "cache-control": "no-store",
+  "content-security-policy": STATIC_PAGE_HEADERS["content-security-policy"]!.replace("form-action 'none'", "form-action 'self'"),
 };
 
 const TEXT_SITE_HEADERS = (type: string): Record<string, string> => ({
@@ -168,8 +183,17 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     return sitehit(aboutPage(host), STATIC_PAGE_HEADERS, head);
   }
   if (path === "/observatory" || path === "/dashboard") {
-    // The one page with script: it reads /v1/stats from this origin.
-    return sitehit(observatoryPage({ host, constitutionHash: await constitutionHash() }), PAGE_HEADERS, head);
+    // The one page with script: it reads /v1/stats from this origin. Its
+    // digest signup form posts back here, so form-action is 'self'.
+    return sitehit(
+      observatoryPage({ host, constitutionHash: await constitutionHash(), digestOpen: !!opts.newsletter?.open }),
+      { ...PAGE_HEADERS, "content-security-policy": PAGE_HEADERS["content-security-policy"]!.replace("form-action 'none'", "form-action 'self'") },
+      head,
+    );
+  }
+  if (path === "/subscribe") {
+    const p = subscribePage({ open: !!opts.newsletter?.open });
+    return sitehit(p.html, FORM_PAGE_HEADERS, head);
   }
   if (path === "/apps" || path === "/marketplace") {
     const m = (await svc.marketplace(100)).body as { marketplace: never[] };
@@ -372,8 +396,16 @@ export async function route(
       const body = (await res.clone().json().catch(() => null)) as { error?: unknown } | null;
       error = typeof body?.error === "string" ? body.error : null;
     }
-    const keys = funnelKeys(req.method, path, res.status, error);
-    if (keys.length) await svc.recordOperational(keys);
+    const day = new Date().toISOString().slice(0, 10);
+    const keys = [...funnelKeys(req.method, path, res.status, error), ...dayFunnelKeys(day, req.method, path, res.status)];
+    // Reads: a daily count per page or surface, by fixed name only.
+    const pv = res.status < 400 ? pageKeyOf(req.method, path, req.headers.get("accept")) : null;
+    if (pv) keys.push(`pv:${day}:${pv}`);
+    if (keys.length) {
+      const counting = svc.recordOperational(keys);
+      if (opts.waitUntil) opts.waitUntil(counting);
+      else await counting;
+    }
   } catch {
     /* counting must never break a response */
   }
@@ -398,6 +430,47 @@ async function routeRequest(
   const isMcp = path === "/mcp";
   if (!(await limiter.allow(reading || isMcp ? "read" : "write", ip))) {
     return respond(429, { error: "rate limit exceeded; slow down" });
+  }
+
+  // The operator console has its own lock (Cloudflare Access, checked again
+  // here) and never falls through to anything public.
+  if (isConsolePath(path)) {
+    if (!opts.console) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
+    return handleConsole(req, opts.console);
+  }
+
+  // Digest unsubscribe links: always honoured, even in read-only mode.
+  const nunsub = path.match(/^\/u\/n\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
+  if (nunsub || path.startsWith("/u/n/")) {
+    if (!opts.newsletter || !nunsub) return new Response("Not found", { status: 404, headers: FORM_PAGE_HEADERS });
+    const r = await opts.newsletter.unsubscribe(nunsub[1]!, nunsub[2]!, method === "POST" ? "POST" : "GET");
+    return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers: FORM_PAGE_HEADERS });
+  }
+
+  // Digest signup and confirmation: pages for people, so even refusals are pages.
+  const confirm = path.match(/^\/subscribe\/confirm\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
+  if (method === "POST" && (path === "/subscribe" || path.startsWith("/subscribe/"))) {
+    const html = (status: number, body: string) => new Response(body, { status, headers: FORM_PAGE_HEADERS });
+    if (opts.readOnly || !opts.newsletter) {
+      return html(503, digestNotice(503, "Not right now", "Ecdysis isn't taking signups at the moment. Please try again later.").html);
+    }
+    if (path === "/subscribe") {
+      const len = Number(req.headers.get("content-length") ?? "0");
+      const text = len > 8192 ? "" : await req.text();
+      if (text.length > 8192) return html(413, digestNotice(413, "Too long", "That form was too long. Please go back and try again.").html);
+      const r = await opts.newsletter.subscribe(new URLSearchParams(text));
+      return html(r.status, r.html);
+    }
+    if (confirm) {
+      const r = await opts.newsletter.confirm(confirm[1]!, confirm[2]!, "POST");
+      return html(r.status, r.html);
+    }
+    return html(404, digestNotice(404, "Not found", "There's nothing at that address.").html);
+  }
+  if (reading && confirm) {
+    if (!opts.newsletter) return new Response("Not found", { status: 404, headers: FORM_PAGE_HEADERS });
+    const r = await opts.newsletter.confirm(confirm[1]!, confirm[2]!, "GET");
+    return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers: FORM_PAGE_HEADERS });
   }
 
   // Unsubscribe links: always honoured, even in read-only mode — opting out

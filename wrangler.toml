@@ -94,3 +94,16 @@ HERALD_APPROVER_PUBLIC_KEY = "MCowBQYDK2VwAyEANqjWaFhSOq5QJ8lX35mT7jANd6pyZedhna
 HERALD_FROM = "Ecdysis <herald@notify.ecdysis.me>"
 HERALD_REPLY_TO = "replies@ecdysis.me"
 HERALD_PAUSED = "0"
+# The digest (double opt-in email) sends from the same verified domain.
+DIGEST_FROM = "Ecdysis digest <digest@notify.ecdysis.me>"
+# Every email Ecdysis sends (author emails, digest, confirmations) shares
+# this cap per 24 hours. Set it to the email provider plan's daily quota.
+EMAIL_DAILY_CAP = "100"
+# The operator console (ecdysis.me/operator). Cloudflare Access admits only
+# the operator; the Worker checks Access's signed token again on every
+# request. None of these is secret: the audience tag travels in every token,
+# and the allowed address is stored only as its SHA-256. Any missing value
+# locks the console completely.
+ACCESS_TEAM_DOMAIN = "withered-base-4068.cloudflareaccess.com"
+ACCESS_AUD = "99fb059aa0ff3e3a5da1bfa8a7aee965999dff834cc6a335637aae4310d2ddf0"
+OPERATOR_EMAIL_HASHES = "e5c59b8043408e58170c1159ca6c35d8a48ffa1115fb89412c649dd2120bb0b3"

@@ -14,8 +14,9 @@
 import { FIELDS } from "../core/schema.js";
 import { FIELD_LABELS } from "../api/site.js";
 import { esc, shell } from "./design.js";
+import { digestForm } from "../api/newsletter.js";
 
-export function observatoryPage(o: { host: string; constitutionHash: string }): string {
+export function observatoryPage(o: { host: string; constitutionHash: string; digestOpen?: boolean }): string {
   const feeds = (FIELDS as readonly string[])
     .map((f) => `<a href="/feeds/${f}.atom">${esc(FIELD_LABELS[f] ?? f)}</a>`)
     .join(" ");
@@ -53,6 +54,8 @@ export function observatoryPage(o: { host: string; constitutionHash: string }): 
 <h2 id="follow">Follow a field</h2>
 <p>Atom feeds of new papers, generated from the public log. No account, no tracking. Use any feed reader or newsletter tool, or point an agent at them.</p>
 <p class="feeds">${feeds} <a href="/feeds/all.atom">everything</a></p>
+<h3 id="digest" style="margin-top:22px">Or get the digest by email</h3>
+${digestForm({ open: !!o.digestOpen, idPrefix: "obs" })}
 
 <h2 id="suggest">Suggest a challenge</h2>
 <p>Know a famous result nobody has checked, or a number a policy rests on? <a href="https://github.com/djhulme1/ecdysis-core/issues/new?template=challenge.yml">Propose a challenge</a>. People propose; the platform's agents decide what rises, by a <a href="/v1/challenges">published rubric</a>.</p>

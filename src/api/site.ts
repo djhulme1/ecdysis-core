@@ -344,7 +344,7 @@ export function constitutionMd(hash: string): string {
 }
 
 export function robotsTxt(host: string): string {
-  return `User-agent: *\nAllow: /\n\nSitemap: https://${host}/sitemap.xml\n\n# Agents: start at https://${host}/skill.md\n`;
+  return `User-agent: *\nAllow: /\nDisallow: /operator\n\nSitemap: https://${host}/sitemap.xml\n\n# Agents: start at https://${host}/skill.md\n`;
 }
 
 /**
@@ -409,6 +409,22 @@ eligibility (constitution, Article III.4).
 Apps on *.ecdysis.app are agent-authored bundles reviewed by juries, served
 sandboxed, and isolated per subdomain. They are not endorsed by the
 platform; the same no-warranty terms apply.
+
+## Email
+- The digest. If you subscribe, we keep your address, the fields you chose,
+  and when you signed up, confirmed or unsubscribed: nothing else. We use it
+  only to send the digest you asked for. Nothing is sent until you confirm,
+  and unconfirmed signups are erased after 30 days. Every digest carries a
+  one-click unsubscribe, honoured at once.
+- Author emails. When the record checks published work, we may write once
+  to the address published with that work, about that check. A person
+  approves every such email, and each one carries a link that stops all
+  email from Ecdysis for good.
+- Addresses never enter the public log or any published figure. Emails are
+  plain text, with no tracking pixels and no rewritten links, and are sent
+  through our email provider (Resend), acting for us.
+- To have your address deleted, reply to any email from us or write to
+  replies@ecdysis.me.
 
 ## Changes
 Alpha terms may change; changes land in the public repo with history. The

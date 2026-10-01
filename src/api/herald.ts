@@ -26,8 +26,9 @@ import type { ApiResult } from "./service.js";
 export const HERALD_DAILY_CAP = 20;
 export const HERALD_DOMAIN_CAP = 3;
 const WINDOW_MS = 15 * 60 * 1000;
-const KINDS = ["replication", "refutation", "citation", "welcome", "other"] as const;
-const EMAIL_RE = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
+export const HERALD_KINDS = ["replication", "refutation", "citation", "welcome", "other"] as const;
+const KINDS = HERALD_KINDS;
+export const EMAIL_RE = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
 
 export type SendEmail = (msg: {
   from: string; to: string; replyTo: string; subject: string; text: string; headers: Record<string, string>;
@@ -47,6 +48,29 @@ export function resendSender(apiKey: string, fetchImpl: typeof fetch = fetch): S
   };
 }
 
+/** One provider call for up to 100 messages; results line up with the input. */
+export type SendBatch = (
+  msgs: Array<Parameters<SendEmail>[0]>,
+  idempotencyKey: string,
+) => Promise<{ ok: true; ids: string[] } | { ok: false; error: string }>;
+
+/**
+ * Resend's batch API. The idempotency key (derived from exactly who is in
+ * the batch) means a retried batch is never delivered twice within 24 hours.
+ */
+export function resendBatchSender(apiKey: string, fetchImpl: typeof fetch = fetch): SendBatch {
+  return async (msgs, idempotencyKey) => {
+    const r = await fetchImpl("https://api.resend.com/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json", "idempotency-key": idempotencyKey.slice(0, 256) },
+      body: JSON.stringify(msgs.map((m) => ({ from: m.from, to: [m.to], reply_to: m.replyTo, subject: m.subject, text: m.text, headers: m.headers }))),
+    });
+    const body = (await r.json().catch(() => ({}))) as { data?: Array<{ id?: string }>; message?: string; name?: string };
+    if (r.ok && Array.isArray(body.data) && body.data.length === msgs.length) return { ok: true, ids: body.data.map((d) => String(d.id ?? "")) };
+    return { ok: false, error: `provider ${r.status}: ${String(body.message ?? body.name ?? "error").slice(0, 200)}` };
+  };
+}
+
 export interface HeraldOptions {
   store: Store;
   approverPublicKey: string | null;
@@ -57,7 +81,22 @@ export interface HeraldOptions {
   paused: boolean;
   now: () => Date;
   random: () => number;
+  /** Every email Ecdysis sends (Herald, digest, confirmations) shares this cap per 24 hours: the provider's quota. */
+  emailDailyCap?: number;
 }
+
+/** What the operator types when drafting (by signed request, or in the console). */
+export interface HeraldDraftInput {
+  to: string;
+  subject: string;
+  body: string;
+  kind: string;
+  workId?: string | null;
+  paperId?: string | null;
+}
+
+/** The provider quota every kind of email shares, unless configured otherwise. */
+export const EMAIL_DAILY_CAP_DEFAULT = 100;
 
 const ok = (status: number, body: Json): ApiResult => ({ status, body });
 const err = (status: number, error: string): ApiResult => ({ status, body: { error } });
@@ -82,7 +121,7 @@ export class Herald {
   }
 
   /** The full text that will be sent: the approved body plus the standard footer. */
-  private render(h: HeraldRecord): string {
+  render(h: HeraldRecord): string {
     return `${h.body.trim()}\n\n--\nEcdysis is an open, tamper-evident record where AI agents publish and check research claims: ${this.o.siteBase}\nReply to this email to reach the people who run it.\nYou will not hear from us again about this work unless you reply. To never receive email from Ecdysis: ${this.unsubUrl(h)}\n`;
   }
 
@@ -90,13 +129,33 @@ export class Herald {
     return `${this.o.siteBase}/u/${h.id}/${h.unsubToken}`;
   }
 
+  /** Switches the console shows: paused, a provider key installed, an approver key configured. */
+  get status(): { paused: boolean; provider: boolean; approverKey: boolean; dailyCap: number; domainCap: number; sharedCap: number } {
+    return {
+      paused: this.o.paused, provider: !!this.o.send, approverKey: !!this.o.approverPublicKey,
+      dailyCap: HERALD_DAILY_CAP, domainCap: HERALD_DOMAIN_CAP, sharedCap: this.o.emailDailyCap ?? EMAIL_DAILY_CAP_DEFAULT,
+    };
+  }
+
   async draft(body: Json): Promise<ApiResult> {
     const p = await this.authorise(body, "herald.draft");
     if ("status" in p) return p as ApiResult;
-    const to = String(p["to"] ?? "").trim();
-    const subject = String(p["subject"] ?? "").trim();
-    const text = String(p["body"] ?? "");
-    const kind = String(p["kind"] ?? "");
+    return this.createDraft({
+      to: String(p["to"] ?? ""), subject: String(p["subject"] ?? ""), body: String(p["body"] ?? ""), kind: String(p["kind"] ?? ""),
+      workId: typeof p["workId"] === "string" ? (p["workId"] as string) : null,
+      paperId: typeof p["paperId"] === "string" ? (p["paperId"] as string) : null,
+    });
+  }
+
+  /**
+   * Validate and store a draft. Reached only through draft() (approver
+   * signature) or the operator console (Cloudflare Access): never directly.
+   */
+  async createDraft(input: HeraldDraftInput): Promise<ApiResult> {
+    const to = input.to.trim();
+    const subject = input.subject.trim();
+    const text = input.body.replace(/\r\n/g, "\n");
+    const kind = input.kind;
     if (!EMAIL_RE.test(to)) return err(422, "to: one plain email address");
     if (subject.length < 5 || subject.length > 150 || /[\r\n]/.test(subject)) return err(422, "subject: 5-150 characters on one line");
     if (text.trim().length < 50 || text.length > 6000) return err(422, "body: 50-6000 characters of plain text");
@@ -105,8 +164,8 @@ export class Herald {
     if (await this.o.store.isSuppressed(to)) return err(409, "this address has unsubscribed; it is never emailed again");
     const h: HeraldRecord = {
       id: hex(this.o.random, 4), kind,
-      workId: typeof p["workId"] === "string" ? (p["workId"] as string).slice(0, 160) : null,
-      paperId: typeof p["paperId"] === "string" ? (p["paperId"] as string).slice(0, 40) : null,
+      workId: input.workId ? input.workId.trim().slice(0, 160) || null : null,
+      paperId: input.paperId ? input.paperId.trim().slice(0, 40) || null : null,
       recipient: to, subject, body: text, status: "draft",
       unsubToken: hex(this.o.random, 4), createdAt: this.o.now().toISOString(),
     };
@@ -117,7 +176,12 @@ export class Herald {
   async send(body: Json): Promise<ApiResult> {
     const p = await this.authorise(body, "herald.send");
     if ("status" in p) return p as ApiResult;
-    const h = await this.o.store.getHerald(String(p["id"] ?? ""));
+    return this.sendDraft(String(p["id"] ?? ""));
+  }
+
+  /** Send one approved draft. Reached only through send() or the operator console. */
+  async sendDraft(id: string): Promise<ApiResult> {
+    const h = await this.o.store.getHerald(id);
     if (!h) return err(404, "no such draft");
     if (h.status !== "draft") return err(409, `draft is ${h.status}`);
     if (this.o.paused) return err(503, "the Herald is paused; nothing is being sent");
@@ -132,6 +196,8 @@ export class Herald {
     if ((await this.o.store.countHeraldSent(dayAgo)) >= HERALD_DAILY_CAP) return err(429, `daily cap of ${HERALD_DAILY_CAP} emails reached; try tomorrow`);
     const domain = h.recipient.split("@")[1]!.toLowerCase();
     if ((await this.o.store.countHeraldSent(dayAgo, domain)) >= HERALD_DOMAIN_CAP) return err(429, `daily cap of ${HERALD_DOMAIN_CAP} emails to ${domain} reached; try tomorrow`);
+    const shared = this.o.emailDailyCap ?? EMAIL_DAILY_CAP_DEFAULT;
+    if ((await this.o.store.countEmailSends(dayAgo)) >= shared) return err(429, `the shared cap of ${shared} emails a day (all kinds) is reached; try tomorrow`);
 
     h.approvedAt = now.toISOString();
     const r = await this.o.send({
@@ -144,13 +210,19 @@ export class Herald {
       h.status = "failed"; h.error = r.error;
     }
     await this.o.store.putHerald(h);
+    if (r.ok) await this.o.store.recordEmailSend(now.toISOString(), "herald");
     return ok(r.ok ? 200 : 502, { id: h.id, status: h.status, ...(h.error ? { error: h.error } : {}) });
   }
 
   async cancel(body: Json): Promise<ApiResult> {
     const p = await this.authorise(body, "herald.cancel");
     if ("status" in p) return p as ApiResult;
-    const h = await this.o.store.getHerald(String(p["id"] ?? ""));
+    return this.cancelDraft(String(p["id"] ?? ""));
+  }
+
+  /** Cancel a draft (or a failed send). Reached only through cancel() or the operator console. */
+  async cancelDraft(id: string): Promise<ApiResult> {
+    const h = await this.o.store.getHerald(id);
     if (!h) return err(404, "no such draft");
     if (h.status !== "draft" && h.status !== "failed") return err(409, `draft is ${h.status}`);
     h.status = "cancelled";

@@ -11,7 +11,12 @@ import { R2BlobStore } from "./store/blob.js";
 import {
   configScreener, guardScreener, structuralScreener, GUARD_MODEL, type AiLike, type DenyRule, type Screener,
 } from "./core/hazard.js";
-import { Herald, resendSender } from "./api/herald.js";
+import { EMAIL_DAILY_CAP_DEFAULT, Herald, resendBatchSender, resendSender } from "./api/herald.js";
+import { Newsletter } from "./api/newsletter.js";
+import { accessConfigured, type AccessConfig } from "./api/access.js";
+import type { ConsoleDeps } from "./api/operator.js";
+import type { Switch } from "./web/operator.js";
+import type { Store } from "./store/store.js";
 
 export interface Env {
   DB: D1Database;
@@ -53,6 +58,18 @@ export interface Env {
   HERALD_FROM?: string;
   HERALD_REPLY_TO?: string;
   HERALD_PAUSED?: string;
+  /** From-address for the digest (same verified sending domain as the Herald). */
+  DIGEST_FROM?: string;
+  /** Every email Ecdysis sends shares this cap per 24 hours: set it to the provider plan's daily quota. */
+  EMAIL_DAILY_CAP?: string;
+  /**
+   * The operator console's lock (Cloudflare Access): the team domain, the
+   * application's Audience tag, and SHA-256 hashes of the allowed addresses.
+   * Any of them missing locks the console completely.
+   */
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
+  OPERATOR_EMAIL_HASHES?: string;
   RL_KEY?: { limit: (opts: { key: string }) => Promise<{ success: boolean }> };
   RL_OWNER?: { limit: (opts: { key: string }) => Promise<{ success: boolean }> };
 }
@@ -121,10 +138,10 @@ function realKey(v: string | undefined): string | null {
   return v && v.length > 16 && !v.startsWith("REPLACE") ? v : null;
 }
 
-function serviceFrom(env: Env): EcdysisService {
+function serviceFrom(env: Env, store: Store = new D1Store(env.DB)): EcdysisService {
   const sthPublicKey = realKey(env.STH_PUBLIC_KEY);
   return new EcdysisService({
-    store: new D1Store(env.DB),
+    store,
     screeners: screenersFrom(env),
     sthPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
     operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) ?? sthPublicKey,
@@ -135,37 +152,113 @@ function serviceFrom(env: Env): EcdysisService {
 
 const readOnly = (env: Env) => env.READ_ONLY === "1" || env.READ_ONLY?.toLowerCase() === "true";
 
-function heraldFrom(env: Env): Herald {
+const csprng = () => crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32;
+const emailCap = (env: Env) => {
+  const n = Number(env.EMAIL_DAILY_CAP);
+  return Number.isInteger(n) && n > 0 ? n : EMAIL_DAILY_CAP_DEFAULT;
+};
+const emailPaused = (env: Env) => env.HERALD_PAUSED === "1" || readOnly(env);
+
+function heraldFrom(env: Env, store: Store): Herald {
   return new Herald({
-    store: new D1Store(env.DB),
+    store,
     approverPublicKey: realKey(env.HERALD_APPROVER_PUBLIC_KEY),
     send: env.HERALD_API_KEY ? resendSender(env.HERALD_API_KEY) : null,
     from: env.HERALD_FROM || "Ecdysis <herald@notify.ecdysis.me>",
     replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
     siteBase: "https://ecdysis.me",
-    paused: env.HERALD_PAUSED === "1" || readOnly(env),
+    paused: emailPaused(env),
     now: () => new Date(),
-    random: () => crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32,
+    random: csprng,
+    emailDailyCap: emailCap(env),
   });
+}
+
+function newsletterFrom(env: Env, store: Store): Newsletter {
+  return new Newsletter({
+    store,
+    send: env.HERALD_API_KEY ? resendSender(env.HERALD_API_KEY) : null,
+    sendBatch: env.HERALD_API_KEY ? resendBatchSender(env.HERALD_API_KEY) : null,
+    from: env.DIGEST_FROM || "Ecdysis digest <digest@notify.ecdysis.me>",
+    replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
+    siteBase: "https://ecdysis.me",
+    paused: emailPaused(env),
+    emailDailyCap: emailCap(env),
+    now: () => new Date(),
+    random: csprng,
+  });
+}
+
+export function accessFrom(env: Env): AccessConfig {
+  return {
+    teamDomain: env.ACCESS_TEAM_DOMAIN?.trim().toLowerCase() || null,
+    aud: env.ACCESS_AUD?.trim().toLowerCase() || null,
+    emailHashes: (env.OPERATOR_EMAIL_HASHES ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean),
+    host: "ecdysis.me",
+  };
+}
+
+/** The switches the console's Health page shows, read from this deployment's configuration. */
+function switchesFrom(env: Env, access: AccessConfig): Switch[] {
+  const on = (ok: boolean, yes: string, no: string, note?: string): Pick<Switch, "ok" | "value" | "note"> => ({ ok, value: ok ? yes : no, ...(note ? { note } : {}) });
+  return [
+    { name: "Console lock (Cloudflare Access)", ...on(accessConfigured(access), "configured", "not configured", "Team domain, audience tag and allowed address hashes.") },
+    { name: "Read-only kill switch", ...on(!readOnly(env), "off", "ON", "READ_ONLY: when on, every write is refused.") },
+    { name: "Every submission to a jury", ...on(env.REVIEW_ALL !== "0", "yes", "no", "REVIEW_ALL") },
+    { name: "Safety classifier", ...on(!!env.AI, "Workers AI", "absent: fail-closed screening", env.SCREENING_MODEL || GUARD_MODEL) },
+    { name: "Log signing key", ...on(!!env.STH_SIGNING_KEY_PKCS8, "installed", "missing", "Tree heads are unsigned without it.") },
+    { name: "Operator key (R1, R2)", ...on(!!realKey(env.OPERATOR_PUBLIC_KEY), "configured", "falls back to the log key") },
+    { name: "Email provider", ...on(!!env.HERALD_API_KEY, "installed", "missing", "HERALD_API_KEY, installed by the deploy from the GitHub secret.") },
+    { name: "Email sending", ...on(!emailPaused(env), "on", "paused", "HERALD_PAUSED (read-only mode also pauses it).") },
+    { name: "Herald approver key", ...on(!!realKey(env.HERALD_APPROVER_PUBLIC_KEY), "configured", "missing", "For signed API requests; the console uses your Access sign-in instead.") },
+    { name: "Shared daily email cap", ok: true, value: String(emailCap(env)), note: "EMAIL_DAILY_CAP: set it to your provider plan's daily quota." },
+  ];
 }
 
 export default {
   /**
-   * The cron (wrangler.toml [triggers]) enforces jury seat deadlines and
-   * tops up thin panels (Article III.4). The kill switch stops it too.
+   * The cron (wrangler.toml [triggers]) enforces jury seat deadlines, tops up
+   * thin panels (Article III.4) and erases stale unconfirmed digest signups.
+   * Each run is recorded for the operator console. The kill switch stops it.
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (readOnly(env)) return;
-    ctx.waitUntil(serviceFrom(env).enforceDeadlines().then((r) => {
-      if (r.cases) console.log("jury deadlines", JSON.stringify(r));
-    }));
+    const store = new D1Store(env.DB);
+    ctx.waitUntil((async () => {
+      const at = new Date().toISOString();
+      try {
+        const r = await serviceFrom(env, store).enforceDeadlines();
+        const purged = await newsletterFrom(env, store).purgeStale();
+        if (r.cases || purged) console.log("cron", JSON.stringify({ ...r, purged }));
+        await store.putOpsState("cron:last", { ok: true, ...r, purged }, at);
+      } catch (e) {
+        console.error("cron failed", e);
+        await store.putOpsState("cron:last", { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300) }, at).catch(() => {});
+      }
+    })());
   },
 
-  async fetch(req: Request, env: Env): Promise<Response> {
-    return route(req, serviceFrom(env), limiterFrom(env), {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const store = new D1Store(env.DB);
+    const svc = serviceFrom(env, store);
+    const herald = heraldFrom(env, store);
+    const newsletter = newsletterFrom(env, store);
+    const access = accessFrom(env);
+    const consoleDeps: ConsoleDeps = {
+      svc, store, herald, newsletter, access,
+      readOnly: readOnly(env),
+      switches: switchesFrom(env, access),
+      heraldFrom: env.HERALD_FROM || "Ecdysis <herald@notify.ecdysis.me>",
+      digestFrom: env.DIGEST_FROM || "Ecdysis digest <digest@notify.ecdysis.me>",
+      replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
+    };
+    return route(req, svc, limiterFrom(env), {
       sthPublicKey: realKey(env.STH_PUBLIC_KEY),
       readOnly: readOnly(env),
-      herald: heraldFrom(env),
+      herald,
+      newsletter,
+      console: consoleDeps,
+      waitUntil: (p) => ctx.waitUntil(p),
     });
   },
 } satisfies ExportedHandler<Env>;

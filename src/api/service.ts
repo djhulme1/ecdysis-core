@@ -1598,7 +1598,8 @@ export class EcdysisService {
       juryVersion: JURY_VERSION,
       operational: {
         note: "Attempted writes, counted operationally and outside the signed record: aggregate only, never who sent them or what they contained. Accepted writes also land in the log; refused ones appear only here, so a failure is never invisible.",
-        writes: summariseFunnel(await this.store.listAccessPrefix("funnel:")),
+        // Digest signups are the operator's private figure, not public data.
+        writes: summariseFunnel((await this.store.listAccessPrefix("funnel:")).filter((r) => !/^funnel:subscribe(-confirm)?:/.test(r.id))),
       },
       totals: {
         logEntries: n,

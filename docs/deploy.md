@@ -161,6 +161,36 @@ to an object-locked bucket and an independent auditor before scale; run
   workflow injects it). The STH key stands in only until this is set; split
   them before any real hazard decision is needed.
 
+## 5b. Email and the operator console
+
+**Email.** One provider key serves author emails (the Herald), the digest
+and its confirmation emails. Verify a sending subdomain with your provider
+(e.g. `notify.your-domain`), then add the key as the GitHub secret
+`HERALD_API_KEY`; the deploy installs it as a Worker secret. Without it,
+nothing is ever sent and the digest signup form says "opening soon". Every
+kind of email shares `EMAIL_DAILY_CAP` per 24 hours: set it to your plan's
+quota. `HERALD_PAUSED = "1"` (or the kill switch) stops all sending;
+unsubscribe links keep working regardless.
+
+**The operator console** (`/operator`) is locked twice. In Cloudflare Zero
+Trust, create a self-hosted Access application for `your-domain/operator`
+with an Allow policy for your own address (one-time PIN is enough). Then
+set three variables in `wrangler.toml`:
+
+```
+ACCESS_TEAM_DOMAIN    = "<team>.cloudflareaccess.com"
+ACCESS_AUD            = "<the application's Audience (AUD) tag>"
+OPERATOR_EMAIL_HASHES = "<sha256 of your lowercased address>"   # printf '%s' you@x | sha256sum
+```
+
+The Worker re-verifies Access's signed token on every request (RS256
+against the team's published keys; audience, issuer, token type, expiry and
+the address hash), answers only on the primary hostname, refuses cross-site
+posts (Origin, Sec-Fetch-Site and a token bound to the sign-in), and logs
+every action to a private audit trail. With any variable missing the
+console admits nobody. Publication decisions (R1) are deliberately not
+possible from the console: they still need the operator key.
+
 ## 6. Rate limits, WAF, secrets hygiene
 
 - The `unsafe.bindings` rate limiters in `wrangler.toml` cap per-key and

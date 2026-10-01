@@ -13,7 +13,8 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, BuildRecord, HeraldRecord, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store,
+  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, LogRowView, PaperRecord,
+  PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
 } from "./store.js";
 
 export class D1Store implements Store {
@@ -176,6 +177,133 @@ export class D1Store implements Store {
   }
   async suppress(email: string, at: string): Promise<void> {
     await this.db.prepare("INSERT OR IGNORE INTO herald_suppression (email, at) VALUES (?1, ?2)").bind(email.toLowerCase(), at).run();
+  }
+  async listSuppressed(limit: number): Promise<Array<{ email: string; at: string }>> {
+    const rs = await this.db.prepare("SELECT email, at FROM herald_suppression ORDER BY at DESC LIMIT ?1").bind(limit).all<{ email: string; at: string }>();
+    return rs.results ?? [];
+  }
+
+  // --- digest (operational, private) ---
+  async putSubscriber(s: SubscriberRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO subscribers (id, email, fields_json, pending_json, status, confirm_token, unsub_token, created_at, confirm_sent_at, confirmed_at, unsubscribed_at, consent)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         ON CONFLICT(id) DO UPDATE SET fields_json=?3, pending_json=?4, status=?5, confirm_token=?6, unsub_token=?7,
+           confirm_sent_at=?9, confirmed_at=?10, unsubscribed_at=?11, consent=?12`,
+      )
+      .bind(s.id, s.email, JSON.stringify(s.fields), s.pendingFields ? JSON.stringify(s.pendingFields) : null, s.status,
+        s.confirmToken, s.unsubToken, s.createdAt, s.confirmSentAt ?? null, s.confirmedAt ?? null, s.unsubscribedAt ?? null, s.consent ?? null)
+      .run();
+  }
+  async getSubscriber(id: string): Promise<SubscriberRecord | null> {
+    const r = await this.db.prepare("SELECT * FROM subscribers WHERE id = ?1").bind(id).first<Record<string, unknown>>();
+    return r ? rowToSubscriber(r) : null;
+  }
+  async getSubscriberByEmail(email: string): Promise<SubscriberRecord | null> {
+    const r = await this.db.prepare("SELECT * FROM subscribers WHERE email = ?1").bind(email.toLowerCase()).first<Record<string, unknown>>();
+    return r ? rowToSubscriber(r) : null;
+  }
+  async listSubscribers(limit: number): Promise<SubscriberRecord[]> {
+    const rs = await this.db.prepare("SELECT * FROM subscribers ORDER BY created_at DESC LIMIT ?1").bind(limit).all<Record<string, unknown>>();
+    return (rs.results ?? []).map(rowToSubscriber);
+  }
+  async deleteSubscriber(id: string): Promise<void> {
+    await this.db.batch([
+      this.db.prepare("DELETE FROM newsletter_deliveries WHERE subscriber_id = ?1").bind(id),
+      this.db.prepare("DELETE FROM subscribers WHERE id = ?1").bind(id),
+    ]);
+  }
+  async listStalePending(beforeIso: string, limit: number): Promise<SubscriberRecord[]> {
+    const rs = await this.db
+      .prepare("SELECT * FROM subscribers WHERE status = 'pending' AND COALESCE(confirm_sent_at, created_at) < ?1 LIMIT ?2")
+      .bind(beforeIso, limit).all<Record<string, unknown>>();
+    return (rs.results ?? []).map(rowToSubscriber);
+  }
+  async putIssue(i: IssueRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO newsletter_issues (id, subject, body, audience, status, created_at, started_at, sent_at, delivered, failed)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(id) DO UPDATE SET status=?5, started_at=?7, sent_at=?8, delivered=?9, failed=?10`,
+      )
+      .bind(i.id, i.subject, i.body, i.audience, i.status, i.createdAt, i.startedAt ?? null, i.sentAt ?? null, i.delivered, i.failed)
+      .run();
+  }
+  async getIssue(id: string): Promise<IssueRecord | null> {
+    const r = await this.db.prepare("SELECT * FROM newsletter_issues WHERE id = ?1").bind(id).first<Record<string, unknown>>();
+    return r ? rowToIssue(r) : null;
+  }
+  async listIssues(limit: number): Promise<IssueRecord[]> {
+    const rs = await this.db.prepare("SELECT * FROM newsletter_issues ORDER BY created_at DESC LIMIT ?1").bind(limit).all<Record<string, unknown>>();
+    return (rs.results ?? []).map(rowToIssue);
+  }
+  async claimIssue(id: string, at: string): Promise<boolean> {
+    const r = await this.db
+      .prepare("UPDATE newsletter_issues SET status = 'sending', started_at = ?2 WHERE id = ?1 AND status = 'draft'")
+      .bind(id, at).run();
+    return (r.meta?.changes ?? 0) > 0;
+  }
+  async putDelivery(d: DeliveryRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO newsletter_deliveries (issue_id, subscriber_id, status, at, provider_id, error) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(issue_id, subscriber_id) DO UPDATE SET status=?3, at=?4, provider_id=?5, error=?6`,
+      )
+      .bind(d.issueId, d.subscriberId, d.status, d.at, d.providerId ?? null, d.error ?? null)
+      .run();
+  }
+  async listDeliveries(issueId: string): Promise<DeliveryRecord[]> {
+    const rs = await this.db.prepare("SELECT * FROM newsletter_deliveries WHERE issue_id = ?1").bind(issueId).all<Record<string, unknown>>();
+    return (rs.results ?? []).map((r) => ({
+      issueId: r["issue_id"] as string, subscriberId: r["subscriber_id"] as string,
+      status: r["status"] as DeliveryRecord["status"], at: r["at"] as string,
+      providerId: (r["provider_id"] as string | null) ?? null, error: (r["error"] as string | null) ?? null,
+    }));
+  }
+  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue"): Promise<void> {
+    await this.db.prepare("INSERT INTO email_sends (at, kind) VALUES (?1, ?2)").bind(at, kind).run();
+  }
+  async countEmailSends(sinceIso: string, kind?: string): Promise<number> {
+    const r = kind
+      ? await this.db.prepare("SELECT COUNT(*) AS n FROM email_sends WHERE at >= ?1 AND kind = ?2").bind(sinceIso, kind).first<{ n: number }>()
+      : await this.db.prepare("SELECT COUNT(*) AS n FROM email_sends WHERE at >= ?1").bind(sinceIso).first<{ n: number }>();
+    return r?.n ?? 0;
+  }
+
+  // --- operator console ---
+  async putOpsState(key: string, value: Json, at: string): Promise<void> {
+    await this.db
+      .prepare("INSERT INTO ops_state (key, value, at) VALUES (?1, ?2, ?3) ON CONFLICT(key) DO UPDATE SET value=?2, at=?3")
+      .bind(key, JSON.stringify(value), at).run();
+  }
+  async getOpsState(key: string): Promise<{ value: Json; at: string } | null> {
+    const r = await this.db.prepare("SELECT value, at FROM ops_state WHERE key = ?1").bind(key).first<{ value: string; at: string }>();
+    return r ? { value: JSON.parse(r.value) as Json, at: r.at } : null;
+  }
+  async appendAudit(a: AuditRecord): Promise<void> {
+    await this.db
+      .prepare("INSERT INTO ops_audit (at, actor, action, subject, detail) VALUES (?1, ?2, ?3, ?4, ?5)")
+      .bind(a.at, a.actor, a.action, a.subject ?? null, a.detail ?? null).run();
+  }
+  async listAudit(limit: number): Promise<AuditRecord[]> {
+    const rs = await this.db.prepare("SELECT at, actor, action, subject, detail FROM ops_audit ORDER BY id DESC LIMIT ?1").bind(limit).all<Record<string, unknown>>();
+    return (rs.results ?? []).map((r) => ({
+      at: r["at"] as string, actor: r["actor"] as string, action: r["action"] as string,
+      subject: (r["subject"] as string | null) ?? null, detail: (r["detail"] as string | null) ?? null,
+    }));
+  }
+  async listLog(fromSeq: number, limit: number): Promise<LogRowView[]> {
+    const rs = await this.db
+      .prepare("SELECT seq, ts, type, payload_json FROM log_entries WHERE seq >= ?1 ORDER BY seq LIMIT ?2")
+      .bind(Math.max(0, fromSeq), limit).all<{ seq: number; ts: string; type: string; payload_json: string }>();
+    return (rs.results ?? []).map((r) => ({ seq: r.seq, ts: r.ts, type: r.type, payload: JSON.parse(r.payload_json) as Json }));
+  }
+  async listPracticeSince(sinceIso: string, limit: number): Promise<PracticeRecord[]> {
+    const rs = await this.db
+      .prepare("SELECT * FROM practice WHERE issued_at >= ?1 ORDER BY issued_at LIMIT ?2")
+      .bind(sinceIso, limit).all<Record<string, unknown>>();
+    return (rs.results ?? []).map(rowToPractice);
   }
 
   async countPracticeForOperator(operatorId: string, sinceIso: string): Promise<number> {
@@ -373,6 +501,46 @@ export class D1Store implements Store {
       .all<{ id: string; count: number }>();
     return rs.results ?? [];
   }
+
+  async listAccessBetween(lo: string, hi: string, limit: number): Promise<Array<{ id: string; count: number }>> {
+    const rs = await this.db
+      .prepare("SELECT id, count FROM access_counts WHERE id >= ?1 AND id < ?2 ORDER BY id LIMIT ?3")
+      .bind(lo, hi, limit)
+      .all<{ id: string; count: number }>();
+    return rs.results ?? [];
+  }
+}
+
+function rowToSubscriber(r: Record<string, unknown>): SubscriberRecord {
+  return {
+    id: r["id"] as string,
+    email: r["email"] as string,
+    fields: JSON.parse(r["fields_json"] as string) as string[],
+    pendingFields: r["pending_json"] ? (JSON.parse(r["pending_json"] as string) as string[]) : null,
+    status: r["status"] as SubscriberRecord["status"],
+    confirmToken: r["confirm_token"] as string,
+    unsubToken: r["unsub_token"] as string,
+    createdAt: r["created_at"] as string,
+    confirmSentAt: (r["confirm_sent_at"] as string | null) ?? null,
+    confirmedAt: (r["confirmed_at"] as string | null) ?? null,
+    unsubscribedAt: (r["unsubscribed_at"] as string | null) ?? null,
+    consent: (r["consent"] as string | null) ?? null,
+  };
+}
+
+function rowToIssue(r: Record<string, unknown>): IssueRecord {
+  return {
+    id: r["id"] as string,
+    subject: r["subject"] as string,
+    body: r["body"] as string,
+    audience: r["audience"] as string,
+    status: r["status"] as IssueRecord["status"],
+    createdAt: r["created_at"] as string,
+    startedAt: (r["started_at"] as string | null) ?? null,
+    sentAt: (r["sent_at"] as string | null) ?? null,
+    delivered: Number(r["delivered"] ?? 0),
+    failed: Number(r["failed"] ?? 0),
+  };
 }
 
 function rowToBuild(r: Record<string, unknown>): BuildRecord {

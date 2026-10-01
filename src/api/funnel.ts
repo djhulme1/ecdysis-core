@@ -22,8 +22,8 @@ export const PROBE_OPERATOR = "op-live-check";
 
 export type Endpoint =
   | "register" | "paper" | "replication" | "review" | "jury-read" | "case-read"
-  | "practice-case" | "practice-answer" | "herald" | "unsubscribe" | "build" | "build-file"
-  | "hazard-decision" | "gov-proposal" | "gov-vote" | "gov-cosign" | "wrong-path";
+  | "practice-case" | "practice-answer" | "herald" | "unsubscribe" | "subscribe" | "subscribe-confirm"
+  | "build" | "build-file" | "hazard-decision" | "gov-proposal" | "gov-vote" | "gov-cosign" | "wrong-path";
 
 /** Which tracked write a request is, or null for reads and MCP. */
 export function endpointOf(method: string, path: string): Endpoint | null {
@@ -32,9 +32,13 @@ export function endpointOf(method: string, path: string): Endpoint | null {
   if (path === "/mcp") return null;
   // The paste route counts each inner step (register, paper) itself.
   if (path === "/submit") return null;
+  // The operator console is private and not part of any public count.
+  if (/^\/operator(\/|$)/i.test(path)) return null;
   // Author emails: counted as steps only, never with any address.
   if (path.startsWith("/v1/herald/")) return "herald";
   if (path.startsWith("/u/")) return "unsubscribe";
+  if (path === "/subscribe") return "subscribe";
+  if (path.startsWith("/subscribe/confirm/")) return "subscribe-confirm";
   if (m === "POST") {
     switch (path) {
       case "/v1/agents/register": return "register";
@@ -116,6 +120,50 @@ export function funnelKeys(method: string, path: string, status: number, error: 
   if (status >= 400) keys.push(`funnel:${where}:${status}:${error ? reasonOf(error) : "other"}`);
   return keys;
 }
+
+/**
+ * Daily twins of the funnel counters, for the operator's private view of
+ * attempts over time: `fd:<YYYY-MM-DD>:<endpoint>:<ok|no>`. Same fixed
+ * vocabulary; never who, never what.
+ */
+export function dayFunnelKeys(day: string, method: string, path: string, status: number): string[] {
+  const ep = endpointOf(method, path);
+  if (!ep) return [];
+  const where = ep === "wrong-path" ? "wrong-path" : ep;
+  return [`fd:${day}:${where}:${status < 400 ? "ok" : "no"}`];
+}
+
+/**
+ * Reads worth counting, by a fixed name: which pages people open and which
+ * machine surfaces agents use (skill.md, heartbeats, MCP). Counted per day as
+ * `pv:<YYYY-MM-DD>:<name>`; never an IP, a query string or a paper id.
+ * Includes crawlers: these are requests, not people.
+ */
+export function pageKeyOf(method: string, path: string, accept: string | null): string | null {
+  const m = method.toUpperCase();
+  if (m === "POST") return path === "/mcp" ? "mcp" : null;
+  if (m !== "GET") return null;
+  const html = (accept ?? "").includes("text/html");
+  if (path === "/") return html ? "home" : "api-index";
+  const pages: Record<string, string> = {
+    "/people": "people", "/start": "people", "/join": "people", "/agents": "agents",
+    "/observatory": "observatory", "/dashboard": "observatory", "/papers": "papers",
+    "/review": "review", "/jury": "review", "/apps": "apps", "/marketplace": "apps", "/about": "about", "/why": "about",
+    "/submit": "submit", "/subscribe": "subscribe", "/skill.md": "skill.md", "/llms.txt": "llms.txt",
+    "/constitution.md": "constitution", "/terms": "terms", "/terms.md": "terms",
+    "/v1/heartbeat": "heartbeat", "/v1/stats": "stats-api", "/v1/review": "review-api", "/v1/challenges": "challenges",
+    "/v1/constitution": "constitution-api", "/v1/frontier": "frontier-api", "/v1/standing": "standing-api",
+  };
+  if (pages[path]) return pages[path]!;
+  if (path.startsWith("/p/")) return "paper";
+  if (path.startsWith("/feeds/")) return "feeds";
+  if (path.startsWith("/v1/papers")) return "papers-api";
+  if (path.startsWith("/v1/log/")) return "log-api";
+  return null;
+}
+
+/** Which page names are people's pages (HTML), for "human page views". */
+export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "review", "apps", "about", "submit", "subscribe", "terms"] as const;
 
 export interface FunnelSummary {
   [endpoint: string]: { accepted: number; refused: number; reasons: Record<string, number> };

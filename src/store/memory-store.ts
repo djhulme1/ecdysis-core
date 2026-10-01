@@ -3,7 +3,8 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, BuildRecord, HeraldRecord, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store,
+  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, LogRowView, PaperRecord,
+  PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
 } from "./store.js";
 
 interface LogRow {
@@ -118,6 +119,97 @@ export class MemoryStore implements Store {
   async suppress(email: string, at: string): Promise<void> {
     if (!this.suppressed.has(email.toLowerCase())) this.suppressed.set(email.toLowerCase(), at);
   }
+  async listSuppressed(limit: number): Promise<Array<{ email: string; at: string }>> {
+    return [...this.suppressed.entries()].map(([email, at]) => ({ email, at }))
+      .sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
+  }
+
+  // --- digest (operational, private) ---
+  private subscribers = new Map<string, SubscriberRecord>();
+  private issues = new Map<string, IssueRecord>();
+  private deliveries = new Map<string, DeliveryRecord>(); // `${issue}|${subscriber}`
+  private sends: Array<{ at: string; kind: string }> = [];
+  async putSubscriber(s: SubscriberRecord): Promise<void> {
+    const clash = [...this.subscribers.values()].find((x) => x.email === s.email && x.id !== s.id);
+    if (clash) throw new Error("UNIQUE constraint failed: subscribers.email");
+    this.subscribers.set(s.id, structuredClone(s));
+  }
+  async getSubscriber(id: string): Promise<SubscriberRecord | null> {
+    const s = this.subscribers.get(id);
+    return s ? structuredClone(s) : null;
+  }
+  async getSubscriberByEmail(email: string): Promise<SubscriberRecord | null> {
+    const s = [...this.subscribers.values()].find((x) => x.email === email.toLowerCase());
+    return s ? structuredClone(s) : null;
+  }
+  async listSubscribers(limit: number): Promise<SubscriberRecord[]> {
+    return [...this.subscribers.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit).map((s) => structuredClone(s));
+  }
+  async deleteSubscriber(id: string): Promise<void> {
+    this.subscribers.delete(id);
+    for (const k of [...this.deliveries.keys()]) if (k.endsWith(`|${id}`)) this.deliveries.delete(k);
+  }
+  async listStalePending(beforeIso: string, limit: number): Promise<SubscriberRecord[]> {
+    return [...this.subscribers.values()]
+      .filter((s) => s.status === "pending" && (s.confirmSentAt ?? s.createdAt) < beforeIso)
+      .slice(0, limit).map((s) => structuredClone(s));
+  }
+  async putIssue(i: IssueRecord): Promise<void> {
+    this.issues.set(i.id, structuredClone(i));
+  }
+  async getIssue(id: string): Promise<IssueRecord | null> {
+    const i = this.issues.get(id);
+    return i ? structuredClone(i) : null;
+  }
+  async listIssues(limit: number): Promise<IssueRecord[]> {
+    return [...this.issues.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit).map((i) => structuredClone(i));
+  }
+  async claimIssue(id: string, at: string): Promise<boolean> {
+    const i = this.issues.get(id);
+    if (!i || i.status !== "draft") return false;
+    i.status = "sending";
+    i.startedAt = at;
+    return true;
+  }
+  async putDelivery(d: DeliveryRecord): Promise<void> {
+    this.deliveries.set(`${d.issueId}|${d.subscriberId}`, structuredClone(d));
+  }
+  async listDeliveries(issueId: string): Promise<DeliveryRecord[]> {
+    return [...this.deliveries.values()].filter((d) => d.issueId === issueId).map((d) => structuredClone(d));
+  }
+  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue"): Promise<void> {
+    this.sends.push({ at, kind });
+  }
+  async countEmailSends(sinceIso: string, kind?: string): Promise<number> {
+    return this.sends.filter((s) => s.at >= sinceIso && (!kind || s.kind === kind)).length;
+  }
+
+  // --- operator console ---
+  private opsState = new Map<string, { value: Json; at: string }>();
+  private audit: AuditRecord[] = [];
+  async putOpsState(key: string, value: Json, at: string): Promise<void> {
+    this.opsState.set(key, { value: structuredClone(value), at });
+  }
+  async getOpsState(key: string): Promise<{ value: Json; at: string } | null> {
+    const v = this.opsState.get(key);
+    return v ? structuredClone(v) : null;
+  }
+  async appendAudit(a: AuditRecord): Promise<void> {
+    this.audit.push({ ...a });
+  }
+  async listAudit(limit: number): Promise<AuditRecord[]> {
+    return [...this.audit].reverse().slice(0, limit);
+  }
+  async listLog(fromSeq: number, limit: number): Promise<LogRowView[]> {
+    return this.log.slice(Math.max(0, fromSeq), Math.max(0, fromSeq) + limit)
+      .map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }));
+  }
+  async listPracticeSince(sinceIso: string, limit: number): Promise<PracticeRecord[]> {
+    return [...this.practice.values()].filter((p) => p.issuedAt >= sinceIso)
+      .sort((a, b) => a.issuedAt.localeCompare(b.issuedAt)).slice(0, limit).map((p) => structuredClone(p));
+  }
 
   // --- papers ---
   async putPaper(p: PaperRecord): Promise<void> {
@@ -224,6 +316,13 @@ export class MemoryStore implements Store {
     return [...this.access.entries()]
       .filter(([id]) => id.startsWith(prefix))
       .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, count]) => ({ id, count }));
+  }
+  async listAccessBetween(lo: string, hi: string, limit: number): Promise<Array<{ id: string; count: number }>> {
+    return [...this.access.entries()]
+      .filter(([id]) => id >= lo && id < hi)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .slice(0, limit)
       .map(([id, count]) => ({ id, count }));
   }
 }

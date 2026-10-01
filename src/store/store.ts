@@ -55,6 +55,69 @@ export interface HeraldRecord {
   error?: string | null;
 }
 
+/**
+ * A digest subscriber (operational; never in the public log). Double opt-in:
+ * nothing but the confirmation email is ever sent until they confirm.
+ */
+export interface SubscriberRecord {
+  id: string;
+  email: string; // lowercased
+  /** Field ids, or ["all"]. */
+  fields: string[];
+  /** A change of fields requested by an already-confirmed subscriber, applied when they confirm it. */
+  pendingFields?: string[] | null;
+  status: "pending" | "confirmed" | "unsubscribed";
+  confirmToken: string;
+  unsubToken: string;
+  createdAt: string;
+  confirmSentAt?: string | null;
+  confirmedAt?: string | null;
+  unsubscribedAt?: string | null;
+  /** The consent wording (versioned) they confirmed. */
+  consent?: string | null;
+}
+
+/** One digest issue, written and sent from the operator console. */
+export interface IssueRecord {
+  id: string;
+  subject: string;
+  body: string;
+  /** "all", or one field id: confirmed subscribers following it (or everything). */
+  audience: string;
+  status: "draft" | "sending" | "sent" | "cancelled";
+  createdAt: string;
+  startedAt?: string | null;
+  sentAt?: string | null;
+  delivered: number;
+  failed: number;
+}
+
+export interface DeliveryRecord {
+  issueId: string;
+  subscriberId: string;
+  status: "sent" | "failed";
+  at: string;
+  providerId?: string | null;
+  error?: string | null;
+}
+
+/** Who did what in the operator console. Ids only, never addresses. */
+export interface AuditRecord {
+  at: string;
+  actor: string;
+  action: string;
+  subject?: string | null;
+  detail?: string | null;
+}
+
+/** A log entry with its payload, for analytics that read the whole log in pages. */
+export interface LogRowView {
+  seq: number;
+  ts: string;
+  type: string;
+  payload: Json;
+}
+
 /** A seat on a jury: who, when, and in which draw round (0 = the original draw). */
 export interface JurySeat {
   handle: string;
@@ -130,6 +193,42 @@ export interface Store extends LogBackend {
   countHeraldSent(sinceIso: string, domain?: string): Promise<number>;
   isSuppressed(email: string): Promise<boolean>;
   suppress(email: string, at: string): Promise<void>;
+  /** Suppressed addresses, newest first (operator console only). */
+  listSuppressed(limit: number): Promise<Array<{ email: string; at: string }>>;
+
+  // digest subscribers and issues (operational, private)
+  putSubscriber(s: SubscriberRecord): Promise<void>;
+  getSubscriber(id: string): Promise<SubscriberRecord | null>;
+  getSubscriberByEmail(email: string): Promise<SubscriberRecord | null>;
+  /** Newest first. */
+  listSubscribers(limit: number): Promise<SubscriberRecord[]>;
+  /** Erase a subscriber and their delivery rows (a deletion request, or a stale unconfirmed signup). */
+  deleteSubscriber(id: string): Promise<void>;
+  /** Unconfirmed signups whose confirmation was sent before `beforeIso`. */
+  listStalePending(beforeIso: string, limit: number): Promise<SubscriberRecord[]>;
+  putIssue(i: IssueRecord): Promise<void>;
+  getIssue(id: string): Promise<IssueRecord | null>;
+  /** Newest first. */
+  listIssues(limit: number): Promise<IssueRecord[]>;
+  /** draft -> sending, atomically. False if it was not a draft. */
+  claimIssue(id: string, at: string): Promise<boolean>;
+  putDelivery(d: DeliveryRecord): Promise<void>;
+  listDeliveries(issueId: string): Promise<DeliveryRecord[]>;
+  /** One row per email actually handed to the provider (kind only, never an address). */
+  recordEmailSend(at: string, kind: "herald" | "confirm" | "issue"): Promise<void>;
+  countEmailSends(sinceIso: string, kind?: string): Promise<number>;
+
+  // operator console: small state (last cron run, last audit) and the action trail
+  putOpsState(key: string, value: Json, at: string): Promise<void>;
+  getOpsState(key: string): Promise<{ value: Json; at: string } | null>;
+  appendAudit(a: AuditRecord): Promise<void>;
+  /** Newest first. */
+  listAudit(limit: number): Promise<AuditRecord[]>;
+
+  /** Log entries with payloads from `fromSeq`, in order: whole-log analytics without one query per entry. */
+  listLog(fromSeq: number, limit: number): Promise<LogRowView[]>;
+  /** Practice cases issued at or after `sinceIso`, oldest first (all agents). */
+  listPracticeSince(sinceIso: string, limit: number): Promise<PracticeRecord[]>;
 
   // published record
   putPaper(p: PaperRecord): Promise<void>;
@@ -176,4 +275,6 @@ export interface Store extends LogBackend {
    * own code, e.g. "funnel:"). Aggregate only: never IPs, handles or content.
    */
   listAccessPrefix(prefix: string): Promise<Array<{ id: string; count: number }>>;
+  /** Counters with lo <= id < hi (ids are fixed-vocabulary keys from our own code). */
+  listAccessBetween(lo: string, hi: string, limit: number): Promise<Array<{ id: string; count: number }>>;
 }
