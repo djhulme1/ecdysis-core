@@ -7,7 +7,12 @@
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash } from "../core/constitution.js";
-import { aboutHtml, appsHtml, badgeSvg, bibtexFor, constitutionMd, feedAtom, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
+import { badgeSvg, bibtexFor, constitutionMd, feedAtom, FIELD_LABELS, llmsTxt, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
+import { paperStatus } from "../web/design.js";
+import { aboutPage, agentsPage, forkPage, papersPage, peoplePage } from "../web/pages.js";
+import { observatoryPage } from "../web/observatory.js";
+import { appsPage } from "../web/apps.js";
+import { paperPage as renderPaper } from "../web/paper.js";
 import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
 import { handleMcp } from "./mcp.js";
@@ -78,6 +83,18 @@ const PAGE_HEADERS: Record<string, string> = {
     "connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 };
 
+/**
+ * Every human page except the Observatory ships no script at all, so its
+ * CSP forbids script outright — defence in depth for pages that render
+ * agent-submitted text (titles, claims, app descriptions).
+ */
+const STATIC_PAGE_HEADERS: Record<string, string> = {
+  ...BASE_SITE_HEADERS,
+  "content-type": "text/html; charset=utf-8",
+  "content-security-policy":
+    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+};
+
 const TEXT_SITE_HEADERS = (type: string): Record<string, string> => ({
   ...BASE_SITE_HEADERS,
   "content-type": type,
@@ -103,23 +120,40 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
   const head = req.method.toUpperCase() === "HEAD";
   const host = safeHost(url);
   if (path === "/") {
-    // Browsers get the page; agents and curl keep getting the JSON index.
+    // Browsers get the fork (person or agent); agents and curl keep getting
+    // the JSON index, so no existing agent integration changes.
     if (!(req.headers.get("accept") ?? "").includes("text/html")) return null;
+    const l = await svc.latestSpecimen();
+    const latest = l
+      ? { id: l.id, title: l.title, agent: l.agent, fieldLabel: FIELD_LABELS[l.field] ?? l.field, ts: l.ts, status: paperStatus(l.outcomes) }
+      : null;
     return sitehit(
-      landingHtml({ host, constitutionHash: await constitutionHash(), sthPublicKey: opts.sthPublicKey ?? null }),
-      PAGE_HEADERS,
+      forkPage({ host, constitutionHash: await constitutionHash(), sthPublicKey: opts.sthPublicKey ?? null, latest }),
+      STATIC_PAGE_HEADERS,
       head,
     );
   }
+  if (path === "/people" || path === "/start" || path === "/join") {
+    return sitehit(peoplePage(host), STATIC_PAGE_HEADERS, head);
+  }
+  if (path === "/agents") {
+    return sitehit(agentsPage(host), STATIC_PAGE_HEADERS, head);
+  }
+  if (path === "/papers") {
+    const ps = await svc.specimens(100);
+    const papers = ps.map((p) => ({ id: p.id, title: p.title, agent: p.agent, fieldLabel: FIELD_LABELS[p.field] ?? p.field, ts: p.ts }));
+    return sitehit(papersPage({ host, papers }), STATIC_PAGE_HEADERS, head);
+  }
   if (path === "/about" || path === "/why") {
-    return sitehit(aboutHtml(host), PAGE_HEADERS, head);
+    return sitehit(aboutPage(host), STATIC_PAGE_HEADERS, head);
   }
   if (path === "/observatory" || path === "/dashboard") {
-    return sitehit(observatoryHtml({ host, constitutionHash: await constitutionHash() }), PAGE_HEADERS, head);
+    // The one page with script: it reads /v1/stats from this origin.
+    return sitehit(observatoryPage({ host, constitutionHash: await constitutionHash() }), PAGE_HEADERS, head);
   }
   if (path === "/apps" || path === "/marketplace") {
     const m = (await svc.marketplace(100)).body as { marketplace: never[] };
-    return sitehit(appsHtml({ host, rows: m.marketplace }), PAGE_HEADERS, head);
+    return sitehit(appsPage({ host, rows: m.marketplace }), STATIC_PAGE_HEADERS, head);
   }
   if (path === "/skill.md") return sitehit(skillMd(host), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
   if (path === "/llms.txt") return sitehit(llmsTxt(host), TEXT_SITE_HEADERS("text/plain; charset=utf-8"), head);
@@ -168,14 +202,8 @@ async function paperPage(req: Request, url: URL, path: string, svc: EcdysisServi
   if (r.status !== 200) {
     return new Response("no such paper", { status: 404, headers: TEXT_SITE_HEADERS("text/plain; charset=utf-8") });
   }
-  return sitehit(
-    paperHtml({ host: safeHost(url), paper: r.body as never }),
-    { ...BASE_SITE_HEADERS, "content-type": "text/html; charset=utf-8",
-      // The paper page ships no script at all; only its own styles run.
-      "content-security-policy":
-        "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" },
-    head,
-  );
+  // The paper page ships no script at all; only its own styles run.
+  return sitehit(renderPaper({ host: safeHost(url), paper: r.body as never }), STATIC_PAGE_HEADERS, head);
 }
 
 const SVG_HEADERS = TEXT_SITE_HEADERS("image/svg+xml; charset=utf-8");

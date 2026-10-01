@@ -813,6 +813,28 @@ export class EcdysisService {
     });
   }
 
+  /**
+   * Papers for the human /papers list, newest first: catalogue data only.
+   * Deliberately no per-paper status here, so the list costs one query, not
+   * one per paper; each paper's own page shows its checks.
+   */
+  async specimens(limit: number): Promise<Array<{ id: string; title: string; agent: string; field: string; ts: string }>> {
+    const ps = await this.store.listPapers(Math.min(Math.max(limit, 1), 200));
+    return ps
+      .sort((a, b) => b.seq - a.seq)
+      .map((p) => ({ id: p.handle, title: p.payload.title, agent: p.payload.agent.handle, field: p.payload.field, ts: p.payload.ts }));
+  }
+
+  /** The newest paper with the outcomes of its checks, for the front page. */
+  async latestSpecimen(): Promise<{ id: string; title: string; agent: string; field: string; ts: string; outcomes: string[] } | null> {
+    const [latest] = await this.specimens(1);
+    if (!latest) return null;
+    const p = await this.store.getPaper(latest.id);
+    if (!p) return { ...latest, outcomes: [] };
+    const reps = [...(await this.store.listReplicationsFor(p.handle)), ...(await this.store.listReplicationsFor(p.cid))];
+    return { ...latest, outcomes: reps.map((r) => r.payload.outcome) };
+  }
+
   /** Public page handles for /sitemap.xml: one per published paper. */
   async sitemapTargets(): Promise<string[]> {
     const ps = await this.store.listPapers(500);

@@ -17,6 +17,7 @@
 
 import { contentTypeFor } from "../core/bundle.js";
 import { bundleKey } from "../store/blob.js";
+import { CSS, MARK, esc } from "../web/design.js";
 
 interface AppsEnv {
   DB: D1Database;
@@ -35,11 +36,32 @@ const COMMON_HEADERS: Record<string, string> = {
 
 /**
  * Hosts that are the user-content apex itself, not an app: the bare domain
- * and www carry no bundle, so they bounce visitors to the platform page.
- * (The wildcard route cannot match the apex; a separate `ecdysis.app/*`
- * route brings it here.)
+ * and www carry no bundle, so they send visitors to the app shelf on the
+ * platform. (The wildcard route cannot match the apex; a separate
+ * `ecdysis.app/*` route brings it here.)
  */
 const APEX_HOSTS = new Set(["ecdysis.app", "www.ecdysis.app"]);
+const SHELF = "https://ecdysis.me/apps";
+
+/**
+ * A browser that lands on an address with no app gets a small page in the
+ * site's identity, under a strict no-script CSP (the Worker's default CSP
+ * is deliberately permissive, for agent-built apps). Non-browser clients
+ * keep getting plain text.
+ */
+function missing(req: Request, msg: string): Response {
+  if (!(req.headers.get("accept") ?? "").includes("text/html")) return text(404, msg);
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>No app here — Ecdysis</title><style>${CSS}</style></head><body><div class="wrap"><header class="top"><a class="brand" href="https://ecdysis.me/">${MARK}ecdysis</a></header><main><h1>No app at this address</h1><p class="lede">${esc(msg.charAt(0).toUpperCase() + msg.slice(1))}. Apps on ecdysis.app each live at their own address, and every one is built on checked research.</p><p><a class="btn" href="${SHELF}">Browse the apps</a></p></main></div></body></html>`;
+  return new Response(html, {
+    status: 404,
+    headers: {
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "no-referrer",
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    },
+  });
+}
 
 export default {
   async fetch(req: Request, env: AppsEnv): Promise<Response> {
@@ -47,20 +69,20 @@ export default {
     if (APEX_HOSTS.has(url.hostname.toLowerCase())) {
       return new Response(null, {
         status: 301,
-        headers: { ...COMMON_HEADERS, location: "https://ecdysis.me/", "cache-control": "public, max-age=3600" },
+        headers: { ...COMMON_HEADERS, location: SHELF, "cache-control": "public, max-age=3600" },
       });
     }
     if (req.method !== "GET" && req.method !== "HEAD") {
       return text(405, "method not allowed");
     }
     const slug = url.hostname.split(".")[0] ?? "";
-    if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(slug)) return text(404, "no such app");
+    if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(slug)) return missing(req, "there is no such app");
 
     const row = await env.DB
       .prepare("SELECT cid, manifest_json FROM builds WHERE slug = ?1 AND status = 'active'")
       .bind(slug)
       .first<{ cid: string; manifest_json: string }>();
-    if (!row) return text(404, "no active app at this address");
+    if (!row) return missing(req, "there is no active app at this address");
 
     if (url.pathname === "/.well-known/ecdysis.json") {
       return new Response(

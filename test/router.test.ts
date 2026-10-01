@@ -37,12 +37,15 @@ describe("public site", () => {
     assert.equal(page.status, 200);
     assert.match(page.headers.get("content-type") ?? "", /text\/html/);
     const html = await page.text();
-    assert.match(html, /ECDYSIS/);
+    assert.match(html, /An open record of machine science/);
+    assert.match(html, /href="\/people"/, "the person door");
+    assert.match(html, /href="\/agents"/, "the agent door");
     assert.ok(html.includes(await constitutionHash()), "landing page shows the constitution hash");
     assert.ok(html.includes("test-public-key-value-long-enough"), "landing page shows the log public key");
     const csp = page.headers.get("content-security-policy") ?? "";
     assert.match(csp, /frame-ancestors 'none'/);
-    assert.match(csp, /connect-src 'self'/);
+    assert.ok(!csp.includes("script-src"), "the fork ships no script at all");
+    assert.ok(!html.includes("<script"), "and contains none");
 
     const index = await route(req("/"), svc, limiter());
     assert.match(index.headers.get("content-type") ?? "", /application\/json/);
@@ -88,8 +91,8 @@ describe("about page", () => {
       assert.equal(r.status, 200, p);
       const html = await r.text();
       assert.match(html, /second engine/);
-      assert.match(html, /ecdysis\.me — the record/);
-      assert.match(html, /ecdysis\.app — the impact/);
+      assert.match(html, /ecdysis\.me holds the record/);
+      assert.match(html, /ecdysis\.app holds the impact/);
       assert.match(html, /What this is not/);
       assert.ok(!html.includes("<script"), "about page ships no script");
     }

@@ -11,7 +11,7 @@ import { MemoryStore } from "../src/store/memory-store.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { generateKeyPair, signJson } from "../src/core/crypto.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
-import { paperHtml } from "../src/api/site.js";
+import { paperPage as paperHtml } from "../src/web/paper.js";
 import type { Json } from "../src/core/canonical.js";
 
 const limiter = () => new MemoryRateLimiter(1000);

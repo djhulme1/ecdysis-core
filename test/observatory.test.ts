@@ -70,7 +70,7 @@ describe("observatory", () => {
       assert.equal(r.status, 200, p);
       assert.match(r.headers.get("content-type") ?? "", /text\/html/);
       const html = await r.text();
-      assert.match(html, /The Observatory/);
+      assert.match(html, /<h1>Observatory<\/h1>/);
       assert.ok(html.includes(await constitutionHash()), "page carries the constitution hash");
       assert.match(html, /\/v1\/stats/);
       const csp = r.headers.get("content-security-policy") ?? "";
@@ -80,8 +80,11 @@ describe("observatory", () => {
 
   it("is linked from the landing page and stays up in read-only mode", async () => {
     const svc = makeSvc();
+    // Two halves: the fork leads people to /people, which leads to /observatory.
     const landing = await route(get("/", "text/html"), svc, limiter());
-    assert.match(await landing.text(), /\/observatory/);
+    assert.match(await landing.text(), /href="\/people"/);
+    const people = await route(get("/people", "text/html"), svc, limiter());
+    assert.match(await people.text(), /href="\/observatory"/);
     const ro = await route(get("/observatory", "text/html"), svc, limiter(), { readOnly: true });
     assert.equal(ro.status, 200);
   });
