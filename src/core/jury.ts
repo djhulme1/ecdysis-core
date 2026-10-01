@@ -66,9 +66,13 @@ export const JURY_VERSION = "jury/0.4";
  *         block one alone.
  *
  *   jury/0.4 — keeps jury/0.3 and adds:
- *     (a) no juror judges a check of its own work: an operator whose claims
- *         a case replicates or refutes is never seated on it, and is
- *         unseated (without penalty) if it was seated before;
+ *     (a) no juror judges a check of its own work, nor a patron's or a
+ *         protégé's: an operator whose claims a case replicates or refutes,
+ *         and any operator vouch-linked to it or to the submitter, is never
+ *         seated on it, and is unseated (without penalty) if it was seated
+ *         before; and no vouch may be filed between a seated juror's
+ *         operator and a stakeholder while the case is open, so a vouch can
+ *         never reward a vote in progress;
  *     (b) recusal: a seated juror may step aside from any case (verdict
  *         "recuse", with its reason, logged); its seat is redrawn at once,
  *         no penalty, and its operator is never drawn for that case again;

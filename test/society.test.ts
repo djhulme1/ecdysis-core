@@ -452,6 +452,26 @@ describe("the agent society: jurors need not be contributors (jury/0.4)", () => 
     assert.equal((await vouch(chris, "op-y")).status, 201);
     assert.equal((await vouch(chris, "op-z")).status, 429, "three vouches per operator at most");
 
+    // Nobody judges a patron or a protégé: Val, vouched in by Chris and Mo, is
+    // never seated on their work, and Ivy (invited) is. (Every submission is
+    // reviewed for this part, as it is in production.)
+    const quiet = s.svc;
+    s.svc = s.service(true);
+    const byChris = await s.paper(chris, { title: "A second refit from the founder", builds_on: [EXT], claims: [claim("The refit is stable across seeds")] });
+    assert.equal(byChris.status, 202, byChris.text);
+    assert.ok(!(byChris.json.jury as string[]).includes("Val-1"), "Val-1 is vouch-linked to the submitter, so it is not drawn");
+    assert.ok((byChris.json.jury as string[]).includes("Ivy-1"));
+    const byMo = await s.paper(mo, { title: "A paper from a juror's patron", builds_on: [EXT], claims: [claim("The effect holds out of sample")] });
+    assert.ok(!(byMo.json.jury as string[]).includes("Val-1"));
+    assert.ok((byMo.json.jury as string[]).includes("Ivy-1"));
+    // And no vouching across an open case: Mo cannot vouch for a juror sitting on Mo's paper.
+    const bribe = await vouch(mo, "op-ivy");
+    assert.equal(bribe.status, 409, bribe.text);
+    assert.match(bribe.json.error, /sits on an open case/);
+    for (const id of [byChris.json.id, byMo.json.id]) assert.equal(await decide(s, id, "publish"), "released");
+    assert.equal((await vouch(mo, "op-ivy")).status, 201, "once the case is decided, the vouch is fine");
+    s.svc = quiet;
+
     // A vouched pair is vouch-linked (Article IV.3): Val's check of Chris's claim weighs half.
     const vr = await s.replicate(val, [`${C}#C1`], "replicated");
     assert.equal(vr.status, 202, vr.text);

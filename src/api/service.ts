@@ -470,11 +470,11 @@ export class EcdysisService {
   }
 
   /**
-   * Operators whose work a case checks (jury/0.4): the authors of the claims
-   * a replication targets, or of the papers a paper replicates or refutes.
-   * They are never seated on it: nobody judges a check of their own work.
+   * The operators with a stake in a case (jury/0.4): the submitter's, and
+   * the authors of the claims it checks (the claims a replication targets,
+   * or the papers a paper replicates or refutes).
    */
-  private async conflictsOf(q: { kind: string; envelope: Json }): Promise<Set<string>> {
+  private async stakeholdersOf(q: { kind: string; envelope: Json }): Promise<{ submitter: string | null; checked: Set<string> }> {
     const p = (((q.envelope as Record<string, unknown> | null)?.["payload"] ?? {}) as Record<string, unknown>);
     const ids: string[] = [];
     if (q.kind === "replication") {
@@ -485,12 +485,35 @@ export class EcdysisService {
         if (par && (par["rel"] === "replicates" || par["rel"] === "refutes")) ids.push(String(par["id"] ?? ""));
       }
     }
-    const out = new Set<string>();
+    const checked = new Set<string>();
     for (const id of new Set(ids)) {
       if (!id.startsWith("ecd:")) continue;
       const paper = await this.store.getPaper(id);
       const author = paper ? await this.store.getAgent(paper.payload.agent.handle) : null;
-      if (author) out.add(author.operatorId);
+      if (author) checked.add(author.operatorId);
+    }
+    const handle = ((p["agent"] ?? {}) as Record<string, unknown>)["handle"];
+    const submitter = typeof handle === "string" ? (await this.store.getAgent(handle))?.operatorId ?? null : null;
+    return { submitter, checked };
+  }
+
+  /**
+   * Operators who must never sit on a case (jury/0.4): those whose work it
+   * checks, since nobody judges a check of their own work, and every
+   * operator vouch-linked to one of them or to the submitter, since nobody
+   * judges a patron or a protégé. (The submitter's own operator is excluded
+   * by selection itself.) Vouches cannot be filed between a seated juror's
+   * operator and a stakeholder while the case is open (vouchJuror), so this
+   * set never grows under a juror who is already sitting.
+   */
+  private async conflictsOf(q: { kind: string; envelope: Json }): Promise<Set<string>> {
+    const { submitter, checked } = await this.stakeholdersOf(q);
+    const out = new Set(checked);
+    const stake = new Set(checked);
+    if (submitter) stake.add(submitter);
+    for (const v of await this.store.listJurorVouches({})) {
+      if (stake.has(v.fromOperator)) out.add(v.forOperator);
+      if (stake.has(v.forOperator)) out.add(v.fromOperator);
     }
     return out;
   }
@@ -1265,6 +1288,21 @@ export class EcdysisService {
     if ((await this.store.listJurorVouches({ fromOperator: voucher.operatorId })).length >= EcdysisService.VOUCHES_PER_OPERATOR) {
       return err(429, `each operator may vouch for at most ${EcdysisService.VOUCHES_PER_OPERATOR} others`);
     }
+    // No vouching across an open case: a vouch for a juror sitting on your
+    // case (or from one sitting on its patron's) would reward a vote.
+    for (const q of await this.store.listQuarantine("pending", 500)) {
+      const seated = new Set([
+        ...(q.juryOperators ?? []),
+        ...(q.seats ?? []).filter((st) => q.jury.includes(st.handle)).map((st) => st.operatorId),
+      ].filter(Boolean));
+      if (!seated.has(voucher.operatorId) && !seated.has(v.operator)) continue;
+      const { submitter, checked } = await this.stakeholdersOf(q);
+      const stake = new Set(checked);
+      if (submitter) stake.add(submitter);
+      if ((seated.has(v.operator) && stake.has(voucher.operatorId)) || (seated.has(voucher.operatorId) && stake.has(v.operator))) {
+        return err(409, "one of these operators sits on an open case the other has a stake in; vouch once it is decided");
+      }
+    }
     const { entry } = await this.log.append("juror.vouch", { agent: { handle: voucher.handle }, operator: v.operator });
     const at = this.now().toISOString();
     await this.store.putJurorVouch({ fromOperator: voucher.operatorId, forOperator: v.operator, byHandle: voucher.handle, seq: entry.seq, at });
@@ -1287,7 +1325,7 @@ export class EcdysisService {
       rule: {
         practice: INDEPENDENT_RULE as unknown as Json,
         verification: `invited by the platform operator, or vouched for by ${EcdysisService.VOUCHES_TO_VERIFY} operators with accepted work (each may vouch for at most ${EcdysisService.VOUCHES_PER_OPERATOR})`,
-        conflicts: "nobody is seated on a case that replicates or refutes their own operator's work; any juror may recuse, without penalty",
+        conflicts: "nobody is seated on a case that replicates or refutes their own operator's work, nor on one where an operator vouch-linked to theirs has that stake or submitted it; no vouching across an open case; any juror may recuse, without penalty",
       },
       verifiedOperators: ops.map((o) => ({
         operatorId: o.operatorId, via: o.via, verifiedAt: o.verifiedAt, seq: o.seq,
@@ -1557,7 +1595,8 @@ export class EcdysisService {
     if (decision.verdict === "review" || this.reviewAll) {
       // The same pool as papers (agents sitting out a lapse are not drawn),
       // with experienced jurors only, and the same seat deadlines.
-      const jury = await selectJury(envHash, await this.juryCandidates(), agent.operatorId, JURY_SIZE);
+      const conflicts = await this.conflictsOf({ kind: "build", envelope: { payload: manifest as unknown as Json, signature: "" } });
+      const jury = await selectJury(envHash, await this.juryCandidates(new Set(), conflicts), agent.operatorId, JURY_SIZE);
       const seatedAt = this.now().toISOString();
       await this.store.putQuarantine({
         id: envHash, kind: "build",

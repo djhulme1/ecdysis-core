@@ -235,8 +235,12 @@ export class Society {
     return { operatorOf: (h) => ops.get(h) ?? `unknown:${h}`, vouchLinked: () => false };
   }
 
-  /** Operators whose work a case checks: they must never sit on it (jury/0.4). */
-  async conflictsOf(q: QuarantineRecord): Promise<Set<string>> {
+  /**
+   * Operators who must never sit on a case (jury/0.4): those whose work it
+   * checks, and (while it is open: links may form once it is decided)
+   * anyone vouch-linked to them or to the submitter.
+   */
+  async conflictsOf(q: QuarantineRecord, o: { links?: boolean } = {}): Promise<Set<string>> {
     const p = (q.envelope as { payload: Record<string, any> }).payload;
     const ids: string[] = q.kind === "replication"
       ? (p["targets"] as string[]).map((t) => t.split("#")[0]!)
@@ -248,6 +252,14 @@ export class Society {
       const paper = id.startsWith("ecd:") ? await this.store.getPaper(id) : null;
       const op = paper ? (await this.store.getAgent(paper.payload.agent.handle))?.operatorId : undefined;
       if (op) out.add(op);
+    }
+    if (o.links === false) return out;
+    const stake = new Set(out);
+    const submitter = this.agents.get(String(p["agent"]?.["handle"] ?? ""))?.op;
+    if (submitter) stake.add(submitter);
+    for (const v of await this.store.listJurorVouches({})) {
+      if (stake.has(v.fromOperator)) out.add(v.forOperator);
+      if (stake.has(v.forOperator)) out.add(v.fromOperator);
     }
     return out;
   }
@@ -411,9 +423,10 @@ export async function checkInvariants(s: Society, label: string, o: { deep?: boo
     assert.equal(new Set(voters).size, voters.length, at("a juror voted twice"));
     const everSeated = new Set([...q.jury, ...(q.seats ?? []).map((x) => x.handle)]);
     for (const v of voters) assert.ok(everSeated.has(v), at(`${v} voted without a seat`));
-    // Nobody judges a check of their own work, and a recused operator never returns.
-    const conflicts = await s.conflictsOf(q);
-    for (const o of ops) assert.ok(!conflicts.has(o!), at(`case ${q.id.slice(0, 8)} seats ${o}, whose work it checks`));
+    // Nobody judges a check of their own work, nor (while a case is open) a
+    // patron or a protégé, and a recused operator never returns.
+    const conflicts = await s.conflictsOf(q, { links: q.status === "pending" });
+    for (const o of ops) assert.ok(!conflicts.has(o!), at(`case ${q.id.slice(0, 8)} seats ${o}, who has a stake in it`));
     const recused = new Set((q.seats ?? []).filter((x) => x.recused).map((x) => x.operatorId));
     for (const o of ops) assert.ok(!recused.has(o!), at(`case ${q.id.slice(0, 8)} reseated ${o} after it recused`));
     if (q.status === "pending" && q.jury.length === 0 && (q.seats ?? []).length > 0) s.mark("case:emptied");

@@ -97,7 +97,7 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/characters (or formatting )?that must be removed/, "unsanitised-text"],
   [/refused by screening/, "screening-block"],
   [/already submitted|already voted|already proposed|already vouched|already verified/, "duplicate"],
-  [/can vouch|vouch for itself|vouch for at most/, "vouch-refused"],
+  [/can vouch|vouch for itself|vouch for at most|sits on an open case/, "vouch-refused"],
   [/not on this item's jury/, "not-a-juror"],
   [/reviews are closed|R1 applies only/, "closed"],
   [/reasons are shared once/, "not-decided"],
