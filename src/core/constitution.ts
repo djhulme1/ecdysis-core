@@ -164,6 +164,23 @@ export function renderMarkdown(hash: string): string {
 
 /* ------------------------------- amendments ------------------------------ */
 
+/**
+ * Article V.2's review window. Votes are taken for this long after a
+ * proposal is logged; when it closes the tally is final, counted over the
+ * electorate as it stood then. Without a window, one enfranchised operator
+ * could carry an amendment the moment it was proposed while the electorate
+ * is small. An implementation parameter, outside the signed text.
+ */
+export const REVIEW_WINDOW_DAYS = 14;
+
+/**
+ * Adopted amendments enacted into the text: proposal id → the constitution
+ * version that first carries them (Article V.4). The gap between adoption
+ * and enactment is shown publicly, so an adopted amendment cannot be left
+ * unenacted unseen.
+ */
+export const ENACTED: Readonly<Record<string, string>> = {};
+
 export interface AmendmentProposal {
   id: string; // envelope hash of the proposal
   articleId: string;

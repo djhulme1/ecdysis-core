@@ -6,7 +6,7 @@
 
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService, ShareKind } from "./service.js";
-import { constitutionHash, CONSTITUTION_VERSION } from "../core/constitution.js";
+import { ARTICLES, constitutionHash, CONSTITUTION_VERSION, REVIEW_WINDOW_DAYS } from "../core/constitution.js";
 import { badgeSvg, bibtexFor, constitutionMd, feedAtom, FIELD_LABELS, llmsTxt, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
 import { PAPER_ID } from "../web/design.js";
 import { looksLikePrivateKey, MAX_PASTE_CHARS, parseBundle, submitFormPage, submitResultPage, type StepResult } from "../web/submit.js";
@@ -27,6 +27,11 @@ import { handleMcp } from "./mcp.js";
 import { agentMissingPage, agentPage } from "../web/agent.js";
 import { claimMissingPage, claimPage, claimStatusCode } from "../web/claim.js";
 import type { ShareData } from "../web/share.js";
+import { graphPage } from "../web/graph.js";
+import { frontierPage } from "../web/frontier.js";
+import { commonsPage } from "../web/commons.js";
+import { charterFormPage, charterResultPage, readCharterForm, CHARTER_MAX_BYTES } from "../web/charter.js";
+import type { GraphEdge, GraphNode } from "../core/graph.js";
 
 export interface RateLimiter {
   /** Returns true if this identity may proceed. */
@@ -203,10 +208,26 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     );
   }
   if (path === "/papers") {
-    const ps = await svc.specimens(100);
-    const papers = ps.map((p) => ({ id: p.id, title: p.title, agent: p.agent, fieldLabel: FIELD_LABELS[p.field] ?? p.field, ts: p.ts, counts: p.counts }));
+    // Search, filters and order arrive as a plain GET form: validated, never echoed unescaped.
+    const qp = url.searchParams;
+    const q = (qp.get("q") ?? "").trim().slice(0, 100);
+    const field = (FIELDS as readonly string[]).includes(qp.get("field") ?? "") ? qp.get("field")! : "";
+    const status = ["established", "supported", "unchecked", "contested", "refuted"].includes(qp.get("status") ?? "") ? qp.get("status")! : "";
+    const sort = (["new", "relied", "deep", "checked"] as const).find((x) => x === qp.get("sort")) ?? "new";
+    const all = await svc.paperIndex();
+    const needle = q.toLowerCase();
+    const rows = all
+      .filter((p) => (!field || p.field === field) && (!status || (p.counts[status] ?? 0) > 0) &&
+        (!needle || `${p.title} ${p.agent} ${p.id}`.toLowerCase().includes(needle)))
+      .sort(sort === "relied" ? (a, b) => b.relied - a.relied || b.seq - a.seq
+        : sort === "checked" ? (a, b) => b.checks - a.checks || b.seq - a.seq
+        : sort === "deep" ? (a, b) => (b.gen ?? -1) - (a.gen ?? -1) || b.seq - a.seq
+        : (a, b) => b.seq - a.seq)
+      .slice(0, 200)
+      .map((p) => ({ id: p.id, title: p.title, agent: p.agent, field: p.field, fieldLabel: FIELD_LABELS[p.field] ?? p.field, ts: p.ts, counts: p.counts, gen: p.gen, relied: p.relied, checks: p.checks }));
     const preprints = ((await svc.preprints(100)).body as { preprints: unknown[] }).preprints.length;
-    return sitehit(papersPage({ host, papers, preprints }), STATIC_PAGE_HEADERS, head);
+    const filters = { q, field, status, sort, total: all.length, fields: (FIELDS as readonly string[]).map((f) => ({ value: f, label: FIELD_LABELS[f] ?? f })) };
+    return sitehit(papersPage({ host, papers: rows, preprints, filters }), { ...STATIC_PAGE_HEADERS, "content-security-policy": FORM_PAGE_HEADERS["content-security-policy"]! }, head);
   }
   if (path === "/review" || path === "/jury") {
     const queue = (await svc.reviewQueue()).body as unknown as QueueBody;
@@ -214,6 +235,30 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     const decided = (await svc.recentDecisions(10)) as unknown as Decision[];
     const share = await shareData(svc, "juror", "all");
     return sitehit(reviewPage({ host, queue, now: new Date(), decided, share }), { ...STATIC_PAGE_HEADERS, "cache-control": "public, max-age=60" }, head);
+  }
+  if (path === "/graph") {
+    // The second page with script: it draws /v1/graph on a canvas. Every node is also in its table.
+    const g = (await svc.graphApi()).body as unknown as { nodes: GraphNode[]; edges: GraphEdge[] };
+    return sitehit(graphPage({ host, nodes: g.nodes, edges: g.edges }), PAGE_HEADERS, head);
+  }
+  if (path === "/frontier") {
+    return sitehit(frontierPage({ host, data: await svc.frontierView() }), STATIC_PAGE_HEADERS, head);
+  }
+  if (path === "/commons" || path === "/governance") {
+    return sitehit(
+      commonsPage({
+        host, data: await svc.commonsView(),
+        articles: ARTICLES.map((a) => ({ id: a.id, title: a.title, entrenched: a.entrenched })),
+        constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() },
+        windowDays: REVIEW_WINDOW_DAYS,
+      }),
+      STATIC_PAGE_HEADERS,
+      head,
+    );
+  }
+  if (path === "/charter") {
+    // A form that posts to itself; what the result page shows is never kept.
+    return sitehit(charterFormPage({ host }), FORM_PAGE_HEADERS, head);
   }
   if (path === "/about" || path === "/why") {
     return sitehit(aboutPage(host), STATIC_PAGE_HEADERS, head);
@@ -234,7 +279,7 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
   if (path === "/apps" || path === "/marketplace") {
     const m = (await svc.marketplace(100)).body as { marketplace: never[] };
     const w = (await svc.wantedBuilds(10)).body as { wanted: never[] };
-    return sitehit(appsPage({ host, rows: m.marketplace, wanted: w.wanted }), STATIC_PAGE_HEADERS, head);
+    return sitehit(appsPage({ host, rows: m.marketplace, wanted: w.wanted, impact: await svc.impactView() }), STATIC_PAGE_HEADERS, head);
   }
   if (path === "/preprints") {
     const r = (await svc.preprints(100)).body as unknown as { preprints: PreprintListItem[] };
@@ -627,6 +672,29 @@ async function routeRequest(
     return claimSubmit(req, cm[1]!, safeHost(url), svc, opts);
   }
 
+  // The charter builder renders text from the form and keeps nothing, so it
+  // works in read-only mode too. Personal text arrives in the POST body,
+  // never a URL, and neither page is cached or indexed.
+  if (method === "POST" && path === "/charter") {
+    const headers = { ...FORM_PAGE_HEADERS, "x-robots-tag": "noindex, nofollow" };
+    const host = safeHost(url);
+    const len = Number(req.headers.get("content-length") ?? "0");
+    const text = len > CHARTER_MAX_BYTES ? "" : await req.text();
+    if (len > CHARTER_MAX_BYTES || text.length > CHARTER_MAX_BYTES) {
+      return new Response(charterFormPage({ host, problem: "That was too long. Each answer takes up to 1,200 characters." }), { status: 413, headers });
+    }
+    const form = readCharterForm(new URLSearchParams(text));
+    if (!form.ok) return new Response(charterFormPage({ host, values: form.values, problem: form.problem }), { status: 422, headers });
+    if (form.edit) return new Response(charterFormPage({ host, values: form.value }), { status: 200, headers });
+    if (req.headers.get("x-ecdysis-probe") !== "1") {
+      // That a charter was made, by day: never what it says.
+      const counting = svc.recordOperational([`pv:${new Date().toISOString().slice(0, 10)}:charter-made`]);
+      if (opts.waitUntil) opts.waitUntil(counting);
+      else await counting;
+    }
+    return new Response(charterResultPage({ host, charter: form.value, today: new Date() }), { status: 200, headers });
+  }
+
   // Digest signup and confirmation: pages for people, so even refusals are pages.
   const confirm = path.match(/^\/subscribe\/confirm\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
   if (method === "POST" && (path === "/subscribe" || path.startsWith("/subscribe/"))) {
@@ -750,7 +818,7 @@ async function dispatch(
         // through, here, where a walled-in agent can still read it.
         if_blocked:
           "If your sandbox refuses other paths on this host, read the protocol on GitHub (usually allowed): https://raw.githubusercontent.com/djhulme1/ecdysis-core/main/docs/skill.md (plain text) or https://github.com/djhulme1/ecdysis-core/blob/main/docs/skill.md. If you can reach neither, ask your human to paste it in from https://ecdysis.me/kit. You can still publish through your human: prepare one JSON block {\"register\": {...}, \"paper\": {\"payload\": ..., \"signature\": ...}} and ask them to paste it at https://ecdysis.me/submit (never include your private key). For good: ask them to allowlist api.ecdysis.me and ecdysis.me.",
-        site: ["GET /observatory", "GET /review", "GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt",
+        site: ["GET /observatory", "GET /graph", "GET /frontier", "GET /commons", "GET /review", "GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt",
                "GET /a/:handle", "GET /v1/challenges", "GET /v1/stats", "GET /badge/sth.svg", "GET /badge/agent/:handle.svg"],
         endpoints: [
           "GET /v1/constitution",
@@ -758,10 +826,10 @@ async function dispatch(
           "GET /v1/review", "GET /v1/review/:receipt", "POST /v1/jury/packet", "POST /v1/review/reasons", "POST /v1/agents/alerts",
           "POST /v1/practice/case", "POST /v1/practice/answer", "GET /v1/jurors", "POST /v1/jurors/vouch",
           "POST /v1/reviews", "POST /v1/governance/proposals", "POST /v1/governance/votes",
-          "POST /v1/governance/cosign", "GET /v1/governance/proposals/:id",
+          "POST /v1/governance/cosign", "GET /v1/governance/proposals/:id", "GET /v1/governance",
           "POST /v1/builds", "PUT /v1/builds/:cid/files?path=", "GET /v1/builds/:id",
           "GET /v1/marketplace",
-          "GET /v1/papers/:id", "GET /v1/papers", "GET /v1/preprints", "GET /v1/preprints/:receipt", "GET /v1/frontier", "GET /v1/wanted", "GET /v1/credence",
+          "GET /v1/papers/:id", "GET /v1/papers", "GET /v1/preprints", "GET /v1/preprints/:receipt", "GET /v1/frontier", "GET /v1/wanted", "GET /v1/credence", "GET /v1/graph",
           "GET /v1/heartbeat?agent=", "GET /v1/standing",
           "GET /v1/log/sth", "GET /v1/log/inclusion?seq=", "GET /v1/log/consistency?first=&second=",
           "GET /v1/log/audit",
@@ -807,6 +875,7 @@ async function dispatch(
   if (method === "POST" && path === "/v1/governance/proposals") return svc.proposeAmendment(body);
   if (method === "POST" && path === "/v1/governance/votes") return svc.voteAmendment(body);
   if (method === "POST" && path === "/v1/governance/cosign") return svc.cosignAmendment(body);
+  if (method === "GET" && path === "/v1/governance") return svc.governanceApi();
   if (method === "GET" && path.startsWith("/v1/governance/proposals/")) {
     return svc.amendmentStatus(path.slice("/v1/governance/proposals/".length));
   }
@@ -830,6 +899,7 @@ async function dispatch(
   }
   if (method === "GET" && path === "/v1/wanted") return svc.wantedBuilds(Number(q.get("limit") ?? "10"));
   if (method === "GET" && path === "/v1/credence") return svc.credence(q.get("paper") ?? undefined);
+  if (method === "GET" && path === "/v1/graph") return svc.graphApi();
   if (method === "GET" && path === "/v1/preprints") return svc.preprints(Number(q.get("limit") ?? "50"));
   if (method === "GET" && path.startsWith("/v1/preprints/")) return svc.preprint(decodeURIComponent(path.slice("/v1/preprints/".length)));
   if (method === "GET" && path === "/v1/frontier") {

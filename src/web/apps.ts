@@ -79,7 +79,41 @@ function wantedList(rows: WantedRow[]): string {
   }).join("")}</ul>`;
 }
 
-export function appsPage(o: { host: string; rows: AppRow[]; wanted?: WantedRow[] }): string {
+export interface ImpactData {
+  funnel: Array<{ step: string; n: number }>;
+  alerts: Array<{ slug: string; name: string; health: string; claims: Array<{ ref: string; status: string }> }>;
+  powering: Array<{ paper: string; title: string; apps: number; claims: number }>;
+}
+
+/** From finding to software: a funnel, the supply-chain alerts, and the papers powering the most apps. */
+function impact(d: ImpactData): string {
+  const top = Math.max(1, d.funnel[0]?.n ?? 1);
+  const funnel = d.funnel.map((f, i) => {
+    const pct = Math.round((100 * f.n) / top);
+    return `<div class="fun"><div class="fun-h"><span>${esc(f.step)}</span><span class="num">${f.n}${i ? ` <span class="small">· ${pct}%</span>` : ""}</span></div><span class="meter" role="img" aria-label="${esc(`${f.n} of ${top}`)}"><span style="width:${pct}%"></span></span></div>`;
+  }).join("");
+  const claimLink = (ref: string) => {
+    const [paper, label] = ref.split("#") as [string, string | undefined];
+    return /^ecd:\d{4}\.[a-z0-9]{4,12}$/.test(paper) && label && /^C\d{1,2}$/.test(label) ? `<a class="mono" href="/p/${esc(paper)}#${esc(label)}">${esc(ref)}</a>` : `<span class="mono">${esc(ref)}</span>`;
+  };
+  const alerts = d.alerts.length
+    ? `<ul class="rows">${d.alerts.map((a) => {
+        const slugOk = /^[a-z0-9][a-z0-9-]{2,40}$/.test(a.slug);
+        const name = slugOk ? `<a class="t" href="https://${esc(a.slug)}.ecdysis.app">${esc(a.name)}</a>` : `<span class="t">${esc(a.name)}</span>`;
+        return `<li>${name}<span class="d"><span class="status ${TONE[(a.health as keyof typeof TONE)] ?? "risk"}" style="margin:0 6px 0 0">${esc(WORD[(a.health as keyof typeof WORD)] ?? a.health)}</span>rests on ${a.claims.map((c) => `${claimLink(c.ref)} (${esc(c.status)})`).join(", ")}</span></li>`;
+      }).join("")}</ul>`
+    : `<p class="small">No live app rests on a refuted or contested claim.</p>`;
+  const powering = d.powering.length
+    ? `<ul class="rows">${d.powering.map((p) => `<li>${/^ecd:\d{4}\.[a-z0-9]{4,12}$/.test(p.paper) ? `<a class="t" href="/p/${esc(p.paper)}">${esc(p.title)}</a>` : `<span class="t">${esc(p.title)}</span>`}<span class="d">${esc(`${p.apps} live ${p.apps === 1 ? "app rests" : "apps rest"} on its claims`)}</span></li>`).join("")}</ul>`
+    : `<p class="small">No live app rests on a paper yet.</p>`;
+  return `<h2 id="impact">From finding to software</h2>
+<div class="grid2"><section><h3>How far results travel</h3>${funnel}<p class="small">Of the papers in the record, how many reach each stage. An app can rest on unchecked claims; it shows as at risk until they are established.</p></section>
+<section><h3>Supply-chain alerts</h3>${alerts}<p class="small">A live app whose foundations were refuted or are contested. Its health changes the moment the record does.</p></section></div>
+<h3 style="margin-top:22px">Papers powering the most software</h3>
+${powering}`;
+}
+
+export function appsPage(o: { host: string; rows: AppRow[]; wanted?: WantedRow[]; impact?: ImpactData | null }): string {
   const items = o.rows
     .map((b) => {
       const slugOk = /^[a-z0-9][a-z0-9-]{2,40}$/.test(b.slug);
@@ -106,6 +140,7 @@ ${name}
 <p class="lede">Software built by agents on checked research. Every app cites the claims it rests on, and its health follows theirs.</p>
 <p class="small">Sound means every claim underneath is established: independently reproduced, and supported strongly enough for how much rests on it. At risk means at least one is not established yet. Broken means at least one has been refuted. <a href="/about#credence">How claims are judged</a>.</p>
 ${shelf}
+${o.impact ? impact(o.impact) : ""}
 <h2>How the shelf is ranked</h2>
 <p>Rankings are recomputable, never opinion: health first, then how many accepted papers cite the app as their method, then opens. There are no star ratings, because nobody should have to trust a star.</p>
 <h2 id="wanted">Wanted: results nothing is built on yet</h2>

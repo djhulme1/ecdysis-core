@@ -15,20 +15,23 @@ import { selectJury, tallyJury } from "../src/core/jury.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import type { Json } from "../src/core/canonical.js";
 
-function clock(): () => Date {
+/** A test clock that ticks a second per read, and can jump ahead. */
+function clock(): { now: () => Date; jump: (ms: number) => void } {
   let t = Date.UTC(2026, 8, 30, 10, 0, 0);
-  return () => new Date((t += 1000));
+  return { now: () => new Date((t += 1000)), jump: (ms) => { t += ms; } };
 }
+const DAY = 86_400_000;
 
 async function setup() {
   const store = new MemoryStore();
   const operator = await generateKeyPair();
+  const time = clock();
   const svc = new EcdysisService({
     store,
     screeners: [structuralScreener()],
     sthPrivateKey: operator.privateKey,
     operatorPublicKey: operator.publicKey,
-    now: clock(),
+    now: time.now,
     reviewAll: false, // exercises direct publication past probation
   });
   const ack = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
@@ -41,7 +44,7 @@ async function setup() {
     agents.set(handle, kp);
     return kp;
   };
-  return { store, svc, operator, agents, add, ack };
+  return { store, svc, operator, agents, add, ack, time };
 }
 
 function paperPayload(handle: string, publicKey: string, title: string): Json {
@@ -245,8 +248,8 @@ describe("amendments (Article V)", () => {
     assert.equal(t.noOperators, 2);
   });
 
-  it("ordinary amendments pass by agent vote alone; entrenched ones need R2, end to end", async () => {
-    const { svc, operator, agents, add } = await setup();
+  it("ordinary amendments pass by agent vote alone after the review window; entrenched ones need R2, end to end", async () => {
+    const { svc, operator, agents, add, time } = await setup();
     for (let i = 0; i < 5; i++) await add(`Voter-${i}`, `op-${i}`);
     // The franchise is earned: each voting operator first gets a paper
     // ACCEPTED (veterans publish directly), which is what enfranchises them.
@@ -267,55 +270,95 @@ describe("amendments (Article V)", () => {
       assert.equal(r.status, 201, JSON.stringify(r.body));
       return String((r.body as Record<string, Json>)["id"]);
     };
-    const vote = async (handle: string, proposal: string, choice: "yes" | "no") => {
+    let n = 0;
+    const signVote = async (handle: string, proposal: string, choice: "yes" | "no") => {
       const kp = agents.get(handle)!;
       const payload: Json = {
         protocol: "ecdysis/0.1", type: "amendment-vote", proposal, choice,
-        agent: { handle, publicKey: kp.publicKey }, ts: "2026-09-30T11:00:00Z",
+        agent: { handle, publicKey: kp.publicKey }, ts: `2026-09-30T11:${String(n++ % 60).padStart(2, "0")}:00Z`,
       };
-      return svc.voteAmendment({ payload, signature: await signJson(kp.privateKey, payload) });
+      return { payload, signature: await signJson(kp.privateKey, payload) };
     };
+    const vote = async (handle: string, proposal: string, choice: "yes" | "no") => svc.voteAmendment(await signVote(handle, proposal, choice));
+    const status = async (id: string) => (await svc.amendmentStatus(id)).body as Record<string, Json>;
 
-    // Ordinary: Article III change, 3 of 5 enfranchised operators vote yes → adopted.
+    // Ordinary: Article III change, 3 of 5 enfranchised operators vote yes.
     const ord = await propose("III", "Raise the default jury size from five to seven once the pool allows it.");
-    for (const h of ["Voter-0", "Voter-1", "Voter-2"]) await vote(h, ord, "yes");
-    const afterThree = await svc.amendmentStatus(ord);
-    assert.equal((afterThree.body as Record<string, Json>)["passed"], true, "3 yes of 3 cast, quorum 1 of 5 operators");
+    for (const h of ["Voter-0", "Voter-1", "Voter-2"]) assert.equal((await vote(h, ord, "yes")).status, 200);
+    const during = await status(ord);
+    assert.equal(during["open"], true, "votes are taken for the review window (Article V.2)");
+    assert.equal(during["passed"], false, "nothing passes while the window is open, however the votes stand");
+    assert.match(String(during["reason"]), /voting is open until .*as it stands: adopted/);
+
+    // A vote counts once: the same envelope again is refused, and a vote
+    // must name a proposal that exists.
+    const once = await signVote("Voter-3", ord, "no");
+    assert.equal((await svc.voteAmendment(once)).status, 200);
+    assert.equal((await svc.voteAmendment(once)).status, 409, "a replayed vote is refused");
+    assert.equal((await vote("Voter-3", "a".repeat(64), "yes")).status, 404, "no voting on a proposal that was never made");
+    assert.equal((await vote("Voter-3", ord, "yes")).status, 200, "a fresh vote replaces the operator's earlier one");
 
     // GOVERNANCE CAPTURE MUST FAIL: a flood of freshly registered sockpuppet
-    // operators votes no — none has accepted work, so none has a vote, and
-    // the adopted tally does not move.
+    // operators tries to vote no. None has accepted work, so none has a
+    // vote: each is refused at the door, and nothing reaches the log.
     for (let i = 0; i < 12; i++) {
       const kp = await add(`Sock-${i}`, `op-fake-${i}`, false); // not veterans: no accepted papers
       const payload: Json = {
         protocol: "ecdysis/0.1", type: "amendment-vote", proposal: ord, choice: "no",
         agent: { handle: `Sock-${i}`, publicKey: kp.publicKey }, ts: "2026-09-30T12:00:00Z",
       };
-      await svc.voteAmendment({ payload, signature: await signJson(kp.privateKey, payload) });
+      const r = await svc.voteAmendment({ payload, signature: await signJson(kp.privateKey, payload) });
+      assert.equal(r.status, 403, "an operator without accepted work has no vote");
     }
-    const afterFlood = await svc.amendmentStatus(ord);
-    const fb = afterFlood.body as Record<string, Json>;
-    assert.equal(fb["passed"], true, "sockpuppet operators cannot capture or block an amendment");
-    assert.equal(fb["noOperators"], 0, "unenfranchised votes are discarded, not counted");
-    assert.equal(fb["eligibleOperators"], 5, "registration alone does not grow the electorate");
+
+    // The window closes: the tally is final and the amendment is adopted.
+    time.jump(15 * DAY);
+    const after = await status(ord);
+    assert.equal(after["open"], false);
+    assert.equal(after["passed"], true, "4 yes of 4 cast, quorum 1 of 5 operators, window closed");
+    assert.equal(after["noOperators"], 0, "unenfranchised votes never counted");
+    assert.equal(after["eligibleOperators"], 5, "registration alone does not grow the electorate");
+    assert.equal(after["enactedIn"], null, "adopted but not yet enacted as a new version");
+    const late = await vote("Voter-4", ord, "no");
+    assert.equal(late.status, 409, "no votes after the window closes");
+    assert.match(String((late.body as Record<string, Json>)["error"]), /closed/);
 
     // Entrenched: Article 0 change never passes on votes alone.
     const ent = await propose("0", "Remove rule 0.3 so that screening becomes optional for veteran agents.");
     for (const h of ["Voter-0", "Voter-1", "Voter-2", "Voter-3", "Voter-4"]) await vote(h, ent, "yes");
-    const unanimous = await svc.amendmentStatus(ent);
-    assert.equal((unanimous.body as Record<string, Json>)["passed"], false);
-    assert.match(String((unanimous.body as Record<string, Json>)["reason"]), /R2/);
-
-    // With the operator key's co-signature it passes.
-    const cosig = await signJson(operator.privateKey, { op: "cosign", proposal: ent });
-    const co = await svc.cosignAmendment({ proposal: ent, signature: cosig });
-    assert.equal((co.body as Record<string, Json>)["passed"], true);
+    time.jump(15 * DAY);
+    const unanimous = await status(ent);
+    assert.equal(unanimous["passed"], false);
+    assert.match(String(unanimous["reason"]), /R2/);
 
     // A forged co-signature is refused.
     const forged = await generateKeyPair();
     const badSig = await signJson(forged.privateKey, { op: "cosign", proposal: ent });
     const bad = await svc.cosignAmendment({ proposal: ent, signature: badSig });
     assert.equal(bad.status, 401);
+
+    // With the operator key's co-signature it passes.
+    const cosig = await signJson(operator.privateKey, { op: "cosign", proposal: ent });
+    const co = await svc.cosignAmendment({ proposal: ent, signature: cosig });
+    assert.equal((co.body as Record<string, Json>)["passed"], true);
+
+    // The co-signature is the same bytes every time, so it must not replay
+    // into the log; and it applies only to the entrenched core.
+    assert.equal((await svc.cosignAmendment({ proposal: ent, signature: cosig })).status, 409, "co-signed once only");
+    const ordSig = await signJson(operator.privateKey, { op: "cosign", proposal: ord });
+    assert.equal((await svc.cosignAmendment({ proposal: ord, signature: ordSig })).status, 409, "R2 applies only to the entrenched core");
+    const ghost = "b".repeat(64);
+    const ghostSig = await signJson(operator.privateKey, { op: "cosign", proposal: ghost });
+    assert.equal((await svc.cosignAmendment({ proposal: ghost, signature: ghostSig })).status, 404, "no co-signing a proposal that was never made");
+
+    // The commons shows all of it: both proposals and the operator's R2 act.
+    const commons = await svc.commonsView();
+    assert.equal(commons.electorate, 5);
+    assert.deepEqual(commons.proposals.map((p) => [p.articleId, p.passed, p.open]), [["0", true, false], ["III", true, false]]);
+    assert.equal(commons.operator.filter((a) => a.what.startsWith("R2")).length, 1, "one co-signature, logged once");
+    const gov = (await svc.governanceApi()).body as Record<string, Json>;
+    assert.equal((gov["proposals"] as Json[]).length, 2);
+    assert.match(JSON.stringify(gov["amendmentRule"]), /14 days/);
     void reg;
   });
 });

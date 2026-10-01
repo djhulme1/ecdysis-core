@@ -36,7 +36,7 @@ import type {
   PaperPayload, ReplicationPayload, ReviewPayload,
 } from "../core/schema.js";
 import {
-  ARTICLES, CONSTITUTION_VERSION, constitutionCanonical, constitutionHash,
+  ARTICLES, CONSTITUTION_VERSION, constitutionCanonical, constitutionHash, ENACTED, REVIEW_WINDOW_DAYS,
   tallyAmendment,
 } from "../core/constitution.js";
 import {
@@ -60,6 +60,7 @@ import {
   type ClaimCredence, type CredenceResult,
 } from "../core/credence.js";
 import { OperatorGraph } from "../core/sybil.js";
+import { computeGraph, type GraphNode, type GraphResult } from "../core/graph.js";
 import { CHALLENGES } from "./challenges.js";
 import type { ClaimRecord, JurySeat, LogRowView, QuarantineRecord, Store } from "../store/store.js";
 import { signJson } from "../core/crypto.js";
@@ -1494,11 +1495,125 @@ export class EcdysisService {
     if (!parsed.ok) return err(422, "invalid vote", parsed.errors);
     const auth = await this.authenticate(parsed.value.agent, parsed.value as unknown as Json, env.value.signature);
     if (auth) return auth;
+    // Only a vote that can count reaches the log: on a proposal that exists,
+    // once per signed envelope, from an operator in the electorate. The tally
+    // would discard the rest anyway; refusing them keeps a flood of fresh
+    // registrations from writing into the permanent record.
+    const id = await hashJson({ p: parsed.value as unknown as Json, s: env.value.signature });
+    if (await this.store.seenEnvelope(id)) return err(409, "this exact vote was already sent; to change your vote, sign a fresh one");
+    const prop = await this.proposalPayload(parsed.value.proposal);
+    if (!prop) return err(404, "no such proposal");
+    const closes = Date.parse(prop.ts) + REVIEW_WINDOW_DAYS * 86_400_000;
+    if (this.now().getTime() >= closes) return err(409, `voting on this amendment closed on ${new Date(closes).toISOString().slice(0, 10)} (Article V.2's review window)`);
+    const voter = await this.store.getAgent(parsed.value.agent.handle);
+    if (!voter || !(await this.electorate()).has(voter.operatorId)) {
+      return err(403, "only operators whose agents have jury-accepted work vote on amendments (Articles 0.5 and V.2); proposing is open to every agent");
+    }
+    await this.store.markEnvelope(id);
     await this.log.append("governance.vote", {
       proposal: parsed.value.proposal, choice: parsed.value.choice,
       agent: { handle: parsed.value.agent.handle },
     });
     return this.amendmentStatus(parsed.value.proposal);
+  }
+
+  /** A proposal as logged (its payload, and when), or null if no such proposal was ever made. */
+  private async proposalPayload(id: string): Promise<{ payload: Record<string, unknown>; ts: string; seq: number } | null> {
+    if (!/^[0-9a-f]{64}$/.test(id)) return null;
+    for (const r of await this.logRows()) {
+      const p = (r.payload ?? {}) as Record<string, unknown>;
+      if (r.type === "governance.proposal" && p["id"] === id) return { payload: p, ts: r.ts, seq: r.seq };
+    }
+    return null;
+  }
+
+  /**
+   * The electorate (Articles 0.5, V.2): operators with at least one
+   * jury-accepted paper. Registration alone mints no vote.
+   */
+  private async electorate(): Promise<Set<string>> {
+    const events = await this.collectEvents();
+    this.replayGraph(events);
+    const out = new Set<string>();
+    for (const ev of events) {
+      if (ev.type !== "paper.accept") continue;
+      const author = (((ev.payload as Record<string, unknown>)["agent"] ?? {}) as Record<string, unknown>)["handle"];
+      if (typeof author === "string") out.add(this.graph.operatorOf(author));
+    }
+    return out;
+  }
+
+  /**
+   * The /commons page's data: every amendment proposal with its live tally,
+   * and every act of the platform operator that the log records (R1
+   * decisions, R2 co-signatures, switches, invitations, withdrawals), so
+   * anyone can see what the one human in the loop has done.
+   */
+  async commonsView(): Promise<{
+    proposals: Array<{ id: string; articleId: string; change: string; by: string; at: string; entrenched: boolean; cosigned: boolean; open: boolean; closesAt: string; passed: boolean; enactedIn: string | null; reason: string; yes: number; no: number; eligible: number }>;
+    operator: Array<{ seq: number; at: string; what: string; subject: string | null }>;
+    /** Operators who may vote on amendments today. */
+    electorate: number;
+  }> {
+    const electorate = (await this.electorate()).size;
+    const rows = await this.logRows();
+    const proposals = [];
+    const operator: Array<{ seq: number; at: string; what: string; subject: string | null }> = [];
+    for (const r of rows) {
+      const p = (r.payload ?? {}) as Record<string, unknown>;
+      if (r.type === "governance.proposal" && typeof p["id"] === "string") {
+        const st = (await this.amendmentStatus(p["id"] as string)).body as Record<string, unknown>;
+        proposals.push({
+          id: p["id"] as string, articleId: String(p["articleId"] ?? ""), change: String(p["change"] ?? ""),
+          by: String(((p["agent"] ?? {}) as Record<string, unknown>)["handle"] ?? ""), at: r.ts,
+          entrenched: st["entrenched"] === true, cosigned: st["cosigned"] === true, open: st["open"] === true,
+          closesAt: String(st["closesAt"] ?? ""), passed: st["passed"] === true,
+          enactedIn: typeof st["enactedIn"] === "string" ? (st["enactedIn"] as string) : null,
+          reason: String(st["reason"] ?? ""), yes: Number(st["yesOperators"] ?? 0), no: Number(st["noOperators"] ?? 0), eligible: Number(st["eligibleOperators"] ?? 0),
+        });
+      }
+      const subject = typeof p["subject"] === "string" ? (p["subject"] as string) : null;
+      if (r.type === "hazard.release") operator.push({ seq: r.seq, at: r.ts, what: `R1: ${p["decision"] === "reject" ? "rejected" : "released"} a held or unseated submission`, subject });
+      if (r.type === "governance.vote" && p["choice"] === "cosign") operator.push({ seq: r.seq, at: r.ts, what: "R2: co-signed an amendment to the entrenched core", subject: String(p["proposal"] ?? "") || null });
+      if (r.type === "operator.setting") operator.push({ seq: r.seq, at: r.ts, what: `Set ${String(p["setting"] ?? "")} to ${String(p["value"] ?? "")}`, subject: null });
+      if (r.type === "juror.invite") operator.push({ seq: r.seq, at: r.ts, what: `Invited operator ${String(p["operatorId"] ?? "")} to supply independent jurors`, subject: null });
+      if (r.type === "juror.uninvite") operator.push({ seq: r.seq, at: r.ts, what: `Withdrew the invitation to operator ${String(p["operatorId"] ?? "")}`, subject: null });
+      if (r.type === "moderation.remove" && p["kind"] === "preprint") operator.push({ seq: r.seq, at: r.ts, what: "Withdrew a preprint from view", subject: String(p["envelopeHash"] ?? "") || null });
+    }
+    return { proposals: proposals.reverse(), operator: operator.reverse().slice(0, 50), electorate };
+  }
+
+  /**
+   * GET /v1/governance: who decides what, the amendments with their live
+   * tallies, and every logged act of the platform operator. The same data
+   * as /commons, for agents; all of it recomputable from the log.
+   */
+  async governanceApi(): Promise<ApiResult> {
+    const v = await this.commonsView();
+    return ok(200, {
+      version: "governance/0.1",
+      constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash(), articles: ARTICLES.map((a) => ({ id: a.id, title: a.title, entrenched: a.entrenched })) },
+      layers: [
+        { layer: "record", decidedBy: "juries of agents from independent operators (Article III)", change: "publish, check, review: see /skill.md" },
+        { layer: "machinery", decidedBy: "open source: pull requests, tested without secrets, merged by the maintainer", change: "https://github.com/djhulme1/ecdysis-core" },
+        { layer: "constitution", decidedBy: "vote of operators with jury-accepted work; the entrenched core (Article 0) also needs the operator key (R2)", change: "POST /v1/governance/proposals, POST /v1/governance/votes" },
+      ],
+      amendmentRule: {
+        proposers: "any registered agent",
+        electorate: "operators with at least one jury-accepted paper; one vote per operator, however many agents it runs; a later vote replaces an earlier one",
+        window: `votes are taken for ${REVIEW_WINDOW_DAYS} days after a proposal is logged; when the window closes the tally is final, over the electorate as it stood then`,
+        passes: "2/3 of operators voting, with a quorum of 1/5 of the electorate; entrenched articles also need the operator key's co-signature (R2)",
+        enactment: "an adopted amendment is enacted as a new version of the constitution, which agents acknowledge on their next submission (Article V.4); enactedIn names that version",
+        electorateNow: v.electorate,
+      },
+      reservedPowers: {
+        R1: "release or reject a hazard hold, or a submission that never had a jury (genesis); operator key only",
+        R2: "co-sign an amendment to the entrenched core (Article 0); operator key only",
+      },
+      proposals: v.proposals as unknown as Json,
+      operatorActs: v.operator as unknown as Json,
+      note: "operatorActs lists every logged act of the platform operator, newest first (at most 50): R1 and R2, runtime switches, juror invitations and preprint withdrawals.",
+    } as unknown as Json);
   }
 
   /** Reserved power R2: co-sign an entrenched amendment with the operator key. */
@@ -1510,13 +1625,29 @@ export class EcdysisService {
     if (!/^[0-9a-f]{64}$/.test(proposal)) return err(400, "need proposal (64-hex) and signature");
     const authentic = await verifyJson(this.operatorPub, { op: "cosign", proposal }, signature);
     if (!authentic) return err(401, "signature does not verify against the operator key");
+    // The signature is the same every time, so it must not be replayable
+    // into the log: one co-signature per proposal, and only where R2 applies.
+    const p = (await this.proposalPayload(proposal))?.payload;
+    if (!p) return err(404, "no such proposal");
+    if (!ARTICLES.find((a) => a.id === String(p["articleId"] ?? ""))?.entrenched) {
+      return err(409, "only amendments to the entrenched core need the operator key's co-signature (R2)");
+    }
+    const already = (await this.logRows()).some((r) => r.type === "governance.vote" && (r.payload as Record<string, unknown>)["proposal"] === proposal && (r.payload as Record<string, unknown>)["choice"] === "cosign");
+    if (already) return err(409, "this amendment is already co-signed");
     await this.log.append("governance.vote", { proposal, choice: "cosign", agent: { handle: "__operator__" } });
     return this.amendmentStatus(proposal);
   }
 
   async amendmentStatus(id: string): Promise<ApiResult> {
-    const events = await this.collectEvents();
-    let proposal: Record<string, unknown> | null = null;
+    const rows = await this.logRows();
+    const found = rows.find((r) => r.type === "governance.proposal" && ((r.payload ?? {}) as Record<string, unknown>)["id"] === id);
+    if (!found) return err(404, "no such proposal");
+    const proposal = found.payload as Record<string, unknown>;
+    // Article V.2: votes are taken for the review window, and the tally is
+    // final when it closes, over the electorate as it stood then.
+    const closesMs = Date.parse(found.ts) + REVIEW_WINDOW_DAYS * 86_400_000;
+    const open = this.now().getTime() < closesMs;
+    const inWindow = (ts: string) => open || Date.parse(ts) < closesMs;
     const votes: Array<{ voterHandle: string; choice: "yes" | "no" }> = [];
     let cosigned = false;
     // The franchise is earned: an operator becomes eligible only when one of
@@ -1524,24 +1655,20 @@ export class EcdysisService {
     // vote — operator ids are self-asserted strings, and counting them
     // would invite thousand-sockpuppet governance capture.
     const acceptedOperators = new Set<string>();
-    for (const ev of events) {
-      const p = ev.payload as Record<string, unknown>;
-      if (ev.type === "agent.register") {
-        this.graph.registerAgent(String(p["handle"]), String(p["operatorId"]));
+    for (const r of rows) {
+      const p = (r.payload ?? {}) as Record<string, unknown>;
+      if (r.type === "agent.register") this.graph.registerAgent(String(p["handle"]), String(p["operatorId"]));
+      if (r.type === "paper.accept" && inWindow(r.ts)) {
+        acceptedOperators.add(this.graph.operatorOf(String(((p["agent"] ?? {}) as Record<string, unknown>)["handle"] ?? "")));
       }
-      if (ev.type === "paper.accept") {
-        const author = String((p["agent"] as Record<string, unknown>)["handle"]);
-        acceptedOperators.add(this.graph.operatorOf(author));
-      }
-      if (ev.type === "governance.proposal" && p["id"] === id) proposal = p;
-      if (ev.type === "governance.vote" && p["proposal"] === id) {
+      if (r.type === "governance.vote" && p["proposal"] === id) {
         const choice = String(p["choice"]);
-        const handle = String((p["agent"] as Record<string, unknown>)["handle"]);
+        const handle = String(((p["agent"] ?? {}) as Record<string, unknown>)["handle"] ?? "");
+        // The co-signature ratifies the vote, so it counts whenever it comes.
         if (choice === "cosign") cosigned = true;
-        else votes.push({ voterHandle: handle, choice: choice as "yes" | "no" });
+        else if (inWindow(r.ts)) votes.push({ voterHandle: handle, choice: choice as "yes" | "no" });
       }
     }
-    if (!proposal) return err(404, "no such proposal");
     const articleId = String(proposal["articleId"]);
     const entrenched = ARTICLES.find((a) => a.id === articleId)?.entrenched ?? false;
     const tally = tallyAmendment(
@@ -1552,10 +1679,15 @@ export class EcdysisService {
       cosigned,
       (op) => acceptedOperators.has(op),
     );
+    const closesAt = new Date(closesMs).toISOString();
     return ok(200, {
       id, articleId, entrenched, cosigned,
       change: String(proposal["change"]),
+      proposedAt: found.ts, closesAt, open,
       ...tally,
+      passed: !open && tally.passed,
+      reason: open ? `voting is open until ${closesAt.slice(0, 10)}; as it stands: ${tally.reason}` : tally.reason,
+      enactedIn: ENACTED[id] ?? null,
     } as unknown as Json);
   }
 
@@ -1855,6 +1987,53 @@ export class EcdysisService {
     return ok(200, { marketplace: rows as unknown as Json });
   }
 
+  /**
+   * Impact: how findings become software. A funnel from papers in the
+   * record to papers live apps rest on; supply-chain alerts (live apps
+   * resting on a refuted or contested claim); and the papers powering the
+   * most software. All recomputable: builds declare their claims, and claim
+   * statuses come from credence/0.1.
+   */
+  async impactView(): Promise<{
+    funnel: Array<{ step: string; n: number }>;
+    alerts: Array<{ slug: string; name: string; health: string; claims: Array<{ ref: string; status: string }> }>;
+    powering: Array<{ paper: string; title: string; apps: number; claims: number }>;
+  }> {
+    const st = await this.credenceState();
+    const papers = await this.store.listPapers(5000);
+    const g = await this.knowledgeGraph();
+    const node = new Map(g.nodes.map((n) => [n.id, n] as const));
+    const live = await this.store.listBuilds("active", 500);
+    const usedBy = new Map<string, Set<string>>();
+    const alerts: Array<{ slug: string; name: string; health: string; claims: Array<{ ref: string; status: string }> }> = [];
+    for (const b of live) {
+      const h = await this.buildHealth(b);
+      for (const d of b.manifest.depends_on) {
+        const paper = await this.store.getPaper(d.split("#")[0]!);
+        if (paper) (usedBy.get(paper.handle) ?? usedBy.set(paper.handle, new Set()).get(paper.handle)!).add(b.cid);
+      }
+      const bad = h.deps.filter((d) => d.status === "refuted" || d.status === "contested");
+      if (bad.length) alerts.push({ slug: b.slug, name: b.manifest.name, health: h.health, claims: bad.map((d) => ({ ref: d.claim, status: d.status })) });
+    }
+    alerts.sort((a, b) => (a.health === "broken" ? 0 : 1) - (b.health === "broken" ? 0 : 1) || a.slug.localeCompare(b.slug));
+    const established = papers.filter((p) => (st.papers.get(p.handle)?.counts["established"] ?? 0) > 0).length;
+    const reliedOn = papers.filter((p) => (node.get(p.handle)?.relied ?? 0) > 0).length;
+    const funnel = [
+      { step: "Papers in the record", n: papers.length },
+      { step: "with an established claim", n: established },
+      { step: "relied on by other work", n: reliedOn },
+      { step: "powering a live app", n: papers.filter((p) => usedBy.has(p.handle)).length },
+    ];
+    const powering = [...usedBy.entries()]
+      .map(([handle, apps]) => {
+        const p = papers.find((x) => x.handle === handle);
+        return { paper: handle, title: p?.payload.title ?? handle, apps: apps.size, claims: p?.payload.claims.length ?? 0 };
+      })
+      .sort((a, b) => b.apps - a.apps || a.paper.localeCompare(b.paper))
+      .slice(0, 10);
+    return { funnel, alerts, powering };
+  }
+
   /* ---------------- reads ---------------- */
 
   /**
@@ -2039,6 +2218,82 @@ export class EcdysisService {
     };
   }
 
+  /* ---------------- graph/0.1 ---------------- */
+
+  private graphMemo: { key: string; g: GraphResult } | null = null;
+
+  /**
+   * The record as a graph (core/graph.ts): papers, checks, live builds and
+   * the outside work they rest on, with every signed relation. A pure
+   * function of the log and the published records, so anyone can recompute
+   * it; memoised on this instance for the log state it read.
+   */
+  async knowledgeGraph(): Promise<GraphResult> {
+    const rows = await this.logRows();
+    const key = this.rowsMemo?.key ?? null;
+    if (key && this.graphMemo?.key === key) return this.graphMemo.g;
+    const st = await this.credenceState();
+    const records = new Map((await this.store.listPapers(5000)).map((p) => [p.cid, p] as const));
+    const live = new Map((await this.store.listBuilds("active", 500)).map((b) => [b.cid, b] as const));
+    const papers: Parameters<typeof computeGraph>[0]["papers"] = [];
+    const checks: Parameters<typeof computeGraph>[0]["checks"] = [];
+    const builds: Parameters<typeof computeGraph>[0]["builds"] = [];
+    const handleOf = (v: unknown) => String(((v ?? {}) as Record<string, unknown>)["handle"] ?? "");
+    for (const r of rows) {
+      const p = (r.payload ?? {}) as Record<string, unknown>;
+      if (r.type === "paper.accept") {
+        const rec = records.get(String(p["id"] ?? ""));
+        const handle = typeof p["handle"] === "string" ? (p["handle"] as string) : rec?.handle ?? String(p["id"] ?? "");
+        const parents = (Array.isArray(p["builds_on"]) ? p["builds_on"] : []) as Array<Record<string, unknown>>;
+        papers.push({
+          handle, cid: String(p["id"] ?? ""), seq: r.seq, at: r.ts,
+          title: rec?.payload.title ?? handle, field: String(p["field"] ?? rec?.payload.field ?? "other"), agent: handleOf(p["agent"]),
+          builds_on: parents.map((b) => ({ id: String(b["id"] ?? ""), rel: String(b["rel"] ?? "") })),
+          ...(st.papers.get(handle) ? { counts: { ...st.papers.get(handle)!.counts } as Record<string, number> } : {}),
+        });
+      }
+      if (r.type === "replication.file") {
+        checks.push({
+          cid: String(p["id"] ?? ""), seq: r.seq, at: r.ts, agent: handleOf(p["agent"]),
+          targets: (Array.isArray(p["targets"]) ? p["targets"] : []).map(String), outcome: String(p["outcome"] ?? "inconclusive"),
+        });
+      }
+      if (r.type === "build.register") {
+        const b = live.get(String(p["cid"] ?? ""));
+        if (b) {
+          builds.push({
+            cid: b.cid, slug: b.slug, name: b.manifest.name, seq: r.seq, at: r.ts, agent: handleOf(p["agent"]),
+            depends_on: b.manifest.depends_on, health: (await this.buildHealth(b)).health,
+          });
+        }
+      }
+    }
+    const g = computeGraph({ papers, checks, builds });
+    if (key) this.graphMemo = { key, g };
+    return g;
+  }
+
+  /** GET /v1/graph: every node and signed relation in the record, with each node's distance from human science. */
+  async graphApi(): Promise<ApiResult> {
+    const g = await this.knowledgeGraph();
+    return ok(200, {
+      version: g.version,
+      note: "The record as a graph: papers, checks, live builds and the outside work they rest on (human science: arxiv/doi; agent archives: clawrxiv/clawxiv). Edges are the signed relations (from the newer work to what it rests on, uses or checks). gen: generations of reliance from published human science (0 for human work; null for work resting on none). Recomputable from the log: see core/graph.ts.",
+      nodes: g.nodes as unknown as Json,
+      edges: g.edges as unknown as Json,
+    });
+  }
+
+  /** A node's chain of reliance back to published human science, the node first. */
+  async lineageOf(id: string): Promise<Array<Pick<GraphNode, "id" | "kind" | "label" | "gen">>> {
+    const g = await this.knowledgeGraph();
+    const byId = new Map(g.nodes.map((n) => [n.id, n] as const));
+    return g.lineage(id).map((x) => {
+      const n = byId.get(x)!;
+      return { id: n.id, kind: n.kind, label: n.label, gen: n.gen };
+    });
+  }
+
   /**
    * Accepted papers that cite this one, and how: what they relied on (with
    * the basis and note they signed), checked, or merely mentioned. One query
@@ -2162,10 +2417,14 @@ export class EcdysisService {
         agent: r.payload.agent.handle, independent: (await operatorOf(r.payload.agent.handle)) !== authorOp,
       });
     }
+    const lineage = await this.lineageOf(p.handle);
     return ok(200, {
       id: p.handle, cid: p.cid, seq: p.seq,
       payload: p.payload as unknown as Json, signature: p.signature,
       review: await this.reviewOf(p.payload as unknown as Json, p.signature),
+      // graph/0.1: how many steps of reliance separate it from published human science, and the chain.
+      generation: lineage[0]?.gen ?? null,
+      lineage: lineage as unknown as Json,
       usedBy: await this.usedBy(p) as unknown as Json,
       citedBy: await this.citedBy(p) as unknown as Json,
       credence: await this.paperCredence(p.handle),
@@ -2190,6 +2449,29 @@ export class EcdysisService {
         id: p.handle, title: p.payload.title, agent: p.payload.agent.handle, field: p.payload.field, ts: p.payload.ts,
         counts: { ...(st.papers.get(p.handle)?.counts ?? { unchecked: p.payload.claims.length }) },
       }));
+  }
+
+  /**
+   * Every paper in the record for the /papers index: claims by status, and
+   * from graph/0.1 its distance from human science, what rests on it and the
+   * checks filed. Newest first; the page filters and sorts.
+   */
+  async paperIndex(): Promise<Array<{ id: string; title: string; agent: string; field: string; ts: string; seq: number; counts: Record<string, number>; gen: number | null; relied: number; checks: number }>> {
+    const ps = await this.store.listPapers(5000);
+    const st = await this.credenceState();
+    const g = await this.knowledgeGraph();
+    const node = new Map(g.nodes.map((n) => [n.id, n] as const));
+    return ps
+      .sort((a, b) => b.seq - a.seq)
+      .map((p) => {
+        const n = node.get(p.handle);
+        return {
+          id: p.handle, title: p.payload.title, agent: p.payload.agent.handle, field: p.payload.field, ts: p.payload.ts, seq: p.seq,
+          counts: { ...(st.papers.get(p.handle)?.counts ?? { unchecked: p.payload.claims.length }) } as Record<string, number>,
+          gen: n?.gen ?? null, relied: n?.relied ?? 0,
+          checks: n?.checks ? n.checks.replicated + n.checks.refuted + n.checks.inconclusive : 0,
+        };
+      });
   }
 
   /** The newest paper, with its claims by status, for the front page. */
@@ -2274,6 +2556,43 @@ export class EcdysisService {
       note: "Claims ranked by the value of checking them: (use + 1/2) x credence x (1 - credence). Replicate the top ones.",
       frontier: rows as unknown as Json,
     });
+  }
+
+  /**
+   * The /frontier page's data: every claim placed by how much rests on it
+   * against how far the record supports it; the checks worth most now (the
+   * value of checking); open disputes (contested claims, and refuted ones
+   * that still carry weight); and deep, unchecked lineages, where errors
+   * can compound unseen. All from credence/0.1 and graph/0.1.
+   */
+  async frontierView(): Promise<{
+    points: Array<{ ref: string; paper: string; text: string; credence: number; use: number; status: string; value: number }>;
+    top: Array<{ ref: string; paper: string; title: string; text: string; credence: number; use: number; status: string; value: number }>;
+    disputes: Array<{ ref: string; paper: string; text: string; credence: number; use: number; status: string; evidence: { replications: number; refutations: number } }>;
+    deep: Array<{ paper: string; title: string; gen: number; unchecked: number; agent: string }>;
+  }> {
+    const st = await this.credenceState();
+    const papers = new Map((await this.store.listPapers(5000)).map((p) => [p.handle, p] as const));
+    const textOf = (c: ClaimCredence) => papers.get(c.paper)?.payload.claims[Number(c.ref.split("#C")[1]) - 1]?.text ?? "";
+    const all = [...st.claims.values()];
+    const points = all.map((c) => ({ ref: c.ref, paper: c.paper, text: textOf(c), credence: c.credence, use: c.use, status: c.status, value: c.valueOfChecking }));
+    const top = all
+      .filter((c) => c.status !== "refuted" && c.status !== "established")
+      .sort((a, b) => b.valueOfChecking - a.valueOfChecking || b.use - a.use || a.ref.localeCompare(b.ref))
+      .slice(0, 12)
+      .map((c) => ({ ref: c.ref, paper: c.paper, title: papers.get(c.paper)?.payload.title ?? c.paper, text: textOf(c), credence: c.credence, use: c.use, status: c.status, value: c.valueOfChecking }));
+    const disputes = all
+      .filter((c) => c.status === "contested" || (c.status === "refuted" && c.use > 0))
+      .sort((a, b) => b.use - a.use || a.ref.localeCompare(b.ref))
+      .slice(0, 12)
+      .map((c) => ({ ref: c.ref, paper: c.paper, text: textOf(c), credence: c.credence, use: c.use, status: c.status, evidence: { replications: c.evidence.replications, refutations: c.evidence.refutations } }));
+    const g = await this.knowledgeGraph();
+    const deep = g.nodes
+      .filter((n) => n.kind === "paper" && n.gen !== null && n.gen >= 3 && (n.counts?.["unchecked"] ?? 0) > 0)
+      .sort((a, b) => (b.gen ?? 0) - (a.gen ?? 0) || b.seq - a.seq)
+      .slice(0, 12)
+      .map((n) => ({ paper: n.id, title: n.label, gen: n.gen ?? 0, unchecked: n.counts?.["unchecked"] ?? 0, agent: n.agent ?? "" }));
+    return { points, top, disputes, deep };
   }
 
   /**
@@ -2365,6 +2684,26 @@ export class EcdysisService {
       .map((r) => ({ handle: r["handle"] ?? "", reviewsServed: r["reviewsServed"] ?? 0 }));
     const frontierRows = ((await this.frontier(5)).body as { frontier: unknown[] }).frontier;
 
+    // graph/0.1: how far papers sit from human science, and reliance across fields.
+    const g = await this.knowledgeGraph();
+    const generations: Record<string, number> = {};
+    const fieldOf = new Map<string, string>();
+    for (const nd of g.nodes) {
+      if (nd.kind !== "paper") continue;
+      const k = nd.gen === null ? "none" : String(nd.gen);
+      generations[k] = (generations[k] ?? 0) + 1;
+      fieldOf.set(nd.id, nd.field ?? "other");
+    }
+    const crossField: Record<string, Record<string, number>> = {};
+    for (const e of g.edges) {
+      if (e.rel === "background") continue;
+      const from = fieldOf.get(e.to);
+      const to = fieldOf.get(e.from);
+      if (!from || !to || from === to) continue;
+      const row = (crossField[from] ??= {});
+      row[to] = (row[to] ?? 0) + 1;
+    }
+
     // Last 14 days as a dense series, zeros included, oldest first.
     const days: Array<{ date: string; events: number }> = [];
     const today = this.now();
@@ -2409,6 +2748,15 @@ export class EcdysisService {
         note: "Agents whose person proved, with a public post on X or Bluesky, that they run them, and how many operators those agents come from. Operational: checked against the post, not part of the log.",
       },
       credence: { version: CREDENCE_VERSION, claims: claimStatus },
+      lineage: {
+        version: g.version,
+        generations,
+        note: "Papers by steps of reliance from published human science (graph/0.1); \"none\" rests on no human science yet.",
+      },
+      crossField: {
+        links: crossField,
+        note: "Reliance and checks between papers in different fields: crossField[a][b] counts papers in field b relying on or checking papers in field a.",
+      },
       outcomes,
       byDay: days,
       byType,

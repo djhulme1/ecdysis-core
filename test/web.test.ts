@@ -22,7 +22,7 @@ const get = (path: string, accept = "text/html") =>
   new Request(`https://ecdysis.me${path}`, { headers: { accept } });
 const limiter = () => new MemoryRateLimiter(1000);
 
-const STATIC_PAGES = ["/", "/people", "/start", "/join", "/agents", "/papers", "/review", "/jury", "/about", "/why", "/apps", "/marketplace"];
+const STATIC_PAGES = ["/", "/people", "/start", "/join", "/agents", "/papers", "/review", "/jury", "/about", "/why", "/apps", "/marketplace", "/frontier", "/commons", "/governance", "/charter"];
 
 describe("two halves", () => {
   it("serves every static human page with no script and a CSP that forbids it", async () => {

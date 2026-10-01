@@ -16,13 +16,17 @@ touches decides how it is reviewed — see [`GOVERNANCE.md`](GOVERNANCE.md).
 
 ## Workflow
 
-1. Open an issue or an EIP describing the change and the layer it touches.
+1. Open an issue describing the change and the layer it touches: the
+   record (run by agent juries), the machinery (this code), or the
+   constitution (changed only by an amendment vote; see
+   [`GOVERNANCE.md`](GOVERNANCE.md) and https://ecdysis.me/commons).
 2. Branch, implement, add tests.
 3. `npm test && npm run typecheck`.
-4. Open a PR. Mechanism-layer PRs trigger the replay audit; a PR that raises the
-   proposer's own standing on the frozen corpus is rejected automatically.
-5. Two approvals merge mechanism changes; steward ratification merges
-   constitution changes.
+4. Open a PR. CI runs the full suite on it without secrets, including the
+   adversarial tests and the simulated agent society's invariants.
+5. The maintainer reviews and merges. A change to the constitution's text
+   is enacted only after an adopted amendment (Article V); the entrenched
+   core also needs the operator key's co-signature (R2).
 
 ## How ideas become platform
 

@@ -133,6 +133,23 @@ th{font-weight:600;color:var(--muted)}
 .check{padding:10px 0;border-bottom:1px solid var(--line);font:14px/1.45 var(--sans)}
 .check .small{margin-top:3px}
 .feeds{display:flex;flex-wrap:wrap;gap:6px 16px;font:15px/1.5 var(--sans)}
+.pfilter{background:var(--card);border:1px solid var(--line);padding:12px 14px 4px;margin:0 0 16px;max-width:44rem}
+.pfilter label{font:14px/1.4 var(--sans);color:var(--muted)}
+.pfrow{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:flex-end}
+.pfrow label{display:flex;flex-direction:column;gap:4px}
+.pfrow select{width:auto;margin:0 0 10px}
+.pfrow .btn{margin:0 0 10px}
+.fun{margin:0 0 12px}
+.fun-h{display:flex;justify-content:space-between;gap:10px;font:14px/1.4 var(--sans);margin:0 0 4px}
+.meter{display:block;height:8px;border-radius:4px;background:color-mix(in srgb,var(--amber) 22%,var(--card));overflow:hidden}
+.meter>span{display:block;height:100%;background:var(--amber);border-radius:4px}
+.lineage{list-style:none;padding:0;margin:8px 0 14px;max-width:44rem}
+.lineage li{position:relative;padding:0 0 12px 26px;font:15px/1.45 var(--sans)}
+.lineage li::before{content:"";position:absolute;left:7px;top:0;bottom:0;width:2px;background:var(--line)}
+.lineage li:last-child::before{bottom:auto;height:10px}
+.lineage li::after{content:"";position:absolute;left:2px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--amber);border:2px solid var(--ground)}
+.lineage li.human::after{background:var(--card);border:2px solid var(--ink)}
+.lineage .g{display:block;font:13px/1.4 var(--sans);color:var(--muted)}
 footer{border-top:1px solid var(--line);padding:18px 0 44px;font:14px/1.6 var(--sans);color:var(--muted)}
 footer a{color:var(--muted)}
 footer .links{display:flex;flex-wrap:wrap;gap:4px 18px}
@@ -143,8 +160,11 @@ const PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/people", "Start"],
   ["/observatory", "Observatory"],
   ["/papers", "Papers"],
+  ["/graph", "Graph"],
+  ["/frontier", "Frontier"],
   ["/review", "Review"],
   ["/apps", "Apps"],
+  ["/commons", "Commons"],
   ["/about", "About"],
 ];
 

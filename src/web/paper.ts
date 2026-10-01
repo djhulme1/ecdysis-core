@@ -10,7 +10,7 @@
  */
 
 import { bibtexFor, FIELD_LABELS, plainCitation } from "../api/site.js";
-import { esc, howRelied, shell, shortDate, STATUS_ORDER, statusChips, statusTone, type RecordStatus } from "./design.js";
+import { esc, howRelied, PAPER_ID, shell, shortDate, STATUS_ORDER, statusChips, statusTone, type RecordStatus } from "./design.js";
 import { shareBox, type ShareData } from "./share.js";
 
 export interface ClaimCredenceView {
@@ -48,6 +48,10 @@ export interface PaperView {
   citedBy?: Array<{ paper: string; title: string; agent: string; rel: string; basis: string | null; claims: string[]; note: string | null }>;
   /** credence/0.1 for this paper's claims. */
   credence?: { version: string; summary: { counts: Partial<Record<RecordStatus, number>> } | null; claims: ClaimCredenceView[] };
+  /** graph/0.1: steps of reliance from published human science (null: none yet). */
+  generation?: number | null;
+  /** The chain back to human science, this paper first. */
+  lineage?: Array<{ id: string; kind: string; label: string; gen: number | null }>;
   /** The jury that accepted it (absent for work published before review existed). */
   review?: {
     receipt: string;
@@ -134,7 +138,7 @@ export function paperPage(o: { host: string; paper: PaperView; share?: ShareData
     })
     .join("\n");
 
-  const lineage = p.payload.builds_on.length
+  const parents = p.payload.builds_on.length
     ? `<ul class="rows">${p.payload.builds_on.map((b) => {
         const claimsTxt = b.claims?.length ? ` (${b.claims.join(", ")})` : "";
         return `<li><span class="t">${parentLink(b.id)}${esc(claimsTxt)}</span><span class="d">${esc(`This paper ${howRelied(b.rel, b.basis)}.`)}</span>${b.note ? `<span class="d small">${esc(b.note)}</span>` : ""}</li>`;
@@ -174,6 +178,22 @@ export function paperPage(o: { host: string; paper: PaperView; share?: ShareData
         ? `<p class="small">No app, library or dataset rests on this yet. Build only on its claims that have not been refuted. <a href="/apps#build">Get your AI to build one</a>.</p>`
         : `<p class="small">No app, library or dataset rests on this yet. <a href="/apps#build">Get your AI to build one</a>.</p>`;
 
+  const chain = p.lineage ?? [];
+  const g = p.generation;
+  const lineage = chain.length
+    ? `<h2>Lineage to human science</h2>
+<p class="small">${esc(g === null || g === undefined
+      ? "This paper rests on no published human science yet: everything under it is agent work, or comes from agent archives."
+      : g === 1
+        ? "One step from published human science: it relies directly on a human result."
+        : `${g} steps from published human science. Errors compound along a chain, so the further a result sits from human science, the more its foundations need checking.`)} <a href="/graph">See the whole graph</a>.</p>
+<ol class="lineage">${chain.map((n, i) => {
+        const link = i === 0 ? `<b>${esc(n.label)}</b>` : n.kind === "paper" ? (PAPER_ID.test(n.id) ? `<a href="/p/${esc(n.id)}">${esc(n.label)}</a>` : esc(n.label)) : parentLink(n.id);
+        const where = n.kind === "human" ? "published human science" : n.kind === "archive" ? "an agent archive, outside the record" : n.gen === null ? "no human lineage" : `${n.gen} ${n.gen === 1 ? "step" : "steps"} from human science`;
+        return `<li class="${n.kind === "human" ? "human" : ""}">${link}<span class="g">${esc(n.kind === "paper" && i > 0 ? `${n.id} · ${where}` : where)}</span></li>`;
+      }).join("")}</ol>`
+    : "";
+
   const r = p.review;
   const reviewed = !r
     ? ""
@@ -211,6 +231,7 @@ ${claims}
 </ol>
 
 <h2>Builds on</h2>
+${parents}
 ${lineage}
 
 <h2>Checks</h2>

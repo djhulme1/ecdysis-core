@@ -45,6 +45,8 @@ export function endpointOf(method: string, path: string): Endpoint | null {
   // A claim page's form: its handler counts the outcome itself (the page is
   // HTML, so the outcome can't be read back from a JSON error).
   if (path.startsWith("/claim/")) return null;
+  // The charter builder writes nothing anywhere; its handler counts charters made.
+  if (path === "/charter") return null;
   if (m === "POST") {
     switch (path) {
       case "/v1/agents/register": return "register";
@@ -100,10 +102,10 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/name the claims|builds have no claims|cite a build with rel/, "citation-basis"],
   [/characters (or formatting )?that must be removed/, "unsanitised-text"],
   [/refused by screening/, "screening-block"],
-  [/already submitted|already sent|already voted|already proposed|already vouched|already verified/, "duplicate"],
+  [/already submitted|already sent|already voted|already proposed|already vouched|already verified|already co-signed/, "duplicate"],
   [/can vouch|vouch for itself|vouch for at most|sits on an open case/, "vouch-refused"],
   [/not on this item's jury/, "not-a-juror"],
-  [/reviews are closed|R1 applies only/, "closed"],
+  [/reviews are closed|R1 applies only|voting on this amendment closed/, "closed"],
   [/reasons are shared once/, "not-decided"],
   [/practice limit/, "practice-limit"],
   [/claim limit/, "claim-limit"],
@@ -116,6 +118,8 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/rate limit/, "rate-limited"],
   [/read-only/, "read-only"],
   [/size mismatch|hash mismatch|does not declare/, "bad-file"],
+  [/only operators whose agents have jury-accepted work vote/, "not-enfranchised"],
+  [/entrenched core need/, "not-entrenched"],
   [/no such|not found|missing/, "not-found"],
 ];
 
@@ -167,6 +171,7 @@ export function dayFunnelKeys(day: string, method: string, path: string, status:
  */
 export function pageKeyOf(method: string, path: string, accept: string | null): string | null {
   const m = method.toUpperCase();
+  // POST /charter counts itself (only a charter made, not an edit or a refusal).
   if (m === "POST") return path === "/mcp" ? "mcp" : null;
   if (m !== "GET") return null;
   const html = (accept ?? "").includes("text/html");
@@ -180,6 +185,8 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
     "/v1/heartbeat": "heartbeat", "/v1/stats": "stats-api", "/v1/review": "review-api", "/v1/challenges": "challenges",
     "/v1/constitution": "constitution-api", "/v1/frontier": "frontier-api", "/v1/standing": "standing-api",
     "/v1/wanted": "wanted-api", "/kit": "kit", "/v1/credence": "credence-api", "/v1/jurors": "jurors-api",
+    "/graph": "graph", "/v1/graph": "graph-api", "/frontier": "frontier",
+    "/commons": "commons", "/governance": "commons", "/v1/governance": "governance-api", "/charter": "charter",
   };
   if (pages[path]) return pages[path]!;
   if (path.startsWith("/p/")) return "paper";
@@ -195,7 +202,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
 }
 
 /** Which page names are people's pages (HTML), for "human page views". */
-export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms", "agent-page", "claim"] as const;
+export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms", "agent-page", "claim", "graph", "frontier", "commons", "charter"] as const;
 
 /**
  * Where a visit to a person's page came from, as one word from a fixed

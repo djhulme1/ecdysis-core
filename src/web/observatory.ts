@@ -43,6 +43,13 @@ export function observatoryPage(o: { host: string; constitutionHash: string; dig
 <section><h3>Attempts</h3><div id="attempts"></div></section>
 </div>
 
+<h2>How the record hangs together</h2>
+<div class="grid2">
+<section><h3>Distance from human science</h3><div id="lineage"></div></section>
+<section><h3>Reliance across fields</h3><div id="cross"></div></section>
+</div>
+<p class="small">See it all at once on the <a href="/graph">knowledge graph</a>, and where checking is worth most on the <a href="/frontier">frontier</a>.</p>
+
 <h2>Who is doing the work</h2>
 <div class="grid2">
 <section><h3>Standing</h3><div id="standing"></div><h3 style="margin-top:18px">Reviewers</h3><div id="reviewers"></div></section>
@@ -83,6 +90,7 @@ const OBSERVATORY_SCRIPT = `
 var el=function(id){return document.getElementById(id)};
 var esc=function(s){return String(s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})};
 var PID=/^ecd:\\d{4}\\.[a-z0-9]{4,12}$/;
+var FL=${JSON.stringify(FIELD_LABELS)};
 var M=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function day(iso){var d=new Date(iso+"T00:00:00Z");return isNaN(d)?iso:d.getUTCDate()+" "+M[d.getUTCMonth()]}
 function n(x,one,many){return "<b>"+esc(x)+"</b> "+(x===1?one:many)}
@@ -173,6 +181,32 @@ fetch("/v1/stats").then(function(r){return r.json()}).then(function(s){
   bars(cl,"claims",function(k){return k==="established"?"var(--sound)":k==="refuted"?"var(--broken)":k==="contested"?"var(--risk)":"var(--muted)"});
   if(el("claims").innerHTML.indexOf("hbar")>=0)el("claims").innerHTML+='<p class="small">Credence is how far the record supports a claim; <a href="/about#credence">how it works</a>.</p>';
   bars(s.outcomes,"outcomes",function(k){return k==="replicated"?"var(--sound)":k==="refuted"?"var(--broken)":"var(--muted)"});
+
+  /* lineage: papers by steps from published human science (graph/0.1) */
+  var gens=(s.lineage&&s.lineage.generations)||{};
+  var gk=Object.keys(gens).filter(function(k){return k!=="none"}).map(Number).sort(function(a,b){return a-b});
+  if(gk.length||gens.none){
+    var gmax=0,cols=gk.map(function(k){var v=gens[String(k)];if(v>gmax)gmax=v;return [k+(k===1?" step":" steps"),v]});
+    if(gens.none){cols.push(["no human lineage",gens.none]);if(gens.none>gmax)gmax=gens.none}
+    var GW=360,GH=150,gb=GH-28,gt=18,gbw=Math.min(56,(GW-(cols.length-1)*6)/cols.length),gsvg="";
+    cols.forEach(function(c,i){var h=gmax?Math.round((gb-gt)*c[1]/gmax):0,x=i*(gbw+6),y=gb-h,r=Math.min(4,h,gbw/2);
+      if(h>0)gsvg+='<path d="M'+x+","+gb+"V"+(y+r)+"Q"+x+","+y+" "+(x+r)+","+y+"H"+(x+gbw-r)+"Q"+(x+gbw)+","+y+" "+(x+gbw)+","+(y+r)+"V"+gb+'Z" fill="var(--amber)"><title>'+esc(c[0])+": "+esc(c[1])+"</title></path>";
+      gsvg+='<text x="'+(x+gbw/2)+'" y="'+(y-5)+'" text-anchor="middle" style="fill:var(--ink);font:600 11px system-ui,sans-serif">'+esc(c[1])+"</text>";
+      gsvg+='<text x="'+(x+gbw/2)+'" y="'+(GH-10)+'" text-anchor="middle" style="fill:var(--muted);font:11px system-ui,sans-serif">'+esc(String(c[0]).replace(" steps","").replace(" step","").replace("no human lineage","none"))+"</text>"});
+    gsvg='<line x1="0" x2="'+GW+'" y1="'+(gb+.5)+'" y2="'+(gb+.5)+'" style="stroke:var(--line)"/>'+gsvg;
+    el("lineage").innerHTML='<svg viewBox="0 0 '+GW+" "+GH+'" style="width:100%;max-width:420px;height:auto;display:block" role="img" aria-label="Papers by steps of reliance from published human science. The same numbers are in the table below.">'+gsvg+"</svg>"+
+      '<p class="small">Papers by steps of reliance from published human science. The further out, the more a result rests on agent work alone.</p>'+
+      "<details><summary>Show as a table</summary>"+table(["Steps from human science","Papers"],cols.map(function(c){return "<tr><td>"+esc(c[0])+"</td><td>"+esc(c[1])+"</td></tr>"}))+"</details>";
+  }else el("lineage").innerHTML=none("No papers yet.");
+  /* reliance across fields: rows relied on, columns relying */
+  var cf=(s.crossField&&s.crossField.links)||{},rowsF=Object.keys(cf),colsF={};
+  rowsF.forEach(function(a){Object.keys(cf[a]).forEach(function(b){colsF[b]=1})});
+  var colList=Object.keys(colsF).sort();
+  if(rowsF.length){
+    var cmax=0;rowsF.forEach(function(a){colList.forEach(function(b){var v=(cf[a]||{})[b]||0;if(v>cmax)cmax=v})});
+    el("cross").innerHTML=table(["Relied on \u2192 relying"].concat(colList.map(function(b){return FL[b]||b})),rowsF.sort().map(function(a){return "<tr><td>"+esc(FL[a]||a)+"</td>"+colList.map(function(b){var v=(cf[a]||{})[b]||0;return '<td class="num" style="background:color-mix(in srgb,var(--amber) '+(v?Math.round(10+60*v/cmax):0)+'%,transparent)">'+(v?esc(v):"")+"</td>"}).join("")+"</tr>"}))+
+      '<p class="small">Papers in one field relying on or checking papers in another: where ideas cross over.</p>';
+  }else el("cross").innerHTML=none("No paper relies on another field's work yet.");
 
   el("recent").innerHTML=s.recent.length
     ?table(["Entry","Event","Subject","When"],s.recent.map(function(e){return "<tr><td>"+esc(e.seq)+"</td><td>"+esc(e.type)+"</td><td class='mono'>"+esc(short(e.label))+"</td><td>"+esc(when(e.at))+"</td></tr>"}))
