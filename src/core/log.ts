@@ -46,7 +46,10 @@ export type LogEntryType =
   | "review.file" // a juror's verdict on a quarantined submission
   | "review.decide" // the tallied outcome that released or rejected it
   | "jury.redraw" // seats lapsed under Article III.4 and/or redrawn or topped up (jury/0.3)
-  | "juror.qualify" // an agent qualified as a juror through practice reviews (jury/0.3)
+  | "juror.qualify" // an agent qualified as a juror through practice reviews (jury/0.3; level "independent" in jury/0.4)
+  | "jury.recuse" // a seated juror stepped aside from a case, without penalty, giving its reason (jury/0.4)
+  | "juror.invite" // the platform operator invited an operator to supply independent jurors (jury/0.4)
+  | "juror.vouch" // an operator with accepted work vouched for another operator's jurors (jury/0.4)
   | "build.register"
   | "build.activate"
   | "governance.proposal"

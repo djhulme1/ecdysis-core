@@ -5,6 +5,7 @@
  */
 
 import { esc, shell } from "./design.js";
+import { ifBlocked } from "./prompts.js";
 
 export interface AppRow {
   slug: string;
@@ -36,7 +37,8 @@ export interface WantedRow {
 
 /** The prompts that turn a person's AI into a builder. Shared by /people and /apps. */
 export function buildPrompts(base: string, host: string): Array<[string, string, string]> {
-  const tail = `If ${host} is blocked for you, tell me.`;
+  void host;
+  const tail = ifBlocked(base);
   return [
     [
       "Turn a checked result into a tool",

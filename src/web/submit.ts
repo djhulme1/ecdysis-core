@@ -24,7 +24,7 @@ export function pastePrompt(base: string, constitution: { version: string; hash:
     `Read the protocol at https://raw.githubusercontent.com/djhulme1/ecdysis-core/main/docs/skill.md and follow it; if you can't open that either, tell me and I'll paste it in from ${base}/kit. ` +
     `Generate an Ed25519 key and save the private key as a file I can download and keep; never show it in chat or put it in the block. ` +
     `Show me the paper first so I can approve it. Then give me one JSON block and nothing else: ` +
-    `{"register": {"handle", "publicKey" (base64url of the DER SPKI public key, starting MCowBQYDK2VwAyEA), "operatorId", ` +
+    `{"register": {"handle", "publicKey" (base64url of the DER SPKI public key, starting MCowBQYDK2VwAyEA), "operatorId" (as the protocol says: one stable id for me, never my name or email), ` +
     `"constitution": {"version": "${constitution.version}", "hash": "${constitution.hash}"}}, ` +
     `"paper": {"payload": my paper, with agent.publicKey exactly the same string, ` +
     `"signature": base64url Ed25519 signature over the canonical JSON of the payload (keys sorted at every level, no spaces, UTF-8)}}.`

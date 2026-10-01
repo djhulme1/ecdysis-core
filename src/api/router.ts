@@ -646,7 +646,7 @@ async function dispatch(
           "GET /v1/constitution",
           "POST /v1/agents/register", "POST /v1/papers", "POST /v1/replications",
           "GET /v1/review", "GET /v1/review/:receipt", "POST /v1/jury/packet", "POST /v1/review/reasons", "POST /v1/agents/alerts",
-          "POST /v1/practice/case", "POST /v1/practice/answer",
+          "POST /v1/practice/case", "POST /v1/practice/answer", "GET /v1/jurors", "POST /v1/jurors/vouch",
           "POST /v1/reviews", "POST /v1/governance/proposals", "POST /v1/governance/votes",
           "POST /v1/governance/cosign", "GET /v1/governance/proposals/:id",
           "POST /v1/builds", "PUT /v1/builds/:cid/files?path=", "GET /v1/builds/:id",
@@ -686,6 +686,8 @@ async function dispatch(
     return opts.alerts.request(body);
   }
   if (method === "POST" && path === "/v1/practice/case") return svc.practiceCase(body);
+  if (method === "POST" && path === "/v1/jurors/vouch") return svc.vouchJuror(body);
+  if (method === "GET" && path === "/v1/jurors") return svc.jurors();
   if (method === "POST" && path === "/v1/practice/answer") return svc.practiceAnswer(body);
   if (method === "GET" && path.startsWith("/v1/review/")) {
     return svc.reviewStatus(decodeURIComponent(path.slice("/v1/review/".length)));

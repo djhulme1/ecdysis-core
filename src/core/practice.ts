@@ -264,6 +264,24 @@ export function scorePractice(expected: PracticeAnswer, verdict: string, flaws: 
   return expected.flaws.every((f) => given.has(f)) && given.size <= expected.flaws.length + 1;
 }
 
+/**
+ * The stricter bar for a FULL juror seat without published work (jury/0.4):
+ * ten correct at 85% or better, two sound cases, and a flawed case of every
+ * kind caught and named. It counts only once the agent's operator is
+ * verified (invited, or vouched for by two operators with accepted work).
+ */
+export const INDEPENDENT_RULE = {
+  minCorrect: 10,
+  minAccuracy: 0.85,
+  minSoundCorrect: 2,
+  flawKinds: ["numbers", "relation", "basis", "injection"] as const,
+} as const;
+
+/** Which kind of flaw a practice family plants. */
+const FLAW_KIND: Record<PracticeFamily, (typeof INDEPENDENT_RULE.flawKinds)[number]> = {
+  streak: "numbers", inconsistency: "numbers", relation: "relation", basis: "basis", injection: "injection",
+};
+
 export interface PracticeProgress {
   answered: number;
   correct: number;
@@ -271,14 +289,21 @@ export interface PracticeProgress {
   flawedCorrect: number;
   soundCorrect: number;
   qualified: boolean;
+  /** Flaw kinds caught and named so far (for the independent bar). */
+  flawKinds: string[];
+  /** Passed the stricter bar for a full seat without published work. */
+  independent: boolean;
 }
 
-export function practiceProgress(rows: Array<{ correct?: boolean | null; answer: { verdict: string } }>): PracticeProgress {
+export function practiceProgress(rows: Array<{ correct?: boolean | null; answer: { verdict: string }; family?: string }>): PracticeProgress {
   const done = rows.filter((r) => r.correct === true || r.correct === false);
   const correct = done.filter((r) => r.correct === true);
   const accuracy = done.length ? correct.length / done.length : 0;
   const flawedCorrect = correct.filter((r) => r.answer.verdict === "reject").length;
   const soundCorrect = correct.filter((r) => r.answer.verdict === "publish").length;
+  const kinds = new Set(correct
+    .filter((r) => r.answer.verdict === "reject" && r.family && r.family in FLAW_KIND)
+    .map((r) => FLAW_KIND[r.family as PracticeFamily]));
   return {
     answered: done.length,
     correct: correct.length,
@@ -290,5 +315,11 @@ export function practiceProgress(rows: Array<{ correct?: boolean | null; answer:
       accuracy >= PRACTICE_RULE.minAccuracy &&
       flawedCorrect >= PRACTICE_RULE.minFlawedCorrect &&
       soundCorrect >= PRACTICE_RULE.minSoundCorrect,
+    flawKinds: INDEPENDENT_RULE.flawKinds.filter((k) => kinds.has(k)),
+    independent:
+      correct.length >= INDEPENDENT_RULE.minCorrect &&
+      accuracy >= INDEPENDENT_RULE.minAccuracy &&
+      soundCorrect >= INDEPENDENT_RULE.minSoundCorrect &&
+      INDEPENDENT_RULE.flawKinds.every((k) => kinds.has(k)),
   };
 }

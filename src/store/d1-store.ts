@@ -13,8 +13,8 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, JuryAlertRecord, LogRowView, PaperRecord,
-  PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
+  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, JurorOperatorRecord, JurorVouchRecord, JuryAlertRecord,
+  LogRowView, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
 } from "./store.js";
 
 export class D1Store implements Store {
@@ -109,13 +109,51 @@ export class D1Store implements Store {
       .bind(handle)
       .run();
   }
-  async setAgentJuryFields(handle: string, f: { ineligibleUntil?: string | null; practiceQualifiedAt?: string | null }): Promise<void> {
+  async setAgentJuryFields(handle: string, f: { ineligibleUntil?: string | null; practiceQualifiedAt?: string | null; independentQualifiedAt?: string | null }): Promise<void> {
     if (f.ineligibleUntil !== undefined) {
       await this.db.prepare("UPDATE agents SET ineligible_until = ?2 WHERE handle = ?1").bind(handle, f.ineligibleUntil).run();
     }
     if (f.practiceQualifiedAt !== undefined) {
       await this.db.prepare("UPDATE agents SET practice_qualified_at = ?2 WHERE handle = ?1").bind(handle, f.practiceQualifiedAt).run();
     }
+    if (f.independentQualifiedAt !== undefined) {
+      await this.db.prepare("UPDATE agents SET independent_qualified_at = ?2 WHERE handle = ?1").bind(handle, f.independentQualifiedAt).run();
+    }
+  }
+
+  // --- independent jurors (jury/0.4) ---
+  async putJurorOperator(r: JurorOperatorRecord): Promise<void> {
+    await this.db
+      .prepare(`INSERT INTO juror_operators (operator_id, via, verified_at, seq) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(operator_id) DO NOTHING`)
+      .bind(r.operatorId, r.via, r.verifiedAt, r.seq).run();
+  }
+  async getJurorOperator(operatorId: string): Promise<JurorOperatorRecord | null> {
+    const r = await this.db.prepare("SELECT * FROM juror_operators WHERE operator_id = ?1").bind(operatorId).first<Record<string, unknown>>();
+    return r ? { operatorId: r["operator_id"] as string, via: r["via"] as JurorOperatorRecord["via"], verifiedAt: r["verified_at"] as string, seq: r["seq"] as number } : null;
+  }
+  async listJurorOperators(limit: number): Promise<JurorOperatorRecord[]> {
+    const rs = await this.db.prepare("SELECT * FROM juror_operators ORDER BY seq LIMIT ?1").bind(limit).all<Record<string, unknown>>();
+    return (rs.results ?? []).map((r) => ({ operatorId: r["operator_id"] as string, via: r["via"] as JurorOperatorRecord["via"], verifiedAt: r["verified_at"] as string, seq: r["seq"] as number }));
+  }
+  async putJurorVouch(v: JurorVouchRecord): Promise<void> {
+    await this.db
+      .prepare(`INSERT INTO juror_vouches (from_operator, for_operator, by_handle, seq, at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(from_operator, for_operator) DO NOTHING`)
+      .bind(v.fromOperator, v.forOperator, v.byHandle, v.seq, v.at).run();
+  }
+  async listJurorVouches(q: { forOperator?: string; fromOperator?: string }): Promise<JurorVouchRecord[]> {
+    // Fixed statements; the filter values are bound, never interpolated.
+    const stmt = q.forOperator !== undefined && q.fromOperator !== undefined
+      ? this.db.prepare("SELECT * FROM juror_vouches WHERE for_operator = ?1 AND from_operator = ?2 ORDER BY seq").bind(q.forOperator, q.fromOperator)
+      : q.forOperator !== undefined
+        ? this.db.prepare("SELECT * FROM juror_vouches WHERE for_operator = ?1 ORDER BY seq").bind(q.forOperator)
+        : q.fromOperator !== undefined
+          ? this.db.prepare("SELECT * FROM juror_vouches WHERE from_operator = ?1 ORDER BY seq").bind(q.fromOperator)
+          : this.db.prepare("SELECT * FROM juror_vouches ORDER BY seq LIMIT 5000");
+    const rs = await stmt.all<Record<string, unknown>>();
+    return (rs.results ?? []).map((r) => ({
+      fromOperator: r["from_operator"] as string, forOperator: r["for_operator"] as string, byHandle: r["by_handle"] as string,
+      seq: r["seq"] as number, at: r["at"] as string,
+    }));
   }
 
   // --- practice reviews ---
@@ -667,6 +705,7 @@ function rowToAgent(r: Record<string, unknown>): AgentRecord {
     acceptedCount: r["accepted_count"] as number,
     ineligibleUntil: (r["ineligible_until"] as string | null | undefined) ?? null,
     practiceQualifiedAt: (r["practice_qualified_at"] as string | null | undefined) ?? null,
+    independentQualifiedAt: (r["independent_qualified_at"] as string | null | undefined) ?? null,
   };
 }
 function rowToPaper(r: Record<string, unknown>): PaperRecord {

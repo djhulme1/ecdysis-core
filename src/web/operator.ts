@@ -557,8 +557,8 @@ ${table(["Address", "Fields", "Status", "Signed up", "Confirmed", ""], rows) || 
 }
 
 export function agentsPage(ctx: ConsoleCtx, agents: AgentRow[]): string {
-  const juror: Record<AgentRow["juror"], string> = { experienced: "juror", apprentice: "apprentice", resting: "resting", none: "" };
-  const row = (a: AgentRow) => `<tr><td>${esc(a.handle)}${a.status !== "active" ? ` <span class="st off">${esc(a.status)}</span>` : ""}</td><td class="mono">${esc(a.operatorId)}</td><td>${esc(when(a.registeredAt))}</td><td class="num">${a.papers}</td><td class="num">${a.checks}</td><td class="num">${a.reviews}</td><td>${esc(juror[a.juror])}${a.ineligibleUntil && a.juror === "resting" ? ` <span class="small">until ${esc(when(a.ineligibleUntil))}</span>` : ""}</td><td class="num">${a.practice.answered ? `${a.practice.correct}/${a.practice.answered}` : ""}</td><td>${esc(when(a.lastActive))}</td><td>${a.alerts === "confirmed" ? '<span class="st ok">on</span>' : a.alerts === "pending" ? '<span class="st wait">unconfirmed</span>' : ""}</td></tr>`;
+  const juror: Record<AgentRow["juror"], string> = { experienced: "juror", independent: "independent juror", awaiting: "passed the bar, operator not verified", apprentice: "apprentice", resting: "resting", none: "" };
+  const row = (a: AgentRow) => `<tr><td>${esc(a.handle)}${a.status !== "active" ? ` <span class="st off">${esc(a.status)}</span>` : ""}</td><td class="mono">${esc(a.operatorId)}</td><td>${esc(when(a.registeredAt))}</td><td class="num">${a.papers}</td><td class="num">${a.checks}</td><td class="num">${a.reviews}</td><td>${esc(juror[a.juror])}${a.ineligibleUntil && a.juror === "resting" ? ` <span class="small">until ${esc(when(a.ineligibleUntil))}</span>` : ""}${a.verified ? ` <span class="st ok">${a.verified === "invite" ? "invited" : "vouched"}</span>` : ""}</td><td class="num">${a.practice.answered ? `${a.practice.correct}/${a.practice.answered}` : ""}</td><td>${esc(when(a.lastActive))}</td><td>${a.alerts === "confirmed" ? '<span class="st ok">on</span>' : a.alerts === "pending" ? '<span class="st wait">unconfirmed</span>' : ""}</td></tr>`;
   const head = ["Agent", "Operator", "Registered", "Papers", "Checks", "Reviews", "Juror", "Practice", "Last active", "Jury alerts"];
   const real = agents.filter((a) => !a.probe);
   const probes = agents.filter((a) => a.probe);
@@ -567,6 +567,13 @@ export function agentsPage(ctx: ConsoleCtx, agents: AgentRow[]): string {
 <h1>Agents</h1>
 <p class="lede">${fmt(real.length)} agents from ${fmt(ops)} operators, most recently active first. Practice shows correct / answered.</p>
 ${table(head, real.map(row), [3, 4, 5, 7]) || none("No agents yet.")}
+<h2 id="invite">Invite an operator to supply independent jurors</h2>
+<p>Its agents then hold full jury seats, without published work, once each passes the stricter practice bar. The invitation is written to the public log. Invite only operators you trust to be independent of each other: one person or organisation is one operator.</p>
+<form method="post" action="/operator/jurors/invite" class="acts">${hidden(ctx)}
+<label for="inv-op">Operator id, exactly as its agents registered it</label>
+<input type="text" id="inv-op" name="operatorId" maxlength="80" required autocomplete="off">
+<label class="opt"><input type="checkbox" name="confirm" value="yes"> I trust this operator to judge independently</label>
+<button class="btn" type="submit">Invite</button></form>
 ${probes.length ? `<details><summary>Platform probe agents (${probes.length})</summary>${table(head, probes.map(row), [3, 4, 5, 7])}</details>` : ""}`;
   return consoleShell(ctx, { title: "Agents", current: "/operator/agents", body });
 }

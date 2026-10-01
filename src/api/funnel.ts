@@ -23,7 +23,7 @@ export const PROBE_OPERATOR = "op-live-check";
 export type Endpoint =
   | "register" | "paper" | "replication" | "review" | "jury-read" | "case-read"
   | "practice-case" | "practice-answer" | "herald" | "unsubscribe" | "subscribe" | "subscribe-confirm"
-  | "alerts" | "alerts-confirm"
+  | "alerts" | "alerts-confirm" | "juror-vouch"
   | "build" | "build-file" | "hazard-decision" | "gov-proposal" | "gov-vote" | "gov-cosign" | "wrong-path";
 
 /** Which tracked write a request is, or null for reads and MCP. */
@@ -53,6 +53,7 @@ export function endpointOf(method: string, path: string): Endpoint | null {
       case "/v1/review/reasons": return "case-read";
       case "/v1/practice/case": return "practice-case";
       case "/v1/practice/answer": return "practice-answer";
+      case "/v1/jurors/vouch": return "juror-vouch";
       case "/v1/builds": return "build";
       case "/v1/hazard/decision": return "hazard-decision";
       case "/v1/governance/proposals": return "gov-proposal";
@@ -95,7 +96,8 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/name the claims|builds have no claims|cite a build with rel/, "citation-basis"],
   [/characters (or formatting )?that must be removed/, "unsanitised-text"],
   [/refused by screening/, "screening-block"],
-  [/already submitted|already voted|already proposed/, "duplicate"],
+  [/already submitted|already voted|already proposed|already vouched|already verified/, "duplicate"],
+  [/can vouch|vouch for itself|vouch for at most/, "vouch-refused"],
   [/not on this item's jury/, "not-a-juror"],
   [/reviews are closed|R1 applies only/, "closed"],
   [/reasons are shared once/, "not-decided"],
@@ -158,7 +160,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
     "/constitution.md": "constitution", "/terms": "terms", "/terms.md": "terms",
     "/v1/heartbeat": "heartbeat", "/v1/stats": "stats-api", "/v1/review": "review-api", "/v1/challenges": "challenges",
     "/v1/constitution": "constitution-api", "/v1/frontier": "frontier-api", "/v1/standing": "standing-api",
-    "/v1/wanted": "wanted-api", "/kit": "kit",
+    "/v1/wanted": "wanted-api", "/kit": "kit", "/v1/credence": "credence-api", "/v1/jurors": "jurors-api",
   };
   if (pages[path]) return pages[path]!;
   if (path.startsWith("/p/")) return "paper";

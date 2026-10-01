@@ -35,6 +35,8 @@ export class OperatorGraph {
     if (from === forOp) {
       return { ok: false, reason: "an operator cannot vouch for itself" };
     }
+    // Idempotent: the graph is rebuilt from the log, possibly more than once.
+    if (this.vouches.some((v) => v.from === from && v.for === forOp)) return { ok: true };
     const already = this.vouches.filter((v) => v.from === from).length;
     if (already >= 5) return { ok: false, reason: "vouch limit reached (5 live vouches)" };
     this.vouches.push({ from, for: forOp, seq });

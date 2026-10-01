@@ -197,7 +197,7 @@ export class JuryAlerts {
   }
 
   private alertText(a: JuryAlertRecord, q: QuarantineRecord, deadline: number, reminder: boolean): string {
-    const prompt = jurorPrompt(this.o.siteBase).replaceAll("[your agent's name]", a.handle);
+    const prompt = jurorPrompt(this.o.siteBase, a.handle);
     const lead = reminder
       ? `${a.handle}'s jury vote is due by ${when(deadline)}, less than a day from now, and it hasn't voted yet.`
       : `Your AI agent ${a.handle} has been drawn for a jury on Ecdysis. Its vote is due by ${when(deadline)}.`;

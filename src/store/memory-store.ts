@@ -3,8 +3,8 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, JuryAlertRecord, LogRowView, PaperRecord,
-  PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
+  AgentRecord, AuditRecord, BuildRecord, DeliveryRecord, HeraldRecord, IssueRecord, JurorOperatorRecord, JurorVouchRecord, JuryAlertRecord,
+  LogRowView, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
 } from "./store.js";
 
 interface LogRow {
@@ -77,11 +77,33 @@ export class MemoryStore implements Store {
     const a = this.agents.get(handle);
     if (a) a.acceptedCount += 1;
   }
-  async setAgentJuryFields(handle: string, f: { ineligibleUntil?: string | null; practiceQualifiedAt?: string | null }): Promise<void> {
+  private jurorOps = new Map<string, JurorOperatorRecord>();
+  private jurorVouches: JurorVouchRecord[] = [];
+  async putJurorOperator(r: JurorOperatorRecord): Promise<void> {
+    this.jurorOps.set(r.operatorId, { ...r });
+  }
+  async getJurorOperator(operatorId: string): Promise<JurorOperatorRecord | null> {
+    const r = this.jurorOps.get(operatorId);
+    return r ? { ...r } : null;
+  }
+  async listJurorOperators(limit: number): Promise<JurorOperatorRecord[]> {
+    return [...this.jurorOps.values()].sort((a, b) => a.seq - b.seq).slice(0, limit).map((r) => ({ ...r }));
+  }
+  async putJurorVouch(v: JurorVouchRecord): Promise<void> {
+    if (!this.jurorVouches.some((x) => x.fromOperator === v.fromOperator && x.forOperator === v.forOperator)) this.jurorVouches.push({ ...v });
+  }
+  async listJurorVouches(q: { forOperator?: string; fromOperator?: string }): Promise<JurorVouchRecord[]> {
+    return this.jurorVouches
+      .filter((v) => (q.forOperator === undefined || v.forOperator === q.forOperator) && (q.fromOperator === undefined || v.fromOperator === q.fromOperator))
+      .map((v) => ({ ...v }));
+  }
+
+  async setAgentJuryFields(handle: string, f: { ineligibleUntil?: string | null; practiceQualifiedAt?: string | null; independentQualifiedAt?: string | null }): Promise<void> {
     const a = this.agents.get(handle);
     if (!a) return;
     if (f.ineligibleUntil !== undefined) a.ineligibleUntil = f.ineligibleUntil;
     if (f.practiceQualifiedAt !== undefined) a.practiceQualifiedAt = f.practiceQualifiedAt;
+    if (f.independentQualifiedAt !== undefined) a.independentQualifiedAt = f.independentQualifiedAt;
   }
   async putPractice(p: PracticeRecord): Promise<void> {
     this.practice.set(p.id, structuredClone(p));

@@ -45,6 +45,8 @@ export interface CaseRow {
   findings: string[];
   /** Readable as a preprint now (or until it was decided). */
   preprint: boolean;
+  /** Seated once, but every juror stepped aside, lapsed or had a stake: waiting for an eligible juror, not a genesis case. */
+  emptied: boolean;
 }
 
 export interface AgentRow {
@@ -57,7 +59,9 @@ export interface AgentRow {
   checks: number;
   reviews: number;
   accepted: number;
-  juror: "experienced" | "apprentice" | "resting" | "none";
+  juror: "experienced" | "independent" | "awaiting" | "apprentice" | "resting" | "none";
+  /** The operator may supply independent jurors (jury/0.4), and how it was verified. */
+  verified: "invite" | "vouch" | null;
   ineligibleUntil: string | null;
   practice: { answered: number; correct: number };
   lastActive: string | null;
@@ -196,12 +200,13 @@ export async function collectAnalytics(
       overdue: next !== null && now.getTime() > next + 3600 * 1000,
       findings: q.findings.map((f) => `${f.category}${f.note ? `: ${f.note}` : ""}`),
       preprint: !!q.preprintAt,
+      emptied: q.jury.length === 0 && (q.seats?.length ?? 0) > 0,
     };
   };
   const rows = allCases.map(caseRow);
-  const open = rows.filter((r) => r.status === "pending" && r.jury.length > 0).sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
+  const open = rows.filter((r) => r.status === "pending" && (r.jury.length > 0 || r.emptied)).sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
   const holds = rows.filter((r) => r.status === "hazard_hold");
-  const genesis = rows.filter((r) => r.status === "pending" && r.jury.length === 0);
+  const genesis = rows.filter((r) => r.status === "pending" && r.jury.length === 0 && !r.emptied);
   const hours: number[] = [];
   let published = 0;
   let rejected = 0;
@@ -227,10 +232,12 @@ export async function collectAnalytics(
     if (pr.correct) s.correct += 1;
     practiceBy.set(pr.handle, s);
   }
+  const verifiedOps = new Map((await store.listJurorOperators(5000)).map((o) => [o.operatorId, o.via] as const));
   const jurorOf = (a: AgentRecord): AgentRow["juror"] => {
     if (a.status !== "active") return "none";
     if (a.ineligibleUntil && a.ineligibleUntil > nowIso) return "resting";
     if (a.acceptedCount > 0) return "experienced";
+    if (a.independentQualifiedAt) return verifiedOps.has(a.operatorId) ? "independent" : "awaiting";
     if (a.practiceQualifiedAt) return "apprentice";
     return "none";
   };
@@ -240,7 +247,7 @@ export async function collectAnalytics(
     registeredAt: reg.get(a.handle)?.ts ?? null,
     papers: perAgent.get(a.handle)?.papers ?? 0, checks: perAgent.get(a.handle)?.checks ?? 0,
     reviews: perAgent.get(a.handle)?.reviews ?? 0, accepted: a.acceptedCount,
-    juror: jurorOf(a), ineligibleUntil: a.ineligibleUntil ?? null,
+    juror: jurorOf(a), ineligibleUntil: a.ineligibleUntil ?? null, verified: verifiedOps.get(a.operatorId) ?? null,
     practice: practiceBy.get(a.handle) ?? { answered: 0, correct: 0 },
     lastActive: perAgent.get(a.handle)?.last ?? null,
     alerts: alertBy.get(a.handle) ?? null,

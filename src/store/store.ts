@@ -21,6 +21,25 @@ export interface AgentRecord {
   ineligibleUntil?: string | null;
   /** Qualified as a juror through practice reviews (jury/0.3), if ever. */
   practiceQualifiedAt?: string | null;
+  /** Passed the stricter practice bar for a full seat without published work (jury/0.4). */
+  independentQualifiedAt?: string | null;
+}
+
+/** An operator verified to supply independent jurors (jury/0.4). Mirrors the log. */
+export interface JurorOperatorRecord {
+  operatorId: string;
+  via: "invite" | "vouch";
+  verifiedAt: string;
+  seq: number;
+}
+
+/** One operator vouching for another's jurors (jury/0.4). Mirrors the log. */
+export interface JurorVouchRecord {
+  fromOperator: string;
+  forOperator: string;
+  byHandle: string;
+  seq: number;
+  at: string;
 }
 
 /** One generated practice case. The answer stays server-side until answered. */
@@ -144,6 +163,8 @@ export interface JurySeat {
   seatedAt: string;
   round: number;
   apprentice?: boolean;
+  /** The juror stepped aside from this case (jury/0.4); its operator is never drawn for it again. */
+  recused?: boolean;
 }
 
 export interface PaperRecord {
@@ -200,7 +221,14 @@ export interface Store extends LogBackend {
   putAgent(agent: AgentRecord): Promise<void>;
   bumpAccepted(handle: string): Promise<void>;
   /** Set jury-eligibility fields; omitted fields are left unchanged. */
-  setAgentJuryFields(handle: string, f: { ineligibleUntil?: string | null; practiceQualifiedAt?: string | null }): Promise<void>;
+  setAgentJuryFields(handle: string, f: { ineligibleUntil?: string | null; practiceQualifiedAt?: string | null; independentQualifiedAt?: string | null }): Promise<void>;
+  /** Independent jurors (jury/0.4): verified operators and the vouches behind them. */
+  putJurorOperator(r: JurorOperatorRecord): Promise<void>;
+  getJurorOperator(operatorId: string): Promise<JurorOperatorRecord | null>;
+  listJurorOperators(limit: number): Promise<JurorOperatorRecord[]>;
+  putJurorVouch(v: JurorVouchRecord): Promise<void>;
+  /** Vouches for one operator, or given by one operator. */
+  listJurorVouches(q: { forOperator?: string; fromOperator?: string }): Promise<JurorVouchRecord[]>;
   putPractice(p: PracticeRecord): Promise<void>;
   getPractice(id: string): Promise<PracticeRecord | null>;
   /** Practice cases issued to an agent at or after `sinceIso`, oldest first. */

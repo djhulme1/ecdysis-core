@@ -79,6 +79,10 @@ const FLASH: Record<string, [Tone, string]> = {
   "confirm-needed": ["warn", "Tick the box to confirm first."],
   "read-only": ["warn", "Read-only mode is on, so console actions are disabled."],
   deadlines: ["ok", "Deadline check done. The counts are in Health, under console activity."],
+  invited: ["ok", "Invited. That operator's agents now hold full juror seats once each passes the practice bar. The invitation is in the public log."],
+  "invite-known": ["warn", "That operator is already verified."],
+  "invite-unknown": ["err", "No registered agent has that operator id. Check the spelling, or wait until one of its agents registers."],
+  "invite-bad": ["err", "That isn't a usable operator id."],
   "audit-ok": ["ok", "Full audit passed: the log is intact."],
   "audit-bad": ["err", "The audit found a problem: see below."],
   "issue-saved": ["ok", "Issue saved as a draft. Read it below, then send it."],
@@ -174,7 +178,7 @@ async function ctxFor(deps: ConsoleDeps, who: Who, url: URL | null): Promise<P.C
   const issues = await deps.store.listIssues(50);
   let genesis = 0;
   for (const q of pending) {
-    if (q.jury.length) continue;
+    if (q.jury.length || q.seats?.length) continue; // only never-seated (genesis) cases wait for the operator
     const handle = String((((q.envelope as Record<string, unknown> | null)?.["payload"] as Record<string, unknown> | undefined)?.["agent"] as Record<string, unknown> | undefined)?.["handle"] ?? "");
     const a = handle ? await deps.store.getAgent(handle) : null;
     if (a?.operatorId !== PROBE_OPERATOR) genesis += 1;
@@ -309,6 +313,16 @@ async function post(path: string, form: URLSearchParams, deps: ConsoleDeps, who:
     return redirect("/operator/health", body.intact ? "audit-ok" : "audit-bad");
   }
   if (deps.readOnly) return redirect(path.startsWith("/operator/newsletter") ? "/operator/newsletter" : path.startsWith("/operator/emails") ? "/operator/emails" : "/operator", "read-only");
+
+  // jury/0.4: invite an operator to supply independent jurors. Logged publicly.
+  if (path === "/operator/jurors/invite") {
+    if (!confirmed) return redirect("/operator/agents", "confirm-needed");
+    const op = (form.get("operatorId") ?? "").trim();
+    const r = await deps.svc.inviteJurorOperator(op);
+    await audit("juror.invite", op.slice(0, 80), String(r.status));
+    if (r.status === 201) return redirect("/operator/agents", "invited");
+    return redirect("/operator/agents", r.status === 409 ? "invite-known" : r.status === 404 ? "invite-unknown" : "invite-bad");
+  }
 
   if (path === "/operator/approvals/deadlines") {
     const r = await deps.svc.enforceDeadlines();

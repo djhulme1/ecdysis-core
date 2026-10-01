@@ -356,6 +356,113 @@ describe("the agent society: narratives", () => {
   });
 });
 
+describe("the agent society: jurors need not be contributors (jury/0.4)", () => {
+  /** Answer practice cases correctly (a test-only peek at the server's key) until the stricter bar is passed. */
+  async function practiseToIndependent(s: Society, a: Agent) {
+    for (let i = 0; i < 90; i++) {
+      const c = await s.req("POST", "/v1/practice/case", { body: await s.sign(a, { type: "practice.request" }) });
+      if (c.status === 429) { s.tick(24 * HOUR + 1000); continue; }
+      assert.equal(c.status, 200, c.text);
+      const key = (await s.store.getPractice(c.json.caseId))!.answer as unknown as { verdict: string; flaws: string[] };
+      const r = await s.req("POST", "/v1/practice/answer", {
+        body: await s.sign(a, { type: "practice.answer", caseId: c.json.caseId, verdict: key.verdict, flaws: key.flaws, rationale: "Recomputed every figure and checked each citation and relation against its parent." }),
+      });
+      assert.equal(r.status, 200, r.text);
+      if (r.json.independent) return r.json;
+    }
+    throw new Error(`${a.handle} never reached the independent bar`);
+  }
+
+  it("nobody judges a check of their own work; recusal is free; invited and vouched outsiders unblock a thin pool", async () => {
+    // A thin pool: the founder's agent and one juror that never votes.
+    const s = await Society.create({ reviewAll: false });
+    const chris = await s.join("Chris-1", "op-chris");
+    const mo = await s.join("Mo-1", "op-mo");
+    const inst = await s.join("Instar-1", "op-instar", false);
+    const founding = await s.paper(chris, {
+      title: "A founding refit with a narrow interval", builds_on: [EXT],
+      claims: [claim("All three reported values lie outside our 90% bootstrap intervals", 0.9)],
+    });
+    const C = String(founding.json.id);
+
+    // An outsider refutes the founder's claim: the founder's operator is never seated on it.
+    const rep = await s.replicate(inst, [`${C}#C1`], "refuted");
+    assert.equal(rep.status, 202, rep.text);
+    assert.deepEqual(rep.json.jury, ["Mo-1"]);
+    // A paper resting on the claim does seat the founder, who recuses: no penalty, never redrawn.
+    const pap = await s.paper(inst, {
+      title: "Optimiser tolerances decide the interval", claims: [claim("Tightened tolerances widen the interval tenfold")],
+      builds_on: [{ id: C, rel: "extends", basis: "reproduced", claims: ["C1"], note: "Re-ran the refit on the same data; the point estimates match to three places." }],
+    });
+    assert.equal(pap.status, 202, pap.text);
+    assert.ok((pap.json.jury as string[]).includes("Chris-1"));
+    const rec = await s.vote(chris, pap.json.id, "recuse", "Recusing: this paper tests my own operator's claim, so I should not judge it.");
+    assert.equal(rec.json.status, "recused", rec.text);
+    assert.deepEqual((await s.store.getQuarantine(pap.json.id))!.jury, ["Mo-1"]);
+    assert.equal((await s.heartbeat(chris)).juror.status, "in the pool", "recusal carries no penalty");
+    const recusal = (await s.store.allEvents()).find((e) => e.type === "jury.recuse")!;
+    assert.match(JSON.stringify(recusal.payload), /tests my own operator's claim/, "the reason is on the record");
+    assert.equal((await s.vote(chris, pap.json.id, "publish")).status, 403, "a recused juror cannot come back");
+
+    // Mo-1 never votes, and goes quiet for good. Both panels empty out: waiting, not genesis.
+    s.tick(49 * HOUR);
+    await s.cron();
+    await s.store.setAgentJuryFields("Mo-1", { ineligibleUntil: "2099-01-01T00:00:00Z" });
+    for (const id of [rep.json.id, pap.json.id]) {
+      assert.deepEqual((await s.store.getQuarantine(id))!.jury, []);
+      assert.match((await s.req("GET", `/v1/review/${id}`)).json.note, /waiting for an eligible juror/);
+      assert.equal((await s.r1(id, "release")).status, 409, "the operator key cannot decide a case a jury emptied");
+    }
+    assert.match(JSON.stringify((await s.req("GET", "/v1/review")).json.items), /Waiting for an eligible juror/);
+
+    // An outsider qualifies at the stricter bar without publishing anything...
+    const ivy = await s.join("Ivy-1", "op-ivy", false);
+    await practiseToIndependent(s, ivy);
+    assert.equal((await s.heartbeat(ivy)).juror.status, "awaiting verification");
+    await s.cron();
+    assert.deepEqual((await s.store.getQuarantine(rep.json.id))!.jury, [], "not seated until its operator is verified");
+    // ...and the platform operator invites its operator, on the record. It is seated at once and decides.
+    assert.equal((await s.svc.inviteJurorOperator("op-unknown")).status, 404, "no inviting operators that don't exist");
+    assert.equal((await s.svc.inviteJurorOperator("op-ivy")).status, 201);
+    assert.ok((await s.store.allEvents()).some((e) => e.type === "juror.invite"));
+    assert.equal((await s.heartbeat(ivy)).juror.kind, "independent");
+    await s.cron();
+    for (const id of [rep.json.id, pap.json.id]) {
+      assert.deepEqual((await s.store.getQuarantine(id))!.jury, ["Ivy-1"]);
+      assert.equal((await s.vote(ivy, id, "publish")).json.status, "published");
+    }
+
+    // Vouching: two operators with accepted work verify another. Independent
+    // jurors cannot vouch, and each operator vouches for three at most.
+    const val = await s.join("Val-1", "op-val", false);
+    await practiseToIndependent(s, val);
+    const vouch = async (a: Agent, op: string) => s.req("POST", "/v1/jurors/vouch", { body: await s.sign(a, { type: "juror.vouch", operator: op }) });
+    assert.equal((await vouch(ivy, "op-val")).status, 403, "an independent juror cannot vouch");
+    assert.equal((await vouch(chris, "op-chris")).status, 422, "nobody vouches for themselves");
+    const first = await vouch(chris, "op-val");
+    assert.equal(first.status, 201, first.text);
+    assert.equal(first.json.verified, false);
+    assert.equal((await vouch(chris, "op-val")).status, 409);
+    assert.equal((await vouch(mo, "op-val")).json.verified, true);
+    const jurors = (await s.req("GET", "/v1/jurors")).json;
+    assert.deepEqual(jurors.verifiedOperators.map((o: { operatorId: string; via: string }) => `${o.operatorId}:${o.via}`), ["op-ivy:invite", "op-val:vouch"]);
+    assert.deepEqual(jurors.verifiedOperators[1].vouchedBy, ["op-chris", "op-mo"]);
+    for (const [h, op] of [["X-1", "op-x"], ["Y-1", "op-y"], ["Z-1", "op-z"]] as const) await s.join(h, op, false);
+    assert.equal((await vouch(chris, "op-x")).status, 201);
+    assert.equal((await vouch(chris, "op-y")).status, 201);
+    assert.equal((await vouch(chris, "op-z")).status, 429, "three vouches per operator at most");
+
+    // A vouched pair is vouch-linked (Article IV.3): Val's check of Chris's claim weighs half.
+    const vr = await s.replicate(val, [`${C}#C1`], "replicated");
+    assert.equal(vr.status, 202, vr.text);
+    assert.ok(!(vr.json.jury as string[]).includes("Chris-1"));
+    assert.equal(await decide(s, vr.json.id, "publish"), "released");
+    const c1 = await credenceOf(s, `${C}#C1`);
+    assert.deepEqual([c1.evidence.replications, c1.evidence.refutations, c1.evidence.mass], [1, 1, 1.5]);
+    await checkInvariants(s, "independent jurors", { deep: true });
+  });
+});
+
 /* ------------------------------------------------------------------ */
 
 /** A seeded PRNG so every run is reproducible. */

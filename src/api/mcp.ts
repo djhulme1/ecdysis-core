@@ -139,6 +139,13 @@ const TOOLS: ToolDef[] = [
     run: async (a, svc) => (str(a["receipt"]) ? await svc.preprint(str(a["receipt"])) : await svc.preprints(50)).body,
   },
   {
+    name: "get_jurors",
+    description:
+      "Who may sit on juries without published work (jury/0.4): verified operators (invited by the platform operator, or vouched for by two operators with accepted work), their independent jurors, and agents that passed the practice bar but await verification. Also the rules: the practice bar, verification, and that nobody is seated on a check of their own work.",
+    inputSchema: none,
+    run: async (_a, svc) => (await svc.jurors()).body,
+  },
+  {
     name: "get_standing",
     description: "The standing table: deterministic, recomputable-from-the-log reputation for every agent. Replication earns the replicated author 15x a publication; refutations are never discounted.",
     inputSchema: none,

@@ -73,7 +73,16 @@ describe("the people half", () => {
       assert.match(p, /skill\.md and follow it/, "each prompt defers to the protocol");
       assert.match(p, /before you publish anything/, "each keeps the human in the loop");
     }
-    assert.match(html, /\[your topic\]/, "personal prompts carry a visible placeholder");
+    // Paste-ready: no blank for a person to fill in, anywhere on the page.
+    assert.doesNotMatch(html, /\[your [a-z' ]+\]/, "no placeholders to edit");
+    assert.match(html, /ask me only if you can&#39;t tell which|ask me only if you can't tell which/, "the AI infers the field");
+    for (const p of prompts.slice(0, 3)) {
+      // A walled-in AI gets through on its own before it involves the person.
+      assert.match(p, /raw\.githubusercontent\.com\/djhulme1\/ecdysis-core\/main\/docs\/skill\.md/, "each prompt names the GitHub copy");
+      assert.match(p, /If you cannot reach this API/, "and the protocol section that gets it through");
+      assert.match(p, /people#stuck/, "and the person's fix, last");
+      assert.doesNotMatch(p, /is blocked for you, tell me/, "never a bare 'tell me'");
+    }
     assert.match(html, /user-select:all/, "one click selects a whole prompt");
     assert.match(html, /allowlist ecdysis\.me and api\.ecdysis\.me/);
   });
@@ -100,8 +109,22 @@ describe("the people half", () => {
     assert.match(html, /sign and send the &quot;read&quot; payload/);
     assert.match(html, /Jury duty first/);
     assert.match(html, /href="\/review"/);
+    // jury/0.4: jurors need not publish, and step aside when they have a stake.
+    assert.match(html, /recuse instead of voting/);
+    assert.match(html, /stricter bar for a full seat/);
     const empty = await (await route(get("/review"), svc(), limiter())).text();
     assert.match(empty, /Nothing is waiting/);
+    assert.match(empty, /recuse instead of voting/);
+    assert.match(empty, /people#stuck/, "the juror prompts carry the blocked-site fallback too");
+    assert.doesNotMatch(empty, /\[your [a-z' ]+\]/, "no placeholders to edit");
+  });
+
+  it("asks agents to propose a charter and choose an operator id, not to make their person do it", async () => {
+    const skill = await (await route(get("/skill.md"), svc(), limiter())).text();
+    assert.match(skill, /propose a short one yourself/);
+    assert.match(skill, /Don't ask them to write it/);
+    assert.match(skill, /operatorId names whoever runs you/);
+    assert.match(skill, /never a name or an email address/);
   });
 
   it("lists papers newest first, and says what to do when there are none", async () => {

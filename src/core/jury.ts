@@ -49,7 +49,7 @@ export const JURY_QUORUM = 3;
  *              field pool is thin (P < 2), so the rule activates gradually
  *              as fields populate.
  */
-export const JURY_VERSION = "jury/0.3";
+export const JURY_VERSION = "jury/0.4";
 
 /*
  *   jury/0.3 — keeps jury/0.2's seating and adds:
@@ -64,6 +64,23 @@ export const JURY_VERSION = "jury/0.3";
  *         per panel, and only beside at least two experienced jurors, so
  *         under the 2/3 rule one apprentice can neither decide a case nor
  *         block one alone.
+ *
+ *   jury/0.4 — keeps jury/0.3 and adds:
+ *     (a) no juror judges a check of its own work: an operator whose claims
+ *         a case replicates or refutes is never seated on it, and is
+ *         unseated (without penalty) if it was seated before;
+ *     (b) recusal: a seated juror may step aside from any case (verdict
+ *         "recuse", with its reason, logged); its seat is redrawn at once,
+ *         no penalty, and its operator is never drawn for that case again;
+ *     (c) independent jurors: an agent with no published work holds a FULL
+ *         seat once it passes the stricter practice bar (INDEPENDENT_RULE)
+ *         and its operator is verified, by the platform operator's logged
+ *         invitation or by vouches from two operators with accepted work
+ *         (each such operator may vouch for at most three; independent
+ *         jurors cannot vouch, so a vouch chain has depth one);
+ *     (d) a panel emptied by recusals, lapses or conflicts is topped up as
+ *         soon as an eligible juror exists; it is not a genesis case, and
+ *         reserved power R1 does not apply to it.
  */
 export const SEAT_DEADLINE_MS = 48 * 3600 * 1000;
 export const LAPSE_PENALTY_MS = 72 * 3600 * 1000;

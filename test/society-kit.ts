@@ -85,7 +85,8 @@ export class Society {
     s.operator = await seededKeyPair("operator");
     s.ack = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
     s.preprintCap = o.preprintDailyCap;
-    s.svc = s.service(o.reviewAll ?? true);
+    s.reviewAll = o.reviewAll ?? true;
+    s.svc = s.service();
     let n = 7;
     s.alerts = new JuryAlerts({
       store: s.store,
@@ -97,11 +98,19 @@ export class Society {
   }
 
   /** A service over this society's store: the same one for every request, or a fresh one (a new isolate). */
-  service(reviewAll = true): EcdysisService {
+  private reviewAll = true;
+  private seed = 20261001;
+  /** Seeded randomness for practice cases, so runs replay exactly. */
+  private rand = () => {
+    this.seed = (Math.imul(this.seed, 1103515245) + 12345) >>> 0;
+    return this.seed / 4294967296;
+  };
+
+  service(reviewAll = this.reviewAll): EcdysisService {
     return new EcdysisService({
       store: this.store, blobs: this.blobs, screeners: [structuralScreener(), markerScreener()],
       sthPrivateKey: this.operator.privateKey, operatorPublicKey: this.operator.publicKey,
-      now: () => new Date((this.t += 1000)), reviewAll,
+      now: () => new Date((this.t += 1000)), reviewAll, random: this.rand,
       ...(this.preprintCap !== undefined ? { preprintDailyCap: this.preprintCap } : {}),
     });
   }
@@ -162,7 +171,7 @@ export class Society {
     });
   }
 
-  async vote(a: Agent, subject: string, verdict: "publish" | "reject" | "escalate", rationale?: string): Promise<Res> {
+  async vote(a: Agent, subject: string, verdict: "publish" | "reject" | "escalate" | "recuse", rationale?: string): Promise<Res> {
     return this.req("POST", "/v1/reviews", {
       body: await this.sign(a, {
         type: "review", subject, verdict,
@@ -225,6 +234,41 @@ export class Society {
     const ops = new Map([...this.agents.values()].map((a) => [a.handle, a.op] as const));
     return { operatorOf: (h) => ops.get(h) ?? `unknown:${h}`, vouchLinked: () => false };
   }
+
+  /** Operators whose work a case checks: they must never sit on it (jury/0.4). */
+  async conflictsOf(q: QuarantineRecord): Promise<Set<string>> {
+    const p = (q.envelope as { payload: Record<string, any> }).payload;
+    const ids: string[] = q.kind === "replication"
+      ? (p["targets"] as string[]).map((t) => t.split("#")[0]!)
+      : q.kind === "paper"
+        ? (p["builds_on"] as Array<{ id: string; rel: string }>).filter((b) => b.rel === "replicates" || b.rel === "refutes").map((b) => b.id)
+        : [];
+    const out = new Set<string>();
+    for (const id of ids) {
+      const paper = id.startsWith("ecd:") ? await this.store.getPaper(id) : null;
+      const op = paper ? (await this.store.getAgent(paper.payload.agent.handle))?.operatorId : undefined;
+      if (op) out.add(op);
+    }
+    return out;
+  }
+}
+
+/**
+ * The operator registry as anyone can rebuild it from the log alone:
+ * operators from registrations, vouch links from juror vouches.
+ */
+export function registryFrom(events: ScoredEvent[]): OperatorRegistry {
+  const ops = new Map<string, string>();
+  const links: Array<[string, string]> = [];
+  for (const e of events) {
+    const p = e.payload as Record<string, any>;
+    if (e.type === "agent.register") ops.set(String(p["handle"]), String(p["operatorId"]));
+    if (e.type === "juror.vouch") links.push([ops.get(String(p["agent"]?.["handle"])) ?? "", String(p["operator"])]);
+  }
+  return {
+    operatorOf: (h) => ops.get(h) ?? `unknown:${h}`,
+    vouchLinked: (a, b) => links.some(([x, y]) => (x === a && y === b) || (x === b && y === a)),
+  };
 }
 
 const authorOf = (q: QuarantineRecord) =>
@@ -367,13 +411,19 @@ export async function checkInvariants(s: Society, label: string, o: { deep?: boo
     assert.equal(new Set(voters).size, voters.length, at("a juror voted twice"));
     const everSeated = new Set([...q.jury, ...(q.seats ?? []).map((x) => x.handle)]);
     for (const v of voters) assert.ok(everSeated.has(v), at(`${v} voted without a seat`));
+    // Nobody judges a check of their own work, and a recused operator never returns.
+    const conflicts = await s.conflictsOf(q);
+    for (const o of ops) assert.ok(!conflicts.has(o!), at(`case ${q.id.slice(0, 8)} seats ${o}, whose work it checks`));
+    const recused = new Set((q.seats ?? []).filter((x) => x.recused).map((x) => x.operatorId));
+    for (const o of ops) assert.ok(!recused.has(o!), at(`case ${q.id.slice(0, 8)} reseated ${o} after it recused`));
+    if (q.status === "pending" && q.jury.length === 0 && (q.seats ?? []).length > 0) s.mark("case:emptied");
   }
 
   // 7. Credence: what the API serves is an independent recomputation from
   //    the log and the published papers; and an operator's own filings on
   //    its own claims change nothing.
   const confidences = new Map(papers.map((p) => [p.cid, p.payload.claims.map((c) => c.confidence)] as const));
-  const reg = s.registry();
+  const reg = registryFrom(events);
   const mine = computeCredence(events, reg, confidences);
   const served = ((await s.req("GET", "/v1/credence")).json?.claims ?? []) as Array<Record<string, unknown>>;
   assert.equal(served.length, mine.claims.size, at("credence covers a different set of claims"));

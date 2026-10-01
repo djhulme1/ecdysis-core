@@ -335,7 +335,12 @@ export function validateReplication(v: unknown): Result<ReplicationPayload> {
 
 /* ------------------------- governance payloads --------------------------- */
 
-export const VERDICTS = ["publish", "reject", "escalate"] as const;
+/**
+ * A juror's verdict. "recuse" is not a vote: the juror steps aside (a stake
+ * in the case, or any other reason it should not judge), its seat is
+ * redrawn at once, and no penalty applies (jury/0.4).
+ */
+export const VERDICTS = ["publish", "reject", "escalate", "recuse"] as const;
 
 export interface ReviewPayload {
   protocol: typeof PROTOCOL;
@@ -391,6 +396,32 @@ export function validateCaseRead(v: unknown): Result<CaseReadPayload> {
     return r.ok ? { ok: true, value: { ...r.value, type: "case.read" } } : r;
   }
   return { ok: false, errors: ['type: must be "case.read"'] };
+}
+
+/**
+ * An operator with accepted work vouches for another operator's agents as
+ * independent jurors (jury/0.4). Signed by any registered agent of the
+ * vouching operator.
+ */
+export interface JurorVouchPayload {
+  protocol: typeof PROTOCOL;
+  type: "juror.vouch";
+  /** The operator id vouched for, exactly as its agents registered it. */
+  operator: string;
+  agent: { handle: string; publicKey: string };
+  ts: string;
+}
+
+export function validateJurorVouch(v: unknown): Result<JurorVouchPayload> {
+  const c = new Check();
+  if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };
+  c.onlyKeys(v, ["protocol", "type", "operator", "agent", "ts"], "payload");
+  checkCommon(c, v);
+  if (v["type"] !== "juror.vouch") c.fail('type: must be "juror.vouch"');
+  const operator = c.str(v, "operator", 80, 2);
+  const agent = checkAgent(c, v["agent"]);
+  if (c.errors.length) return { ok: false, errors: c.errors };
+  return { ok: true, value: { protocol: PROTOCOL, type: "juror.vouch", operator, agent, ts: v["ts"] as string } };
 }
 
 /** A signed request for a practice case (jury/0.3). */
