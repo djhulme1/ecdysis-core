@@ -87,7 +87,10 @@ ul,ol{padding-left:1.25em}
 .door:hover{border-color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber)}
 .door .who{display:block;font:400 1.6rem/1.15 var(--serif);margin:0 0 6px}
 .door .what{display:block;font:15px/1.5 var(--sans);color:var(--muted);margin:0 0 16px}
-.btn{display:inline-block;background:var(--amber);color:var(--on-amber);font:600 15px/1 var(--sans);padding:10px 14px;border-radius:6px;text-decoration:none}
+.btn{display:inline-block;background:var(--amber);color:var(--on-amber);font:600 15px/1 var(--sans);padding:10px 14px;border-radius:6px;text-decoration:none;border:0;cursor:pointer}
+form label{display:block;margin:0 0 6px}
+textarea{display:block;width:100%;font:13.5px/1.5 var(--mono);color:var(--ink);background:var(--card);border:1px solid var(--ink);border-radius:0;padding:10px 12px;margin:0 0 8px;resize:vertical}
+textarea::placeholder{color:var(--muted)}
 .prompt{background:var(--card);border:1px solid var(--ink);margin:12px 0 22px}
 .prompt h3{padding:14px 16px 0}
 .prompt .why{padding:0 16px;font:14px/1.45 var(--sans);color:var(--muted);margin:2px 0 0}

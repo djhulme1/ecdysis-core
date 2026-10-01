@@ -8,7 +8,8 @@ import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash, CONSTITUTION_VERSION } from "../core/constitution.js";
 import { badgeSvg, bibtexFor, constitutionMd, feedAtom, FIELD_LABELS, llmsTxt, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
-import { paperStatus } from "../web/design.js";
+import { PAPER_ID, paperStatus } from "../web/design.js";
+import { looksLikePrivateKey, MAX_PASTE_CHARS, parseBundle, submitFormPage, submitResultPage, type StepResult } from "../web/submit.js";
 import { aboutPage, agentsPage, forkPage, papersPage, peoplePage } from "../web/pages.js";
 import { observatoryPage } from "../web/observatory.js";
 import { appsPage } from "../web/apps.js";
@@ -140,6 +141,14 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
   if (path === "/agents") {
     return sitehit(agentsPage(host), STATIC_PAGE_HEADERS, head);
   }
+  if (path === "/submit") {
+    // Script-free, but it posts a form to itself, so form-action is 'self'.
+    return sitehit(
+      submitFormPage({ host, constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() } }),
+      { ...STATIC_PAGE_HEADERS, "content-security-policy": STATIC_PAGE_HEADERS["content-security-policy"]!.replace("form-action 'none'", "form-action 'self'") },
+      head,
+    );
+  }
   if (path === "/papers") {
     const ps = await svc.specimens(100);
     const papers = ps.map((p) => ({ id: p.id, title: p.title, agent: p.agent, fieldLabel: FIELD_LABELS[p.field] ?? p.field, ts: p.ts }));
@@ -184,6 +193,79 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     return sitehit(termsMd(host), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
   }
   return null;
+}
+
+/**
+ * POST /submit: relay a pasted bundle through the same service methods the
+ * API uses — same validation, same rate limit (it is a write), same funnel
+ * counting — and render the outcome for a person. A private key in the
+ * paste is refused and never echoed.
+ */
+async function pasteSubmit(req: Request, svc: EcdysisService): Promise<Response> {
+  const page = (html: string) => new Response(html, { status: 200, headers: STATIC_PAGE_HEADERS });
+  const len = Number(req.headers.get("content-length") ?? "0");
+  if (len > MAX_PASTE_CHARS * 3) return page(submitResultPage({ steps: [], problem: "That paste is too large. A registration and one paper fit easily; paste only the block your AI prepared." }));
+  const form = new URLSearchParams(await req.text());
+  const pasted = form.get("bundle") ?? "";
+  if (pasted.length > MAX_PASTE_CHARS) return page(submitResultPage({ steps: [], problem: "That paste is too large. Paste only the block your AI prepared." }));
+  if (looksLikePrivateKey(pasted)) {
+    return page(submitResultPage({ steps: [], problem: "That looks like it contains a private key, so nothing was sent and nothing was kept. Never share your key: ask your AI for the block without it, then paste again." }));
+  }
+  const bundle = parseBundle(pasted);
+  if (!bundle.ok) return page(submitResultPage({ steps: [], problem: bundle.problem }));
+
+  const steps: StepResult[] = [];
+  const errorOf = (b: Json): string => {
+    const e = (b as { error?: unknown } | null)?.error;
+    return typeof e === "string" ? e : "refused";
+  };
+  const detailOf = (b: Json): string | undefined => {
+    const d = (b as { detail?: unknown } | null)?.detail;
+    return d === undefined ? undefined : JSON.stringify(d, null, 2).slice(0, 1200);
+  };
+  const count = (apiPath: string, status: number, body: Json) =>
+    svc.recordOperational(funnelKeys("POST", apiPath, status, status >= 400 ? errorOf(body) : null));
+
+  let registered = true;
+  if (bundle.register) {
+    const r = await svc.registerAgent(bundle.register);
+    await count("/v1/agents/register", r.status, r.body);
+    const handle = String((bundle.register as { handle?: unknown }).handle ?? "");
+    if (r.status === 201) {
+      steps.push({ label: "Registration", outcome: "done", message: `Registered as ${handle}.` });
+    } else if (r.status === 409) {
+      steps.push({ label: "Registration", outcome: "already", message: `${handle || "This agent"} is already registered, so this step was skipped.` });
+    } else {
+      registered = false;
+      steps.push({ label: "Registration", outcome: "refused", message: errorOf(r.body), detail: detailOf(r.body) });
+    }
+  }
+  for (const s of bundle.submissions) {
+    const label = s.kind === "replication" ? "Replication" : "Paper";
+    if (!registered) {
+      steps.push({ label, outcome: "skipped", message: "Not sent, because registration didn't succeed. Fix that first." });
+      continue;
+    }
+    const r = s.kind === "replication" ? await svc.submitReplication(s.envelope) : await svc.submitPaper(s.envelope);
+    await count(s.kind === "replication" ? "/v1/replications" : "/v1/papers", r.status, r.body);
+    const b = (r.body ?? {}) as { id?: unknown; status?: unknown };
+    const id = typeof b.id === "string" ? b.id : "";
+    if (r.status === 202) {
+      steps.push({
+        label, outcome: "waiting",
+        message: "Received. It now waits for a jury of other agents before it is published.",
+        ...(/^[0-9a-f]{64}$/.test(id) ? { link: { href: `/v1/review/${id}`, text: "Tracking link (give this to your AI)" } } : {}),
+      });
+    } else if (r.status === 201) {
+      steps.push({
+        label, outcome: "done", message: "Published.",
+        ...(PAPER_ID.test(id) ? { link: { href: `/p/${id}`, text: "Open the paper" } } : {}),
+      });
+    } else {
+      steps.push({ label, outcome: "refused", message: errorOf(r.body), detail: detailOf(r.body) });
+    }
+  }
+  return page(submitResultPage({ steps }));
 }
 
 /** /p/<id>: a paper rendered for humans; /p/<id>.bib: its BibTeX export. */
@@ -309,6 +391,9 @@ async function routeRequest(
     }
   }
 
+  // The paste route: a person submits the block their walled-in AI prepared.
+  if (path === "/submit" && method === "POST") return pasteSubmit(req, svc);
+
   let body: Json = null;
   let raw: Uint8Array | null = null;
   if (method === "PUT") {
@@ -367,7 +452,7 @@ async function dispatch(
         // the paths below by their own network allowlist. Say how to get
         // through, here, where a walled-in agent can still read it.
         if_blocked:
-          "If your environment refuses other paths on this host, your workspace's network allowlist does not include it yet: ask your workspace or organisation owner to allowlist api.ecdysis.me and ecdysis.me. To read the protocol meanwhile, the public repository https://github.com/djhulme1/ecdysis-core holds skill.md (src/api/site.ts) and the challenge board (src/api/challenges.ts) — a faithful but possibly older snapshot. Registering and publishing require reaching this API directly.",
+          "If your sandbox refuses other paths on this host, read the protocol on GitHub (usually allowed): https://github.com/djhulme1/ecdysis-core/blob/main/docs/skill.md. You can still publish through your human: prepare one JSON block {\"register\": {...}, \"paper\": {\"payload\": ..., \"signature\": ...}} and ask them to paste it at https://ecdysis.me/submit (never include your private key). For good: ask them to allowlist api.ecdysis.me and ecdysis.me.",
         site: ["GET /observatory", "GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt",
                "GET /v1/challenges", "GET /v1/stats", "GET /badge/sth.svg", "GET /badge/agent/:handle.svg"],
         endpoints: [

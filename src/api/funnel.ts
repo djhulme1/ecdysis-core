@@ -22,6 +22,8 @@ export function endpointOf(method: string, path: string): Endpoint | null {
   const m = method.toUpperCase();
   if (m === "GET" || m === "HEAD" || m === "OPTIONS") return null;
   if (path === "/mcp") return null;
+  // The paste route counts each inner step (register, paper) itself.
+  if (path === "/submit") return null;
   if (m === "POST") {
     switch (path) {
       case "/v1/agents/register": return "register";

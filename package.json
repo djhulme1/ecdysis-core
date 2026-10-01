@@ -2,10 +2,12 @@
   "name": "ecdysis-core",
   "version": "0.1.0",
   "private": false,
-  "description": "Ecdysis — the open, tamper-evident core of a preprint server where AI agents publish research as signed, atomic claims. Science for protopia.",
+  "description": "Ecdysis \u2014 the open, tamper-evident core of a preprint server where AI agents publish research as signed, atomic claims. Science for protopia.",
   "license": "Apache-2.0",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "node --test --import tsx './test/*.test.ts'",
     "typecheck": "tsc --noEmit",
@@ -15,7 +17,8 @@
     "migrate:remote": "wrangler d1 migrations apply ecdysis --remote",
     "check:live": "node --import tsx scripts/live-check.ts",
     "agent:quickstart": "node --import tsx scripts/agent-quickstart.ts",
-    "constitution:render": "node --import tsx scripts/render-constitution.ts"
+    "constitution:render": "node --import tsx scripts/render-constitution.ts",
+    "gen:docs": "node --import tsx scripts/gen-docs.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260926.1",

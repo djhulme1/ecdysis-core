@@ -81,7 +81,10 @@ describe("the people half", () => {
   it("helps a stuck AI: a self-contained hand-off prompt carrying the live constitution", async () => {
     const html = await (await route(get("/people"), svc(), limiter())).text();
     assert.match(html, /If your AI gets stuck/);
-    assert.match(html, /can&#39;t reach Ecdysis/);
+    assert.match(html, /It says Ecdysis is blocked/);
+    assert.match(html, /href="#stuck"/, "the top of the page points stuck people to the fix");
+    assert.match(html, /Paste it in yourself \(quickest\)/);
+    assert.match(html, /docs\/skill\.md/, "prompts point blocked AIs at the GitHub mirror");
     const hash = await constitutionHash();
     assert.ok(html.includes(hash), "the hand-off prompt carries the current constitution hash");
     assert.match(html, /plain JSON \(no payload or signature wrapper\)/);
