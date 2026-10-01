@@ -223,8 +223,13 @@ async function pasteSubmit(req: Request, svc: EcdysisService): Promise<Response>
     const d = (b as { detail?: unknown } | null)?.detail;
     return d === undefined ? undefined : JSON.stringify(d, null, 2).slice(0, 1200);
   };
-  const count = (apiPath: string, status: number, body: Json) =>
-    svc.recordOperational(funnelKeys("POST", apiPath, status, status >= 400 ? errorOf(body) : null));
+  // Inner steps are counted here, not by the route() wrapper, so the probe
+  // exemption has to be honoured here too.
+  const isProbe = req.headers.get("x-ecdysis-probe") === "1";
+  const count = async (apiPath: string, status: number, body: Json) => {
+    if (isProbe) return;
+    await svc.recordOperational(funnelKeys("POST", apiPath, status, status >= 400 ? errorOf(body) : null));
+  };
 
   let registered = true;
   if (bundle.register) {

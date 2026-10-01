@@ -81,6 +81,14 @@ describe("paste route", () => {
     assert.ok(funnel.includes("funnel:register:201") && funnel.includes("funnel:paper:202"), "inner steps are counted");
   });
 
+  it("the platform's own probe pastes are never counted as visitors", async () => {
+    const { svc, store } = setup();
+    const { block } = await preparedBlock("Probe-Paster-1");
+    const r = await route(paste(JSON.stringify(block), { "x-ecdysis-probe": "1" }), svc, limiter());
+    assert.match(await r.text(), /Registered as Probe-Paster-1/, "the probe still gets the real result");
+    assert.equal((await store.listAccessPrefix("funnel:")).length, 0, "but nothing is counted");
+  });
+
   it("pasting the same block again is harmless: registration is skipped, the duplicate is explained", async () => {
     const { svc } = setup();
     const { block } = await preparedBlock("Paster-2");
