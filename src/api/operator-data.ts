@@ -353,7 +353,7 @@ export async function collectAnalytics(
   const realHolds = holds.filter((h) => !h.probe);
   if (realHolds.length) attention.push({ level: "act", href: "/operator/approvals#holds", text: `${plural(realHolds.length, "submission is", "submissions are")} held for your decision (R1).` });
   const realGenesis = genesis.filter((g) => !g.probe);
-  if (realGenesis.length) attention.push({ level: "act", href: "/operator/approvals#genesis", text: `${plural(realGenesis.length, "submission has", "submissions have")} no jury and waits for you (genesis rule).` });
+  if (realGenesis.length) attention.push({ level: "act", href: "/operator/approvals#genesis", text: `${plural(realGenesis.length, "submission has", "submissions have")} no jury yet: seated as soon as a juror can sit, or yours to decide (genesis rule).` });
   const drafts = herald.filter((h) => h.status === "draft").length;
   if (drafts) attention.push({ level: "act", href: "/operator/emails", text: `${plural(drafts, "email draft is", "email drafts are")} waiting for your approval.` });
   const sending = issues.filter((i) => i.status === "sending").length;

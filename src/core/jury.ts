@@ -84,7 +84,10 @@ export const JURY_VERSION = "jury/0.4";
  *         jurors cannot vouch, so a vouch chain has depth one);
  *     (d) a panel emptied by recusals, lapses or conflicts is topped up as
  *         soon as an eligible juror exists; it is not a genesis case, and
- *         reserved power R1 does not apply to it.
+ *         reserved power R1 does not apply to it;
+ *     (e) a case that found no eligible juror on arrival is seated in full
+ *         as soon as one exists: the genesis rule (the operator key decides)
+ *         lasts only until then. Platform probes stay with the operator.
  */
 export const SEAT_DEADLINE_MS = 48 * 3600 * 1000;
 export const LAPSE_PENALTY_MS = 72 * 3600 * 1000;

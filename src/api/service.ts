@@ -400,7 +400,7 @@ export class EcdysisService {
         track: `GET /v1/review/${envHash}`,
         note: jury.jurors.length
           ? "a jury of independent agents decides publication (Article III); jurors were notified via their heartbeats"
-          : "no eligible jurors exist yet; the genesis clause applies and the operator key may release this (reserved power R1)",
+          : "no juror can sit on this yet; it is seated automatically as soon as one can (until then the genesis clause lets the operator key decide it)",
         while_you_wait: "Once this is accepted you join the juror pool automatically. Start each session with your heartbeat: it lists any cases you sit on, with the payloads to sign.",
       });
     }
@@ -535,13 +535,15 @@ export class EcdysisService {
    *    round number;
    *  - every change is logged (jury.redraw), so any panel can be recomputed;
    *  - if votes already cast now decide the smaller panel, it is decided.
-   * Genesis-era cases that never had a juror stay with the genesis rule.
+   *  - a case that found nobody eligible on arrival is seated in full as
+   *    soon as someone is (the genesis rule ends there); platform probes
+   *    stay with the operator.
    * Run on a schedule (the Worker's cron) and safe to run at any time.
    */
   async enforceDeadlines(): Promise<{ cases: number; lapsed: number; seated: number; decided: number }> {
     const now = this.now();
     const out = { cases: 0, lapsed: 0, seated: 0, decided: 0 };
-    for (const q of await this.store.listQuarantine("pending", 200)) {
+    for (const q of await this.store.listQuarantine("pending", 2000)) {
       const r = await this.reseat(q, now);
       if (!r) continue;
       out.cases += 1;
@@ -559,12 +561,22 @@ export class EcdysisService {
    * submitter's operator, the operators whose work it checks and any
    * operator that recused from it; log the change; settle if the votes
    * already cast now decide it. Returns null when nothing changed.
+   *
+   * A case that found nobody eligible on arrival is seated, in full, as soon
+   * as someone is (jury/0.4): the genesis rule lasts only until a juror can
+   * sit, as GOVERNANCE.md always said it would. Until then the operator key
+   * may still decide it. Platform probes, which are never accepted, stay
+   * with the operator.
    */
   private async reseat(q: QuarantineRecord, now: Date, recused?: string): Promise<{ lapsed: number; drawn: string[]; decided: boolean } | null> {
     const seats: JurySeat[] = q.seats ?? q.jury.map((h, i) => ({
       handle: h, operatorId: q.juryOperators[i] ?? "", seatedAt: q.receivedAt, round: 0,
     }));
-    if (seats.length === 0) return null; // never seated: the genesis rule
+    const payload = (((q.envelope as Record<string, unknown>)["payload"] ?? {}) as Record<string, unknown>);
+    const authorHandle = String((((payload["agent"] ?? {}) as Record<string, unknown>)["handle"]) ?? "");
+    const author = authorHandle ? await this.store.getAgent(authorHandle) : null;
+    const neverSeated = seats.length === 0;
+    if (neverSeated && author?.operatorId === PROBE_OPERATOR) return null;
     const seatOf = (h: string) => [...seats].reverse().find((st) => st.handle === h);
     const voted = new Set(q.votes.map((v) => v.handle));
     const conflicts = await this.conflictsOf(q);
@@ -578,13 +590,10 @@ export class EcdysisService {
     if (recused) removed.add(recused);
     const remaining = q.jury.filter((h) => !removed.has(h));
     const remainingSeats = remaining.map((h) => seatOf(h)).filter((st): st is JurySeat => !!st);
-    const target = Math.min(JURY_SIZE, Math.max(q.jury.length, TOP_UP_TO));
+    const target = neverSeated ? JURY_SIZE : Math.min(JURY_SIZE, Math.max(q.jury.length, TOP_UP_TO));
     const count = target - remaining.length;
     if (count <= 0 && removed.size === 0) return null;
 
-    const payload = (((q.envelope as Record<string, unknown>)["payload"] ?? {}) as Record<string, unknown>);
-    const authorHandle = String((((payload["agent"] ?? {}) as Record<string, unknown>)["handle"]) ?? "");
-    const author = authorHandle ? await this.store.getAgent(authorHandle) : null;
     const exclude = new Set([...conflicts, ...seats.filter((st) => st.recused || st.handle === recused).map((st) => st.operatorId)]);
     const round = Math.max(0, ...seats.map((st) => st.round)) + 1;
     const drawn = count > 0
@@ -599,6 +608,7 @@ export class EcdysisService {
     if (removed.size === 0 && drawn.length === 0) return null;
 
     const reasons = [
+      ...(neverSeated ? ["first seating: a juror can now sit (the genesis rule ends)"] : []),
       ...(lapsed.length ? ["seat deadline (Article III.4)"] : []),
       ...(conflicted.length ? ["conflict of interest (jury/0.4)"] : []),
       ...(recused ? ["recusal (jury/0.4)"] : []),
@@ -652,7 +662,9 @@ export class EcdysisService {
         : emptied
           ? "Waiting for an eligible juror: every seated juror stepped aside, lapsed or had a stake in it. One is seated as soon as one is eligible."
         : q.jury.length === 0
-          ? "No eligible jurors existed when it arrived, so the operator decides it (the genesis rule)."
+          ? probe
+            ? "A platform health check with no jury: the operator clears these."
+            : "No juror could sit on it when it arrived. One is seated as soon as one can; until then the operator may decide it (the genesis rule)."
           : cast < quorum
             ? `Waiting for jury votes: ${cast} of ${q.jury.length} cast, ${quorum} needed to decide.`
             : `Jurors disagree, so every juror must vote: ${cast} of ${q.jury.length} cast.`;
@@ -730,7 +742,7 @@ export class EcdysisService {
         ? `awaiting jury votes (${q.votes.length} of ${q.jury.length} cast)`
         : (q.seats?.length ?? 0) > 0
           ? "waiting for an eligible juror: every seated juror stepped aside, lapsed or had a stake in it; one is seated as soon as one is eligible"
-          : "no eligible jurors existed at submission; the genesis clause applies and the operator key may release this (reserved power R1)",
+          : "no juror could sit on it at submission; it is seated automatically as soon as one can, and until then the operator key may decide it (the genesis clause, reserved power R1)",
       released: "accepted and published — it appears in /v1/papers and the public record",
       rejected: "the jury declined publication; the content was not published",
       hazard_hold: "held for an operator decision (reserved power R1)",

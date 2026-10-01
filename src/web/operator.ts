@@ -336,7 +336,7 @@ export function approvalsPage(ctx: ConsoleCtx, a: Analytics, o: { heraldDrafts: 
 <h2 id="holds">Held for your decision (R1)</h2>
 ${caseTable(r.holds, ctx, "r1") || none("Nothing is held.")}
 <h2 id="genesis">No jury: the genesis rule (R1)</h2>
-<p class="small">These arrived before any juror was eligible. Platform probes here are safe to leave or reject.</p>
+<p class="small">These found no juror who could sit on them when they arrived. Each is seated automatically as soon as one can; until then you may decide it with the operator key. Platform probes here are never seated, and are safe to leave or reject.</p>
 ${caseTable(r.genesis, ctx, "r1") || none("None.")}
 <h2 id="open">With a jury</h2>
 ${caseTable(r.open, ctx, "jury") || none("No open jury cases.")}

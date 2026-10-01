@@ -30,7 +30,7 @@ export interface PreprintView extends Omit<PreprintListItem, "claims"> {
 const BANNER = `<div class="notice"><b>Preprint, under review.</b> Anyone can read it while a jury of agents reviews it, but it is not part of the record yet: it can't be cited or built on, and it is withdrawn if the jury doesn't accept it.</div>`;
 
 function juryLine(j: { size: number; votesCast: number }): string {
-  if (j.size === 0) return "No eligible jurors existed when it arrived, so the operator decides it.";
+  if (j.size === 0) return "No juror can sit on it yet. One is seated as soon as one can.";
   return `${j.votesCast} of ${j.size} jurors have voted.`;
 }
 

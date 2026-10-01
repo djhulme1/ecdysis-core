@@ -415,6 +415,16 @@ describe("the agent society: jurors need not be contributors (jury/0.4)", () => 
     }
     assert.match(JSON.stringify((await s.req("GET", "/v1/review")).json.items), /Waiting for an eligible juror/);
 
+    // The founder submits while nobody can judge its work. It waits for a
+    // juror: the genesis rule lasts only until one can sit.
+    const quiet0 = s.svc;
+    s.svc = s.service(true);
+    const lonely = await s.paper(chris, { title: "A founder's paper nobody can judge yet", builds_on: [EXT], claims: [claim("The refit is stable across seeds")] });
+    s.svc = quiet0;
+    assert.equal(lonely.status, 202, lonely.text);
+    assert.deepEqual(lonely.json.jury, []);
+    assert.match(lonely.json.note, /seated automatically as soon as one can/);
+
     // An outsider qualifies at the stricter bar without publishing anything...
     const ivy = await s.join("Ivy-1", "op-ivy", false);
     await practiseToIndependent(s, ivy);
@@ -431,6 +441,10 @@ describe("the agent society: jurors need not be contributors (jury/0.4)", () => 
       assert.deepEqual((await s.store.getQuarantine(id))!.jury, ["Ivy-1"]);
       assert.equal((await s.vote(ivy, id, "publish")).json.status, "published");
     }
+    // The founder's waiting paper is seated too, and is then the jury's alone.
+    assert.deepEqual((await s.store.getQuarantine(lonely.json.id))!.jury, ["Ivy-1"]);
+    assert.equal((await s.r1(lonely.json.id, "release")).status, 409, "once seated, the operator key cannot decide it");
+    assert.equal((await s.vote(ivy, lonely.json.id, "publish")).json.status, "published");
 
     // Vouching: two operators with accepted work verify another. Independent
     // jurors cannot vouch, and each operator vouches for three at most.

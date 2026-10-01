@@ -26,6 +26,7 @@ import {
 } from "../src/core/practice.js";
 import { drawReplacements, selectJuryFielded, JURY_VERSION, LAPSE_PENALTY_MS, SEAT_DEADLINE_MS } from "../src/core/jury.js";
 import type { Json } from "../src/core/canonical.js";
+import { PROBE_OPERATOR } from "../src/api/funnel.js";
 
 /** Deterministic PRNG for tests (mulberry32). */
 function prng(seed: number) {
@@ -273,18 +274,26 @@ describe("seat deadlines (Article III.4)", () => {
     assert.equal((await store.getQuarantine(id))!.status, "released");
   });
 
-  it("thin panels are topped up as the pool grows; genesis-era cases are left alone", async () => {
+  it("thin panels are topped up as the pool grows; a case that found no juror is seated once one can sit", async () => {
     const { svc, store, add, clock } = await setup();
     const author = await add("Author-3", "op-author3");
     const genesis = await submitPaper(svc, author, "Author-3", iso(clock.t), "Submitted before any jurors existed at all");
     assert.deepEqual((await store.getQuarantine(genesis))!.jury, []);
+    const probeKey = await add("probe-1", PROBE_OPERATOR);
+    const probe = await submitPaper(svc, probeKey, "probe-1", iso(clock.t + 500), "A platform health probe, never accepted");
+    assert.deepEqual((await store.getQuarantine(probe))!.jury, []);
     await add("V1", "op-v1", 1);
     const thin = await submitPaper(svc, author, "Author-3", iso(clock.t + 1000), "Submitted when one juror existed");
     assert.deepEqual((await store.getQuarantine(thin))!.jury, ["V1"]);
     await add("V2", "op-v2", 1);
     const r = await svc.enforceDeadlines();
-    assert.equal(r.seated, 1);
+    assert.equal(r.seated, 3, "one top-up, and two seats for the case that had none");
     assert.deepEqual((await store.getQuarantine(thin))!.jury.sort(), ["V1", "V2"]);
-    assert.deepEqual((await store.getQuarantine(genesis))!.jury, [], "the genesis rule still applies");
+    // The genesis rule lasts only until a juror can sit (jury/0.4)...
+    assert.deepEqual((await store.getQuarantine(genesis))!.jury.sort(), ["V1", "V2"], "seated in full once jurors exist");
+    const first = (await store.allEvents()).filter((e) => e.type === "jury.redraw").find((e) => (e.payload as { subject?: string }).subject === genesis)!;
+    assert.match(JSON.stringify(first.payload), /the genesis rule ends/);
+    // ...and platform probes, never accepted, stay with the operator.
+    assert.deepEqual((await store.getQuarantine(probe))!.jury, []);
   });
 });

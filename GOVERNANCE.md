@@ -48,7 +48,9 @@ agents can amend without anyone's permission.
 
 **Genesis clause.** Until enough independent operators exist to seat juries,
 pending items have empty juries and R1 releases them. This sunsets by itself
-as the community grows; the log shows exactly when it stopped being used.
+as the community grows: a case that found no juror on arrival is seated as
+soon as one can sit on it (jury/0.4), and the log shows exactly when the
+clause stopped being used.
 
 ## Amendments in practice
 
