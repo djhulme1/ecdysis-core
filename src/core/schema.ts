@@ -330,6 +330,63 @@ export function validateCaseRead(v: unknown): Result<CaseReadPayload> {
   return { ok: false, errors: ['type: must be "case.read"'] };
 }
 
+/** A signed request for a practice case (jury/0.3). */
+export interface PracticeRequestPayload {
+  protocol: typeof PROTOCOL;
+  type: "practice.request";
+  agent: { handle: string; publicKey: string };
+  ts: string;
+}
+
+export function validatePracticeRequest(v: unknown): Result<PracticeRequestPayload> {
+  const c = new Check();
+  if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };
+  c.onlyKeys(v, ["protocol", "type", "agent", "ts"], "payload");
+  checkCommon(c, v);
+  if (v["type"] !== "practice.request") c.fail('type: must be "practice.request"');
+  const agent = checkAgent(c, v["agent"]);
+  if (c.errors.length) return { ok: false, errors: c.errors };
+  return { ok: true, value: { protocol: PROTOCOL, type: "practice.request", agent, ts: v["ts"] as string } };
+}
+
+/** A signed answer to a practice case: verdict, the flaws found, and reasons. */
+export interface PracticeAnswerPayload {
+  protocol: typeof PROTOCOL;
+  type: "practice.answer";
+  caseId: string;
+  verdict: "publish" | "reject";
+  flaws: string[];
+  rationale: string;
+  agent: { handle: string; publicKey: string };
+  ts: string;
+}
+
+export function validatePracticeAnswer(v: unknown): Result<PracticeAnswerPayload> {
+  const c = new Check();
+  if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };
+  c.onlyKeys(v, ["protocol", "type", "caseId", "verdict", "flaws", "rationale", "agent", "ts"], "payload");
+  checkCommon(c, v);
+  if (v["type"] !== "practice.answer") c.fail('type: must be "practice.answer"');
+  const caseId = c.str(v, "caseId", 32, 32);
+  if (caseId && !/^[0-9a-f]{32}$/.test(caseId)) c.fail("caseId: the 32-hex id from your practice case");
+  const verdict = v["verdict"];
+  if (verdict !== "publish" && verdict !== "reject") c.fail('verdict: "publish" or "reject" (practice has no escalation)');
+  const flaws = v["flaws"];
+  if (!Array.isArray(flaws) || flaws.length > 12 || flaws.some((f) => typeof f !== "string" || f.length < 1 || f.length > 24)) {
+    c.fail('flaws: an array of up to 12 labels such as "C2", "relation" or "injection" ([] if sound)');
+  }
+  const rationale = c.str(v, "rationale", 2000, 30);
+  const agent = checkAgent(c, v["agent"]);
+  if (c.errors.length) return { ok: false, errors: c.errors };
+  return {
+    ok: true,
+    value: {
+      protocol: PROTOCOL, type: "practice.answer", caseId, verdict: verdict as "publish" | "reject",
+      flaws: flaws as string[], rationale, agent, ts: v["ts"] as string,
+    },
+  };
+}
+
 export function validateReview(v: unknown): Result<ReviewPayload> {
   const c = new Check();
   if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };

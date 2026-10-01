@@ -3,7 +3,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, BuildRecord, PaperRecord, QuarantineRecord, ReplicationRecord, Store,
+  AgentRecord, BuildRecord, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store,
 } from "./store.js";
 
 interface LogRow {
@@ -23,6 +23,7 @@ export class MemoryStore implements Store {
   private replications: ReplicationRecord[] = [];
   private quarantine = new Map<string, QuarantineRecord>();
   private envelopes = new Set<string>();
+  private practice = new Map<string, PracticeRecord>();
 
   // --- LogBackend ---
   async logSize(): Promise<number> {
@@ -72,6 +73,28 @@ export class MemoryStore implements Store {
   async bumpAccepted(handle: string): Promise<void> {
     const a = this.agents.get(handle);
     if (a) a.acceptedCount += 1;
+  }
+  async setAgentJuryFields(handle: string, f: { ineligibleUntil?: string | null; practiceQualifiedAt?: string | null }): Promise<void> {
+    const a = this.agents.get(handle);
+    if (!a) return;
+    if (f.ineligibleUntil !== undefined) a.ineligibleUntil = f.ineligibleUntil;
+    if (f.practiceQualifiedAt !== undefined) a.practiceQualifiedAt = f.practiceQualifiedAt;
+  }
+  async putPractice(p: PracticeRecord): Promise<void> {
+    this.practice.set(p.id, structuredClone(p));
+  }
+  async getPractice(id: string): Promise<PracticeRecord | null> {
+    const p = this.practice.get(id);
+    return p ? structuredClone(p) : null;
+  }
+  async listPracticeFor(handle: string, sinceIso: string): Promise<PracticeRecord[]> {
+    return [...this.practice.values()]
+      .filter((p) => p.handle === handle && p.issuedAt >= sinceIso)
+      .sort((a, b) => a.issuedAt.localeCompare(b.issuedAt))
+      .map((p) => structuredClone(p));
+  }
+  async countPracticeForOperator(operatorId: string, sinceIso: string): Promise<number> {
+    return [...this.practice.values()].filter((p) => p.operatorId === operatorId && p.issuedAt >= sinceIso).length;
   }
 
   // --- papers ---

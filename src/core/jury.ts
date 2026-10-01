@@ -49,7 +49,27 @@ export const JURY_QUORUM = 3;
  *              field pool is thin (P < 2), so the rule activates gradually
  *              as fields populate.
  */
-export const JURY_VERSION = "jury/0.2";
+export const JURY_VERSION = "jury/0.3";
+
+/*
+ *   jury/0.3 — keeps jury/0.2's seating and adds:
+ *     (a) seat deadlines (Article III.4): a juror who has not voted within
+ *         SEAT_DEADLINE_MS loses the seat and is not drawn again for
+ *         LAPSE_PENALTY_MS; the seat is redrawn deterministically from
+ *         SHA-256(receipt|r<round>|handle). Panels below three seats are
+ *         topped up the same way as the pool grows. Genesis-era cases with
+ *         no jurors at all stay under the genesis rule.
+ *     (b) practice-qualified jurors (apprentices): agents that qualified
+ *         through practice reviews instead of accepted work. At most one
+ *         per panel, and only beside at least two experienced jurors, so
+ *         under the 2/3 rule one apprentice can neither decide a case nor
+ *         block one alone.
+ */
+export const SEAT_DEADLINE_MS = 48 * 3600 * 1000;
+export const LAPSE_PENALTY_MS = 72 * 3600 * 1000;
+export const MAX_APPRENTICE_SEATS = 1;
+export const MIN_EXPERIENCED_BESIDE_APPRENTICE = 2;
+export const TOP_UP_TO = 3;
 
 export interface FieldedJuryCandidate extends JuryCandidate {
   /**
@@ -59,6 +79,8 @@ export interface FieldedJuryCandidate extends JuryCandidate {
    * self-declared, never imported from outside the log.
    */
   fieldCompetent: boolean;
+  /** Qualified through practice reviews, with no accepted work yet (jury/0.3). */
+  apprentice?: boolean;
 }
 
 export interface FieldedJurySelection extends JurySelection {
@@ -67,6 +89,64 @@ export interface FieldedJurySelection extends JurySelection {
   fieldSeats: number;
   /** Independence-discounted weight of the field pool at selection time. */
   fieldPoolWeight: number;
+  /** Handles seated as practice-qualified jurors (at most one). */
+  apprentices: string[];
+}
+
+async function rankBy(seed: string, handle: string): Promise<string> {
+  return toHex(await sha256(new TextEncoder().encode(`${seed}|${handle}`)));
+}
+
+/** Practice-qualified candidates available for one apprentice seat, in hash order. */
+async function apprenticePick(
+  seed: string,
+  candidates: FieldedJuryCandidate[],
+  excludedOperators: Set<string>,
+  submitterOperator: string,
+): Promise<FieldedJuryCandidate | null> {
+  const pool = candidates.filter(
+    (c) => c.apprentice && c.acceptedCount === 0 && c.operatorId !== submitterOperator && !excludedOperators.has(c.operatorId),
+  );
+  const ranked = await Promise.all(pool.map(async (c) => ({ c, r: await rankBy(seed, c.handle) })));
+  ranked.sort((a, b) => (a.r < b.r ? -1 : a.r > b.r ? 1 : 0));
+  return ranked[0]?.c ?? null;
+}
+
+/**
+ * Seats to fill a panel after lapses, or to top it up: experienced jurors
+ * first (hash order under the round's own seed), then at most one
+ * apprentice if the rule allows. Callers exclude ineligible agents.
+ */
+export async function drawReplacements(
+  receipt: string,
+  round: number,
+  candidates: FieldedJuryCandidate[],
+  o: {
+    submitterOperator: string;
+    seatedOperators: Set<string>;
+    count: number;
+    experiencedSeated: number;
+    apprenticeSeated: boolean;
+  },
+): Promise<Array<{ handle: string; operatorId: string; apprentice: boolean }>> {
+  const seed = `${receipt}|r${round}`;
+  const out: Array<{ handle: string; operatorId: string; apprentice: boolean }> = [];
+  const seen = new Set(o.seatedOperators);
+  const vets = candidates.filter((c) => c.acceptedCount > 0 && c.operatorId !== o.submitterOperator);
+  const ranked = await Promise.all(vets.map(async (c) => ({ c, r: await rankBy(seed, c.handle) })));
+  ranked.sort((a, b) => (a.r < b.r ? -1 : a.r > b.r ? 1 : 0));
+  for (const { c } of ranked) {
+    if (out.length >= o.count) break;
+    if (seen.has(c.operatorId)) continue;
+    seen.add(c.operatorId);
+    out.push({ handle: c.handle, operatorId: c.operatorId, apprentice: false });
+  }
+  const experienced = o.experiencedSeated + out.length;
+  if (out.length < o.count && !o.apprenticeSeated && experienced >= MIN_EXPERIENCED_BESIDE_APPRENTICE) {
+    const a = await apprenticePick(seed, candidates, seen, o.submitterOperator);
+    if (a) out.push({ handle: a.handle, operatorId: a.operatorId, apprentice: true });
+  }
+  return out;
 }
 
 /**
@@ -159,7 +239,19 @@ export async function selectJuryFielded(
     if (seen.has(c.operatorId)) continue;
     seat(c);
   }
-  return { jurors, operators, juryVersion: JURY_VERSION, fieldSeats, fieldPoolWeight };
+  // Pass 3 (jury/0.3): one practice-qualified juror, only beside two
+  // experienced ones and only if a seat is left.
+  const apprentices: string[] = [];
+  if (jurors.length >= MIN_EXPERIENCED_BESIDE_APPRENTICE && jurors.length < size && MAX_APPRENTICE_SEATS > 0) {
+    const a = await apprenticePick(seedHex, candidates, seen, submitterOperator);
+    if (a) {
+      seen.add(a.operatorId);
+      jurors.push(a.handle);
+      operators.push(a.operatorId);
+      apprentices.push(a.handle);
+    }
+  }
+  return { jurors, operators, juryVersion: JURY_VERSION, fieldSeats, fieldPoolWeight, apprentices };
 }
 
 export type ReviewVerdict = "publish" | "reject" | "escalate";

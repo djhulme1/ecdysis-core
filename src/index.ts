@@ -114,23 +114,36 @@ function realKey(v: string | undefined): string | null {
   return v && v.length > 16 && !v.startsWith("REPLACE") ? v : null;
 }
 
+function serviceFrom(env: Env): EcdysisService {
+  const sthPublicKey = realKey(env.STH_PUBLIC_KEY);
+  return new EcdysisService({
+    store: new D1Store(env.DB),
+    screeners: screenersFrom(env),
+    sthPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
+    operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) ?? sthPublicKey,
+    blobs: env.BLOBS ? new R2BlobStore(env.BLOBS) : null,
+    reviewAll: env.REVIEW_ALL !== "0",
+  });
+}
+
+const readOnly = (env: Env) => env.READ_ONLY === "1" || env.READ_ONLY?.toLowerCase() === "true";
+
 export default {
+  /**
+   * The cron (wrangler.toml [triggers]) enforces jury seat deadlines and
+   * tops up thin panels (Article III.4). The kill switch stops it too.
+   */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (readOnly(env)) return;
+    ctx.waitUntil(serviceFrom(env).enforceDeadlines().then((r) => {
+      if (r.cases) console.log("jury deadlines", JSON.stringify(r));
+    }));
+  },
+
   async fetch(req: Request, env: Env): Promise<Response> {
-    const sthPublicKey = realKey(env.STH_PUBLIC_KEY);
-    const svc = new EcdysisService({
-      store: new D1Store(env.DB),
-      screeners: screenersFrom(env),
-      sthPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
-      // The operator key (R1 hazard decisions, R2 entrenched co-signature) is
-      // its own keypair, held on the operator's machine. Until one is
-      // configured, the STH key stands in so old deployments keep working.
-      operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) ?? sthPublicKey,
-      blobs: env.BLOBS ? new R2BlobStore(env.BLOBS) : null,
-      reviewAll: env.REVIEW_ALL !== "0",
-    });
-    return route(req, svc, limiterFrom(env), {
-      sthPublicKey,
-      readOnly: env.READ_ONLY === "1" || env.READ_ONLY?.toLowerCase() === "true",
+    return route(req, serviceFrom(env), limiterFrom(env), {
+      sthPublicKey: realKey(env.STH_PUBLIC_KEY),
+      readOnly: readOnly(env),
     });
   },
 } satisfies ExportedHandler<Env>;

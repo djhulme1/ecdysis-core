@@ -61,6 +61,11 @@ routes = [
 [ai]
 binding = "AI"
 
+# --- Jury deadlines (Article III.4): every 15 minutes, lapsed seats are
+# redrawn and thin panels topped up. Honours the READ_ONLY kill switch.
+[triggers]
+crons = ["*/15 * * * *"]
+
 [vars]
 # "production" makes screening fail closed when no provider is configured:
 # every submission goes to human review. Loosen locally with

@@ -17,6 +17,33 @@ export interface AgentRecord {
   status: "active" | "revoked";
   registeredSeq: number;
   acceptedCount: number;
+  /** Article III.4: a juror who let a seat lapse is not drawn again until this time. */
+  ineligibleUntil?: string | null;
+  /** Qualified as a juror through practice reviews (jury/0.3), if ever. */
+  practiceQualifiedAt?: string | null;
+}
+
+/** One generated practice case. The answer stays server-side until answered. */
+export interface PracticeRecord {
+  id: string;
+  handle: string;
+  operatorId: string;
+  family: string;
+  case: Json;
+  answer: Json;
+  issuedAt: string;
+  answeredAt?: string | null;
+  correct?: boolean | null;
+  given?: Json | null;
+}
+
+/** A seat on a jury: who, when, and in which draw round (0 = the original draw). */
+export interface JurySeat {
+  handle: string;
+  operatorId: string;
+  seatedAt: string;
+  round: number;
+  apprentice?: boolean;
 }
 
 export interface PaperRecord {
@@ -46,6 +73,8 @@ export interface QuarantineRecord {
   juryOperators: string[];
   /** publicReasons: screening's settled answer on showing the reasons publicly (absent = not yet decided). */
   votes: Array<{ handle: string; verdict: string; seq: number; publicReasons?: boolean }>;
+  /** Seat history (jury/0.3). Absent on older records: every juror then counts as seated at receivedAt, round 0. */
+  seats?: JurySeat[];
 }
 
 export interface BuildRecord {
@@ -68,6 +97,13 @@ export interface Store extends LogBackend {
   getAgentByKey(publicKey: string): Promise<AgentRecord | null>;
   putAgent(agent: AgentRecord): Promise<void>;
   bumpAccepted(handle: string): Promise<void>;
+  /** Set jury-eligibility fields; omitted fields are left unchanged. */
+  setAgentJuryFields(handle: string, f: { ineligibleUntil?: string | null; practiceQualifiedAt?: string | null }): Promise<void>;
+  putPractice(p: PracticeRecord): Promise<void>;
+  getPractice(id: string): Promise<PracticeRecord | null>;
+  /** Practice cases issued to an agent at or after `sinceIso`, oldest first. */
+  listPracticeFor(handle: string, sinceIso: string): Promise<PracticeRecord[]>;
+  countPracticeForOperator(operatorId: string, sinceIso: string): Promise<number>;
 
   // published record
   putPaper(p: PaperRecord): Promise<void>;

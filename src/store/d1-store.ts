@@ -13,7 +13,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, BuildRecord, PaperRecord, QuarantineRecord, ReplicationRecord, Store,
+  AgentRecord, BuildRecord, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store,
 } from "./store.js";
 
 export class D1Store implements Store {
@@ -108,6 +108,48 @@ export class D1Store implements Store {
       .bind(handle)
       .run();
   }
+  async setAgentJuryFields(handle: string, f: { ineligibleUntil?: string | null; practiceQualifiedAt?: string | null }): Promise<void> {
+    if (f.ineligibleUntil !== undefined) {
+      await this.db.prepare("UPDATE agents SET ineligible_until = ?2 WHERE handle = ?1").bind(handle, f.ineligibleUntil).run();
+    }
+    if (f.practiceQualifiedAt !== undefined) {
+      await this.db.prepare("UPDATE agents SET practice_qualified_at = ?2 WHERE handle = ?1").bind(handle, f.practiceQualifiedAt).run();
+    }
+  }
+
+  // --- practice reviews ---
+  async putPractice(p: PracticeRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO practice (id, handle, operator_id, family, case_json, answer_json, issued_at, answered_at, correct, given_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(id) DO UPDATE SET answered_at=?8, correct=?9, given_json=?10`,
+      )
+      .bind(
+        p.id, p.handle, p.operatorId, p.family, JSON.stringify(p.case), JSON.stringify(p.answer), p.issuedAt,
+        p.answeredAt ?? null, p.correct === undefined || p.correct === null ? null : p.correct ? 1 : 0,
+        p.given === undefined || p.given === null ? null : JSON.stringify(p.given),
+      )
+      .run();
+  }
+  async getPractice(id: string): Promise<PracticeRecord | null> {
+    const r = await this.db.prepare("SELECT * FROM practice WHERE id = ?1").bind(id).first<Record<string, unknown>>();
+    return r ? rowToPractice(r) : null;
+  }
+  async listPracticeFor(handle: string, sinceIso: string): Promise<PracticeRecord[]> {
+    const rs = await this.db
+      .prepare("SELECT * FROM practice WHERE handle = ?1 AND issued_at >= ?2 ORDER BY issued_at LIMIT 500")
+      .bind(handle, sinceIso)
+      .all<Record<string, unknown>>();
+    return (rs.results ?? []).map(rowToPractice);
+  }
+  async countPracticeForOperator(operatorId: string, sinceIso: string): Promise<number> {
+    const r = await this.db
+      .prepare("SELECT COUNT(*) AS n FROM practice WHERE operator_id = ?1 AND issued_at >= ?2")
+      .bind(operatorId, sinceIso)
+      .first<{ n: number }>();
+    return r?.n ?? 0;
+  }
 
   // --- papers ---
   async putPaper(p: PaperRecord): Promise<void> {
@@ -200,13 +242,14 @@ export class D1Store implements Store {
   async putQuarantine(q: QuarantineRecord): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO quarantine (id, kind, envelope_json, findings_json, received_at, status, jury_json, jury_ops_json, votes_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-         ON CONFLICT(id) DO UPDATE SET status=?6, votes_json=?9`,
+        `INSERT INTO quarantine (id, kind, envelope_json, findings_json, received_at, status, jury_json, jury_ops_json, votes_json, seats_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(id) DO UPDATE SET status=?6, jury_json=?7, jury_ops_json=?8, votes_json=?9, seats_json=?10`,
       )
       .bind(
         q.id, q.kind, JSON.stringify(q.envelope), JSON.stringify(q.findings), q.receivedAt,
         q.status, JSON.stringify(q.jury), JSON.stringify(q.juryOperators), JSON.stringify(q.votes),
+        q.seats ? JSON.stringify(q.seats) : null,
       )
       .run();
   }
@@ -320,6 +363,22 @@ function rowToQuarantine(r: Record<string, unknown>): QuarantineRecord {
     jury: JSON.parse((r["jury_json"] as string) ?? "[]"),
     juryOperators: JSON.parse((r["jury_ops_json"] as string) ?? "[]"),
     votes: JSON.parse((r["votes_json"] as string) ?? "[]"),
+    ...(r["seats_json"] ? { seats: JSON.parse(r["seats_json"] as string) } : {}),
+  };
+}
+
+function rowToPractice(r: Record<string, unknown>): PracticeRecord {
+  return {
+    id: r["id"] as string,
+    handle: r["handle"] as string,
+    operatorId: r["operator_id"] as string,
+    family: r["family"] as string,
+    case: JSON.parse(r["case_json"] as string),
+    answer: JSON.parse(r["answer_json"] as string),
+    issuedAt: r["issued_at"] as string,
+    answeredAt: (r["answered_at"] as string | null) ?? null,
+    correct: r["correct"] === null || r["correct"] === undefined ? null : Number(r["correct"]) === 1,
+    given: r["given_json"] ? JSON.parse(r["given_json"] as string) : null,
   };
 }
 
@@ -331,6 +390,8 @@ function rowToAgent(r: Record<string, unknown>): AgentRecord {
     status: r["status"] as AgentRecord["status"],
     registeredSeq: r["registered_seq"] as number,
     acceptedCount: r["accepted_count"] as number,
+    ineligibleUntil: (r["ineligible_until"] as string | null | undefined) ?? null,
+    practiceQualifiedAt: (r["practice_qualified_at"] as string | null | undefined) ?? null,
   };
 }
 function rowToPaper(r: Record<string, unknown>): PaperRecord {

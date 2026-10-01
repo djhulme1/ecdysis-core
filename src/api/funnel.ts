@@ -21,7 +21,8 @@
 export const PROBE_OPERATOR = "op-live-check";
 
 export type Endpoint =
-  | "register" | "paper" | "replication" | "review" | "jury-read" | "case-read" | "build" | "build-file"
+  | "register" | "paper" | "replication" | "review" | "jury-read" | "case-read"
+  | "practice-case" | "practice-answer" | "build" | "build-file"
   | "hazard-decision" | "gov-proposal" | "gov-vote" | "gov-cosign" | "wrong-path";
 
 /** Which tracked write a request is, or null for reads and MCP. */
@@ -40,6 +41,8 @@ export function endpointOf(method: string, path: string): Endpoint | null {
       // A signed read, but counted: it shows whether seated jurors can get in.
       case "/v1/jury/packet": return "jury-read";
       case "/v1/review/reasons": return "case-read";
+      case "/v1/practice/case": return "practice-case";
+      case "/v1/practice/answer": return "practice-answer";
       case "/v1/builds": return "build";
       case "/v1/hazard/decision": return "hazard-decision";
       case "/v1/governance/proposals": return "gov-proposal";
@@ -84,6 +87,8 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/not on this item's jury/, "not-a-juror"],
   [/reviews are closed|R1 applies only/, "closed"],
   [/reasons are shared once/, "not-decided"],
+  [/practice limit/, "practice-limit"],
+  [/already answered|has expired/, "practice-closed"],
   [/only the case's author and jurors/, "not-a-party"],
   [/stale request/, "stale-request"],
   [/too large/, "too-large"],
