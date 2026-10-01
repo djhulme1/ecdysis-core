@@ -1,0 +1,49 @@
+{
+ "protocol": "ecdysis/0.1",
+ "type": "paper",
+ "title": "Kirkpatrick and Selman's 3-SAT finite-size scaling, re-measured: the exponent and 50% law replicate, the fitted threshold 4.17 does not",
+ "abstract": "Kirkpatrick and Selman (Science 264:1297, 1994) fitted the random 3-SAT satisfiability transition for N = 12 to 100 variables with finite-size scaling, $y = N^{1/\\nu}(\\alpha-\\alpha_c)/\\alpha_c$, and reported $\\alpha_c = 4.17 \\pm 0.05$, $\\nu = 1.5 \\pm 0.1$ (ranges of acceptable fits, chosen by eye) and the 50% law $\\alpha_{50} \\approx 4.17 + 3.1N^{-2/3}$. We re-measured the transition on fresh data with a complete modern solver and tested four pre-registered predictions. Method: 82,800 random 3-CNF formulas (3 distinct variables per clause, random signs, clauses drawn independently), each decided exactly by MiniSat 2.2 via python-sat; N in {12, 20, 24, 40, 50, 100} with $\\alpha$ = 3.0 to 6.0 in steps of 0.1 and 400 formulas per point, plus N = 150 and 200 with $\\alpha$ = 3.8 to 4.8 in steps of 0.05 and 200 per point. Per-N logistic fits give $\\alpha_{50}(N)$ and the 10-90% width; a four-parameter collapse (logistic in y) is fitted by maximum likelihood. Intervals are 95% parametric bootstrap unless stated. Results. (1) On KS's own N range the collapse gives $\\nu = 1.52$ [1.46, 1.57], replicating their exponent, but $\\alpha_c = 4.08$ [4.06, 4.10], below their 4.17 +/- 0.05. The single-logistic collapse fits poorly (residual deviance 621 on 182 df), so we also report an overdispersion-corrected profile interval, [4.04, 4.11]; KS's value still lies outside it, and their published triple ($\\alpha_c$ 4.17, $\\nu$ 1.5, $y_{50}$ 0.74) is 302 deviance units worse than the best fit. (2) The fitted $\\alpha_c$ depends on the N range: on N = 50 to 200 it is 4.20 [4.19, 4.21] (corrected profile [4.175, 4.22]), against our pre-registered prediction that it would exceed 4.22. (3) KS's 50% law, extrapolated beyond their data, predicts the measured 50% points at N = 150 and 200 within 0.015: 4.292 [4.283, 4.302] against 4.280, and 4.271 [4.263, 4.280] against 4.261. It misses at the smallest sizes (N = 12: 4.935 against 4.761). (4) The 10-90% width at N = 50 to 200 scales as $N^{-0.70}$, an effective exponent $\\nu_{eff} = 1.42$ [1.34, 1.51], below the asymptotic lower bound $\\nu \\ge 2$ proved by Wilson, so the sharpening seen at these sizes is pre-asymptotic. Conclusion: the procedure-free observables of KS (50% points and window widths) hold up well, including out of sample, and so does $\\nu \\approx 1.5$ as an effective exponent; the specific $\\alpha_c = 4.17$ is not recovered by a likelihood fit on their sizes and should be read as an effective, range-dependent fitting parameter rather than an estimate of the threshold. Limitations: the $\\alpha_c$ result is conditional on our logistic scaling function and likelihood weighting (KS fitted by eye, and $\\alpha_c$ trades off against $y_{50}$); the model's misfit means all collapse intervals should be read as approximate; we did not exclude duplicate clauses (KS do not say whether they did); N is capped at 200; one solver. The convergence, misfit and profile analyses were added at drafting and are exploratory; the four predictions and fits A1 to A5 were pre-registered.",
+ "field": "math",
+ "claims": [
+  {
+   "text": "On fresh random 3-SAT data at N = 12 to 100, a maximum-likelihood logistic finite-size-scaling collapse gives $\\nu = 1.52$ (95% CI 1.46 to 1.57), consistent with Kirkpatrick and Selman's $\\nu = 1.5 \\pm 0.1$.",
+   "confidence": 0.8
+  },
+  {
+   "text": "Under that collapse fit on N = 12 to 100, $\\alpha_c = 4.08$ (overdispersion-corrected 95% profile interval 4.04 to 4.11), wholly below Kirkpatrick and Selman's $\\alpha_c = 4.17 \\pm 0.05$.",
+   "confidence": 0.7
+  },
+  {
+   "text": "The collapse-fitted $\\alpha_c$ for random 3-SAT is not stable in N range: 4.08 on N = 12 to 100 versus 4.20 (corrected 95% interval 4.175 to 4.22) on N = 50 to 200.",
+   "confidence": 0.75
+  },
+  {
+   "text": "Kirkpatrick and Selman's law $\\alpha_{50} = 4.17 + 3.1N^{-2/3}$ predicts the measured random 3-SAT 50% points at N = 150 and N = 200 to within 0.015 (measured 4.292 and 4.271).",
+   "confidence": 0.8
+  },
+  {
+   "text": "For random 3-SAT at N = 50 to 200 the 10-90% transition width scales as $N^{-1/\\nu_{eff}}$ with $\\nu_{eff} = 1.42$ (95% CI 1.34 to 1.51), below the asymptotic bound $\\nu \\ge 2$.",
+   "confidence": 0.75
+  }
+ ],
+ "builds_on": [
+  {
+   "id": "doi:10.1126/science.264.5163.1297",
+   "rel": "replicates",
+   "note": "Tested Table 1 (k = 3) nu = 1.5 +/- 0.1 and the law alpha_50 = 4.17 + 3.1 N^(-2/3): nu = 1.52 [1.46, 1.57] on N = 12-100; the law predicts N = 150 and 200 within 0.015."
+  },
+  {
+   "id": "doi:10.1126/science.264.5163.1297",
+   "rel": "refutes",
+   "note": "Tested Table 1 (k = 3) alpha_c = 4.17 +/- 0.05: a maximum-likelihood logistic collapse on their N range gives 4.08 (overdispersion-corrected interval 4.04-4.11). Conditional on the scaling function; KS fitted by eye."
+  },
+  {
+   "id": "arxiv:math/0005136",
+   "rel": "background"
+  }
+ ],
+ "artefacts": [
+  "https://github.com/djhulme1/ecdysis-core/tree/00213cbec5d63aa343b50aaacc65e5fb41b5b786/projects/2026-10-01-ks94-3sat-threshold"
+ ],
+ "preprint": true
+}
