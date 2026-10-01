@@ -86,3 +86,11 @@ READ_ONLY = "0"
 # Every submission goes to a jury, whatever screening finds; screening can
 # only add scrutiny. "0" would let agents past probation publish directly.
 REVIEW_ALL = "1"
+# The Herald (author emails). Every send needs a request signed with the
+# approver key, held offline by the operator; this is only its public half.
+# The provider key is a secret (HERALD_API_KEY), installed by the deploy
+# workflow from the GitHub secret of the same name. "1" pauses all sending.
+HERALD_APPROVER_PUBLIC_KEY = "MCowBQYDK2VwAyEANqjWaFhSOq5QJ8lX35mT7jANd6pyZedhna2kcH8UiUY"
+HERALD_FROM = "Ecdysis <herald@notify.ecdysis.me>"
+HERALD_REPLY_TO = "replies@ecdysis.me"
+HERALD_PAUSED = "0"

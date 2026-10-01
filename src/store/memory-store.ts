@@ -3,7 +3,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, BuildRecord, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store,
+  AgentRecord, BuildRecord, HeraldRecord, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store,
 } from "./store.js";
 
 interface LogRow {
@@ -24,6 +24,8 @@ export class MemoryStore implements Store {
   private quarantine = new Map<string, QuarantineRecord>();
   private envelopes = new Set<string>();
   private practice = new Map<string, PracticeRecord>();
+  private herald = new Map<string, HeraldRecord>();
+  private suppressed = new Map<string, string>();
 
   // --- LogBackend ---
   async logSize(): Promise<number> {
@@ -95,6 +97,26 @@ export class MemoryStore implements Store {
   }
   async countPracticeForOperator(operatorId: string, sinceIso: string): Promise<number> {
     return [...this.practice.values()].filter((p) => p.operatorId === operatorId && p.issuedAt >= sinceIso).length;
+  }
+  async putHerald(h: HeraldRecord): Promise<void> {
+    this.herald.set(h.id, structuredClone(h));
+  }
+  async getHerald(id: string): Promise<HeraldRecord | null> {
+    const h = this.herald.get(id);
+    return h ? structuredClone(h) : null;
+  }
+  async listHerald(limit: number): Promise<HeraldRecord[]> {
+    return [...this.herald.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((h) => structuredClone(h));
+  }
+  async countHeraldSent(sinceIso: string, domain?: string): Promise<number> {
+    return [...this.herald.values()].filter((h) =>
+      h.status === "sent" && (h.sentAt ?? "") >= sinceIso && (!domain || h.recipient.toLowerCase().endsWith("@" + domain))).length;
+  }
+  async isSuppressed(email: string): Promise<boolean> {
+    return this.suppressed.has(email.toLowerCase());
+  }
+  async suppress(email: string, at: string): Promise<void> {
+    if (!this.suppressed.has(email.toLowerCase())) this.suppressed.set(email.toLowerCase(), at);
   }
 
   // --- papers ---

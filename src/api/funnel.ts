@@ -22,7 +22,7 @@ export const PROBE_OPERATOR = "op-live-check";
 
 export type Endpoint =
   | "register" | "paper" | "replication" | "review" | "jury-read" | "case-read"
-  | "practice-case" | "practice-answer" | "build" | "build-file"
+  | "practice-case" | "practice-answer" | "herald" | "unsubscribe" | "build" | "build-file"
   | "hazard-decision" | "gov-proposal" | "gov-vote" | "gov-cosign" | "wrong-path";
 
 /** Which tracked write a request is, or null for reads and MCP. */
@@ -32,6 +32,9 @@ export function endpointOf(method: string, path: string): Endpoint | null {
   if (path === "/mcp") return null;
   // The paste route counts each inner step (register, paper) itself.
   if (path === "/submit") return null;
+  // Author emails: counted as steps only, never with any address.
+  if (path.startsWith("/v1/herald/")) return "herald";
+  if (path.startsWith("/u/")) return "unsubscribe";
   if (m === "POST") {
     switch (path) {
       case "/v1/agents/register": return "register";

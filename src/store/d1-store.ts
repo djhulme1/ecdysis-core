@@ -13,7 +13,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, BuildRecord, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store,
+  AgentRecord, BuildRecord, HeraldRecord, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store,
 } from "./store.js";
 
 export class D1Store implements Store {
@@ -143,6 +143,41 @@ export class D1Store implements Store {
       .all<Record<string, unknown>>();
     return (rs.results ?? []).map(rowToPractice);
   }
+  // --- the Herald (operational, private) ---
+  async putHerald(h: HeraldRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO herald (id, kind, work_id, paper_id, recipient, subject, body, status, unsub_token, created_at, approved_at, sent_at, provider_id, error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         ON CONFLICT(id) DO UPDATE SET status=?8, approved_at=?11, sent_at=?12, provider_id=?13, error=?14`,
+      )
+      .bind(h.id, h.kind, h.workId, h.paperId, h.recipient, h.subject, h.body, h.status, h.unsubToken, h.createdAt,
+        h.approvedAt ?? null, h.sentAt ?? null, h.providerId ?? null, h.error ?? null)
+      .run();
+  }
+  async getHerald(id: string): Promise<HeraldRecord | null> {
+    const r = await this.db.prepare("SELECT * FROM herald WHERE id = ?1").bind(id).first<Record<string, unknown>>();
+    return r ? rowToHerald(r) : null;
+  }
+  async listHerald(limit: number): Promise<HeraldRecord[]> {
+    const rs = await this.db.prepare("SELECT * FROM herald ORDER BY created_at DESC LIMIT ?1").bind(limit).all<Record<string, unknown>>();
+    return (rs.results ?? []).map(rowToHerald);
+  }
+  async countHeraldSent(sinceIso: string, domain?: string): Promise<number> {
+    const r = domain
+      ? await this.db.prepare("SELECT COUNT(*) AS n FROM herald WHERE status = 'sent' AND sent_at >= ?1 AND lower(recipient) LIKE ?2")
+          .bind(sinceIso, `%@${domain.toLowerCase()}`).first<{ n: number }>()
+      : await this.db.prepare("SELECT COUNT(*) AS n FROM herald WHERE status = 'sent' AND sent_at >= ?1").bind(sinceIso).first<{ n: number }>();
+    return r?.n ?? 0;
+  }
+  async isSuppressed(email: string): Promise<boolean> {
+    const r = await this.db.prepare("SELECT 1 AS x FROM herald_suppression WHERE email = ?1").bind(email.toLowerCase()).first();
+    return !!r;
+  }
+  async suppress(email: string, at: string): Promise<void> {
+    await this.db.prepare("INSERT OR IGNORE INTO herald_suppression (email, at) VALUES (?1, ?2)").bind(email.toLowerCase(), at).run();
+  }
+
   async countPracticeForOperator(operatorId: string, sinceIso: string): Promise<number> {
     const r = await this.db
       .prepare("SELECT COUNT(*) AS n FROM practice WHERE operator_id = ?1 AND issued_at >= ?2")
@@ -364,6 +399,25 @@ function rowToQuarantine(r: Record<string, unknown>): QuarantineRecord {
     juryOperators: JSON.parse((r["jury_ops_json"] as string) ?? "[]"),
     votes: JSON.parse((r["votes_json"] as string) ?? "[]"),
     ...(r["seats_json"] ? { seats: JSON.parse(r["seats_json"] as string) } : {}),
+  };
+}
+
+function rowToHerald(r: Record<string, unknown>): HeraldRecord {
+  return {
+    id: r["id"] as string,
+    kind: r["kind"] as string,
+    workId: (r["work_id"] as string | null) ?? null,
+    paperId: (r["paper_id"] as string | null) ?? null,
+    recipient: r["recipient"] as string,
+    subject: r["subject"] as string,
+    body: r["body"] as string,
+    status: r["status"] as HeraldRecord["status"],
+    unsubToken: r["unsub_token"] as string,
+    createdAt: r["created_at"] as string,
+    approvedAt: (r["approved_at"] as string | null) ?? null,
+    sentAt: (r["sent_at"] as string | null) ?? null,
+    providerId: (r["provider_id"] as string | null) ?? null,
+    error: (r["error"] as string | null) ?? null,
   };
 }
 

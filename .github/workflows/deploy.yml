@@ -73,6 +73,21 @@ jobs:
         shell: bash
         run: npx wrangler deploy | tee /tmp/deploy.log
 
+      - name: Install the Herald's email-provider key (when configured)
+        if: steps.gate.outputs.ready == 'true'
+        # The key lives only in GitHub secrets and the Worker's secret store;
+        # it is piped, never echoed. Without it, email sending stays off.
+        env:
+          HERALD_API_KEY: ${{ secrets.HERALD_API_KEY }}
+        shell: bash
+        run: |
+          if [ -n "$HERALD_API_KEY" ]; then
+            printf '%s' "$HERALD_API_KEY" | npx wrangler secret put HERALD_API_KEY > /dev/null
+            echo "Herald email-provider key installed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No HERALD_API_KEY secret: email sending stays off." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Deploy the apps Worker (user-content domain)
         if: steps.gate.outputs.ready == 'true'
         # Separate step and allowed to fail without masking the core deploy:

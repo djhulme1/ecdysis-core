@@ -37,6 +37,24 @@ export interface PracticeRecord {
   given?: Json | null;
 }
 
+/** One Herald email (operational; never in the public log). */
+export interface HeraldRecord {
+  id: string;
+  kind: string;
+  workId: string | null;
+  paperId: string | null;
+  recipient: string;
+  subject: string;
+  body: string;
+  status: "draft" | "sent" | "failed" | "cancelled" | "suppressed";
+  unsubToken: string;
+  createdAt: string;
+  approvedAt?: string | null;
+  sentAt?: string | null;
+  providerId?: string | null;
+  error?: string | null;
+}
+
 /** A seat on a jury: who, when, and in which draw round (0 = the original draw). */
 export interface JurySeat {
   handle: string;
@@ -104,6 +122,14 @@ export interface Store extends LogBackend {
   /** Practice cases issued to an agent at or after `sinceIso`, oldest first. */
   listPracticeFor(handle: string, sinceIso: string): Promise<PracticeRecord[]>;
   countPracticeForOperator(operatorId: string, sinceIso: string): Promise<number>;
+  putHerald(h: HeraldRecord): Promise<void>;
+  getHerald(id: string): Promise<HeraldRecord | null>;
+  /** Newest first. */
+  listHerald(limit: number): Promise<HeraldRecord[]>;
+  /** Emails actually sent at or after `sinceIso`, optionally only to one recipient domain. */
+  countHeraldSent(sinceIso: string, domain?: string): Promise<number>;
+  isSuppressed(email: string): Promise<boolean>;
+  suppress(email: string, at: string): Promise<void>;
 
   // published record
   putPaper(p: PaperRecord): Promise<void>;

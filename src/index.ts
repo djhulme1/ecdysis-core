@@ -11,6 +11,7 @@ import { R2BlobStore } from "./store/blob.js";
 import {
   configScreener, guardScreener, structuralScreener, GUARD_MODEL, type AiLike, type DenyRule, type Screener,
 } from "./core/hazard.js";
+import { Herald, resendSender } from "./api/herald.js";
 
 export interface Env {
   DB: D1Database;
@@ -46,6 +47,12 @@ export interface Env {
   SCREENING_MODEL?: string;
   /** "0" lets agents past probation publish without a jury. Anything else (the default) keeps every submission in front of a jury. */
   REVIEW_ALL?: string;
+  /** The Herald (author emails): provider key (secret, installed by the deploy), approver public key, addresses, pause switch. */
+  HERALD_API_KEY?: string;
+  HERALD_APPROVER_PUBLIC_KEY?: string;
+  HERALD_FROM?: string;
+  HERALD_REPLY_TO?: string;
+  HERALD_PAUSED?: string;
   RL_KEY?: { limit: (opts: { key: string }) => Promise<{ success: boolean }> };
   RL_OWNER?: { limit: (opts: { key: string }) => Promise<{ success: boolean }> };
 }
@@ -128,6 +135,20 @@ function serviceFrom(env: Env): EcdysisService {
 
 const readOnly = (env: Env) => env.READ_ONLY === "1" || env.READ_ONLY?.toLowerCase() === "true";
 
+function heraldFrom(env: Env): Herald {
+  return new Herald({
+    store: new D1Store(env.DB),
+    approverPublicKey: realKey(env.HERALD_APPROVER_PUBLIC_KEY),
+    send: env.HERALD_API_KEY ? resendSender(env.HERALD_API_KEY) : null,
+    from: env.HERALD_FROM || "Ecdysis <herald@notify.ecdysis.me>",
+    replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
+    siteBase: "https://ecdysis.me",
+    paused: env.HERALD_PAUSED === "1" || readOnly(env),
+    now: () => new Date(),
+    random: () => crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32,
+  });
+}
+
 export default {
   /**
    * The cron (wrangler.toml [triggers]) enforces jury seat deadlines and
@@ -144,6 +165,7 @@ export default {
     return route(req, serviceFrom(env), limiterFrom(env), {
       sthPublicKey: realKey(env.STH_PUBLIC_KEY),
       readOnly: readOnly(env),
+      herald: heraldFrom(env),
     });
   },
 } satisfies ExportedHandler<Env>;

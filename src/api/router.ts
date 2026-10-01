@@ -15,6 +15,7 @@ import { observatoryPage } from "../web/observatory.js";
 import { reviewPage, type Decision, type QueueBody } from "../web/review.js";
 import { appsPage } from "../web/apps.js";
 import { paperPage as renderPaper } from "../web/paper.js";
+import type { Herald } from "./herald.js";
 import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
 import { endpointOf, funnelKeys } from "./funnel.js";
@@ -30,6 +31,8 @@ export interface RouteOptions {
   sthPublicKey?: string | null;
   /** Kill switch: when true every non-GET returns 503 and nothing mutates. */
   readOnly?: boolean;
+  /** The Herald (author emails). Absent: its endpoints answer 501. */
+  herald?: Herald | null;
 }
 
 /** Permissive in-memory fallback; production uses Cloudflare's bindings. */
@@ -397,6 +400,16 @@ async function routeRequest(
     return respond(429, { error: "rate limit exceeded; slow down" });
   }
 
+  // Unsubscribe links: always honoured, even in read-only mode — opting out
+  // of email must never be refused.
+  const unsub = path.match(/^\/u\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
+  if (unsub || path.startsWith("/u/")) {
+    const headers = { ...STATIC_PAGE_HEADERS, "cache-control": "no-store", "content-security-policy": STATIC_PAGE_HEADERS["content-security-policy"]!.replace("form-action 'none'", "form-action 'self'") };
+    if (!opts.herald || !unsub) return new Response("Not found", { status: 404, headers });
+    const r = await opts.herald.unsubscribe(unsub[1]!, unsub[2]!, method === "POST" ? "POST" : "GET");
+    return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers });
+  }
+
   // The kill switch: reads stay up (the record remains auditable), every
   // mutation is refused before its body is even parsed.
   if (!reading && !isMcp && opts.readOnly) {
@@ -449,7 +462,7 @@ async function routeRequest(
       if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
       return respond(r.status, r.body);
     }
-    const r = await dispatch(method === "HEAD" ? "GET" : method, path, url.searchParams, body, raw, svc);
+    const r = await dispatch(method === "HEAD" ? "GET" : method, path, url.searchParams, body, raw, svc, opts);
     if (method === "HEAD") return new Response(null, { status: r.status, headers: JSON_HEADERS });
     return respond(r.status, r.body);
   } catch (e) {
@@ -466,6 +479,7 @@ async function dispatch(
   body: Json,
   raw: Uint8Array | null,
   svc: EcdysisService,
+  opts: RouteOptions = {},
 ) {
   if (method === "GET" && path === "/") {
     return {
@@ -512,6 +526,16 @@ async function dispatch(
   if (method === "GET" && path === "/v1/review") return svc.reviewQueue();
   if (method === "POST" && path === "/v1/jury/packet") return svc.juryPacket(body);
   if (method === "POST" && path === "/v1/review/reasons") return svc.caseReasons(body);
+  if (method === "POST" && path.startsWith("/v1/herald/")) {
+    const h = opts.herald;
+    if (!h) return { status: 501, body: { error: "the Herald is not configured on this deployment" } };
+    switch (path) {
+      case "/v1/herald/draft": return h.draft(body);
+      case "/v1/herald/send": return h.send(body);
+      case "/v1/herald/cancel": return h.cancel(body);
+      case "/v1/herald/list": return h.list(body);
+    }
+  }
   if (method === "POST" && path === "/v1/practice/case") return svc.practiceCase(body);
   if (method === "POST" && path === "/v1/practice/answer") return svc.practiceAnswer(body);
   if (method === "GET" && path.startsWith("/v1/review/")) {
