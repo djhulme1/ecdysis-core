@@ -2,7 +2,7 @@
 instance models (duplicates allowed: counts.csv; no duplicate clauses: counts_nodup.csv), with overdispersion-corrected
 (quasi-likelihood) profile intervals for alpha_c and nu. -> results/sensitivity_<model>.json. Bootstrap seed 20261002 per model.
 Usage: python sensitivity.py [with_duplicates] [no_duplicates]   (one model per process to use both cores).
-Profile grids: alpha_c 3.95-4.30 step 0.01, nu 1.10-2.00 step 0.02, warm-started sweeps."""
+Profile grids: alpha_c 3.95-4.30 step 0.005, nu 1.10-2.00 step 0.02, warm-started sweeps."""
 import csv, json, os, itertools
 import numpy as np
 from scipy.optimize import minimize
@@ -51,15 +51,15 @@ def profile(D, nl, idx, grid, x0):
 def analyse(D, rng):
     o = {"A1": {}}
     for N in sorted(D):
-        m, w = fit_logistic(D[N][:, 0], D[N][:, 1], D[N][:, 2]); bm = []
+        m, w = fit_logistic(D[N][:, 0], D[N][:, 1], D[N][:, 2]); bm = []; bw = []
         for b in range(300):
-            k = rng.binomial(D[N][:, 1].astype(int), D[N][:, 2] / D[N][:, 1]); bm.append(fit_logistic(D[N][:, 0], D[N][:, 1], k)[0])
-        o["A1"][N] = {"alpha50": m, "alpha50_ci": [float(np.percentile(bm, 2.5)), float(np.percentile(bm, 97.5))], "width10_90": w}
+            k = rng.binomial(D[N][:, 1].astype(int), D[N][:, 2] / D[N][:, 1]); fb = fit_logistic(D[N][:, 0], D[N][:, 1], k); bm.append(fb[0]); bw.append(fb[1])
+        o["A1"][N] = {"alpha50": m, "alpha50_ci": [float(np.percentile(bm, 2.5)), float(np.percentile(bm, 97.5))], "width10_90": w, "_bw": bw}
     for key, nl in (("A2", [12, 20, 24, 40, 50, 100]), ("A3", [50, 100, 150, 200])):
         r = best(D, nl)
         sat = sum(nll(np.clip(D[N][:, 2] / D[N][:, 1], 1e-12, 1 - 1e-12), D[N][:, 2], D[N][:, 1]) for N in nl)
         df = sum(len(D[N]) for N in nl) - 4; phi = 2 * (r.fun - sat) / df
-        prof_ac = {k: 2 * (v - r.fun) for k, v in profile(D, nl, 0, np.round(np.arange(3.95, 4.3001, 0.01), 3), r.x).items()}
+        prof_ac = {k: 2 * (v - r.fun) for k, v in profile(D, nl, 0, np.round(np.arange(3.95, 4.3001, 0.005), 3), r.x).items()}
         prof_nu = {k: 2 * (v - r.fun) for k, v in profile(D, nl, 1, np.round(np.arange(1.10, 2.0001, 0.02), 3), r.x).items()}
         ks = minimize(lambda t: F([4.17, 1.5, 0.74, t[0]], D, nl), [0.5], method="Nelder-Mead", options=opt)
         inside = lambda pr: [min(k for k, d in pr.items() if d / phi <= 3.84), max(k for k, d in pr.items() if d / phi <= 3.84)]
@@ -69,7 +69,9 @@ def analyse(D, rng):
                   "KS_triple_dev": 2 * (ks.fun - r.fun), "KS_triple_dev_over_phi": 2 * (ks.fun - r.fun) / phi}
     L = [50, 100, 150, 200]
     sl = np.polyfit(np.log(L), np.log([o["A1"][N]["width10_90"] for N in L]), 1)[0]
-    o["A4"] = {"slope": sl, "nu_eff": -1 / sl}
+    bs = [np.polyfit(np.log(L), np.log([o["A1"][N]["_bw"][b] for N in L]), 1)[0] for b in range(300)]
+    o["A4"] = {"slope": sl, "nu_eff": -1 / sl, "nu_eff_ci": [float(np.percentile([-1 / x for x in bs], 2.5)), float(np.percentile([-1 / x for x in bs], 97.5))]}
+    for N in o["A1"]: o["A1"][N].pop("_bw")
     o["A5"] = {N: {"obs": o["A1"][N]["alpha50"], "obs_minus_KS": o["A1"][N]["alpha50"] - (4.17 + 3.1 * N ** (-2 / 3))} for N in (150, 200)}
     return o
 files = {"with_duplicates": "counts.csv", "no_duplicates": "counts_nodup.csv"}
@@ -83,4 +85,4 @@ for m, o in out.items():
     for N, a in o["A1"].items(): print("  N=%d a50=%.3f [%.3f, %.3f] w=%.3f" % (N, a["alpha50"], *a["alpha50_ci"], a["width10_90"]))
     for k in ("A2", "A3"):
         q = o[k]; print("  %s ac=%.3f %s nu=%.3f %s y50=%.2f phi=%.2f dev/phi@4.17=%.1f KS=%.1f (%.1f)" % (k, q["alpha_c"], q["alpha_c_quasi_ci"], q["nu"], q["nu_quasi_ci"], q["y50"], q["phi"], q["dev_over_phi_at_4.17"], q["KS_triple_dev"], q["KS_triple_dev_over_phi"]))
-    print("  A4 nu_eff=%.3f" % o["A4"]["nu_eff"], " A5", {N: round(v["obs_minus_KS"], 4) for N, v in o["A5"].items()})
+    print("  A4 nu_eff=%.3f [%.3f, %.3f]" % (o["A4"]["nu_eff"], *o["A4"]["nu_eff_ci"]), " A5", {N: round(v["obs_minus_KS"], 4) for N, v in o["A5"].items()})

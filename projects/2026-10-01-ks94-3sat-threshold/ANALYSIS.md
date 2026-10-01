@@ -51,23 +51,24 @@ Added 2026-10-01 at drafting, to close deviation 3 and to test how much the $\al
 - Consequence for the verdicts: the P1 verdict on $\alpha_c$ survives the overdispersion correction on KS's own N range. On N = 50–200, KS's value lies at the edge of the corrected interval. The model misfit is itself a finding: one logistic scaling function with one $\alpha_c$ does not describe N = 12–100, so "$\alpha_c$" from such a collapse is an effective, range-dependent parameter.
 
 ## Post-review sensitivity analysis (exploratory, not pre-registered): instance model
-Added 2026-10-01 after juror 1. run_nodup.py -> results/counts_nodup.csv (same grid, same solver, new seeds, no duplicate clauses within a formula); sensitivity.py -> results/sensitivity_with_duplicates.json and results/sensitivity_no_duplicates.json (+ .log). Profile intervals are quasi-likelihood (profile deviance / φ ≤ 3.84) on a grid of step 0.01 for $\alpha_c$ and 0.02 for $\nu$, so endpoints are resolved to the grid step; A1 intervals here use 300 bootstrap resamples. The with-duplicates rows reproduce the earlier A2/A3 and check_fit numbers (4.0762, 1.5194, deviance 621.0, φ 3.41, deviance at 4.17 = 101.0, KS triple 301.8).
+Added 2026-10-01 after juror 1. run_nodup.py -> results/counts_nodup.csv (same grid, same solver, new seeds, no duplicate clauses within a formula); sensitivity.py -> results/sensitivity_with_duplicates.json and results/sensitivity_no_duplicates.json (+ .log). Profile intervals are quasi-likelihood (profile deviance / φ ≤ 3.84) on a grid of step 0.005 for $\alpha_c$ (refined from 0.01 after review 2) and 0.02 for $\nu$, so endpoints are resolved to the grid step; A1 intervals and the $\nu_{eff}$ interval here use 300 bootstrap resamples. The with-duplicates rows reproduce the earlier A2/A3 and check_fit numbers (4.0762, 1.5194, deviance 621.0, φ 3.41, deviance at 4.17 = 101.0, KS triple 301.8).
 
 | | with duplicates | no duplicates |
 |---|---|---|
-| A2 (N 12–100) $\alpha_c$ [corrected 95%] | 4.076 [4.04, 4.11] | 4.115 [4.08, 4.14] |
+| A2 (N 12–100) $\alpha_c$ [corrected 95%] | 4.076 [4.04, 4.11] | 4.115 [4.08, 4.145] |
 | A2 $\nu$ [corrected 95%] | 1.519 [1.44, 1.62] | 1.517 [1.44, 1.62] |
 | A2 $y_{50}$; φ | 1.05; 3.41 | 0.91; 3.30 |
 | A2 deviance at $\alpha_c$ = 4.17, raw (÷φ) | 101.0 (29.6) | 35.4 (10.7) |
 | A2 KS triple 4.17/1.5/0.74, raw (÷φ) | 301.8 (88.4) | 97.8 (29.7) |
-| A3 (N 50–200) $\alpha_c$ [corrected 95%] | 4.198 [4.18, 4.22] | 4.190 [4.17, 4.21] |
+| A3 (N 50–200) $\alpha_c$ [corrected 95%] | 4.198 [4.175, 4.22] | 4.190 [4.17, 4.21] |
 | A3 $\nu$ [corrected 95%] | 1.449 [1.34, 1.60] | 1.451 [1.34, 1.58] |
 | A3 deviance ÷φ at 4.17 | 4.5 | 2.7 |
-| A4 $\nu_{eff}$ (N 50–200) | 1.42 | 1.46 |
+| A4 $\nu_{eff}$ (N 50–200) [95%] | 1.42 [1.33, 1.52] | 1.46 [1.37, 1.57] |
 | A5 obs − KS law, N = 150 / 200 | +0.013 / +0.010 | +0.002 / +0.009 |
 | $\alpha_{50}$ at N = 12 / 150 / 200 | 4.935 / 4.292 / 4.271 | 4.859 / 4.282 / 4.269 |
 
 Consequences for the draft:
-- The P1 verdict on $\alpha_c$ ("wholly below 4.17 ± 0.05") holds with duplicates allowed but NOT without them: the duplicate-free corrected interval [4.08, 4.14] overlaps KS's range [4.12, 4.22]. KS do not state their instance model, so the "refutes" relation is withdrawn. What survives under both models: the point value 4.17 itself lies outside the corrected 95% interval on KS's N range (deviance ÷ φ 29.6 and 10.7, both > 3.84), and KS's published triple fits far worse than the best collapse.
+- The P1 verdict on $\alpha_c$ ("wholly below 4.17 ± 0.05") holds with duplicates allowed but NOT without them: the duplicate-free corrected interval [4.08, 4.145] overlaps KS's range [4.12, 4.22]. KS do not state their instance model, so the "refutes" relation is withdrawn. What survives under both models: the point value 4.17 itself lies outside the corrected 95% interval on KS's N range (deviance ÷ φ 29.6 and 10.7, both > 3.84), and KS's published triple fits far worse than the best collapse.
 - $\nu$, the drift of the fitted $\alpha_c$ with N range, the 50% law at N = 150, 200 and $\nu_{eff}$ are robust to the instance model.
 - Duplicate clauses mainly move the smallest sizes ($\alpha_{50}$ at N = 12 falls by 0.08 without them), which is where the A2 collapse gets its leverage.
+- Review 2 balancing points: on N = 50–200 the KS triple is only 4.9 / 2.8 corrected deviance units worse than the best collapse and the duplicate-free interval contains 4.17. KS's 50% law misses in their own range at small N (with duplicates +0.17, +0.08, +0.05 at N = 12, 20, 24) and the bootstrap interval excludes it at N = 100 (4.298 [4.287, 4.309] against 4.314) and at N = 150 with duplicates; Crawford–Auton's 4.24 + 6/N is as close or closer at N = 150, 200 (+0.012, +0.001), so the out-of-sample check cannot separate the two laws.
