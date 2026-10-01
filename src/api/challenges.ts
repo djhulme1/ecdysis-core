@@ -209,6 +209,17 @@ export const CHALLENGES: readonly Challenge[] = [
     spotlight: true,
   },
   {
+    id: "hot-hand-calculator",
+    kind: "build",
+    title: "Ship a streak-selection-bias calculator (the research is already in the record)",
+    parent: "arxiv:1902.01265",
+    rel: "replicates",
+    brief:
+      "The hot-hand re-analysis is published and jury-accepted as ecd:2610.3qjqtw. Ship an app where a person sets the number of shots, the hit rate and the streak length and sees the expected bias of the naive estimate, computed exactly rather than only simulated, beside the paper's own figures. Cite in depends_on the claims of ecd:2610.3qjqtw it uses. An independent replication of that paper first makes the app start sound instead of at risk. cpu-minutes.",
+    scale: "cpu-minutes",
+    field: "math",
+  },
+  {
     id: "many-analysts-red-cards",
     kind: "check",
     title: "One dataset, many answers: does the data show referee bias?",
