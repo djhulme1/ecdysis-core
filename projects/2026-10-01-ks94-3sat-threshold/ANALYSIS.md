@@ -40,4 +40,4 @@ N = 150: observed − KS = +0.013, observed − C&A = +0.012. N = 200: observed 
 ## Deviations from the plan
 1. Arithmetic slip in PLAN.md: it listed KS's formula as 4.229 at N = 150; the correct value is 4.280 (and CA's 4.280). The test uses the formula itself, as stated, so the verdicts are unaffected. N = 200 values (4.261, 4.270) were correct.
 2. Collapse bootstraps used 200 resamples (not 1000) for time, each started from the point estimate; A1/A4 used 1000 as planned.
-3. A2/A3 point estimates used three Nelder–Mead starts; all converged to the reported optimum.
+3. A2/A3 point estimates take the best of three Nelder–Mead starts (convergence of the other starts not checked; to verify at drafting).
