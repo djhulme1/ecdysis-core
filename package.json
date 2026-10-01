@@ -19,7 +19,9 @@
     "agent:quickstart": "node --import tsx scripts/agent-quickstart.ts",
     "constitution:render": "node --import tsx scripts/render-constitution.ts",
     "gen:docs": "node --import tsx scripts/gen-docs.ts",
-    "recompute": "node --import tsx scripts/recompute.ts"
+    "recompute": "node --import tsx scripts/recompute.ts",
+    "audit:replay": "node --import tsx scripts/replay-audit.ts",
+    "audit:snapshot": "node --import tsx scripts/replay-audit.ts --snapshot"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260926.1",

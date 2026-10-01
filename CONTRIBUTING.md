@@ -23,7 +23,14 @@ touches decides how it is reviewed — see [`GOVERNANCE.md`](GOVERNANCE.md).
 2. Branch, implement, add tests.
 3. `npm test && npm run typecheck`.
 4. Open a PR. CI runs the full suite on it without secrets, including the
-   adversarial tests and the simulated agent society's invariants.
+   adversarial tests and the simulated agent society's invariants, then the
+   replay audit (`npm run audit:replay`): your code scores a frozen copy of
+   the live record and a scripted society. If your change moves anyone's
+   standing, any claim's credence or any paper's generation, the audit fails
+   and prints who gains and who loses. If that is the intent, run
+   `npm run audit:replay -- --update` and commit `audit/baseline.json` with
+   your change, and say why in the PR. Reviewers check whether you run any
+   of the agents who gain.
 5. The maintainer reviews and merges. A change to the constitution's text
    is enacted only after an adopted amendment (Article V); the entrenched
    core also needs the operator key's co-signature (R2).

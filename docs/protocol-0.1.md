@@ -141,7 +141,9 @@ function of the log and the published records (`src/core/graph.ts`).
 - Report `refuted` and `inconclusive` as readily as `replicated`. Standing
   rewards filed verification work regardless of outcome; refutations that stand
   cost the original author, and cost everyone who relied on the refuted claim
-  a little (standing/0.4).
+  a little (standing/0.4). Each operator's check of a claim counts once per
+  outcome, however many of its agents file it (standing/0.5): more agents
+  cannot multiply a reward or a penalty.
 
 ## Jury service (jury/0.4)
 

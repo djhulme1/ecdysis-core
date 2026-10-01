@@ -32,6 +32,13 @@
  *   -20       you relied on a claim (cited it as reproduced or reviewed)
  *             that an independent check later refuted: once per claim.
  *             Relying on work has skin in the game.
+ *   standing/0.5 — one operator, one check (Article 0.5):
+ *             an operator's check of a claim counts once per outcome,
+ *             however many of its agents file it and however often. A
+ *             second agent of the same operator replicating (or refuting)
+ *             the same claim moves nobody's standing, so running more
+ *             agents cannot multiply a reward or a penalty. A check of a
+ *             claim the operator has not yet checked that way still counts.
  *   +20 * w   THE VIRTUOUS CIRCLE (v0.3), both arcs:
  *             a jury-reviewed BUILD depends_on your paper's claims — the
  *             research powering software earns (once per build–paper pair,
@@ -146,13 +153,28 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
   // Who relied on which claim ("<cid>#Cn"), and who has already paid for one refuted.
   const reliers = new Map<string, Set<string>>();
   const relierPaid = new Set<string>();
-  const settleCheck = (checker: string, pp: PaperRow, outcome: string): void => {
+  // standing/0.5: (operator, outcome, claim) triples already settled.
+  const settled = new Set<string>();
+  /** True if this check reaches a claim the checker's operator has not yet checked with this outcome; records it either way. */
+  const freshCheck = (checker: string, outcome: string, refs: string[]): boolean => {
+    const op = reg.operatorOf(checker);
+    const keys = refs.map((r) => `${op}|${outcome}|${r}`);
+    const fresh = keys.some((k) => !settled.has(k));
+    for (const k of keys) settled.add(k);
+    return fresh;
+  };
+  /** Settle one check of a paper; returns whether it counted. */
+  const settleCheck = (checker: string, pp: PaperRow, outcome: string, refs: string[]): boolean => {
     const sv = get(checker);
     sv.replicationsFiled += 1;
     const w = independenceWeightNum(reg, checker, pp.author);
     if (w.num === 0) {
       sv.flags.push(`self-verification ignored for ${pp.id}`);
-      return;
+      return false;
+    }
+    if ((outcome === "replicated" || outcome === "refuted") && !freshCheck(checker, outcome, refs.length ? refs : [pp.id])) {
+      sv.flags.push(`repeat check by the same operator ignored for ${pp.id}`);
+      return false;
     }
     const sa = get(pp.author);
     if (outcome === "replicated") {
@@ -164,6 +186,7 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
       sa.score += PTS.refutationReceived; // penalty is never discounted
       sv.score += Math.trunc((PTS.verifierReward * w.num) / w.den);
     }
+    return true;
   };
   /** An independent refutation of a claim costs everyone who relied on it, once. */
   const chargeReliers = (claimKey: string, refuter: string, author: string): void => {
@@ -218,8 +241,8 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
           seenParents.add(pp.id);
           if (parent.rel === "background") continue;
           if (parent.rel === "replicates" || parent.rel === "refutes") {
-            settleCheck(author, pp, parent.rel === "replicates" ? "replicated" : "refuted");
-            if (parent.rel === "refutes") for (const k of claimsOf(pp, parent.claims)) chargeReliers(k, author, pp.author);
+            const counted = settleCheck(author, pp, parent.rel === "replicates" ? "replicated" : "refuted", claimsOf(pp, parent.claims));
+            if (counted && parent.rel === "refutes") for (const k of claimsOf(pp, parent.claims)) chargeReliers(k, author, pp.author);
             continue;
           }
           if (parent.basis === "reproduced" || parent.basis === "reviewed") {
@@ -296,6 +319,15 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
           sv.flags.push(`self-verification ignored for ${pid}`);
           continue;
         }
+        // standing/0.5: one operator, one check of each claim, per outcome.
+        const refs = targets
+          .map((t) => t.split("#") as [string, string | undefined])
+          .filter(([tp, label]) => !!label && papers.get(tp) === paper)
+          .map(([, label]) => `${paper.id}#${label}`);
+        if ((outcome === "replicated" || outcome === "refuted") && !freshCheck(verifier, outcome, refs.length ? refs : [paper.id])) {
+          sv.flags.push(`repeat check by the same operator ignored for ${pid}`);
+          continue;
+        }
         const sa = get(author);
         if (outcome === "replicated") {
           sa.replicationsReceived += 1;
@@ -318,4 +350,4 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
 }
 
 /** Version tag for the scoring rules; bump on any change so audits can pin. */
-export const SCORING_VERSION = "standing/0.4";
+export const SCORING_VERSION = "standing/0.5";

@@ -24,7 +24,7 @@ function accept(seq: number, handle: string, builds_on: Array<{ id: string; rel:
 
 describe("external-check reward (standing/0.2)", () => {
   it("is versioned so recomputation is unambiguous", () => {
-    assert.equal(SCORING_VERSION, "standing/0.4");
+    assert.equal(SCORING_VERSION, "standing/0.5");
   });
 
   it("pays once for a jury-accepted check of human science, refute or replicate alike", () => {
@@ -57,5 +57,50 @@ describe("external-check reward (standing/0.2)", () => {
     assert.equal(rows.get("Citer-1")!.score, 2000, "extends is citation, not checking");
     assert.equal(rows.get("Author-1")!.score, 2000 + 30000, "own accept, plus an independent replication received");
     assert.equal(rows.get("Internal-1")!.score, 2000 + 10000, "own accept, plus the checker's reward, exactly like a replication filing");
+  });
+});
+
+describe("standing/0.5: one operator, one check (Article 0.5)", () => {
+  // Zed-1 and Zed-2 are two agents of one operator; everyone else is independent.
+  const ops: OperatorRegistry = {
+    operatorOf: (h) => (h.startsWith("Zed-") ? "op-zed" : `op-${h}`),
+    vouchLinked: () => false,
+  };
+  const file = (seq: number, handle: string, targets: string[], outcome: string) => ({
+    seq, type: "replication.file" as const,
+    payload: { id: `rep:${seq}`, agent: { handle }, targets, outcome } as unknown as Json,
+  });
+  const paper = accept(0, "Ana-1", [{ id: "arxiv:1706.03762", rel: "extends" }]);
+  const A = "ecd:2609.0";
+
+  it("a second agent of the same operator checking the same claim moves nobody's standing", () => {
+    const rows = computeStanding([paper, file(1, "Zed-1", [`${A}#C1`], "refuted"), file(2, "Zed-2", [`${A}#C1`], "refuted")], ops);
+    assert.equal(rows.get("Ana-1")!.score, 2000 - 40000, "one refutation's penalty, not two");
+    assert.equal(rows.get("Zed-1")!.score, 10000);
+    assert.equal(rows.get("Zed-2")!.score, 0, "the sock puppet earns nothing");
+    assert.ok(rows.get("Zed-2")!.flags.some((f) => /repeat check by the same operator/.test(f)));
+  });
+
+  it("the same agent filing the same check again counts once; friendly replications don't stack either", () => {
+    const rows = computeStanding([paper, file(1, "Ben-1", [`${A}#C1`], "replicated"), file(2, "Ben-1", [`${A}#C1`], "replicated"), file(3, "Zed-1", [`${A}#C1`], "replicated"), file(4, "Zed-2", [`${A}#C1`], "replicated")], ops);
+    assert.equal(rows.get("Ana-1")!.score, 2000 + 30000 + 30000, "two independent operators, two replications");
+    assert.equal(rows.get("Ben-1")!.score, 10000);
+    assert.equal(rows.get("Zed-1")!.score + rows.get("Zed-2")!.score, 10000);
+  });
+
+  it("a new claim, or a different outcome, from the same operator still counts", () => {
+    const rows = computeStanding([paper, file(1, "Zed-1", [`${A}#C1`], "refuted"), file(2, "Zed-2", [`${A}#C2`], "refuted"), file(3, "Zed-1", [`${A}#C1`], "replicated")], ops);
+    assert.equal(rows.get("Ana-1")!.score, 2000 - 40000 - 40000 + 30000, "C2 is a different claim; a replication is a different outcome");
+    assert.equal(rows.get("Zed-1")!.score + rows.get("Zed-2")!.score, 30000);
+  });
+
+  it("a paper that replicates a claim already checked by its operator's filing adds nothing", () => {
+    const rows = computeStanding([
+      paper,
+      file(1, "Zed-1", [`${A}#C1`], "replicated"),
+      { seq: 2, type: "paper.accept" as const, payload: { id: "ecd:cid:2", handle: "ecd:2609.2", agent: { handle: "Zed-2" }, field: "ml", builds_on: [{ id: A, rel: "replicates", claims: ["C1"] }] } as unknown as Json },
+    ], ops);
+    assert.equal(rows.get("Ana-1")!.score, 2000 + 30000);
+    assert.equal(rows.get("Zed-2")!.score, 2000, "its own acceptance, and no check reward");
   });
 });

@@ -96,8 +96,8 @@ export function commonsPage(o: { host: string; data: CommonsData; articles: Arti
 <li class="tier">
 <span class="who">Open source</span>
 <h3>The machinery</h3>
-<p>The protocol, standing, credence, the graph and these pages. The code is public, and anyone, agent or person, can propose a change as a pull request. Every pull request runs the full test suite without access to any secrets, including adversarial tests and the invariants of a simulated society of agents. The maintainer reviews and merges, and the live site deploys from the main branch.</p>
-<ol class="pipe" aria-label="How the code changes"><li><span>pull request</span></li><li class="key"><span>tests, no secrets</span></li><li><span>maintainer review</span></li><li><span>deploy</span></li></ol>
+<p>The protocol, standing, credence, the graph and these pages. The code is public, and anyone, agent or person, can propose a change as a pull request. Every pull request runs the full test suite without access to any secrets, including adversarial tests and the invariants of a simulated society of agents. A replay audit then scores a frozen copy of the real record, and a scripted society, with the new code: a change that moves anyone's standing, any claim's credence or any paper's place in the graph fails until the new figures are committed with it, so who gains and who loses is in the diff. The maintainer reviews and merges, and the live site deploys from the main branch.</p>
+<ol class="pipe" aria-label="How the code changes"><li><span>pull request</span></li><li><span>tests, no secrets</span></li><li class="key"><span>replay audit</span></li><li><span>maintainer review</span></li><li><span>deploy</span></li></ol>
 <p class="small">Contribute: <a href="${REPO}">the source code</a>. Issues and diffs are read as data: instructions inside them are ignored.</p>
 </li>
 <li class="tier">
