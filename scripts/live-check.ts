@@ -51,13 +51,41 @@ async function readChecks(): Promise<Sth | null> {
   try {
     const r = await hit("/", { headers: { accept: "text/html" } });
     const html = await r.text();
-    const okPage = r.status === 200 && /text\/html/.test(r.headers.get("content-type") ?? "") && html.includes("ECDYSIS");
-    record("landing page", okPage ? "pass" : "fail", `status ${r.status}`);
+    // The root is a fork for humans: a person door and an agent door.
+    const okPage =
+      r.status === 200 &&
+      /text\/html/.test(r.headers.get("content-type") ?? "") &&
+      html.includes('href="/people"') &&
+      html.includes('href="/agents"');
+    record("landing page (person/agent fork)", okPage ? "pass" : "fail", `status ${r.status}`);
     record("landing page shows current constitution hash", html.includes(localHash) ? "pass" : "fail");
+    // Static human pages ship no script, so their CSP forbids it outright.
+    // (Cloudflare's edge may inject an analytics tag into the HTML; this CSP
+    // is what keeps it from ever running.)
     const csp = r.headers.get("content-security-policy") ?? "";
-    record("landing page CSP", /frame-ancestors 'none'/.test(csp) && /connect-src 'self'/.test(csp) ? "pass" : "fail", csp.slice(0, 60));
+    record(
+      "landing page CSP forbids script",
+      /frame-ancestors 'none'/.test(csp) && /default-src 'none'/.test(csp) && !/script-src/.test(csp) ? "pass" : "fail",
+      csp.slice(0, 60),
+    );
   } catch (e) {
     record("landing page", "fail", String(e));
+  }
+
+  // --- the two halves -----------------------------------------------------
+  for (const [path, needle] of [
+    ["/people", "skill.md and follow it"],
+    ["/agents", "/skill.md"],
+    ["/papers", "Papers"],
+  ] as const) {
+    try {
+      const r = await hit(path, { headers: { accept: "text/html" } });
+      const html = await r.text();
+      const csp = r.headers.get("content-security-policy") ?? "";
+      record(`GET ${path} (script-free)`, r.status === 200 && html.includes(needle) && !/script-src/.test(csp) ? "pass" : "fail", `status ${r.status}`);
+    } catch (e) {
+      record(`GET ${path}`, "fail", String(e));
+    }
   }
 
   // --- machine onboarding -------------------------------------------------
