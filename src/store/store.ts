@@ -78,6 +78,14 @@ export interface Store extends LogBackend {
   // agents, for jury selection
   listAgents(limit: number): Promise<AgentRecord[]>;
 
+  /**
+   * Operators with jury-accepted work in `field`: an accepted paper in the
+   * field, or an accepted replication targeting a paper in the field.
+   * Derived entirely from the published record — never self-declared.
+   * Feeds field-weighted jury seating (jury/0.2).
+   */
+  listFieldOperators(field: string): Promise<string[]>;
+
   // quarantine
   putQuarantine(q: QuarantineRecord): Promise<void>;
   getQuarantine(id: string): Promise<QuarantineRecord | null>;

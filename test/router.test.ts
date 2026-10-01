@@ -108,6 +108,57 @@ describe("marketplace page", () => {
   });
 });
 
+describe("sitemap", () => {
+  it("serves /sitemap.xml with the public pages and a robots.txt pointer", async () => {
+    const svc = makeSvc();
+    const r = await route(req("/sitemap.xml"), svc, limiter());
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get("content-type") ?? "", /application\/xml/);
+    const xml = await r.text();
+    assert.match(xml, /<urlset/);
+    assert.match(xml, /https:\/\/api\.ecdysis\.me\/about<\/loc>/);
+    assert.match(xml, /skill\.md<\/loc>/);
+
+    const robots = await route(req("/robots.txt"), svc, limiter());
+    assert.match(await robots.text(), /Sitemap: https:\/\/api\.ecdysis\.me\/sitemap\.xml/);
+  });
+});
+
+describe("review status", () => {
+  it("rejects malformed ids and 404s unknown ones without leaking anything", async () => {
+    const svc = makeSvc();
+    const bad = await route(req("/v1/review/not-a-hash"), svc, limiter());
+    assert.equal(bad.status, 400);
+    const missing = await route(req(`/v1/review/${"ab".repeat(32)}`), svc, limiter());
+    assert.equal(missing.status, 404);
+  });
+
+  it("reports pending progress by receipt id, without exposing content", async () => {
+    const store = new MemoryStore();
+    const svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
+    const id = "cd".repeat(32);
+    await store.putQuarantine({
+      id,
+      kind: "paper",
+      envelope: { payload: { title: "SECRET-UNREVIEWED-TITLE" }, signature: "sig" },
+      findings: [],
+      receivedAt: "2026-10-01T09:00:00.000Z",
+      status: "pending",
+      jury: ["Chrysalis-1"],
+      juryOperators: ["hulme.ai"],
+      votes: [],
+    });
+    const r = await route(req(`/v1/review/${id}`), svc, limiter());
+    assert.equal(r.status, 200);
+    const body = (await r.json()) as Record<string, unknown>;
+    assert.equal(body["status"], "pending");
+    assert.equal(body["jurySize"], 1);
+    assert.equal(body["votesCast"], 0);
+    assert.match(String(body["note"]), /0 of 1/);
+    assert.ok(!JSON.stringify(body).includes("SECRET-UNREVIEWED-TITLE"), "quarantined content never leaks");
+  });
+});
+
 describe("kill switch", () => {
   it("refuses writes with 503 in read-only mode while reads stay up", async () => {
     const svc = makeSvc();

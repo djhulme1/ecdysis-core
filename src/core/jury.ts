@@ -32,6 +32,63 @@ export interface JurySelection {
 export const JURY_SIZE = 5;
 export const JURY_QUORUM = 3;
 
+/**
+ * Selection-rule version, stamped on receipts and stats like
+ * SCORING_VERSION: auditors recompute any panel under the rules in force
+ * when it was seated, never retroactively.
+ *
+ *   jury/0.1 — global hash draw, one juror per operator.
+ *   jury/0.2 — field-weighted seating (see selectJuryFielded): up to
+ *              min(3, floor(P/2)) seats reserved for operators with
+ *              jury-accepted work in the submission's field, where P is the
+ *              field pool's independence-discounted size; remaining seats
+ *              stay a global draw. With max three field seats, the 2/3
+ *              decision rule means acceptance always requires at least one
+ *              open-seat juror's concurrence — the cross-field check is
+ *              structural. Behaviour is identical to jury/0.1 whenever the
+ *              field pool is thin (P < 2), so the rule activates gradually
+ *              as fields populate.
+ */
+export const JURY_VERSION = "jury/0.2";
+
+export interface FieldedJuryCandidate extends JuryCandidate {
+  /**
+   * The operator has jury-accepted work in the submission's field —
+   * derived from the published record only (accepted papers in the field,
+   * or accepted replications targeting papers in the field). Never
+   * self-declared, never imported from outside the log.
+   */
+  fieldCompetent: boolean;
+}
+
+export interface FieldedJurySelection extends JurySelection {
+  juryVersion: string;
+  /** Seats reserved for the field pool in this panel (0 when the pool is thin). */
+  fieldSeats: number;
+  /** Independence-discounted weight of the field pool at selection time. */
+  fieldPoolWeight: number;
+}
+
+/**
+ * Independence-discounted weight of a pool of operators: each counts 1, or
+ * 1/2 when vouch-linked to another member of the same pool — the same
+ * discount the scoring rule applies (Article IV.3). A nine-agent field
+ * vouched in by one clique weighs far less than nine, so a clique must
+ * out-populate the honest field to concentrate seats.
+ */
+export function independentPoolWeight(
+  operators: string[],
+  vouchLinked: (a: string, b: string) => boolean,
+): number {
+  const ops = [...new Set(operators)];
+  let weight = 0;
+  for (const a of ops) {
+    const linked = ops.some((b) => b !== a && vouchLinked(a, b));
+    weight += linked ? 0.5 : 1;
+  }
+  return weight;
+}
+
 /** Deterministically select up to `size` jurors, one per operator. */
 export async function selectJury(
   seedHex: string,
@@ -39,9 +96,38 @@ export async function selectJury(
   submitterOperator: string,
   size = JURY_SIZE,
 ): Promise<JurySelection> {
+  const sel = await selectJuryFielded(
+    seedHex,
+    candidates.map((c) => ({ ...c, fieldCompetent: false })),
+    submitterOperator,
+    () => false,
+    size,
+  );
+  return { jurors: sel.jurors, operators: sel.operators };
+}
+
+/**
+ * Field-weighted selection (jury/0.2). Ranking stays SHA-256(seed||handle)
+ * — the seed is the submission's own envelope hash, so a submitter cannot
+ * predict or shop for its panel — and one operator still never holds two
+ * seats. Field seats fill first from the field pool in hash order; open
+ * seats then fill from everyone, so an under-populated field pool degrades
+ * gracefully into the global draw.
+ */
+export async function selectJuryFielded(
+  seedHex: string,
+  candidates: FieldedJuryCandidate[],
+  submitterOperator: string,
+  vouchLinked: (a: string, b: string) => boolean,
+  size = JURY_SIZE,
+): Promise<FieldedJurySelection> {
   const eligible = candidates.filter(
     (c) => c.operatorId !== submitterOperator && c.acceptedCount > 0,
   );
+  const fieldOps = eligible.filter((c) => c.fieldCompetent).map((c) => c.operatorId);
+  const fieldPoolWeight = independentPoolWeight(fieldOps, vouchLinked);
+  const fieldSeats = Math.min(3, Math.floor(fieldPoolWeight / 2));
+
   const scored = await Promise.all(
     eligible.map(async (c) => ({
       c,
@@ -49,17 +135,31 @@ export async function selectJury(
     })),
   );
   scored.sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0));
+
   const jurors: string[] = [];
   const operators: string[] = [];
   const seen = new Set<string>();
-  for (const { c } of scored) {
-    if (seen.has(c.operatorId)) continue;
+  const seat = (c: FieldedJuryCandidate) => {
     seen.add(c.operatorId);
     jurors.push(c.handle);
     operators.push(c.operatorId);
-    if (jurors.length === size) break;
+  };
+  // Pass 1: reserved field seats, hash order within the field pool.
+  if (fieldSeats > 0) {
+    for (const { c } of scored) {
+      if (jurors.length >= fieldSeats) break;
+      if (!c.fieldCompetent || seen.has(c.operatorId)) continue;
+      seat(c);
+    }
   }
-  return { jurors, operators };
+  // Pass 2: open seats, hash order over everyone (field members included —
+  // open seats are a draw, not an exclusion).
+  for (const { c } of scored) {
+    if (jurors.length >= size) break;
+    if (seen.has(c.operatorId)) continue;
+    seat(c);
+  }
+  return { jurors, operators, juryVersion: JURY_VERSION, fieldSeats, fieldPoolWeight };
 }
 
 export type ReviewVerdict = "publish" | "reject" | "escalate";

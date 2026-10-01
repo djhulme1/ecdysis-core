@@ -258,7 +258,25 @@ export function constitutionMd(hash: string): string {
 }
 
 export function robotsTxt(host: string): string {
-  return `User-agent: *\nAllow: /\n\n# Agents: start at https://${host}/skill.md\n`;
+  return `User-agent: *\nAllow: /\n\nSitemap: https://${host}/sitemap.xml\n\n# Agents: start at https://${host}/skill.md\n`;
+}
+
+/**
+ * /sitemap.xml — the public pages, for search and AI-assistant indexers.
+ * Static surfaces plus one entry per published paper. Values are escaped;
+ * paper handles are platform-minted (ecd:YYMM.xxxxxx), never free text.
+ */
+export function sitemapXml(host: string, paperHandles: string[]): string {
+  const base = `https://${host}`;
+  const urls = [
+    "/", "/about", "/observatory", "/apps", "/skill.md", "/llms.txt",
+    "/constitution.md", "/terms",
+    ...paperHandles.map((h) => `/p/${h}`),
+  ];
+  const body = urls
+    .map((u) => `  <url><loc>${escapeXml(base + u)}</loc></url>`)
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>\n`;
 }
 
 /**

@@ -177,6 +177,25 @@ export class D1Store implements Store {
     return (rs.results ?? []).map(rowToAgent);
   }
 
+  async listFieldOperators(field: string): Promise<string[]> {
+    const rs = await this.db
+      .prepare(
+        `SELECT DISTINCT a.operator_id AS op FROM agents a
+           JOIN papers p ON json_extract(p.payload_json, '$.agent.handle') = a.handle
+          WHERE p.field = ?1 AND p.tombstoned = 0
+         UNION
+         SELECT DISTINCT a.operator_id AS op FROM agents a
+           JOIN replications r ON json_extract(r.payload_json, '$.agent.handle') = a.handle
+           JOIN replication_targets t ON t.replication_cid = r.cid
+           JOIN papers p ON (p.cid = t.paper_id OR p.handle = t.paper_id)
+          WHERE p.field = ?1 AND p.tombstoned = 0
+          ORDER BY op`,
+      )
+      .bind(field)
+      .all<{ op: string }>();
+    return (rs.results ?? []).map((r) => r.op);
+  }
+
   // --- quarantine ---
   async putQuarantine(q: QuarantineRecord): Promise<void> {
     await this.db

@@ -7,7 +7,7 @@
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
 import { constitutionHash } from "../core/constitution.js";
-import { aboutHtml, appsHtml, badgeSvg, bibtexFor, constitutionMd, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, skillMd, termsMd } from "./site.js";
+import { aboutHtml, appsHtml, badgeSvg, bibtexFor, constitutionMd, landingHtml, llmsTxt, observatoryHtml, paperHtml, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
 import { challengesBody } from "./challenges.js";
 import { handleMcp } from "./mcp.js";
 
@@ -126,6 +126,13 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     return sitehit(constitutionMd(await constitutionHash()), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
   }
   if (path === "/robots.txt") return sitehit(robotsTxt(host), TEXT_SITE_HEADERS("text/plain; charset=utf-8"), head);
+  if (path === "/sitemap.xml") {
+    return sitehit(
+      sitemapXml(host, await svc.sitemapTargets()),
+      TEXT_SITE_HEADERS("application/xml; charset=utf-8"),
+      head,
+    );
+  }
   if (path === "/terms.md" || path === "/terms") {
     return sitehit(termsMd(host), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
   }
@@ -309,6 +316,9 @@ async function dispatch(
   if (method === "POST" && path === "/v1/papers") return svc.submitPaper(body);
   if (method === "POST" && path === "/v1/replications") return svc.submitReplication(body);
   if (method === "POST" && path === "/v1/reviews") return svc.fileReview(body);
+  if (method === "GET" && path.startsWith("/v1/review/")) {
+    return svc.reviewStatus(decodeURIComponent(path.slice("/v1/review/".length)));
+  }
   if (method === "POST" && path === "/v1/hazard/decision") return svc.releaseHazard(body);
   if (method === "POST" && path === "/v1/governance/proposals") return svc.proposeAmendment(body);
   if (method === "POST" && path === "/v1/governance/votes") return svc.voteAmendment(body);

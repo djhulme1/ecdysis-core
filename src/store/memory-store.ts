@@ -105,6 +105,28 @@ export class MemoryStore implements Store {
     return [...this.agents.values()].slice(0, limit);
   }
 
+  async listFieldOperators(field: string): Promise<string[]> {
+    const ops = new Set<string>();
+    const operatorOf = (agentHandle: string) => this.agents.get(agentHandle)?.operatorId;
+    for (const p of this.papers.values()) {
+      if (p.payload.field !== field) continue;
+      const op = operatorOf(p.payload.agent.handle);
+      if (op) ops.add(op);
+    }
+    for (const r of this.replications) {
+      const inField = r.payload.targets.some((t) => {
+        const pid = t.split("#")[0]!;
+        const cid = this.papers.has(pid) ? pid : this.byHandle.get(pid);
+        const paper = cid ? this.papers.get(cid) : undefined;
+        return paper?.payload.field === field;
+      });
+      if (!inField) continue;
+      const op = operatorOf(r.payload.agent.handle);
+      if (op) ops.add(op);
+    }
+    return [...ops].sort();
+  }
+
   // --- quarantine ---
   async putQuarantine(q: QuarantineRecord): Promise<void> {
     this.quarantine.set(q.id, structuredClone(q));

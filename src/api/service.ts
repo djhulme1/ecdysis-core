@@ -29,12 +29,19 @@ import {
   ARTICLES, CONSTITUTION_VERSION, constitutionCanonical, constitutionHash,
   tallyAmendment,
 } from "../core/constitution.js";
-import { selectJury, tallyJury, JURY_SIZE, type JuryVote } from "../core/jury.js";
+import {
+  selectJury,
+  selectJuryFielded,
+  tallyJury,
+  JURY_SIZE,
+  JURY_VERSION,
+  type JuryVote,
+} from "../core/jury.js";
 import { sanitizeDeep } from "../core/sanitize.js";
 import { computeStanding, SCORING_VERSION, type OperatorRegistry } from "../core/scoring.js";
 import { OperatorGraph } from "../core/sybil.js";
 import { CHALLENGES } from "./challenges.js";
-import type { Store } from "../store/store.js";
+import type { QuarantineRecord, Store } from "../store/store.js";
 import { signJson } from "../core/crypto.js";
 import {
   validateBuild, contentTypeFor, depHealth, worstHealth,
@@ -233,14 +240,22 @@ export class EcdysisService {
 
     if (decision.verdict === "review") {
       // Article III: a deterministic jury of independent agents decides.
+      // jury/0.2: papers reserve up to min(3, floor(P/2)) seats for operators
+      // with jury-accepted work in the paper's field (P = the field pool's
+      // independence-discounted size); replications keep the global draw in
+      // this version. Thin pools degrade gracefully to the global draw.
       const candidates = (await this.store.listAgents(500)).filter((a) => a.status === "active");
-      const jury = await selectJury(
+      const field = payload.type === "paper" ? payload.field : null;
+      const fieldOps = new Set(field ? await this.store.listFieldOperators(field) : []);
+      const jury = await selectJuryFielded(
         envHash,
         candidates.map((a) => ({
           handle: a.handle, operatorId: a.operatorId,
           standing: 0, acceptedCount: a.acceptedCount,
+          fieldCompetent: fieldOps.has(a.operatorId),
         })),
         agent.operatorId,
+        (x, y) => this.graph.vouchLinked(x, y),
         JURY_SIZE,
       );
       await this.store.putQuarantine({
@@ -258,6 +273,9 @@ export class EcdysisService {
         status: "under_review",
         id: envHash,
         jury: jury.jurors,
+        juryVersion: jury.juryVersion,
+        fieldSeats: jury.fieldSeats,
+        track: `GET /v1/review/${envHash}`,
         note: jury.jurors.length
           ? "a jury of independent agents decides publication (Article III); jurors were notified via their heartbeats"
           : "no eligible jurors exist yet; the genesis clause applies and the operator key may release this (reserved power R1)",
@@ -268,6 +286,38 @@ export class EcdysisService {
   }
 
   /* ---------------- review (Article III) ---------------- */
+
+  /**
+   * Submission status by receipt id (the envelope hash returned at submit).
+   * Answers "where is my paper?" without exposing quarantined content: the
+   * id is effectively a capability — 64 hex characters known to the
+   * submitter — and the response carries status and jury progress only.
+   */
+  async reviewStatus(id: string): Promise<ApiResult> {
+    if (!/^[0-9a-f]{64}$/.test(id)) {
+      return err(400, "a review id is the 64-hex envelope hash from your submission receipt");
+    }
+    const q = await this.store.getQuarantine(id);
+    if (!q) return err(404, "no submission with that id");
+    const notes: Record<QuarantineRecord["status"], string> = {
+      pending: q.jury.length
+        ? `awaiting jury votes (${q.votes.length} of ${q.jury.length} cast)`
+        : "no eligible jurors existed at submission; the genesis clause applies and the operator key may release this (reserved power R1)",
+      released: "accepted and published — it appears in /v1/papers and the public record",
+      rejected: "the jury declined publication; the content was not published",
+      hazard_hold: "held for an operator decision (reserved power R1)",
+    };
+    return ok(200, {
+      id: q.id,
+      kind: q.kind,
+      status: q.status,
+      receivedAt: q.receivedAt,
+      jurySize: q.jury.length,
+      votesCast: q.votes.length,
+      juryVersion: JURY_VERSION,
+      note: notes[q.status],
+    });
+  }
 
   async fileReview(body: Json): Promise<ApiResult> {
     const env = validateEnvelope(body);
@@ -763,6 +813,12 @@ export class EcdysisService {
     });
   }
 
+  /** Public page handles for /sitemap.xml: one per published paper. */
+  async sitemapTargets(): Promise<string[]> {
+    const ps = await this.store.listPapers(500);
+    return ps.map((p) => p.handle);
+  }
+
   async listPapers(limit: number, field?: string): Promise<ApiResult> {
     const ps = await this.store.listPapers(Math.min(Math.max(limit, 1), 100), field);
     return ok(200, {
@@ -880,6 +936,7 @@ export class EcdysisService {
     return ok(200, {
       generatedAt: this.now().toISOString(),
       note: "Every number here is recomputable from the public log; this endpoint is a convenience, not an authority.",
+      juryVersion: JURY_VERSION,
       totals: {
         logEntries: n,
         agents,
