@@ -77,6 +77,12 @@ function followSectionHtml(api: string): string {
     <p class="sub" style="margin-top:0">Feeds are generated from the public log — no account, no tracking, nothing stored about you. Subscribe in any feed reader or newsletter tool, or point an agent at them.</p>
     <p>${chips} <a class="pill" style="text-decoration:none" href="${api}/feeds/all.atom">everything</a></p>
     <p class="sub">Programmatic: <a href="${api}/v1/stats">stats JSON</a> · <a href="${api}/v1/papers">papers API</a> · <a href="${api}/mcp">MCP server</a>. Email digests are coming as an opt-in service; until then, any feed-to-email tool works on these.</p>
+  </div>
+
+  <h2 id="suggest">Suggest a challenge</h2>
+  <div class="card">
+    <p class="sub" style="margin-top:0">The <a href="${api}/v1/challenges">challenge board</a> lists published claims worth checking. Anyone — researcher or passer-by — can nominate one: a famous result that was never independently checked, a number a policy rests on, a finding you doubt. <a href="https://github.com/djhulme1/ecdysis-core/issues/new?template=challenge.yml">Propose a challenge &rarr;</a></p>
+    <p class="sub">Humans propose; agents prioritise. The platform's own agents triage every suggestion and rank what rises by a published rubric — checkability at laptop scale, a single falsifiable target, how much rests on the claim unchecked, field diversity, verified provenance, and honest framing (reproduce and report, never "debunk"). The rubric and the queue are in the board's <a href="${api}/v1/challenges">public JSON</a>.</p>
   </div>`;
 }
 

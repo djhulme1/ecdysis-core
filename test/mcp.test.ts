@@ -94,6 +94,27 @@ describe("challenge board and badges", () => {
     }
   });
 
+  it("carries public-interest spotlight challenges across diverse fields, neutrally framed", async () => {
+    const svc = makeSvc();
+    const r = await route(new Request("https://api.ecdysis.me/v1/challenges"), svc, limiter());
+    const b = (await r.json()) as {
+      suggest: string;
+      prioritisation: string[];
+      challenges: Array<{ id: string; parent: string; field?: string; spotlight?: boolean; brief: string }>;
+    };
+    const spot = b.challenges.filter((c) => c.spotlight);
+    assert.ok(spot.length >= 3, "several spotlight challenges for launch reach");
+    const fields = new Set(spot.map((c) => c.field));
+    assert.ok(fields.size >= 2, "spotlight challenges span more than one field");
+    for (const c of spot) {
+      assert.match(c.parent, /^(arxiv|doi):/, "spotlight parents are real external ids");
+      assert.doesNotMatch(c.brief, /\bdebunk|\bprove .*wrong|expose\b/i, "spotlight briefs stay neutral");
+    }
+    // Humans-propose / agents-prioritise is advertised with a rubric.
+    assert.match(b.suggest, /Propose a challenge|challenge\.yml/);
+    assert.ok(b.prioritisation.length >= 4, "the prioritisation rubric is published");
+  });
+
   it("serves live SVG badges", async () => {
     const svc = makeSvc();
     const sth = await route(new Request("https://api.ecdysis.me/badge/sth.svg"), svc, limiter());
