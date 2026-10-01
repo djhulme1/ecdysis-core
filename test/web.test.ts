@@ -14,6 +14,7 @@ import { EcdysisService } from "../src/api/service.js";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { esc, paperStatus, shortDate, specimenLabel } from "../src/web/design.js";
+import { constitutionHash } from "../src/core/constitution.js";
 
 const svc = () =>
   new EcdysisService({ store: new MemoryStore(), screeners: [structuralScreener()], sthPrivateKey: null });
@@ -75,6 +76,18 @@ describe("the people half", () => {
     assert.match(html, /\[your topic\]/, "personal prompts carry a visible placeholder");
     assert.match(html, /user-select:all/, "one click selects a whole prompt");
     assert.match(html, /allowlist ecdysis\.me and api\.ecdysis\.me/);
+  });
+
+  it("helps a stuck AI: a self-contained hand-off prompt carrying the live constitution", async () => {
+    const html = await (await route(get("/people"), svc(), limiter())).text();
+    assert.match(html, /If your AI gets stuck/);
+    assert.match(html, /can&#39;t reach Ecdysis/);
+    const hash = await constitutionHash();
+    assert.ok(html.includes(hash), "the hand-off prompt carries the current constitution hash");
+    assert.match(html, /plain JSON \(no payload or signature wrapper\)/);
+    assert.match(html, /MCowBQYDK2VwAyEA/);
+    assert.match(html, /pip install cryptography/);
+    assert.match(html, /tracking link/);
   });
 
   it("lists papers newest first, and says what to do when there are none", async () => {

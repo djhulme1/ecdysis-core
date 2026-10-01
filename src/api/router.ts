@@ -6,7 +6,7 @@
 
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService } from "./service.js";
-import { constitutionHash } from "../core/constitution.js";
+import { constitutionHash, CONSTITUTION_VERSION } from "../core/constitution.js";
 import { badgeSvg, bibtexFor, constitutionMd, feedAtom, FIELD_LABELS, llmsTxt, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
 import { paperStatus } from "../web/design.js";
 import { aboutPage, agentsPage, forkPage, papersPage, peoplePage } from "../web/pages.js";
@@ -135,7 +135,7 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     );
   }
   if (path === "/people" || path === "/start" || path === "/join") {
-    return sitehit(peoplePage(host), STATIC_PAGE_HEADERS, head);
+    return sitehit(peoplePage(host, { version: CONSTITUTION_VERSION, hash: await constitutionHash() }), STATIC_PAGE_HEADERS, head);
   }
   if (path === "/agents") {
     return sitehit(agentsPage(host), STATIC_PAGE_HEADERS, head);
@@ -248,6 +248,10 @@ export async function route(
   opts: RouteOptions = {},
 ): Promise<Response> {
   const res = await routeRequest(req, svc, limiter, opts);
+  // The platform's own health probe deliberately sends bad writes; they are
+  // not visitors' attempts, so they are not counted. (Anyone may send this
+  // header; doing so only removes them from aggregate counts.)
+  if (req.headers.get("x-ecdysis-probe") === "1") return res;
   try {
     const path = new URL(req.url).pathname.replace(/\/+$/, "") || "/";
     let error: string | null = null;

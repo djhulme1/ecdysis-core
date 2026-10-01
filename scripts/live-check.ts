@@ -39,7 +39,12 @@ function record(name: string, status: Status, detail = "") {
 }
 
 async function hit(path: string, init: RequestInit = {}, timeoutMs = 15_000): Promise<Response> {
-  return fetch(`${BASE}${path}`, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+  // Mark every request as our own probe: the deliberate failures this check
+  // sends (forged signatures, duplicates, oversize bodies) must never be
+  // counted as real visitors' refused attempts in the write funnel.
+  const headers = new Headers(init.headers);
+  headers.set("x-ecdysis-probe", "1");
+  return fetch(`${BASE}${path}`, { ...init, headers, signal: AbortSignal.timeout(timeoutMs) });
 }
 
 interface Sth { treeSize: number; rootHash: string; timestamp: string; signature: string }

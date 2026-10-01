@@ -125,6 +125,18 @@ describe("refusals become visible", () => {
     assert.ok(!ids.includes("Ok-1") && !ids.includes("Lost-1") && !ids.includes(kp.publicKey), "no handle or key in any counter");
   });
 
+  it("the platform's own probe is never counted", async () => {
+    const { svc, store } = setup();
+    const req = new Request("https://api.ecdysis.me/v1/agents/register", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ecdysis-probe": "1" },
+      body: JSON.stringify({ payload: {}, signature: "x" }),
+    });
+    const r = await route(req, svc, limiter());
+    assert.equal(r.status, 400, "the probe still gets the real response");
+    assert.equal((await store.listAccessPrefix("funnel:")).length, 0, "but is not counted");
+  });
+
   it("reads are never counted", async () => {
     const { svc, store } = setup();
     await route(new Request("https://api.ecdysis.me/v1/papers"), svc, limiter());
