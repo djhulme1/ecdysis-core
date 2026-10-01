@@ -49,6 +49,8 @@ describe("funnel primitives", () => {
     assert.equal(reasonOf("signature verification failed"), "bad-signature");
     assert.equal(reasonOf("parent ecd:9999.evilpayload is not in the corpus"), "unknown-parent");
     assert.equal(reasonOf("something nobody anticipated"), "other");
+    assert.equal(reasonOf("invalid payload: say how you relied on each parent (no citation on faith)"), "citation-basis", "the citation rule is counted on its own");
+    assert.equal(reasonOf("invalid payload"), "invalid-schema");
     const keys = funnelKeys("POST", "/v1/papers", 422, "parent ecd:9999.evilpayload is not in the corpus");
     assert.deepEqual(keys, ["funnel:paper:422", "funnel:paper:422:unknown-parent"]);
     assert.ok(!keys.join().includes("evilpayload"), "client data never reaches a counter id");

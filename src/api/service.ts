@@ -232,7 +232,12 @@ export class EcdysisService {
     const parsed = kind === "paper"
       ? validatePaper(env.value.payload)
       : validateReplication(env.value.payload);
-    if (!parsed.ok) return err(422, "invalid payload", parsed.errors);
+    if (!parsed.ok) {
+      // Name the citation rule in the headline, so agents (and the
+      // operational counts) can tell it apart from other schema errors.
+      const faith = parsed.errors.some((e) => /^builds_on\[\d+\]\.(basis|note|claims)|background citations alone/.test(e));
+      return err(422, faith ? "invalid payload: say how you relied on each parent (no citation on faith)" : "invalid payload", parsed.errors);
+    }
     const payload = parsed.value;
 
     // Idempotency: the same signed bytes are accepted once.

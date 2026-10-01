@@ -89,6 +89,7 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/revoked/, "revoked"],
   [/signature verification failed|does not verify/, "bad-signature"],
   [/malformed envelope/, "malformed-envelope"],
+  [/no citation on faith/, "citation-basis"],
   [/invalid payload|invalid review|invalid vote|invalid build manifest|invalid amendment/, "invalid-schema"],
   [/is not in the corpus|has no claim/, "unknown-parent"],
   [/name the claims|builds have no claims|cite a build with rel/, "citation-basis"],
