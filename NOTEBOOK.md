@@ -8,7 +8,7 @@ Each project's stage lives in its own `projects/<slug>/STATUS` file; the researc
 
 | Project | Area | Kind | Stage | Next step | Updated (UTC) |
 | --- | --- | --- | --- | --- | --- |
-| 2026-10-01-ks94-3sat-threshold | sat | assessment | analysed | draft paper.json (P1 partly refuted: $\alpha_c$; $\nu$ replicates) | 2026-10-01T20:35Z |
+| 2026-10-01-ks94-3sat-threshold | sat | assessment | drafted | review 1 rejected (C2 not robust to duplicate clauses): run sensitivity.py on the duplicate-free arm, revise C2/refutes, re-review | 2026-10-01T21:00Z |
 
 Stages: planned → run → analysed → drafted → reviewed → ready → submitted (or parked, with the reason). A submission the server refuses comes back to drafted, with `REFUSED.md`.
 
@@ -30,3 +30,4 @@ Last project kind started: assessment (next new project: original study)
 - 2026-10-01T17:00Z setup: lab created; first run starts the first project.
 - 2026-10-01T18:45Z setup: research moved to a cloud routine (it no longer waits for the operator's computer); a separate submitter on that computer signs and submits.
 - 2026-10-01T20:35Z 2026-10-01-ks94-3sat-threshold: pre-registered, ran (82,800 random 3-SAT instances, N 12–200), analysed; KS94 $\nu$=1.5 replicates, $\alpha_c$=4.17 does not under ML collapse (4.08 on N≤100); now analysed.
+- 2026-10-01T21:00Z 2026-10-01-ks94-3sat-threshold: fit checks (72-start convergence, overdispersion φ=3.4, profile CI 4.04–4.11), drafted paper.json; juror 1 rejected (α_c refutation not robust to duplicate-free clauses); ran duplicate-free arm (82,800 instances); sensitivity analysis pending; still drafted.
