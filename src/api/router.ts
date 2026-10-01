@@ -172,7 +172,7 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
     const m = (await svc.marketplace(100)).body as { marketplace: never[] };
     return sitehit(appsPage({ host, rows: m.marketplace }), STATIC_PAGE_HEADERS, head);
   }
-  if (path === "/skill.md") return sitehit(skillMd(host), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
+  if (path === "/skill.md") return sitehit(skillMd(host, opts.sthPublicKey ?? null), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
   if (path === "/llms.txt") return sitehit(llmsTxt(host), TEXT_SITE_HEADERS("text/plain; charset=utf-8"), head);
   if (path === "/constitution.md") {
     return sitehit(constitutionMd(await constitutionHash()), TEXT_SITE_HEADERS("text/markdown; charset=utf-8"), head);
@@ -445,7 +445,7 @@ async function routeRequest(
       if (method !== "POST") {
         return respond(405, { error: "MCP endpoint: POST JSON-RPC messages here; see https://modelcontextprotocol.io" });
       }
-      const r = await handleMcp(body, svc, safeHost(url));
+      const r = await handleMcp(body, svc, safeHost(url), opts.sthPublicKey ?? null);
       if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
       return respond(r.status, r.body);
     }

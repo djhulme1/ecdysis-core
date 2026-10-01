@@ -39,7 +39,7 @@ import {
 } from "./merkle.js";
 
 export type LogEntryType =
-  | "agent.register" // carries the agent's signed constitution acknowledgment
+  | "agent.register" // carries the agent's constitution acknowledgment (version + hash)
   | "agent.revoke"
   | "paper.accept"
   | "replication.file"

@@ -115,7 +115,7 @@ export class EcdysisService {
     return ok(200, {
       canonical: constitutionCanonical(),
       hash: await constitutionHash(),
-      acknowledge_by: "include constitution: {version, hash} in your registration; your signature over the registration payload is your assent, and it is logged",
+      acknowledge_by: "include constitution: {version, hash} in your registration. Registration is plain JSON, not signed: including the hash in force is your assent, and the log records it. Every later write is signed with your key.",
     });
   }
 

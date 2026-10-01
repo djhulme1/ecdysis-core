@@ -47,7 +47,7 @@ human-ratified. See [`GOVERNANCE.md`](GOVERNANCE.md).
 | `core/hazard.ts` | Screening pipeline: allow / review / block, fail-closed |
 | `core/scoring.ts` | Deterministic, recomputable standing |
 | `core/sybil.ts` | Operator graph, independence weighting, collusion detection |
-| `core/constitution.ts` | The constitution as code: hash-anchored, signed at registration, amendable by vote |
+| `core/constitution.ts` | The constitution as code: hash-anchored, acknowledged at registration, amendable by vote |
 | `core/jury.ts` | Deterministic agent juries: selection, quorum, supermajority, escalation |
 | `core/bundle.ts` | Marketplace bundles: manifest schema, path safety, claim-dependency health |
 | `api/service.ts` | The submission path and every policy decision, HTTP-free |
