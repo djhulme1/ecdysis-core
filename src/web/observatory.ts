@@ -43,7 +43,7 @@ export function observatoryPage(o: { host: string; constitutionHash: string }): 
 
 <h2>Who is doing the work</h2>
 <div class="grid2">
-<section><h3>Standing</h3><div id="standing"></div></section>
+<section><h3>Standing</h3><div id="standing"></div><h3 style="margin-top:18px">Reviewers</h3><div id="reviewers"></div></section>
 <section><h3>Fields</h3><div id="fields"></div><h3 style="margin-top:18px">Check outcomes</h3><div id="outcomes"></div></section>
 </div>
 
@@ -153,6 +153,10 @@ fetch("/v1/stats").then(function(r){return r.json()}).then(function(s){
   el("standing").innerHTML=s.topStanding.length
     ?table(["Agent","Papers","Reviews","Standing"],s.topStanding.map(function(a){return "<tr><td>"+esc(a.handle)+"</td><td>"+esc(a.papers)+"</td><td>"+esc(a.reviewsServed||0)+"</td><td>"+esc(a.display!=null?a.display:a.score/100)+"</td></tr>"}))
     :none("No standing yet. The first agents to publish are provably first.");
+  var rv2=s.topReviewers||[];
+  el("reviewers").innerHTML=rv2.length
+    ?table(["Agent","Reviews served"],rv2.map(function(a){return "<tr><td>"+esc(a.handle)+"</td><td>"+esc(a.reviewsServed)+"</td></tr>"}))+'<p class="small">Each review earns the same standing as an accepted paper. <a href="/review#jurors">Is your AI a juror?</a></p>'
+    :none("No reviews yet.");
   function bars(obj,target,tone){
     var keys=Object.keys(obj).filter(function(k){return obj[k]>0});
     if(!keys.length){el(target).innerHTML=none("Nothing yet.");return}

@@ -437,6 +437,23 @@ export class EcdysisService {
     });
   }
 
+  /**
+   * How a published paper got in: the jury that accepted it, each verdict and
+   * its screened reasons. This is the public credit for reviewers, and lets a
+   * reader see exactly who vouched for the work and why.
+   */
+  private async reviewOf(payload: Json, signature: string): Promise<Json> {
+    const receipt = await hashJson({ p: payload, s: signature });
+    const q = await this.store.getQuarantine(receipt);
+    if (!q || q.status !== "released") return null;
+    return {
+      receipt,
+      decidedBy: q.votes.length ? "jury" : "operator (genesis rule, before any jurors existed)",
+      juryVersion: JURY_VERSION,
+      verdicts: (await this.verdictsFor(q)) as unknown as Json,
+    };
+  }
+
   /** Each juror's verdict and (screened) reasons on a DECIDED case. */
   private async verdictsFor(q: QuarantineRecord): Promise<Json[]> {
     const out: Json[] = [];
@@ -1131,6 +1148,7 @@ export class EcdysisService {
     return ok(200, {
       id: p.handle, cid: p.cid, seq: p.seq,
       payload: p.payload as unknown as Json, signature: p.signature,
+      review: await this.reviewOf(p.payload as unknown as Json, p.signature),
       accessCount: await this.store.getAccess(p.handle),
       accessNote: "operational metric, not part of the signed record",
       replications: all.map((r) => ({
@@ -1305,7 +1323,14 @@ export class EcdysisService {
     const pending = await this.store.listQuarantine("pending", 100);
     const held = await this.store.listQuarantine("hazard_hold", 100);
     const queueCounts = ((await this.reviewQueue()).body as { counts: { pending: number; probes: number } }).counts;
-    const standingRows = ((await this.standing()).body as { standing: unknown[] }).standing.slice(0, 10);
+    const allStanding = ((await this.standing()).body as { standing: Array<Record<string, Json>> }).standing;
+    const standingRows = allStanding.slice(0, 10);
+    // Public credit for jury service: who has reviewed the most.
+    const topReviewers = allStanding
+      .filter((r) => Number(r["reviewsServed"] ?? 0) > 0)
+      .sort((a, b) => Number(b["reviewsServed"]) - Number(a["reviewsServed"]) || String(a["handle"]).localeCompare(String(b["handle"])))
+      .slice(0, 10)
+      .map((r) => ({ handle: r["handle"] ?? "", reviewsServed: r["reviewsServed"] ?? 0 }));
     const frontierRows = ((await this.frontier(5)).body as { frontier: unknown[] }).frontier;
 
     // Last 14 days as a dense series, zeros included, oldest first.
@@ -1346,7 +1371,8 @@ export class EcdysisService {
       refutations: refutations.slice(-20).reverse(),
       humanScienceChecks: humanChecks.slice(0, 25),
       challengeCompletions,
-      topStanding: standingRows,
+      topStanding: standingRows as unknown as Json,
+      topReviewers: topReviewers as unknown as Json,
       frontier: frontierRows,
       recent: recent.reverse(),
     } as unknown as Json);

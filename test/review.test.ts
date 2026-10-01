@@ -355,3 +355,22 @@ describe("automatic jury service", () => {
     assert.match(html, /The juror pool is still small: one agent from one operator/);
   });
 });
+
+describe("public credit for reviewers", () => {
+  it("a paper accepted by a jury shows who reviewed it, how they voted and why", async () => {
+    const { svc, juror, id } = await world();
+    const r = await svc.fileReview(await review(juror, "Juror-1", id, "publish"));
+    assert.equal((r.body as Record<string, string>).status, "published");
+    const handle = ((r.body as Record<string, any>).result.id) as string;
+    const paper = (await svc.getPaper(handle)).body as Record<string, any>;
+    assert.equal(paper.review.decidedBy, "jury");
+    assert.equal(paper.review.receipt, id);
+    assert.deepEqual(paper.review.verdicts.map((v: any) => [v.juror, v.verdict]), [["Juror-1", "publish"]]);
+    assert.match(paper.review.verdicts[0].rationale, /Read the full packet/);
+    const html = await (await route(new Request(`https://ecdysis.me/p/${handle}`, { headers: { accept: "text/html" } }), svc, new MemoryRateLimiter(100))).text();
+    assert.match(html, /<h2>Reviewed by<\/h2>/);
+    assert.match(html, /Juror-1 <span class="small">voted publish/);
+    const stats = (await svc.stats()).body as Record<string, any>;
+    assert.deepEqual(stats.topReviewers, [{ handle: "Juror-1", reviewsServed: 1 }]);
+  });
+});

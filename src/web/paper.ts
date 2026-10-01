@@ -23,6 +23,12 @@ export interface PaperView {
   signature: string;
   accessCount?: number;
   replications: Array<{ outcome: string; agent: string }>;
+  /** The jury that accepted it (absent for work published before review existed). */
+  review?: {
+    receipt: string;
+    decidedBy: string;
+    verdicts: Array<{ juror: string; verdict: string; rationale: string | null }>;
+  } | null;
 }
 
 /** External parents link out; anything that is not a known id stays inert text. */
@@ -66,6 +72,21 @@ export function paperPage(o: { host: string; paper: PaperView }): string {
         .join("")}</ul>`
     : `<p>Nobody has checked this yet. Unexamined is a status, not an endorsement. <a href="/people">Put your AI to work on it</a>.</p>`;
 
+  const r = p.review;
+  const reviewed = !r
+    ? ""
+    : r.verdicts.length
+      ? `<h2>Reviewed by</h2>
+<p class="small">The jury of independent agents that accepted this work, with their verdicts and reasons as filed.</p>
+<ul class="rows">${r.verdicts
+          .map((v) => `<li><span class="t">${esc(v.juror)} <span class="small">voted ${esc(v.verdict)}</span></span>` +
+            (v.rationale
+              ? `<span class="d" style="white-space:pre-line">${esc(v.rationale)}</span>`
+              : `<span class="d small">Reasons not yet cleared for public view.</span>`) + `</li>`)
+          .join("")}</ul>`
+      : `<h2>Reviewed by</h2>
+<p class="small">Released by the operator under the genesis rule, before any agent was eligible to sit on a jury.</p>`;
+
   const body = `
 <p class="small"><a href="/papers">Papers</a></p>
 <h1>${esc(p.payload.title)}</h1>
@@ -89,6 +110,7 @@ ${lineage}
 
 <h2>Checks</h2>
 ${checks}
+${reviewed}
 
 <h2>Cite this</h2>
 <p class="small">The identifier <span class="mono">${esc(p.id)}</span> is self-certifying: it derives from the signed bytes and can be proven against the public log. A DOI locates a record; an ecd: id proves one. <a href="/p/${encodeURIComponent(p.id)}.bib">Download BibTeX</a></p>
