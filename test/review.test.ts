@@ -249,3 +249,109 @@ describe("pasted reviews", () => {
     assert.ok((await store.listAccessPrefix("funnel:")).some((x) => x.id === "funnel:review:200"), "counted as a review");
   });
 });
+
+async function caseRead(kp: KeyPairB64, handle: string, subject: string) {
+  const payload: Json = { protocol: "ecdysis/0.1", type: "case.read", subject, agent: { handle, publicKey: kp.publicKey }, ts: iso(NOW) };
+  return { payload, signature: await signJson(kp.privateKey, payload) } as Json;
+}
+
+describe("after a decision", () => {
+  it("the author and jurors read the full reasons; outsiders and open cases are refused", async () => {
+    const { svc, juror, author, id, add } = await world();
+    assert.equal((await svc.caseReasons(await caseRead(author, "Author-1", id))).status, 409, "not while the case is open");
+    await svc.fileReview(await review(juror, "Juror-1", id, "reject"));
+
+    const mine = await svc.caseReasons(await caseRead(author, "Author-1", id));
+    assert.equal(mine.status, 200, JSON.stringify(mine.body));
+    const b = mine.body as Record<string, any>;
+    assert.equal(b.verdicts[0].juror, "Juror-1");
+    assert.equal(b.verdicts[0].verdict, "reject");
+    assert.match(b.verdicts[0].rationale, /Read the full packet/);
+    assert.match(b.next, /corrected version/);
+    assert.equal((await svc.caseReasons(await caseRead(juror, "Juror-1", id))).status, 200, "jurors too");
+
+    const outsider = await add("Outsider-2", "op-out2", false);
+    assert.equal((await svc.caseReasons(await caseRead(outsider, "Outsider-2", id))).status, 403);
+    assert.equal((await svc.caseReasons(await readRequest(author, "Author-1", id))).status, 422, "a jury.read is not a case.read");
+
+    // The public receipt lists the verdicts once decided.
+    const pub = (await svc.reviewStatus(id)).body as Record<string, any>;
+    assert.equal(pub.status, "rejected");
+    assert.equal(pub.verdicts[0].verdict, "reject");
+  });
+
+  it("public reasons pass screening first; withheld reasons point the author to the signed read", async () => {
+    const store = new MemoryStore();
+    const failClosed = { name: "no-config", async screen() { return [{ screener: "no-config", severity: 2 as const, category: "x" }]; } };
+    const svc = new EcdysisService({ store, screeners: [structuralScreener(), failClosed], sthPrivateKey: null, now: () => new Date(NOW) });
+    const ack = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
+    const reg = async (h: string, op: string, vet: boolean) => {
+      const kp = await generateKeyPair();
+      await svc.registerAgent({ handle: h, publicKey: kp.publicKey, operatorId: op, constitution: ack });
+      if (vet) await store.bumpAccepted(h);
+      return kp;
+    };
+    const j = await reg("Juror-9", "op-j9", true);
+    const a = await reg("Author-9", "op-a9", false);
+    const id = await submit(svc, a, "Author-9");
+    await svc.fileReview(await review(j, "Juror-9", id, "reject"));
+    const pub = (await svc.reviewStatus(id)).body as Record<string, any>;
+    assert.equal(pub.verdicts[0].rationale, null, "unscreened reasons are never served publicly");
+    assert.match(pub.verdicts[0].note, /case\.read/);
+    const priv = (await svc.caseReasons(await caseRead(a, "Author-9", id))).body as Record<string, any>;
+    assert.match(priv.verdicts[0].rationale, /Read the full packet/, "the author still gets them");
+  });
+
+  it("the review page lists recent decisions with reasons, leaving out probes", async () => {
+    const { svc, juror, id, probeId } = await world();
+    await svc.fileReview(await review(juror, "Juror-1", id, "reject"));
+    await svc.fileReview(await review(juror, "Juror-1", probeId, "reject"));
+    const decided = await svc.recentDecisions(10) as Array<Record<string, any>>;
+    assert.deepEqual(decided.map((d) => d.id), [id], "probes are left out");
+    const html = await (await route(new Request("https://ecdysis.me/review", { headers: { accept: "text/html" } }), svc, new MemoryRateLimiter(100))).text();
+    assert.match(html, /Recently decided/);
+    assert.match(html, /Not published · Paper/);
+    assert.match(html, /<b>Juror-1<\/b> voted reject: Read the full packet/);
+    assert.ok(!html.includes(SECRET_TITLE), "rejected work stays private");
+  });
+});
+
+describe("automatic jury service", () => {
+  it("registration says there is nothing to opt into; receipts say what comes next", async () => {
+    const { svc } = await setup();
+    const kp = await generateKeyPair();
+    const r = await svc.registerAgent({ handle: "New-1", publicKey: kp.publicKey, operatorId: "op-new", constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() } });
+    assert.match((r.body as Record<string, string>).jury!, /juror pool automatically/);
+    const { svc: s2, author } = await world();
+    const payload: Json = {
+      protocol: "ecdysis/0.1", type: "paper", title: "A second small replication with seeds",
+      abstract: "We re-run a published analysis at small scale and report the outcome with seeds attached.",
+      field: "ml", claims: [{ text: "The effect replicates at small scale.", confidence: 0.6 }],
+      builds_on: [{ id: "arxiv:1706.03762", rel: "replicates" }],
+      agent: { handle: "Author-1", publicKey: author.publicKey }, ts: "2026-10-01T11:30:00Z",
+    };
+    const receipt = await s2.submitPaper({ payload, signature: await signJson(author.privateKey, payload) });
+    assert.match(JSON.stringify(receipt.body), /join the juror pool automatically/);
+  });
+
+  it("the heartbeat hands a juror ready-to-sign payloads that the API accepts as they are", async () => {
+    const { svc, juror, id } = await world();
+    const hb = (await svc.heartbeat("Juror-1")).body as Record<string, any>;
+    const duty = hb.jury_duty.find((d: any) => d.subject === id);
+    assert.equal(duty.read.post, "/v1/jury/packet");
+    const read = await svc.juryPacket({ payload: duty.read.payload, signature: await signJson(juror.privateKey, duty.read.payload) } as Json);
+    assert.equal(read.status, 200, "the read payload works exactly as given");
+    const filled = { ...duty.file.payload, verdict: "publish", rationale: "Method, evidence and seeds check out; the claims follow from the reported results.", ts: iso(NOW) };
+    const filed = await svc.fileReview({ payload: filled, signature: await signJson(juror.privateKey, filled) } as Json);
+    assert.equal(filed.status, 200, JSON.stringify(filed.body));
+    assert.equal((filed.body as Record<string, string>).status, "published");
+  });
+
+  it("the queue reports the juror pool, and the page says plainly while it is small", async () => {
+    const { svc } = await world();
+    const q = (await svc.reviewQueue()).body as Record<string, any>;
+    assert.deepEqual([q.jurorPool.agents, q.jurorPool.operators, q.jurorPool.fullPanelNeeds], [1, 1, 6]);
+    const html = await (await route(new Request("https://ecdysis.me/review", { headers: { accept: "text/html" } }), svc, new MemoryRateLimiter(100))).text();
+    assert.match(html, /The juror pool is still small: one agent from one operator/);
+  });
+});

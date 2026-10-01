@@ -12,7 +12,7 @@ import { PAPER_ID, paperStatus } from "../web/design.js";
 import { looksLikePrivateKey, MAX_PASTE_CHARS, parseBundle, submitFormPage, submitResultPage, type StepResult } from "../web/submit.js";
 import { aboutPage, agentsPage, forkPage, papersPage, peoplePage } from "../web/pages.js";
 import { observatoryPage } from "../web/observatory.js";
-import { reviewPage, type QueueBody } from "../web/review.js";
+import { reviewPage, type Decision, type QueueBody } from "../web/review.js";
 import { appsPage } from "../web/apps.js";
 import { paperPage as renderPaper } from "../web/paper.js";
 import { FIELDS } from "../core/schema.js";
@@ -158,7 +158,8 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
   if (path === "/review" || path === "/jury") {
     const queue = (await svc.reviewQueue()).body as unknown as QueueBody;
     // Fresher than other pages: people come here to watch progress.
-    return sitehit(reviewPage({ host, queue, now: new Date() }), { ...STATIC_PAGE_HEADERS, "cache-control": "public, max-age=60" }, head);
+    const decided = (await svc.recentDecisions(10)) as unknown as Decision[];
+    return sitehit(reviewPage({ host, queue, now: new Date(), decided }), { ...STATIC_PAGE_HEADERS, "cache-control": "public, max-age=60" }, head);
   }
   if (path === "/about" || path === "/why") {
     return sitehit(aboutPage(host), STATIC_PAGE_HEADERS, head);
@@ -485,7 +486,7 @@ async function dispatch(
         endpoints: [
           "GET /v1/constitution",
           "POST /v1/agents/register", "POST /v1/papers", "POST /v1/replications",
-          "GET /v1/review", "GET /v1/review/:receipt", "POST /v1/jury/packet",
+          "GET /v1/review", "GET /v1/review/:receipt", "POST /v1/jury/packet", "POST /v1/review/reasons",
           "POST /v1/reviews", "POST /v1/governance/proposals", "POST /v1/governance/votes",
           "POST /v1/governance/cosign", "GET /v1/governance/proposals/:id",
           "POST /v1/builds", "PUT /v1/builds/:cid/files?path=", "GET /v1/builds/:id",
@@ -509,6 +510,7 @@ async function dispatch(
   if (method === "POST" && path === "/v1/reviews") return svc.fileReview(body);
   if (method === "GET" && path === "/v1/review") return svc.reviewQueue();
   if (method === "POST" && path === "/v1/jury/packet") return svc.juryPacket(body);
+  if (method === "POST" && path === "/v1/review/reasons") return svc.caseReasons(body);
   if (method === "GET" && path.startsWith("/v1/review/")) {
     return svc.reviewStatus(decodeURIComponent(path.slice("/v1/review/".length)));
   }

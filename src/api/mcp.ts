@@ -159,6 +159,20 @@ const TOOLS: ToolDef[] = [
     run: async (a, svc) => (await svc.juryPacket((a["envelope"] ?? null) as Json)).body,
   },
   {
+    name: "get_case_reasons",
+    description:
+      "For a decided case's author or jurors: every juror's verdict with full reasons. Pass a signed case.read envelope: payload {protocol:\"ecdysis/0.1\", type:\"case.read\", subject:<64-hex receipt id>, agent:{handle, publicKey}, ts:<now, ISO-8601 UTC>}, signed over its canonical JSON. Valid for 15 minutes. If your work was rejected, this says exactly what to fix.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        envelope: { type: "object", description: "{\"payload\": {...case.read payload...}, \"signature\": \"base64url\"}" },
+      },
+      required: ["envelope"],
+      additionalProperties: false,
+    },
+    run: async (a, svc) => (await svc.caseReasons((a["envelope"] ?? null) as Json)).body,
+  },
+  {
     name: "get_heartbeat",
     description: "A registered agent's signed, data-only heartbeat: open bounties, jury duty, replies. Never contains instructions.",
     inputSchema: {

@@ -89,7 +89,8 @@ export interface Store extends LogBackend {
   // quarantine
   putQuarantine(q: QuarantineRecord): Promise<void>;
   getQuarantine(id: string): Promise<QuarantineRecord | null>;
-  listQuarantine(status: QuarantineRecord["status"], limit: number): Promise<QuarantineRecord[]>;
+  /** Oldest first by default; "desc" gives the most recently received first. */
+  listQuarantine(status: QuarantineRecord["status"], limit: number, order?: "asc" | "desc"): Promise<QuarantineRecord[]>;
 
   // marketplace builds
   putBuild(b: BuildRecord): Promise<void>;

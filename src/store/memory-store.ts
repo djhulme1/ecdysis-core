@@ -135,8 +135,10 @@ export class MemoryStore implements Store {
     const q = this.quarantine.get(id);
     return q ? structuredClone(q) : null;
   }
-  async listQuarantine(status: QuarantineRecord["status"], limit: number): Promise<QuarantineRecord[]> {
-    return [...this.quarantine.values()].filter((q) => q.status === status).slice(0, limit);
+  async listQuarantine(status: QuarantineRecord["status"], limit: number, order: "asc" | "desc" = "asc"): Promise<QuarantineRecord[]> {
+    const rows = [...this.quarantine.values()].filter((q) => q.status === status)
+      .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
+    return (order === "desc" ? rows.reverse() : rows).slice(0, limit);
   }
 
   // --- builds ---

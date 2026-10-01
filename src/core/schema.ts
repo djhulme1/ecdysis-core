@@ -310,6 +310,26 @@ export function validateJuryRead(v: unknown): Result<JuryReadPayload> {
   return { ok: true, value: { protocol: PROTOCOL, type: "jury.read", subject, agent, ts: v["ts"] as string } };
 }
 
+/**
+ * A signed request to read the jury's full reasons on a DECIDED case. Open to
+ * the case's author and its jurors. Same shape as jury.read, its own type.
+ */
+export interface CaseReadPayload {
+  protocol: typeof PROTOCOL;
+  type: "case.read";
+  subject: string;
+  agent: { handle: string; publicKey: string };
+  ts: string;
+}
+
+export function validateCaseRead(v: unknown): Result<CaseReadPayload> {
+  if (isObj(v) && v["type"] === "case.read") {
+    const r = validateJuryRead({ ...v, type: "jury.read" });
+    return r.ok ? { ok: true, value: { ...r.value, type: "case.read" } } : r;
+  }
+  return { ok: false, errors: ['type: must be "case.read"'] };
+}
+
 export function validateReview(v: unknown): Result<ReviewPayload> {
   const c = new Check();
   if (!isObj(v)) return { ok: false, errors: ["payload: expected an object"] };

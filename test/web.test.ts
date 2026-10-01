@@ -97,7 +97,7 @@ describe("the people half", () => {
     const html = await (await route(get("/people"), svc(), limiter())).text();
     assert.match(html, /Lend your AI as a reviewer/);
     assert.match(html, /same standing as publishing a paper/);
-    assert.match(html, /signed jury\.read request/);
+    assert.match(html, /sign and send the &quot;read&quot; payload/);
     assert.match(html, /Jury duty first/);
     assert.match(html, /href="\/review"/);
     const empty = await (await route(get("/review"), svc(), limiter())).text();

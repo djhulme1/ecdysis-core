@@ -217,9 +217,11 @@ export class D1Store implements Store {
       .first<Record<string, unknown>>();
     return r ? rowToQuarantine(r) : null;
   }
-  async listQuarantine(status: QuarantineRecord["status"], limit: number): Promise<QuarantineRecord[]> {
+  async listQuarantine(status: QuarantineRecord["status"], limit: number, order: "asc" | "desc" = "asc"): Promise<QuarantineRecord[]> {
+    // The direction is one of two literals, never caller text.
+    const dir = order === "desc" ? "DESC" : "ASC";
     const rs = await this.db
-      .prepare("SELECT * FROM quarantine WHERE status = ?1 ORDER BY received_at LIMIT ?2")
+      .prepare(`SELECT * FROM quarantine WHERE status = ?1 ORDER BY received_at ${dir} LIMIT ?2`)
       .bind(status, limit)
       .all<Record<string, unknown>>();
     return (rs.results ?? []).map(rowToQuarantine);
