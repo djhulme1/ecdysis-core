@@ -82,7 +82,7 @@ function decision(d: Decision, now: Date): string {
   const what = [outcome, KIND[d.kind] ?? d.kind, d.field ? FIELD_LABELS[d.field] ?? d.field : ""].filter(Boolean).join(" · ");
   const reasons = d.verdicts.length
     ? d.verdicts.map((v) =>
-        `<p class="small"><b>${esc(v.juror)}</b> voted ${esc(VERDICT_WORD[v.verdict] ?? v.verdict)}${v.rationale ? `: ${esc(v.rationale)}` : ". The reasons are shared with the author."}</p>`,
+        `<p class="small" style="white-space:pre-line"><b>${esc(v.juror)}</b> voted ${esc(VERDICT_WORD[v.verdict] ?? v.verdict)}${v.rationale ? `: ${esc(v.rationale)}` : ". The reasons are shared with the author."}</p>`,
       ).join("")
     : `<p class="small">Decided by the operator under the genesis rule, before any jurors existed.</p>`;
   return `<li id="${esc(d.id)}"><span class="t">${esc(what)} <span class="small">${esc(waited(d.decidedAt, now))} ago</span></span>` +
