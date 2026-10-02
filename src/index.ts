@@ -6,6 +6,9 @@
 
 import { EcdysisService, PREPRINT_DAILY_CAP } from "./api/service.js";
 import { BUCKET_LIMITS, MemoryRateLimiter, route, type RateLimiter } from "./api/router.js";
+import { V2Service } from "./api/v2/service.js";
+import { TransparencyLog } from "./core/log.js";
+import { D1V2Store } from "./store/v2/d1.js";
 import { D1Store } from "./store/d1-store.js";
 import { R2BlobStore } from "./store/blob.js";
 import {
@@ -40,6 +43,12 @@ export interface Env {
    * keeping the record readable and auditable. Delete or set "0" to resume.
    */
   READ_ONLY?: string;
+  /**
+   * Ecdysis v2 (docs/v2/PLAN.md): "1" serves /v2/* and the v2 connector
+   * tools from this deployment. Off by default; the switchover to a fresh
+   * database and a new log key is the owner's act.
+   */
+  ECDYSIS_V2?: string;
   /** Secret: wrangler secret put STH_SIGNING_KEY_PKCS8 */
   STH_SIGNING_KEY_PKCS8?: string;
   /** Secret: JSON array of {pattern, flags, category, severity} rules,
@@ -164,6 +173,17 @@ function serviceFrom(env: Env, store: Store = new D1Store(env.DB)): EcdysisServi
     blobs: env.BLOBS ? new R2BlobStore(env.BLOBS) : null,
     reviewAll: env.REVIEW_ALL !== "0",
     preprintDailyCap: preprintCap(env),
+  });
+}
+
+/** Ecdysis v2, when switched on: the same log and database, the v2 tables, the log key as the sealer. */
+function v2From(env: Env, store: D1Store): V2Service | null {
+  if (env.ECDYSIS_V2 !== "1") return null;
+  return new V2Service({
+    log: new TransparencyLog(store),
+    store: new D1V2Store(env.DB, store),
+    logPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
+    screeners: screenersFrom(env),
   });
 }
 
@@ -340,6 +360,7 @@ export default {
       openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE ?? null,
       console: consoleDeps,
       waitUntil: (p) => ctx.waitUntil(p),
+      v2: v2From(env, store),
     });
   },
 } satisfies ExportedHandler<Env>;

@@ -196,3 +196,54 @@ describe("the D1 store against SQLite, every migration applied", { skip: !sqlite
     for (const ty of ["agent.register", "moderation.remove", "operator.setting", "juror.invite", "juror.uninvite"]) assert.ok(types.includes(ty as never), ty);
   });
 });
+
+describe("the v2 store against SQLite, every migration applied", { skip: !sqlite && "node:sqlite is not available" }, () => {
+  it("runs registration, an external claim, two receipts with a cross-check and the scores through the real SQL", async () => {
+    const { D1V2Store } = await import("../src/store/v2/d1.js");
+    const { V2Service } = await import("../src/api/v2/service.js");
+    const { TransparencyLog } = await import("../src/core/log.js");
+    const { generateKeyPair, signJson } = await import("../src/core/crypto.js");
+    const db = migrated();
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((t) => t.name);
+    for (const t of ["v2_envelopes", "v2_bundles", "v2_outputs"]) assert.ok(tables.includes(t), t);
+    const store = new D1Store(d1Over(db));
+    let t = Date.UTC(2026, 9, 3, 9, 0, 0);
+    const now = () => new Date((t += 1000));
+    const log = new TransparencyLog(store, now);
+    const logKey = await generateKeyPair();
+    const svc = new V2Service({ log, store: new D1V2Store(d1Over(db), store, now), logPrivateKey: logKey.privateKey, now });
+    const a = await generateKeyPair();
+    const b = await generateKeyPair();
+    assert.equal((await svc.registerAgent({ handle: "Ant", publicKey: a.publicKey, operatorId: "op-a", models: ["claude"] })).status, 201);
+    assert.equal((await svc.registerAgent({ handle: "Bee", publicKey: b.publicKey, operatorId: "op-b", models: ["gpt"] })).status, 201);
+    await svc.setTier("op-a", "verified");
+    await svc.setTier("op-b", "verified");
+    const sign = async (kp: { privateKey: string }, payload: Json) => ({ payload, signature: await signJson(kp.privateKey, payload) }) as Json;
+    const ext = await svc.registerExternalClaim(await sign(a, { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup", agent: { handle: "Ant", publicKey: a.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    assert.equal(ext.status, 201);
+    const ref = String((ext.body as Record<string, Json>)["ref"]);
+    const bundle = (n: number) => ({ repo: "https://github.com/example/rep", commit: n.toString(16).padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }], runtimeMinutes: 5 });
+    const c1 = await svc.commitCheck(await sign(a, { protocol: "ecdysis/0.2", type: "check.commit", target: ref, kind: "replication", bundle: bundle(1) as unknown as Json, agent: { handle: "Ant", publicKey: a.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    assert.equal(c1.status, 201, JSON.stringify(c1.body));
+    const id1 = String((c1.body as Record<string, Json>)["id"]);
+    assert.equal((await svc.fileResult(await sign(a, { protocol: "ecdysis/0.2", type: "check.result", commit: id1, outcome: "confirmed", outputs: { alpha: 28.4 }, crossCheck: null, agent: { handle: "Ant", publicKey: a.publicKey }, ts: "2026-10-03T09:01:00Z" }))).status, 201);
+    const c2 = await svc.commitCheck(await sign(b, { protocol: "ecdysis/0.2", type: "check.commit", target: ref, kind: "replication", bundle: bundle(2) as unknown as Json, agent: { handle: "Bee", publicKey: b.publicKey }, ts: "2026-10-03T09:02:00Z" }));
+    const b2 = c2.body as Record<string, Json>;
+    assert.equal((b2["crossCheck"] as Record<string, Json>)["receipt"], id1);
+    const r2 = await svc.fileResult(await sign(b, { protocol: "ecdysis/0.2", type: "check.result", commit: String(b2["id"]), outcome: "confirmed", outputs: { alpha: 28.3 }, crossCheck: { receipt: id1, outputs: { alpha: 28.405 } }, agent: { handle: "Bee", publicKey: b.publicKey }, ts: "2026-10-03T09:03:00Z" }));
+    assert.equal(r2.status, 201, JSON.stringify(r2.body));
+    assert.equal((r2.body as Record<string, Json>)["crossMatch"], true);
+    const scores = await svc.scores();
+    const claim = scores.claims.get(ref)!;
+    assert.equal(claim.status, "supported");
+    assert.deepEqual(claim.families, ["claude", "gpt"]);
+    // The withheld outputs and the bundle round-trip through SQL; the log is intact.
+    const v2store = new D1V2Store(d1Over(db), store, now);
+    assert.deepEqual(await v2store.getOutputs(id1), { alpha: 28.4 });
+    assert.equal((await v2store.getBundle(id1))!.run, "python run.py");
+    const types = (await store.listLog(0, 100)).map((e) => e.type);
+    for (const ty of ["agent.register", "operator.tier", "claim.external", "check.commit", "check.seal", "check.result"]) assert.ok(types.includes(ty), ty);
+    const audit = await new (await import("../src/api/service.js")).EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null }).audit();
+    assert.equal((audit.body as { intact: boolean }).intact, true);
+  });
+});

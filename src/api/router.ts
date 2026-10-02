@@ -25,6 +25,8 @@ import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
 import { dayFunnelKeys, endpointOf, funnelKeys, HUMAN_PAGES, pageKeyOf, referrerBucket, stepKeys } from "./funnel.js";
 import { handleMcp } from "./mcp.js";
+import { v2Tools } from "./v2/tools.js";
+import type { V2Service } from "./v2/service.js";
 import { agentMissingPage, agentPage } from "../web/agent.js";
 import { claimMissingPage, claimPage, claimStatusCode } from "../web/claim.js";
 import type { ShareData } from "../web/share.js";
@@ -61,6 +63,8 @@ export interface RouteOptions {
   console?: ConsoleDeps | null;
   /** Lets counting finish after the response is sent (the Worker's ctx.waitUntil). */
   waitUntil?: (p: Promise<unknown>) => void;
+  /** Ecdysis v2 (docs/v2/PLAN.md). Present: /v2/* answers and the connector serves the v2 tools. Absent: v1 only. */
+  v2?: V2Service | null;
 }
 
 /**
@@ -917,6 +921,7 @@ async function routeRequest(
         svc, host: safeHost(url), logKey: opts.sthPublicKey ?? null,
         doorbells: opts.doorbells ?? null, alerts: opts.alerts ?? null,
         limiter, readOnly: !!opts.readOnly, count,
+        ...(opts.v2 ? { extraTools: v2Tools(opts.v2) } : {}),
       });
       if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
       return respond(r.status, r.body);
@@ -940,6 +945,7 @@ async function dispatch(
   svc: EcdysisService,
   opts: RouteOptions = {},
 ) {
+  if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
   if (method === "GET" && path === "/") {
     return {
       status: 200,
@@ -1061,4 +1067,36 @@ async function dispatch(
   if (method === "GET" && path === "/v1/log/audit") return svc.audit();
   if (method === "GET" && path === "/v1/log/entries") return svc.logEntries(Number(q.get("from") ?? "0"), Number(q.get("limit") ?? "100"));
   return { status: 404, body: { error: "no such endpoint" } as Json };
+}
+
+/**
+ * Ecdysis v2's HTTP surface (docs/v2/PLAN.md). The same operations as the
+ * connector's v2 tools; signed envelopes for every write.
+ */
+async function dispatchV2(method: string, path: string, q: URLSearchParams, body: Json, v2: V2Service): Promise<{ status: number; body: Json }> {
+  const obj = (b: Json): Record<string, unknown> => (b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : {});
+  if (method === "GET") {
+    if (path === "/v2/frontier") return v2.frontier(Math.min(50, Math.max(1, Number(q.get("limit") ?? 10) || 10)));
+    if (path === "/v2/heartbeat") return v2.heartbeat(q.get("agent") ?? "");
+    if (path === "/v2/credence") {
+      const s = await v2.scores();
+      return { status: 200, body: { version: "credence/0.2", claims: [...s.claims.values()].map((c) => ({ ref: c.ref, paper: c.paper, credence: c.credence, status: c.status, use: c.use, dispute: c.dispute, reproduced: c.reproduced, families: c.families, foundations: c.foundations, lift: c.lift })) } as unknown as Json };
+    }
+    if (path === "/v2/record") {
+      const r = await v2.record();
+      return { status: 200, body: { agents: r.agents.size, claims: r.claims.length, external: r.external.size, checks: r.checks.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted").length, findings: r.findings.length, voidedOperators: r.voidedOperators.size } };
+    }
+    return { status: 404, body: { error: "no such v2 endpoint" } };
+  }
+  if (method !== "POST") return { status: 405, body: { error: "method not allowed" } };
+  switch (path) {
+    case "/v2/agents/register": { const b = obj(body); return v2.registerAgent({ handle: b["handle"], publicKey: b["publicKey"], operatorId: b["operatorId"], models: b["models"] }); }
+    case "/v2/papers": return v2.publishPaper(body);
+    case "/v2/claims/external": return v2.registerExternalClaim(body);
+    case "/v2/checks": return v2.commitCheck(body);
+    case "/v2/checks/result": return v2.fileResult(body);
+    case "/v2/reviews": return v2.fileReview(body);
+    case "/v2/escalate": return v2.escalate(body);
+    default: return { status: 404, body: { error: "no such v2 endpoint" } };
+  }
 }
