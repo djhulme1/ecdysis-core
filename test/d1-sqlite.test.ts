@@ -247,3 +247,53 @@ describe("the v2 store against SQLite, every migration applied", { skip: !sqlite
     assert.equal((audit.body as { intact: boolean }).intact, true);
   });
 });
+
+describe("the account store against SQLite, every migration applied", { skip: !sqlite && "node:sqlite is not available" }, () => {
+  it("signs a person in, pairs an agent, keeps preferences, counts rate-limit events and deletes everything but the log", async () => {
+    const { D1AccountStore } = await import("../src/store/v2/accounts-d1.js");
+    const { Accounts } = await import("../src/api/v2/accounts.js");
+    const { D1V2Store } = await import("../src/store/v2/d1.js");
+    const { V2Service } = await import("../src/api/v2/service.js");
+    const { TransparencyLog } = await import("../src/core/log.js");
+    const { generateKeyPair } = await import("../src/core/crypto.js");
+    const db = migrated();
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((t) => t.name);
+    for (const t of ["accounts", "account_sessions", "account_links", "account_pairings", "account_preferences", "account_events"]) assert.ok(tables.includes(t), t);
+    let t = Date.UTC(2026, 9, 3, 9, 0, 0);
+    const now = () => new Date((t += 1000));
+    const sent: string[] = [];
+    const accounts = new Accounts({
+      store: new D1AccountStore(d1Over(db), now), key: "ef".repeat(32),
+      send: async (m) => { sent.push(m.text); return { ok: true, id: "m" }; },
+      from: "Ecdysis <accounts@notify.ecdysis.me>", replyTo: "replies@ecdysis.me", siteBase: "https://ecdysis.me", stewardEmailHashes: [], now,
+    });
+    const store = new D1Store(d1Over(db));
+    const log = new TransparencyLog(store, now);
+    const svc = new V2Service({ log, store: new D1V2Store(d1Over(db), store, now), logPrivateKey: null, now, pairing: (c, ip) => accounts.consumePairing(c, ip) });
+    const r = await accounts.requestLink("dan@example.org", "1.1.1.1", null);
+    assert.ok(r.ok);
+    const token = sent[0]!.match(/t=([A-Za-z0-9_-]+)/)![1]!;
+    const c = await accounts.completeLink(token, r.browser, "1.1.1.1");
+    assert.ok(c.ok && c.created);
+    assert.equal((await accounts.completeLink(token, r.browser, "1.1.1.1")).ok, false, "single use, through SQL");
+    const s = (await accounts.session(c.session))!;
+    assert.equal(s.account.id, c.account.id);
+    const code = await accounts.newPairingCode(s);
+    const kp = await generateKeyPair();
+    const reg = await svc.registerAgent({ handle: "Moth", publicKey: kp.publicKey, pairing: code }, "1.1.1.1");
+    assert.equal(reg.status, 201, JSON.stringify(reg.body));
+    assert.equal((reg.body as Record<string, Json>)["operatorId"], c.account.operatorId);
+    await accounts.savePreferences(s, { interests: { fields: ["math"], topics: ["sat"], claims: [], agents: [] }, notifications: { digest: "weekly", alerts: ["check.owed"] }, profile: null });
+    assert.deepEqual((await accounts.preferences(s)).interests.fields, ["math"]);
+    const row = db.prepare("SELECT email_hash, email_sealed FROM accounts").get() as { email_hash: string; email_sealed: string };
+    assert.ok(!row.email_sealed.includes("example") && !row.email_hash.includes("example"), "no readable address in the database");
+    assert.equal(await accounts.emailOf(s.account), "dan@example.org");
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM account_events").get() as { n: number }).n >= 2, true);
+    await accounts.deleteAccount(s);
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM accounts").get() as { n: number }).n, 0);
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM account_sessions").get() as { n: number }).n, 0);
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM account_preferences").get() as { n: number }).n, 0);
+    const rec = await svc.record();
+    assert.equal(rec.agents.get("Moth")!.operatorId, c.account.operatorId, "the log keeps the operator id and the agent");
+  });
+});

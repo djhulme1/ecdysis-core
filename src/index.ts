@@ -7,8 +7,11 @@
 import { EcdysisService, PREPRINT_DAILY_CAP } from "./api/service.js";
 import { BUCKET_LIMITS, MemoryRateLimiter, route, type RateLimiter } from "./api/router.js";
 import { V2Service } from "./api/v2/service.js";
+import { Accounts } from "./api/v2/accounts.js";
+import { MeHandler } from "./api/v2/me.js";
 import { TransparencyLog } from "./core/log.js";
 import { D1V2Store } from "./store/v2/d1.js";
+import { D1AccountStore } from "./store/v2/accounts-d1.js";
 import { D1Store } from "./store/d1-store.js";
 import { R2BlobStore } from "./store/blob.js";
 import {
@@ -95,6 +98,15 @@ export interface Env {
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
   OPERATOR_EMAIL_HASHES?: string;
+  /**
+   * Secret: 32 random bytes as 64 hex characters, keying the account store
+   * (v2): emails are kept as an HMAC under it for lookup and sealed under it
+   * for sending. Unset or unreadable: accounts are closed (fail closed).
+   * openssl rand -hex 32 | npx wrangler secret put ACCOUNTS_KEY
+   */
+  ACCOUNTS_KEY?: string;
+  /** Sender for sign-in links; defaults to accounts@notify.ecdysis.me. */
+  ACCOUNTS_FROM?: string;
   RL_KEY?: { limit: (opts: { key: string }) => Promise<{ success: boolean }> };
   RL_OWNER?: { limit: (opts: { key: string }) => Promise<{ success: boolean }> };
 }
@@ -177,14 +189,30 @@ function serviceFrom(env: Env, store: Store = new D1Store(env.DB)): EcdysisServi
 }
 
 /** Ecdysis v2, when switched on: the same log and database, the v2 tables, the log key as the sealer. */
-function v2From(env: Env, store: D1Store): V2Service | null {
+/** Accounts for people (v2), present whenever v2 is; closed without ACCOUNTS_KEY. */
+function accountsFrom(env: Env): Accounts {
+  return new Accounts({
+    store: new D1AccountStore(env.DB),
+    key: env.ACCOUNTS_KEY ?? null,
+    send: env.HERALD_API_KEY ? resendSender(env.HERALD_API_KEY) : null,
+    from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>",
+    replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
+    siteBase: "https://ecdysis.me",
+    stewardEmailHashes: accessFrom(env).emailHashes,
+  });
+}
+
+function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
-  return new V2Service({
+  const accounts = accountsFrom(env);
+  const v2 = new V2Service({
     log: new TransparencyLog(store),
     store: new D1V2Store(env.DB, store),
     logPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
     screeners: screenersFrom(env),
+    pairing: (code, ip) => accounts.consumePairing(code, ip),
   });
+  return { v2, me: new MeHandler({ accounts, v2, readOnly: readOnly(env) }) };
 }
 
 /** The preprint cap from configuration; anything unreadable keeps the default. */
@@ -338,6 +366,7 @@ export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const store = new D1Store(env.DB);
     const svc = serviceFrom(env, store);
+    const v2 = v2From(env, store);
     const herald = heraldFrom(env, store);
     const newsletter = newsletterFrom(env, store);
     const alerts = alertsFrom(env, store);
@@ -360,7 +389,8 @@ export default {
       openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE ?? null,
       console: consoleDeps,
       waitUntil: (p) => ctx.waitUntil(p),
-      v2: v2From(env, store),
+      v2: v2?.v2 ?? null,
+      me: v2?.me ?? null,
     });
   },
 } satisfies ExportedHandler<Env>;

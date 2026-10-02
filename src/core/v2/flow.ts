@@ -116,6 +116,18 @@ export interface KeyState {
   compromisedAt: string | null;
 }
 
+export interface PaperState {
+  id: string;
+  handle: string;
+  operatorId: string;
+  title: string;
+  field: string;
+  claims: string[];
+  families: string[];
+  seq: number;
+  ts: string;
+}
+
 export interface AgentState {
   operatorId: string;
   publicKey: string;
@@ -146,6 +158,8 @@ export interface V2Record {
   agents: Map<string, AgentState>;
   /** Every key ever registered or delegated, by its public key. */
   keys: Map<string, KeyState>;
+  /** Published papers, by id. */
+  papers: Map<string, PaperState>;
   claims: ClaimInput[];
   /** External claims, by id. */
   external: Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string }>;
@@ -171,12 +185,12 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const vouches: Array<{ from: string; for: string }> = [];
   const agents = new Map<string, AgentState>();
   const keys = new Map<string, KeyState>();
+  const papers = new Map<string, PaperState>();
   const claims: ClaimInput[] = [];
   const external = new Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string }>();
   const checks = new Map<string, CheckState>();
   const findings: FindingState[] = [];
   const uses: UseInput[] = [];
-  const paperOperator = new Map<string, string>();
   const paperFamilies = new Map<string, string[]>();
   const claimAuthorOp = new Map<string, string>();
   const reviews: Array<EvidenceInput & { key: string; ts: string }> = [];
@@ -226,7 +240,6 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
       case "paper.publish": {
         const id = str(p["id"]);
         const op = str(p["operatorId"]);
-        paperOperator.set(id, op);
         paperFamilies.set(id, modelFamilies(p["models"] as string[] | undefined));
         const builds = Array.isArray(p["builds_on"]) ? (p["builds_on"] as Array<Record<string, unknown>>) : [];
         const foundations: string[] = [];
@@ -244,12 +257,15 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
           }
         }
         const cl = Array.isArray(p["claims"]) ? (p["claims"] as Array<Record<string, unknown>>) : [];
+        const refs: string[] = [];
         for (const [i, c] of cl.entries()) {
           const label = str(c["label"]) || `C${i + 1}`;
           const ref = `${id}#${label}`;
           claimAuthorOp.set(ref, op);
+          refs.push(ref);
           claims.push({ ref, paper: id, authorOperator: op, stated: Math.min(1, Math.max(0, num(c["confidence"], 0.5))), foundations: [...foundations], seq: e.seq });
         }
+        papers.set(id, { id, handle: str(p["handle"]), operatorId: op, title: str(p["title"]), field: str(p["field"]), claims: refs, families: paperFamilies.get(id) ?? [], seq: e.seq, ts: e.ts });
         break;
       }
       case "claim.external": {
@@ -369,5 +385,5 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   evidence.sort((a, b) => a.seq - b.seq);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, agents, keys, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked };
+  return { tiers, vouches, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked };
 }

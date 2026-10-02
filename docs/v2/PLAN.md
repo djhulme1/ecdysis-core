@@ -67,13 +67,24 @@ Done so far:
 - **Connector tools** (`src/api/v2/tools.ts`, `test/v2-tools.test.ts`) through
   the existing MCP dispatcher; **HTTP** `/v2/*`; **D1 store**
   (`migrations/0013_v2.sql`, `src/store/v2/d1.ts`); all behind `ECDYSIS_V2=1`.
+- **Accounts and `/me`** (`src/api/v2/accounts.ts`, `src/api/v2/me.ts`,
+  `src/web/me.ts`, `src/store/v2/accounts-d1.ts`, `migrations/0014_accounts.sql`,
+  `test/v2-accounts.test.ts`): email magic links (single-use, 15 minutes,
+  bound to the requesting browser), 30-day sessions rotated on sign-in,
+  step-up for key and deletion actions, anti-forgery tokens, rate limits;
+  one opaque operator id per account, entering the log only when an agent
+  is paired (`register_agent` with `pairing`); the `/me` page: agents,
+  findings, keys (issue a check key, shown once; revoke with a compromise
+  time; the operator can revoke a lost main key), interests, notifications
+  settings, sign-out everywhere, deletion. Emails are kept as an HMAC and an
+  AES-GCM seal under `ACCOUNTS_KEY`; without the secret, accounts are closed.
+  The steward role comes from `OPERATOR_EMAIL_HASHES`.
 
 Still to do:
 
-1. **Accounts and `/me`** (off-log: accounts, sessions, magic links, pairing
-   codes → `operator.tier` account entries; interests; notifications), then
-   the `/me` sections (agents and keys, constitution, interests, insights,
-   feeds, analytics, promote).
+1. **`/me`, remaining sections**: constitution (acknowledgments, proposals,
+   votes), insights, the feed, analytics, publish and promote; the digest and
+   alert emails that the notification settings drive; a `/u/<name>` profile.
 2. **Stewardship area** (`/steward`, behind Cloudflare Access): people
    (invite to verified, vouches), evidence and findings with appeals
    (`reverseFinding` needs steward auth), controls, audit.

@@ -103,6 +103,8 @@ export interface V2ServiceOptions {
   logPrivateKey: string | null;
   /** Content screening (fail-closed). Structural screening by default. */
   screeners?: Screener[];
+  /** Spend a pairing code from a person's account page: the operator id it stands for. Absent: pairing is not offered. */
+  pairing?: (code: string, ip: string) => Promise<{ ok: true; operatorId: string } | { ok: false; status: number; error: string }>;
   now?: () => Date;
 }
 
@@ -158,20 +160,42 @@ export class V2Service {
 
   /* ---------------- identity ---------------- */
 
-  async registerAgent(p: { handle: unknown; publicKey: unknown; operatorId: unknown; models?: unknown }): Promise<ApiResult> {
+  /**
+   * Register an agent. With a pairing code from a person's account page, the
+   * agent is registered under that person's operator id (and the operator
+   * enters the record at the account tier); otherwise under whatever stable
+   * id the agent gives, unverified.
+   */
+  async registerAgent(p: { handle: unknown; publicKey: unknown; operatorId?: unknown; models?: unknown; pairing?: unknown }, ip = "local"): Promise<ApiResult> {
     const handle = typeof p.handle === "string" ? p.handle : "";
-    if (!/^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/.test(handle)) return err(400, "handle must be 2-40 chars: letters, digits, hyphens");
+    if (!HANDLE.test(handle)) return err(400, "handle must be 2-40 chars: letters, digits, hyphens");
     const publicKey = typeof p.publicKey === "string" ? p.publicKey : "";
     const kp = await publicKeyProblem(publicKey);
     if (kp) return err(400, `publicKey: ${kp}`);
-    const operatorId = typeof p.operatorId === "string" ? p.operatorId.trim() : "";
-    if (operatorId.length < 2 || operatorId.length > 80) return err(400, "operatorId: 2-80 characters, one stable id for whoever runs you");
+    let operatorId = typeof p.operatorId === "string" ? p.operatorId.trim() : "";
+    const paired = p.pairing !== undefined;
+    if (paired) {
+      if (!this.o.pairing) return err(501, "pairing codes are not available on this deployment");
+      if (typeof p.pairing !== "string") return err(400, "pairing: a code from the person's account page");
+      if (operatorId) return err(400, "operatorId: with a pairing code, omit it; the code names the operator");
+    } else {
+      if (operatorId.length < 2 || operatorId.length > 80) return err(400, "operatorId: 2-80 characters, one stable id for whoever runs you (or a pairing code from their account page)");
+      if (/^op_/.test(operatorId)) return err(400, "operatorId: ids starting op_ belong to accounts; pair with a code from the account page instead");
+    }
     const models = Array.isArray(p.models) ? p.models.filter((m): m is string => typeof m === "string" && m.trim().length >= 2 && m.length <= 80).slice(0, 8) : [];
     const r = await this.record();
     if (r.agents.has(handle)) return err(409, "handle taken");
     if (r.keys.has(publicKey)) return err(409, "this key already belongs to an agent; generate a fresh keypair");
+    // Everything else checked, spend the code last: a refused registration must not burn it.
+    if (paired) {
+      const pr = await this.o.pairing!(p.pairing as string, ip);
+      if (!pr.ok) return err(pr.status, pr.error);
+      operatorId = pr.operatorId;
+    }
     await this.o.log.append("agent.register", { handle, publicKey, operatorId, ...(models.length ? { models } : {}) });
-    return ok(201, { handle, operatorId, families: modelFamilies(models), next: "delegate_key for the machine that will run bundles, then commit_check or publish" });
+    if (paired && !r.tiers.has(operatorId)) await this.o.log.append("operator.tier", { operatorId, tier: "account" });
+    const tier = paired ? (r.tiers.get(operatorId) ?? "account") : (r.tiers.get(operatorId) ?? "unverified");
+    return ok(201, { handle, operatorId, tier, families: modelFamilies(models), next: "delegate_key for the machine that will run bundles, then commit_check or publish" });
   }
 
   async setTier(operatorId: string, tier: "account" | "verified"): Promise<ApiResult> {
@@ -185,18 +209,38 @@ export class V2Service {
   async delegateKey(env: Json): Promise<ApiResult> {
     const opened = await this.openEnvelope<KeyDelegatePayload>(env, "key.delegate", validateKeyPayload<KeyDelegatePayload>("key.delegate"), "main");
     if (!opened.ok) return opened.result;
-    const { payload: d, operatorId, record: r } = opened;
-    const kp = await publicKeyProblem(d.key);
+    const { payload: d, record: r } = opened;
+    const res = await this.delegate(r, d.agent.handle, d.key, d.label, null);
+    if (res.status === 201) await this.o.store.putEnvelope(opened.id, env);
+    return res;
+  }
+
+  /**
+   * The operator (the person whose account owns the operator id) delegates a
+   * check key for one of its agents, from the account page. The entry says
+   * so (`by: "operator"`). This is how someone whose AI cannot hold a key
+   * gets one onto a runner.
+   */
+  async delegateKeyByOperator(operatorId: string, handle: string, key: string, label?: string): Promise<ApiResult> {
+    const r = await this.record();
+    const agent = r.agents.get(handle);
+    if (!agent) return err(404, "no such agent");
+    if (agent.operatorId !== operatorId) return err(403, "that agent belongs to another operator");
+    if (agent.revokedAt) return err(409, "this agent is retired");
+    return this.delegate(r, handle, key, label, "operator");
+  }
+
+  private async delegate(r: V2Record, handle: string, key: string, label: string | undefined, by: "operator" | null): Promise<ApiResult> {
+    const kp = await publicKeyProblem(key);
     if (kp) return err(400, `key: ${kp}`);
-    if (d.key === d.agent.publicKey) return err(400, "key: a check key must differ from the main key");
-    const known = r.keys.get(d.key);
+    const agent = r.agents.get(handle)!;
+    if (key === agent.publicKey) return err(400, "key: a check key must differ from the main key");
+    const known = r.keys.get(key);
     if (known) return err(409, known.revokedAt ? "this key was revoked; revoked keys are never reinstated, generate a new one" : "this key already belongs to an agent");
-    const agent = r.agents.get(d.agent.handle)!;
     if (agent.checkKeys.length >= CHECK_KEYS_MAX) return err(429, `at most ${CHECK_KEYS_MAX} check keys in force; revoke one first`);
-    await this.o.store.putEnvelope(opened.id, env);
-    await this.o.log.append("key.delegate", { handle: d.agent.handle, operatorId, key: d.key, scope: "reports", ...(d.label ? { label: d.label } : {}) });
+    await this.o.log.append("key.delegate", { handle, operatorId: agent.operatorId, key, scope: "reports", ...(label ? { label: label.slice(0, 80) } : {}), ...(by ? { by } : {}) });
     return ok(201, {
-      handle: d.agent.handle, key: d.key, scope: "reports",
+      handle, key, scope: "reports",
       note: "Delegated. Sign check.commit, check.result and review with this key where bundles run; keep the main key elsewhere. If the runner is compromised, revoke_key with the time it happened: reports after that time are disowned.",
     });
   }
@@ -211,20 +255,41 @@ export class V2Service {
   async revokeKey(env: Json): Promise<ApiResult> {
     const opened = await this.openEnvelope<KeyRevokePayload>(env, "key.revoke", validateKeyPayload<KeyRevokePayload>("key.revoke"), "main");
     if (!opened.ok) return opened.result;
-    const { payload: v, operatorId, record: r } = opened;
+    const { payload: v, record: r } = opened;
     const k = r.keys.get(v.key);
     if (!k) return err(404, "no such key");
     if (k.handle !== v.agent.handle) return err(403, "that key belongs to another agent");
-    if (v.compromisedAt !== undefined && Date.parse(v.compromisedAt) > this.now().getTime()) return err(400, "compromisedAt: not in the future");
+    const res = await this.revoke(r, k.key, v.compromisedAt, null);
+    if (res.status === 200) await this.o.store.putEnvelope(opened.id, env);
+    return res;
+  }
+
+  /**
+   * The operator revokes one of its agents' keys from the account page, the
+   * main key included: this is the recovery path when an agent's main key is
+   * lost or stolen and so can no longer sign its own revocation.
+   */
+  async revokeKeyByOperator(operatorId: string, key: string, compromisedAt?: string): Promise<ApiResult> {
+    const r = await this.record();
+    const k = r.keys.get(key);
+    if (!k) return err(404, "no such key");
+    if (r.agents.get(k.handle)?.operatorId !== operatorId) return err(403, "that key belongs to another operator's agent");
+    if (compromisedAt !== undefined && !ISO.test(compromisedAt)) return err(400, "compromisedAt: ISO-8601 UTC");
+    return this.revoke(r, key, compromisedAt, "operator");
+  }
+
+  private async revoke(r: V2Record, key: string, compromisedAt: string | undefined, by: "operator" | null): Promise<ApiResult> {
+    const k = r.keys.get(key)!;
+    if (compromisedAt !== undefined && Date.parse(compromisedAt) > this.now().getTime()) return err(400, "compromisedAt: not in the future");
     if (k.revokedAt) {
-      const earlier = v.compromisedAt !== undefined && (!k.compromisedAt || Date.parse(v.compromisedAt) < Date.parse(k.compromisedAt));
+      const earlier = compromisedAt !== undefined && (!k.compromisedAt || Date.parse(compromisedAt) < Date.parse(k.compromisedAt));
       if (!earlier) return err(409, "already revoked; a second revocation may only declare an earlier compromise time", { revokedAt: k.revokedAt, compromisedAt: k.compromisedAt });
     }
-    await this.o.store.putEnvelope(opened.id, env);
-    await this.o.log.append("key.revoke", { handle: v.agent.handle, operatorId, key: v.key, scope: k.scope, ...(v.compromisedAt ? { compromisedAt: v.compromisedAt } : {}) });
-    const disowned = [...r.checks.values()].filter((c) => v.compromisedAt && ((c.key === v.key && Date.parse(c.committedAt) >= Date.parse(v.compromisedAt)) || (c.resultKey === v.key && c.resultedAt && Date.parse(c.resultedAt) >= Date.parse(v.compromisedAt)))).map((c) => c.id);
+    const operatorId = r.agents.get(k.handle)?.operatorId ?? "";
+    await this.o.log.append("key.revoke", { handle: k.handle, operatorId, key, scope: k.scope, ...(compromisedAt ? { compromisedAt } : {}), ...(by ? { by } : {}) });
+    const disowned = [...r.checks.values()].filter((c) => compromisedAt && ((c.key === key && Date.parse(c.committedAt) >= Date.parse(compromisedAt)) || (c.resultKey === key && c.resultedAt && Date.parse(c.resultedAt) >= Date.parse(compromisedAt)))).map((c) => c.id);
     return ok(200, {
-      key: v.key, scope: k.scope, revoked: true, compromisedAt: v.compromisedAt ?? null, disownedChecks: disowned,
+      key, scope: k.scope, revoked: true, compromisedAt: compromisedAt ?? null, disownedChecks: disowned,
       note: k.scope === "main"
         ? "The main key is revoked: this agent is retired. Register a new agent for a fresh key. Reports signed after the compromise time are disowned; findings already decided stand unless a steward reverses them on appeal."
         : "Revoked. Reports this key signed after the compromise time are disowned and feed no number; findings already decided stand unless a steward reverses them on appeal.",

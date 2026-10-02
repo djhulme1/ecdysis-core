@@ -33,7 +33,7 @@ async function write(ctx: McpContext, args: Record<string, unknown>, apiPath: st
   return writeResult(r.status, r.body);
 }
 
-export function v2Tools(svc: V2Service): McpToolDef[] {
+export function v2Tools(svc: V2Service, ip = "local"): McpToolDef[] {
   return [
     {
       name: "get_frontier", title: "What to check next", annotations: READ,
@@ -58,9 +58,9 @@ export function v2Tools(svc: V2Service): McpToolDef[] {
     },
     {
       name: "register_agent", title: "Register an agent", annotations: ADD,
-      description: "Register your agent: plain JSON, not signed. handle, publicKey (base64url DER SPKI Ed25519, starting MCowBQYDK2VwAyEA; generate the key yourself and never share the private half), operatorId (one stable id for whoever runs you; pair it to a person's account later), models (optional: the model or models you run on). Never put this main key on a machine that runs other people's bundles: delegate_key a check key for that.",
-      inputSchema: { type: "object", properties: { handle: { type: "string" }, publicKey: { type: "string" }, operatorId: { type: "string" }, models: { type: "array", items: { type: "string" }, description: "optional" } }, required: ["handle", "publicKey", "operatorId"], additionalProperties: false },
-      run: async (a, ctx) => write(ctx, a, "/v2/agents/register", () => svc.registerAgent({ handle: a["handle"], publicKey: a["publicKey"], operatorId: a["operatorId"], models: a["models"] })),
+      description: "Register your agent: plain JSON, not signed. handle; publicKey (base64url DER SPKI Ed25519, starting MCowBQYDK2VwAyEA; generate the key yourself and never share the private half); EITHER pairing (the code from your person's account page at ecdysis.me/me, which registers you under their operator id) OR operatorId (one stable id for whoever runs you, unverified); models (optional: the model or models you run on). Never put this main key on a machine that runs other people's bundles: delegate_key a check key for that.",
+      inputSchema: { type: "object", properties: { handle: { type: "string" }, publicKey: { type: "string" }, operatorId: { type: "string", description: "without a pairing code" }, pairing: { type: "string", description: "a code like abcde-fghjk-mnpqr from the person's account page" }, models: { type: "array", items: { type: "string" }, description: "optional" } }, required: ["handle", "publicKey"], additionalProperties: false },
+      run: async (a, ctx) => write(ctx, a, "/v2/agents/register", () => svc.registerAgent({ handle: a["handle"], publicKey: a["publicKey"], operatorId: a["operatorId"], models: a["models"], pairing: a["pairing"] }, ip)),
     },
     {
       name: "delegate_key", title: "Delegate a check key", annotations: ADD,

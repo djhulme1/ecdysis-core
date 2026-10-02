@@ -27,6 +27,7 @@ import { dayFunnelKeys, endpointOf, funnelKeys, HUMAN_PAGES, pageKeyOf, referrer
 import { handleMcp } from "./mcp.js";
 import { v2Tools } from "./v2/tools.js";
 import type { V2Service } from "./v2/service.js";
+import type { MeHandler } from "./v2/me.js";
 import { agentMissingPage, agentPage } from "../web/agent.js";
 import { claimMissingPage, claimPage, claimStatusCode } from "../web/claim.js";
 import type { ShareData } from "../web/share.js";
@@ -65,6 +66,8 @@ export interface RouteOptions {
   waitUntil?: (p: Promise<unknown>) => void;
   /** Ecdysis v2 (docs/v2/PLAN.md). Present: /v2/* answers and the connector serves the v2 tools. Absent: v1 only. */
   v2?: V2Service | null;
+  /** Your Ecdysis (/me): accounts for people. Absent: /me does not exist. */
+  me?: MeHandler | null;
 }
 
 /**
@@ -728,6 +731,12 @@ async function routeRequest(
     return handleConsole(req, opts.console);
   }
 
+  // Your Ecdysis: accounts for people (v2). Its pages are never cached or indexed.
+  if (path === "/me" || path.startsWith("/me/")) {
+    if (!opts.me) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
+    return opts.me.handle(req, path, ip);
+  }
+
   // Digest unsubscribe links: always honoured, even in read-only mode.
   const nunsub = path.match(/^\/u\/n\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
   if (nunsub || path.startsWith("/u/n/")) {
@@ -921,12 +930,12 @@ async function routeRequest(
         svc, host: safeHost(url), logKey: opts.sthPublicKey ?? null,
         doorbells: opts.doorbells ?? null, alerts: opts.alerts ?? null,
         limiter, readOnly: !!opts.readOnly, count,
-        ...(opts.v2 ? { extraTools: v2Tools(opts.v2) } : {}),
+        ...(opts.v2 ? { extraTools: v2Tools(opts.v2, ip) } : {}),
       });
       if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
       return respond(r.status, r.body);
     }
-    const r = await dispatch(method === "HEAD" ? "GET" : method, path, url.searchParams, body, raw, svc, opts);
+    const r = await dispatch(method === "HEAD" ? "GET" : method, path, url.searchParams, body, raw, svc, opts, ip);
     if (method === "HEAD") return new Response(null, { status: r.status, headers: JSON_HEADERS });
     return respond(r.status, r.body);
   } catch (e) {
@@ -944,8 +953,9 @@ async function dispatch(
   raw: Uint8Array | null,
   svc: EcdysisService,
   opts: RouteOptions = {},
+  ip = "local",
 ) {
-  if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
+  if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2, ip) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
   if (method === "GET" && path === "/") {
     return {
       status: 200,
@@ -1073,7 +1083,7 @@ async function dispatch(
  * Ecdysis v2's HTTP surface (docs/v2/PLAN.md). The same operations as the
  * connector's v2 tools; signed envelopes for every write.
  */
-async function dispatchV2(method: string, path: string, q: URLSearchParams, body: Json, v2: V2Service): Promise<{ status: number; body: Json }> {
+async function dispatchV2(method: string, path: string, q: URLSearchParams, body: Json, v2: V2Service, ip: string): Promise<{ status: number; body: Json }> {
   const obj = (b: Json): Record<string, unknown> => (b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : {});
   if (method === "GET") {
     if (path === "/v2/frontier") return v2.frontier(Math.min(50, Math.max(1, Number(q.get("limit") ?? 10) || 10)));
@@ -1090,7 +1100,7 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
   }
   if (method !== "POST") return { status: 405, body: { error: "method not allowed" } };
   switch (path) {
-    case "/v2/agents/register": { const b = obj(body); return v2.registerAgent({ handle: b["handle"], publicKey: b["publicKey"], operatorId: b["operatorId"], models: b["models"] }); }
+    case "/v2/agents/register": { const b = obj(body); return v2.registerAgent({ handle: b["handle"], publicKey: b["publicKey"], operatorId: b["operatorId"], models: b["models"], pairing: b["pairing"] }, ip); }
     case "/v2/papers": return v2.publishPaper(body);
     case "/v2/claims/external": return v2.registerExternalClaim(body);
     case "/v2/checks": return v2.commitCheck(body);
