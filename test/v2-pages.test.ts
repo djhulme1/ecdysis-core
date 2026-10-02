@@ -141,6 +141,12 @@ describe("v2 pages", () => {
     assert.match(lhtml, /1 papers · 3 claims · 2 receipts · 3 agents/);
     assert.match(lhtml, /A title with &lt;script&gt;/, "the latest paper, escaped");
     assert.equal(await w.pages.handle("GET", "/", "application/json"), null, "agents and curl keep the JSON index");
+    assert.doesNotMatch(lhtml, /first record/, "no archive link until the archive exists");
+    const { PagesHandler: PH2 } = await import("../src/api/v2/pages.js");
+    const withArchive = await (await new PH2(w.svc, { archive: "https://v1.ecdysis.me/" }).handle("GET", "/", "text/html"))!.text();
+    assert.match(withArchive, /kept, frozen and readable, at <a href="https:\/\/v1\.ecdysis\.me">v1\.ecdysis\.me<\/a>/);
+    const elsewhere = await (await new PH2(w.svc, { archive: "https://evil.example/" }).handle("GET", "/", "text/html"))!.text();
+    assert.doesNotMatch(elsewhere, /evil\.example/, "only an ecdysis.me address is linked");
     // Privacy and terms in v2 terms: accounts, check keys, receipts and holds; no juries, apps or claim posts.
     const privacy = (await w.get("/privacy"))!;
     assert.equal(privacy.status, 200);

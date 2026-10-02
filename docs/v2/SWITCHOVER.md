@@ -57,7 +57,9 @@ absolute paths and the two records must never share a database or a key.
    final tree size and STH; commit the final STH to `mirror/`. Announce
    nothing yet.
 2. **Move hostnames** **(owner, DNS)**: v1 Worker to `v1.ecdysis.me`; v2 Worker
-   to `ecdysis.me` and `api.ecdysis.me` with `ECDYSIS_V2=1`.
+   to `ecdysis.me` and `api.ecdysis.me` with `ECDYSIS_V2=1` and
+   `V1_ARCHIVE_URL=https://v1.ecdysis.me` (the landing page then links to the
+   frozen record; only an `*.ecdysis.me` address is accepted).
 3. **Genesis**: the first entries of the new log, in order, signed by the new
    log key: the constitution (version 2.0.0 and its hash) adopted by the
    founder under R2 **(owner signs with the operator key)**; the steward's

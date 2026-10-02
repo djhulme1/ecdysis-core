@@ -62,6 +62,8 @@ export interface Env {
    * database and a new log key is the owner's act.
    */
   ECDYSIS_V2?: string;
+  /** Where the frozen v1 record lives after the switchover (https://v1.ecdysis.me); linked from v2's landing page when set. */
+  V1_ARCHIVE_URL?: string;
   /** Secret: wrangler secret put STH_SIGNING_KEY_PKCS8 */
   STH_SIGNING_KEY_PKCS8?: string;
   /** Secret: JSON array of {pattern, flags, category, severity} rules,
@@ -262,7 +264,7 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
     steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env), canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }) }),
     pages: new PagesHandler(v2, {
-      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts,
+      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null,
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
       ...(waitUntil ? { waitUntil } : {}),
     }),

@@ -47,6 +47,8 @@ export interface PagesOptions {
   governance?: V2Governance | null;
   /** Accounts, when configured: public profiles (/u/<name>) look the name up here. Without them, no profile page exists. */
   accounts?: Accounts | null;
+  /** The frozen v1 archive's address (https://v1.ecdysis.me), once it exists: linked from the landing page. */
+  archive?: string | null;
   /** Operational counters (share links followed, by day, kind and platform only; never who). Best effort. */
   count?: (keys: string[]) => Promise<void>;
   /** Lets counting outlive the response (the Worker's waitUntil); otherwise it is awaited. */
@@ -145,6 +147,7 @@ export class PagesHandler {
       logPublicKey: this.o.logPublicKey ?? null,
       counts: { papers: r.papers.size, claims: r.claims.length, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted" && !c.disowned).length, agents: r.agents.size },
       latest: latest ? { id: latest.id, title: latest.title, agent: latest.handle, field: latest.field, ts: latest.ts } : null,
+      archive: this.o.archive && /^https:\/\/[a-z0-9.-]+\.ecdysis\.me\/?$/.test(this.o.archive) ? this.o.archive.replace(/\/$/, "") : null,
     };
   }
 
