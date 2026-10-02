@@ -18,10 +18,16 @@
  *           receipt of the same claim, re-run under its own seed.
  *
  * The next scientist is the audit. Outputs that agree within the declared
- * tolerances verify both receipts. A disagreement gets a third run: two
- * independent runs agreeing against one prove the odd one wrong, as
- * fabrication when the bundle is deterministic, as irreproducible when it
- * declares tolerances.
+ * tolerances verify both receipts. A disagreement opens a FINDING, never a
+ * verdict (sanity check §5.1): identical ML runs differ more often than
+ * not, so two runs against one would convict honest agents, and two
+ * colluders could aim it at a rival. Determinism is observed, not declared:
+ * a bundle is deterministic for an environment only once independent runs
+ * under one seed in one pinned image have matched exactly. A finding of
+ * fabrication needs a deterministic bundle, at least FINDING_MIN_RUNS
+ * independent runs with all but one agreeing, an appeal period, and is
+ * reversible by a later finding. Anything less is "irreproducible": a mark
+ * on the odd one's record, no voiding.
  *
  * Proposition 3. If each receipt R_j (j ≥ 2) re-runs a uniformly random
  * earlier receipt of the same claim, R_i has been re-run, once there are n,
@@ -55,13 +61,17 @@ export interface Bundle {
   repo: string;
   /** The exact commit (40 or 64 hex). */
   commit: string;
-  /** Container image digest, "sha256:<64 hex>", when the run uses one. */
+  /**
+   * Container image digest, "sha256:<64 hex>". Optional, but determinism
+   * can only ever be observed for a bundle that pins its environment, so a
+   * bundle without one can never carry a fabrication finding.
+   */
   image?: string;
   /** The command, run with ECDYSIS_SEED set to the seed. */
   run: string;
   outputs: OutputSpec[];
-  /** Same seed, same outputs, exactly. Only a deterministic bundle can prove fabrication. */
-  deterministic: boolean;
+  /** Expected wall-clock minutes on one CPU, so priorities can be shown per unit of compute. */
+  runtimeMinutes: number;
 }
 
 export interface CheckCommit {
@@ -70,6 +80,8 @@ export interface CheckCommit {
   target: string;
   kind: CheckKind;
   bundle: Bundle;
+  /** The model this check is run on (free text; normalised to a family by credence/0.2). */
+  model: string;
   agent: { handle: string; publicKey: string };
   ts: string;
 }
@@ -154,22 +166,52 @@ export function compareOutputs(a: Outputs, b: Outputs, spec: OutputSpec[]): { ma
 }
 
 /**
- * Settle a disagreement over one bundle under one seed from three
- * independent runs: two agreeing against one prove the odd one wrong.
+ * Determinism, observed: a bundle with a pinned image whose independent
+ * runs under ONE seed have matched exactly at least DETERMINISM_MIN_RUNS
+ * times (the runs that establish this may include the disputed seed's own
+ * agreeing runs).
+ */
+export const DETERMINISM_MIN_RUNS = 2;
+/** A fabrication finding needs this many independent runs, all but one agreeing. */
+export const FINDING_MIN_RUNS = 4;
+/** A finding takes effect this long after it is made, unless reversed. */
+export const APPEAL_MS = 14 * 24 * 3600 * 1000;
+
+export function isDeterministic(bundle: Bundle, exactMatchesUnderOneSeed: number): boolean {
+  return !!bundle.image && exactMatchesUnderOneSeed >= DETERMINISM_MIN_RUNS;
+}
+
+export type Settlement =
+  | { verdict: "agreed" }
+  | { verdict: "open"; need: number }
+  | { verdict: "irreproducible"; odd: string }
+  | { verdict: "fabrication"; odd: string }
+  | { verdict: "unresolved" };
+
+/**
+ * Settle a disagreement over one bundle under one seed from independent
+ * runs. All agree: agreed. Fewer than FINDING_MIN_RUNS: open, with how many
+ * more are needed. All but one agree: the odd one out is fabrication if the
+ * bundle is deterministic (observed), else irreproducible. No majority of
+ * that strength: unresolved (the bundle itself is not reproducible).
  */
 export function settleRuns(
   runs: Array<{ by: string; outputs: Outputs }>,
   spec: OutputSpec[],
   deterministic: boolean,
-): { verdict: "agreed" | "fraud" | "irreproducible" | "unresolved"; odd: string | null } {
-  if (runs.length < 3) return { verdict: "unresolved", odd: null };
-  const [a, b, c] = runs as [typeof runs[0], typeof runs[0], typeof runs[0]];
-  const m = (x: typeof a, y: typeof a) => compareOutputs(x.outputs, y.outputs, spec).match;
-  const ab = m(a, b), ac = m(a, c), bc = m(b, c);
-  if (ab && ac && bc) return { verdict: "agreed", odd: null };
-  const odd = ab && !ac && !bc ? c : ac && !ab && !bc ? b : bc && !ab && !ac ? a : null;
-  if (!odd) return { verdict: "unresolved", odd: null };
-  return { verdict: deterministic ? "fraud" : "irreproducible", odd: odd.by };
+): Settlement {
+  const m = (x: Outputs, y: Outputs) => compareOutputs(x, y, spec).match;
+  const n = runs.length;
+  if (n >= 2 && runs.every((r) => m(r.outputs, runs[0]!.outputs))) return { verdict: "agreed" };
+  if (n < FINDING_MIN_RUNS) return { verdict: "open", need: FINDING_MIN_RUNS - n };
+  // The odd one out: exactly one run that matches none of the others, while all the others match each other.
+  for (let i = 0; i < n; i++) {
+    const rest = runs.filter((_, j) => j !== i);
+    const restAgree = rest.every((r) => m(r.outputs, rest[0]!.outputs));
+    const oddDiffers = rest.every((r) => !m(r.outputs, runs[i]!.outputs));
+    if (restAgree && oddDiffers) return deterministic ? { verdict: "fabrication", odd: runs[i]!.by } : { verdict: "irreproducible", odd: runs[i]!.by };
+  }
+  return { verdict: "unresolved" };
 }
 
 /** Outputs identical under two different seeds: the bundle ignores its seed, so its re-runs count together as one. */
@@ -208,20 +250,20 @@ export function validateCheckCommit(p: unknown): { ok: true; value: CheckCommit 
   if (c.type !== "check.commit") errors.push('type: "check.commit"');
   if (typeof c.target !== "string" || !TARGET.test(c.target)) errors.push('target: "<paper-id>#C<n>"');
   if (c.kind !== "rerun" && c.kind !== "replication") errors.push('kind: "rerun" or "replication"');
+  if (typeof c.model !== "string" || c.model.trim().length < 2 || c.model.length > 80) errors.push("model: the model this check runs on, 2 to 80 characters (e.g. \"claude-opus-5-5\")");
   const b = c.bundle as Partial<Bundle> | undefined;
-  if (!b || typeof b !== "object") errors.push("bundle: {repo, commit, run, outputs, deterministic}");
+  if (!b || typeof b !== "object") errors.push("bundle: {repo, commit, image?, run, outputs, runtimeMinutes}");
   else {
     if (typeof b.repo !== "string" || !/^https:\/\/[^\s]{4,290}$/.test(b.repo)) errors.push("bundle.repo: an https URL of a public git repository");
     if (typeof b.commit !== "string" || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(b.commit)) errors.push("bundle.commit: the exact commit, 40 or 64 hex");
     if (b.image !== undefined && (typeof b.image !== "string" || !/^sha256:[0-9a-f]{64}$/.test(b.image))) errors.push('bundle.image: "sha256:<64 hex>"');
     if (typeof b.run !== "string" || b.run.length < 1 || b.run.length > 500) errors.push("bundle.run: the command, 1 to 500 characters");
-    if (typeof b.deterministic !== "boolean") errors.push("bundle.deterministic: true or false");
+    if (!(typeof b.runtimeMinutes === "number" && Number.isFinite(b.runtimeMinutes) && b.runtimeMinutes > 0 && b.runtimeMinutes <= 7 * 24 * 60)) errors.push("bundle.runtimeMinutes: expected minutes on one CPU, 0 < m ≤ 10080");
     if (!Array.isArray(b.outputs) || b.outputs.length === 0 || b.outputs.length > MAX_OUTPUTS) errors.push(`bundle.outputs: 1 to ${MAX_OUTPUTS} declared outputs`);
     else for (const o of b.outputs as OutputSpec[]) {
       if (!o || typeof o.name !== "string" || !NAME.test(o.name)) errors.push("bundle.outputs[].name: a letter then letters, digits, _ . - (max 40)");
       if (o?.tolerance !== undefined && !(typeof o.tolerance === "number" && o.tolerance >= 0 && Number.isFinite(o.tolerance))) errors.push("bundle.outputs[].tolerance: a number ≥ 0");
       if (o?.relative !== undefined && typeof o.relative !== "boolean") errors.push("bundle.outputs[].relative: true or false");
-      if (b.deterministic === true && (o?.tolerance ?? 0) > 0) errors.push("bundle.outputs[].tolerance: a deterministic bundle's outputs match exactly");
     }
   }
   checkAgent(c.agent, errors);

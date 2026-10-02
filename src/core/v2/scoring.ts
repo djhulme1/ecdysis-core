@@ -29,6 +29,7 @@
 
 import {
   computeCredenceV2,
+  familyCount,
   logit,
   sigma,
   statusOf,
@@ -76,8 +77,14 @@ export interface TrackRecord {
 
 export interface TrackOptions {
   vouchLinked?: (a: string, b: string) => boolean;
-  /** Agents with proven fabrication: their evidence weighs nothing and their ω is 0. */
+  /** Agents under a fabrication finding in force: their evidence weighs nothing and their ω is 0. */
   fabricators?: Set<string>;
+  /**
+   * Operators under a finding in force (Daniel, 2 Oct: voiding reaches the
+   * operator's other evidence). Every item from these operators weighs
+   * nothing; the appeal period and reversibility live in the log, not here.
+   */
+  voidedOperators?: Set<string>;
   /** Committed checks never reported, per agent. */
   lapses?: Map<string, number>;
 }
@@ -102,7 +109,7 @@ export function scoreTrackRecord(
   neutral: Map<string, ClaimV2>,
   o: TrackOptions = {},
 ): TrackRecord {
-  const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent);
+  const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent) || !!o.voidedOperators?.has(e.operatorId);
   const opts = { vouchLinked: o.vouchLinked, voided };
   const byClaim = new Map<string, EvidenceInput[]>();
   for (const e of evidence) byClaim.set(e.claim, [...(byClaim.get(e.claim) ?? []), e]);
@@ -121,6 +128,7 @@ export function scoreTrackRecord(
       const status = statusOf({
         credence: sigma(base + without.sum), s: without.s, f: without.f, threshold: r.threshold,
         confirmingReplication: without.confirmingReplication, failingReplication: without.failingReplication,
+        confirmingFamilies: familyCount(without.confirmingFamilies),
         foundationRefuted,
       });
       const resolved: 0 | 1 | null = status === "established" ? 1 : status === "refuted" ? 0 : null;
@@ -149,7 +157,7 @@ export function computeV2(
   uses: UseInput[],
   o: TrackOptions = {},
 ): { claims: Map<string, ClaimV2>; track: TrackRecord } {
-  const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent);
+  const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent) || !!o.voidedOperators?.has(e.operatorId);
   const neutral = computeCredenceV2(claims, evidence, uses, { vouchLinked: o.vouchLinked, voided });
   const track = scoreTrackRecord(claims, evidence, neutral, o);
   const weighed = computeCredenceV2(claims, evidence, uses, {

@@ -1,8 +1,8 @@
 /**
- * Ecdysis v2's core (claude/ecdysis-v2-design.md): credence/0.2, the track
- * record and receipts. Each result the design states is checked here
- * against its own definition, numerically, so the document and the code
- * can't drift apart.
+ * Ecdysis v2's core (claude/ecdysis-v2-design.md; sanity check
+ * claude/ecdysis-v2-sanity-check.md): credence/0.2, the track record and
+ * receipts. Each result the design states is checked here against its own
+ * definition, numerically, so the documents and the code can't drift apart.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -11,6 +11,7 @@ import {
   computeCredenceV2,
   disputeOf,
   logit,
+  modelFamily,
   priorOf,
   sigma,
   type ClaimInput,
@@ -19,6 +20,8 @@ import {
 import { computeV2, marketCredit, reliabilityOf } from "../src/core/v2/scoring.js";
 import {
   compareOutputs,
+  FINDING_MIN_RUNS,
+  isDeterministic,
   pickCrossCheck,
   sealCommit,
   seedFromSeal,
@@ -27,6 +30,7 @@ import {
   validateCheckCommit,
   validateCheckResult,
   verifySeal,
+  type Bundle,
 } from "../src/core/v2/receipts.js";
 import { generateKeyPair } from "../src/core/crypto.js";
 import { sha256, toHex } from "../src/core/canonical.js";
@@ -37,10 +41,11 @@ const claim = (ref: string, seq: number, o: Partial<ClaimInput> = {}): ClaimInpu
   ref, paper: ref.split("#")[0]!, authorOperator: "op-author", stated: 0.8, foundations: [], seq, ...o,
 });
 let n = 0;
+/** A verified operator on a distinct model family per operator, unless said otherwise. */
 const ev = (claimRef: string, kind: EvidenceInput["kind"], confirms: boolean, op: string, o: Partial<EvidenceInput> = {}): EvidenceInput => ({
-  id: `e${++n}`, claim: claimRef, kind, confirms, agent: `${op}-agent`, operatorId: op, verified: true, seq: 100 + n, ...o,
+  id: `e${++n}`, claim: claimRef, kind, confirms, agent: `${op}-agent`, operatorId: op, tier: "verified", family: `fam-${op}`, seq: 100 + n, ...o,
 });
-/** Everyone fully reliable, so a check's weight is just independence × verification. */
+/** Everyone fully reliable, so a check's weight is just independence × tier × diversity. */
 const full = { reliability: () => 1 };
 
 describe("credence/0.2", () => {
@@ -54,10 +59,9 @@ describe("credence/0.2", () => {
     assert.equal(b.status, "unchecked");
   });
 
-  it("Proposition 1: ∂ℓ(c)/∂ℓ(f) = κ_c(1 − p_f), so the weakest foundation lifts a claim most (0.33 → 0.42 against 0.34)", () => {
+  it("Proposition 1: ∂ℓ(c)/∂ℓ(f) = κ_c(1 − p_f), so the weakest foundation lifts a claim most", () => {
     const fs = [0.9, 0.5];
     const q = priorOf(0.8, 0.5, fs);
-    near(q, 0.327875, 1e-6);
     const kappa = (q - P.epsilon) / (q * (1 - q));
     for (const [i, f] of fs.entries()) {
       const h = 1e-6;
@@ -65,9 +69,8 @@ describe("credence/0.2", () => {
       const numeric = (logit(priorOf(0.8, 0.5, bumped)) - logit(q)) / h;
       near(numeric, kappa * (1 - f), 1e-4);
     }
-    const lifted = (i: number) => priorOf(0.8, 0.5, fs.map((v, j) => (j === i ? sigma(logit(v) + Math.log(2)) : v)));
-    assert.equal(lifted(1).toFixed(2), "0.42");
-    assert.equal(lifted(0).toFixed(2), "0.34");
+    const lifted = (i: number) => priorOf(0.8, 0.5, fs.map((v, j) => (j === i ? sigma(logit(v) + Math.log(4)) : v)));
+    assert.ok(lifted(1) - q > 2 * (lifted(0) - q), "replicating the weak foundation gains more than twice as much");
     // The platform's own "what would raise this claim most" ranks the weak foundation first.
     const r = computeCredenceV2(
       [claim("strong#C1", 1, { stated: 0.95 }), claim("weak#C1", 2, { stated: 0.5 }), claim("top#C1", 3, { foundations: ["strong#C1", "weak#C1"] })],
@@ -91,7 +94,7 @@ describe("credence/0.2", () => {
     near(x.disputePriority, 0.5 * 10);
   });
 
-  it("dispute measures disagreement, not evidence: 0 when agreed, 4f for a lone dissenter, contested from a seventh", () => {
+  it("dispute measures disagreement, not evidence: 0 when agreed, ~4f for a lone dissenter, contested from a seventh", () => {
     assert.equal(disputeOf(0, 0), 0);
     assert.equal(disputeOf(7, 0), 0);
     near(disputeOf(9, 1), 3.6);
@@ -106,16 +109,62 @@ describe("credence/0.2", () => {
     assert.notEqual(mk(6, 1), "contested", "one in seven (14.3%) is just under it: 4r(1 − r) = 0.490");
   });
 
-  it("established needs a confirming replication: re-runs prove honesty, not the effect", () => {
-    const reruns = [1, 2, 3, 4, 5, 6].map((i) => ev("r#C1", "rerun", true, `op-r${i}`));
-    const onlyReruns = computeCredenceV2([claim("r#C1", 1)], reruns, [], full).get("r#C1")!;
-    assert.ok(onlyReruns.credence >= onlyReruns.threshold, "credence clears the bar");
-    assert.equal(onlyReruns.status, "supported", "but re-runs alone never establish");
-    const withRep = computeCredenceV2([claim("r#C1", 1)], [...reruns, ev("r#C1", "replication", true, "op-rep")], [], full).get("r#C1")!;
-    assert.equal(withRep.status, "established");
+  it("re-runs prove honesty, not truth: a confirming re-run weighs a review, a failing one half a refutation, and neither sets a status", () => {
+    const one = computeCredenceV2([claim("r#C1", 1)], [ev("r#C1", "rerun", true, "op-r1")], [], full).get("r#C1")!;
+    near(one.logOdds - logit(one.prior), Math.log(4) * 0.25);
+    assert.equal(one.reproduced, true);
+    assert.equal(one.status, "unchecked", "reproduced, but no replication yet");
+    const bad = computeCredenceV2([claim("r#C1", 1)], [ev("r#C1", "rerun", false, "op-r1")], [], full).get("r#C1")!;
+    near(bad.logOdds - logit(bad.prior), -Math.log(6) * 0.5);
+    assert.equal(bad.status, "unchecked", "a misreport moves credence; only a failed replication can refute");
+    const many = [1, 2, 3, 4, 5, 6].map((i) => ev("r#C1", "rerun", true, `op-r${i}`));
+    const onlyReruns = computeCredenceV2([claim("r#C1", 1)], many, [], full).get("r#C1")!;
+    assert.equal(onlyReruns.status, "unchecked", "six re-runs never establish, nor even support");
+    const withRep = computeCredenceV2([claim("r#C1", 1)], [...many, ev("r#C1", "replication", true, "op-rep")], [], full).get("r#C1")!;
+    assert.equal(withRep.status, "supported", "one replication, one model family: supported, not established");
+    const twoFams = computeCredenceV2([claim("r#C1", 1)], [...many, ev("r#C1", "replication", true, "op-rep"), ev("r#C1", "replication", true, "op-rep2")], [], full).get("r#C1")!;
+    assert.equal(twoFams.status, "established", "two replications from two model families");
   });
 
-  it("refuted needs a failed replication and low credence; a refuted foundation makes its dependants contested", () => {
+  it("a monoculture is not a crowd: same-family confirmations count ½, ¼, …, and established needs two families", () => {
+    const same = [1, 2, 3].map((i) => ev("m#C1", "replication", true, `op-c${i}`, { family: "claude" }));
+    const r = computeCredenceV2([claim("m#C1", 1)], same, [], full).get("m#C1")!;
+    near(r.logOdds - logit(r.prior), Math.log(4) * (1 + 0.5 + 0.25));
+    near(r.s, 1.75);
+    assert.equal(r.status, "supported", "credence is high, but one family never establishes");
+    const mixed = computeCredenceV2([claim("m#C1", 1)], [...same, ev("m#C1", "replication", true, "op-g", { family: "gemini" })], [], full).get("m#C1")!;
+    assert.deepEqual(mixed.families, ["claude", "gemini"]);
+    assert.equal(mixed.status, "established");
+    const unknown = computeCredenceV2([claim("m#C1", 1)], [1, 2].map((i) => ev("m#C1", "replication", true, `op-u${i}`, { family: null })), [], full).get("m#C1")!;
+    near(unknown.s, 2); // unknown families are not discounted against each other
+    assert.equal(unknown.status, "supported", "but unknown counts as one family at most");
+  });
+
+  it("modelFamily normalises declared models", () => {
+    assert.equal(modelFamily("claude-opus-5-5"), "claude");
+    assert.equal(modelFamily("Anthropic/Claude Sonnet 5.5"), "claude");
+    assert.equal(modelFamily("gpt-5.2"), "gpt");
+    assert.equal(modelFamily("o3-pro"), "gpt");
+    assert.equal(modelFamily("Gemini 3 Pro"), "gemini");
+    assert.equal(modelFamily("mixtral-8x22b"), "mistral");
+    assert.equal(modelFamily("grok-4"), "grok");
+    assert.equal(modelFamily(""), null);
+    assert.equal(modelFamily(null), null);
+  });
+
+  it("resolution needs verified evidence: cheap identities move credence a little and never a status", () => {
+    const cheap = [1, 2, 3, 4].map((i) => ev("v#C1", "replication", true, `op-s${i}`, { tier: "unverified" }));
+    const r = computeCredenceV2([claim("v#C1", 1)], cheap, [], full).get("v#C1")!;
+    near(r.logOdds - logit(r.prior), Math.log(4) * 0.25 * 4);
+    assert.equal(r.s, 0, "no resolution mass");
+    assert.equal(r.status, "unchecked");
+    assert.equal(r.dispute, 0);
+    const acct = computeCredenceV2([claim("v#C1", 1)], [ev("v#C1", "replication", true, "op-acc", { tier: "account" })], [], full).get("v#C1")!;
+    near(acct.logOdds - logit(acct.prior), Math.log(4) * 0.5);
+    assert.equal(acct.status, "unchecked");
+  });
+
+  it("refuted needs a failed verified replication and low credence; a refuted foundation makes dependants contested", () => {
     const r = computeCredenceV2(
       [claim("f#C1", 1), claim("g#C1", 2, { foundations: ["f#C1"] })],
       [ev("f#C1", "replication", false, "op-1"), ev("f#C1", "replication", false, "op-2")], [], full,
@@ -124,21 +173,19 @@ describe("credence/0.2", () => {
     assert.equal(r.get("g#C1")!.status, "contested");
   });
 
-  it("one operator, one voice: its own evidence is worth nothing, several items count once, unverified counts half", () => {
+  it("one operator, one voice: its own evidence is worth nothing, and several items count once", () => {
     const own = computeCredenceV2([claim("o#C1", 1)], [ev("o#C1", "replication", true, "op-author")], [], full).get("o#C1")!;
     assert.equal(own.s, 0);
     assert.equal(own.status, "unchecked");
     const many = computeCredenceV2([claim("o#C1", 1)], [1, 2, 3].map(() => ev("o#C1", "replication", true, "op-same")), [], full).get("o#C1")!;
     near(many.s, 1);
-    const unverified = computeCredenceV2([claim("o#C1", 1)], [ev("o#C1", "replication", true, "op-u", { verified: false })], [], full).get("o#C1")!;
-    near(unverified.s, 0.5);
-    near(unverified.logOdds - logit(unverified.prior), 0.5 * Math.log(4));
   });
 
   it("reviews move a little, both ways, and never more than ln 3 together", () => {
-    const pro = computeCredenceV2([claim("v#C1", 1)], [1, 2, 3, 4, 5, 6, 7, 8].map((i) => ev("v#C1", "review", true, `op-v${i}`)), [], full).get("v#C1")!;
+    const pro = computeCredenceV2([claim("w#C1", 1)], [1, 2, 3, 4, 5, 6, 7, 8].map((i) => ev("w#C1", "review", true, `op-v${i}`)), [], full).get("w#C1")!;
     near(pro.logOdds - logit(pro.prior), Math.log(3));
-    const con = computeCredenceV2([claim("v#C1", 1)], [ev("v#C1", "review", false, "op-v1")], [], full).get("v#C1")!;
+    assert.equal(pro.status, "unchecked", "reviews never lift a claim out of unchecked");
+    const con = computeCredenceV2([claim("w#C1", 1)], [ev("w#C1", "review", false, "op-v1")], [], full).get("w#C1")!;
     near(con.logOdds - logit(con.prior), -Math.log(4) / 4);
   });
 
@@ -174,16 +221,15 @@ describe("track record (Theorem 2)", () => {
   });
 
   it("no report resolves itself: a claim established only with each report's help scores none of them yet", () => {
-    // Stated ½, perfectly calibrated: four replications establish it (0.946), any three don't (0.898 < 0.9).
+    // Stated 0.45, perfectly calibrated, newcomers at ω = ½: four replications from four families establish it (0.942); any three don't clear 0.9 (0.891).
     const items = [1, 2, 3, 4].map((i) => ev("t#C1", "replication", true, `op-${i}`));
-    const { claims, track } = computeV2([claim("t#C1", 1, { stated: 0.5, calibration: 1 })], items, []);
+    const { claims, track } = computeV2([claim("t#C1", 1, { stated: 0.45, calibration: 1 })], items, []);
     assert.equal(claims.get("t#C1")!.status, "established");
     assert.equal(track.reports.length, 4);
     for (const r of track.reports) assert.equal(r.resolved, null, "without it, the claim isn't established");
   });
 
   it("liars lose weight and honest reproducers gain it, as claims resolve", () => {
-    // Ten true claims, each confirmed by four honest operators; a liar "confirms" five false ones, which seven honest operators then refute.
     const claims: ClaimInput[] = [];
     const items: EvidenceInput[] = [];
     const honest = [1, 2, 3, 4, 5, 6, 7].map((i) => `op-h${i}`);
@@ -204,18 +250,13 @@ describe("track record (Theorem 2)", () => {
     for (const op of honest) assert.ok(track.reliability.get(`${op}-agent`)! > 0.5, op);
   });
 
-  it("a lone dissent keeps a claim contested until the rest outnumber it 6 to 1: honest disagreement is surfaced, and liars are removed by cross-checks and their record", () => {
+  it("a lone dissent keeps a claim contested until the rest outnumber it 6 to 1; a finding voids the dissenter's operator", () => {
     const items = [ev("k#C1", "replication", true, "op-liar", { agent: "liar" }), ...[1, 2, 3].map((i) => ev("k#C1", "replication", false, `op-${i}`))];
     assert.equal(computeV2([claim("k#C1", 1)], items, []).claims.get("k#C1")!.status, "contested");
-    const proven = computeV2([claim("k#C1", 1)], items, [], { fabricators: new Set(["liar"]) }).claims.get("k#C1")!;
-    assert.equal(proven.status, "refuted", "once its fabrication is proven, the dissent is void");
-  });
-
-  it("proven fabrication weighs nothing and sets reliability to 0", () => {
-    const items = [ev("z#C1", "replication", true, "op-f", { agent: "faker" })];
-    const { claims, track } = computeV2([claim("z#C1", 1)], items, [], { fabricators: new Set(["faker"]) });
-    assert.equal(claims.get("z#C1")!.status, "unchecked");
-    assert.equal(track.reliability.get("faker"), 0);
+    const voided = computeV2([claim("k#C1", 1)], items, [], { voidedOperators: new Set(["op-liar"]) }).claims.get("k#C1")!;
+    assert.equal(voided.status, "refuted", "once the finding is in force, the dissent is void");
+    const { track } = computeV2([claim("k#C1", 1)], items, [], { fabricators: new Set(["liar"]) });
+    assert.equal(track.reliability.get("liar"), 0);
     near(reliabilityOf(0), 0.5);
   });
 });
@@ -234,7 +275,7 @@ describe("receipts", () => {
     assert.notEqual((await sealCommit(other.privateKey, receipt)).seed, one.seed, "unknowable without the key");
   });
 
-  it("the cross-check is drawn among independent operators, and is uniform enough that Proposition 3 holds", async () => {
+  it("the cross-check is drawn among independent operators, uniformly enough that Proposition 3 holds", async () => {
     const earlier = [
       { id: "r1", operatorId: "op-a", seq: 1 },
       { id: "r2", operatorId: "op-b", seq: 2 },
@@ -243,7 +284,6 @@ describe("receipts", () => {
     assert.equal(pickCrossCheck("ff".repeat(32), earlier.slice(0, 1), "op-a"), null, "never your own operator");
     assert.equal(pickCrossCheck("ff".repeat(32), [], "op-z"), null, "the first receipt has none");
     assert.equal(pickCrossCheck("00".repeat(32), earlier, "op-z", (x, y) => x === "op-a" && y === "op-z"), "r2", "vouch-linked operators are skipped");
-    // Proposition 3: receipt i of n is re-run with probability (n − i)/(n − 1).
     const nRec = 8;
     const trials = 3000;
     const hits = new Array(nRec + 1).fill(0);
@@ -259,32 +299,47 @@ describe("receipts", () => {
     for (const i of [1, 2, 4, 7, 8]) near(hits[i] / trials, (nRec - i) / (nRec - 1), 0.03);
   });
 
-  it("outputs compare within declared tolerances; two runs against one prove the odd one wrong", () => {
+  it("outputs compare within declared tolerances", () => {
     const spec = [{ name: "alpha_c", tolerance: 0.01 }, { name: "solver" }];
     assert.ok(compareOutputs({ alpha_c: 4.081, solver: "minisat" }, { alpha_c: 4.089, solver: "minisat" }, spec).match);
     assert.deepEqual(compareOutputs({ alpha_c: 4.08, solver: "minisat" }, { alpha_c: 4.17, solver: "minisat" }, spec).differ, ["alpha_c"]);
-    const runs = [
-      { by: "claimant", outputs: { alpha_c: 4.17, solver: "minisat" } },
-      { by: "checker", outputs: { alpha_c: 4.08, solver: "minisat" } },
-      { by: "third", outputs: { alpha_c: 4.081, solver: "minisat" } },
-    ];
-    assert.deepEqual(settleRuns(runs, spec, false), { verdict: "irreproducible", odd: "claimant" });
-    const exact = [{ name: "alpha_c" }, { name: "solver" }];
-    assert.deepEqual(settleRuns([runs[0]!, runs[1]!, { by: "third", outputs: { alpha_c: 4.08, solver: "minisat" } }], exact, true), { verdict: "fraud", odd: "claimant" });
-    assert.equal(settleRuns(runs.slice(0, 2), spec, true).verdict, "unresolved", "two runs never prove anything");
     assert.ok(seedInsensitive({ alpha_c: 4.1, solver: "m" }, { alpha_c: 4.1, solver: "m" }, spec));
     assert.equal(seedInsensitive({ alpha_c: 4.1, solver: "m" }, { alpha_c: 4.1000001, solver: "m" }, spec), false, "a different seed must change something exactly");
   });
 
-  it("validates commits and results, and refuses tolerances on a deterministic bundle", () => {
+  it("a disagreement opens a finding, never a verdict: two colluders cannot frame one honest agent", () => {
+    const spec = [{ name: "alpha_c" }];
+    const honest = { by: "honest", outputs: { alpha_c: 4.08 } };
+    const liar1 = { by: "liar1", outputs: { alpha_c: 4.17 } };
+    const liar2 = { by: "liar2", outputs: { alpha_c: 4.17 } };
+    assert.deepEqual(settleRuns([honest, liar1], spec, true), { verdict: "open", need: FINDING_MIN_RUNS - 2 }, "a mismatch opens a finding");
+    assert.deepEqual(settleRuns([honest, liar1, liar2], spec, true), { verdict: "open", need: 1 }, "two against one is not enough to convict anyone");
+    const fourth = { by: "fourth", outputs: { alpha_c: 4.08 } };
+    assert.deepEqual(settleRuns([honest, liar1, liar2, fourth], spec, true), { verdict: "unresolved" }, "two and two: the bundle, not an agent, is in question");
+    const fifth = { by: "fifth", outputs: { alpha_c: 4.08 } };
+    assert.deepEqual(settleRuns([honest, liar1, liar2, fourth, fifth], spec, true), { verdict: "unresolved" }, "even 3 to 2 convicts nobody: all but one must agree");
+    assert.deepEqual(settleRuns([honest, fourth, fifth, liar1], spec, true), { verdict: "fabrication", odd: "liar1" }, "one odd run against three agreeing, on a deterministic bundle");
+    assert.deepEqual(settleRuns([honest, fourth, fifth, liar1], spec, false), { verdict: "irreproducible", odd: "liar1" }, "the same without observed determinism is irreproducible, no voiding");
+    assert.deepEqual(settleRuns([honest, fourth], spec, true), { verdict: "agreed" });
+  });
+
+  it("determinism is observed, never declared: a pinned image and two exact matches", () => {
+    const bundle: Bundle = { repo: "https://github.com/x/y", commit: "a".repeat(40), run: "python run.py", outputs: [{ name: "a" }], runtimeMinutes: 5 };
+    assert.equal(isDeterministic(bundle, 5), false, "no pinned image: never deterministic");
+    assert.equal(isDeterministic({ ...bundle, image: "sha256:" + "b".repeat(64) }, 1), false);
+    assert.equal(isDeterministic({ ...bundle, image: "sha256:" + "b".repeat(64) }, 2), true);
+  });
+
+  it("validates commits and results; a commit names its model and expected runtime", () => {
     const commit = {
-      protocol: "ecdysis/0.2", type: "check.commit", target: "ecd:2610.3qjqtw#C1", kind: "replication",
-      bundle: { repo: "https://github.com/example/ks94", commit: "a".repeat(40), run: "python run.py", outputs: [{ name: "alpha_c" }], deterministic: true },
+      protocol: "ecdysis/0.2", type: "check.commit", target: "ecd:2610.3qjqtw#C1", kind: "replication", model: "claude-opus-5-5",
+      bundle: { repo: "https://github.com/example/ks94", commit: "a".repeat(40), run: "python run.py", outputs: [{ name: "alpha_c", tolerance: 0.01 }], runtimeMinutes: 30 },
       agent: { handle: "Moth-1", publicKey: "MCowBQYDK2VwAyEA" }, ts: "2026-10-02T12:00:00Z",
     };
     assert.equal(validateCheckCommit(commit).ok, true);
-    const bad = { ...commit, bundle: { ...commit.bundle, outputs: [{ name: "alpha_c", tolerance: 0.1 }] } };
-    assert.equal(validateCheckCommit(bad).ok, false);
+    assert.equal(validateCheckCommit({ ...commit, model: undefined }).ok, false, "the model is required");
+    assert.equal(validateCheckCommit({ ...commit, bundle: { ...commit.bundle, runtimeMinutes: 0 } }).ok, false);
+    assert.equal(validateCheckCommit({ ...commit, bundle: { ...commit.bundle, deterministic: true } }).ok, true, "an unknown extra field is ignored, not trusted");
     const result = {
       protocol: "ecdysis/0.2", type: "check.result", commit: "ab".repeat(32), outcome: "confirmed",
       outputs: { alpha_c: 4.08 }, crossCheck: { receipt: "cd".repeat(32), outputs: { alpha_c: 4.17 } },

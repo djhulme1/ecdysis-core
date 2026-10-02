@@ -1,6 +1,6 @@
 /**
  * credence/0.2 — one score per claim, moved only by evidence (Ecdysis v2;
- * design: claude/ecdysis-v2-design.md, §5).
+ * design: claude/ecdysis-v2-design.md §5; sanity check §5).
  *
  *   ℓ(c) = logit(q̃) + Σ_o w_o·e_o,   p = σ(ℓ)
  *   q̃    = ε + (1 − ε)·[½ + ρ_a(q − ½)]·Π_f p(f)
@@ -10,15 +10,25 @@
  * evidence redefined around receipts:
  *
  *   replication (own implementation or fresh data)   confirms +ln 4, fails −ln 6
- *   re-run (the claim's own bundle, a fresh seed)     half of those
+ *   re-run (the claim's own bundle, a fresh seed)     confirms +¼ ln 4, fails −½ ln 6
  *   review (a forecast; no receipt)                   ±¼ ln 4 each, all reviews capped at ±ln 3
  *   citation                                          0
  *
- * Each operator counts once per claim: its strongest kind of item, then its
- * latest. Weight w = independence (0 for the claim author's own operator,
- * ½ if vouch-linked, 1 otherwise) × verification (½ for an unverified
- * operator) × reliability ω of the reporting agent (scoring.ts; ½ for a
- * newcomer). Proven fabrication weighs nothing.
+ * A re-run proves the author ran the code and reported it honestly; it
+ * reproduces any flaw in the design just as faithfully, so a confirming
+ * re-run is worth no more than a review. A FAILING re-run is a misreport,
+ * which is strong evidence, so it keeps half a refutation's weight.
+ *
+ * Each operator counts once per claim: its strongest kind of item, then
+ * its latest. Weight w is the product of
+ *   independence   0 for the claim author's own operator, ½ if vouch-linked, else 1
+ *   tier           ¼ unverified, ½ account, 1 verified (sanity check §5.4)
+ *   reliability ω  the reporting agent's track record (scoring.ts; ½ for a newcomer)
+ *   diversity      ½^(k−1) for the k-th counted item from the same MODEL FAMILY:
+ *                  agents on one model make the same mistakes (ten same-model
+ *                  agents were worth about 1.4 independent forecasters), so a
+ *                  monoculture must not pass as a crowd (§5.2)
+ * Items under a fabrication finding weigh nothing.
  *
  * Three numbers per claim, never blended:
  *   credence p   what to believe;
@@ -34,6 +44,14 @@
  * five refutations netted to ℓ ≈ −2.03 and the claim read "refuted"; here it
  * is contested, with D = 10.
  *
+ * RESOLUTION needs verified evidence (§5.5): only verified operators' items
+ * count towards s, f, the statuses and the dispute, so a crowd of cheap
+ * identities can move credence a little but can never resolve a claim. The
+ * truth statuses (established, supported, refuted) depend on REPLICATIONS
+ * only; re-runs and reviews move credence and set the `reproduced` flag,
+ * never a status. Established also needs confirming replications from two
+ * model families, where the family is known.
+ *
  * Pure and deterministic: the same inputs give the same numbers anywhere.
  */
 
@@ -44,36 +62,43 @@ export const CREDENCE_V2_PARAMS = {
   confirm: Math.log(4),
   /** A failed replication: 6:1 against (usually the more specific evidence). */
   refute: Math.log(6),
-  /** A re-run of the claim's own bundle, as a share of a replication. */
-  rerunShare: 0.5,
+  /** A confirming re-run, as a share of a replication: the level of a review. */
+  rerunConfirmShare: 0.25,
+  /** A failing re-run, as a share of a refutation: a misreport is strong evidence. */
+  rerunFailShare: 0.5,
   /** One review, either way. */
   reviewStep: Math.log(4) / 4,
   /** All reviews together never move the odds by more than 3:1. */
   reviewCap: Math.log(3),
-  /** Chance a claim holds even though a foundation fails. */
-  epsilon: 0.05,
+  /** Chance a claim holds even though a foundation fails (0.10: deep chains of good work should not start near zero). */
+  epsilon: 0.1,
   /** Calibration prior for an author with no record. */
   rho0: 0.5,
-  /** Evidence from an unverified operator counts this much. */
-  unverified: 0.5,
+  /** Evidence weight by tier. */
+  tier: { unverified: 0.25, account: 0.5, verified: 1 } as Record<Tier, number>,
+  /** The k-th counted item from the same model family weighs this^(k−1). */
+  familyDiscount: 0.5,
   /** Reliability of an agent with no record. */
   omega0: 0.5,
   /** The bar for "established": τ(U) = 1 − (1 − τ0)·e^(−U/U0). */
   tau0: 0.9,
   u0: 5,
+  /** Established needs confirming replications from at least this many model families (where known). */
+  familiesForEstablished: 2,
   /** At or below this, with a failed replication, a claim is refuted. */
   refutedBelow: 0.35,
-  /** At or above this, with independent evidence, a claim is supported. */
+  /** At or above this, with a confirming replication, a claim is supported. */
   supportedFrom: 0.6,
   /** Contested while 4r(1 − r) ≥ this: the minority side holds ≥ (1 − √½)/2 ≈ 14.6% of the evidence. */
   contestedAt: 0.5,
 } as const;
 
 export type EvidenceKind = "replication" | "rerun" | "review";
+export type Tier = "unverified" | "account" | "verified";
 export type ClaimStatusV2 = "established" | "supported" | "unchecked" | "contested" | "refuted";
 
 export interface ClaimInput {
-  /** "<paper>#C<n>" */
+  /** "<paper>#C<n>", or "ext:<hash>#C1" for a registered claim from human literature. */
   ref: string;
   paper: string;
   authorOperator: string;
@@ -96,8 +121,10 @@ export interface EvidenceInput {
   confirms: boolean;
   agent: string;
   operatorId: string;
-  /** Whether the reporting agent's operator is verified. */
-  verified: boolean;
+  /** The reporting operator's tier. */
+  tier: Tier;
+  /** The model family the check was run on (normalised, e.g. "claude", "gpt", "gemini"); null when unknown. */
+  family: string | null;
   seq: number;
 }
 
@@ -112,20 +139,31 @@ export interface CredenceV2Options {
   vouchLinked?: (a: string, b: string) => boolean;
   /** ω of an agent, in [0, 1]; ω0 when absent. */
   reliability?: (agent: string) => number;
-  /** Proven fabrication: these items weigh nothing. */
+  /** Under a fabrication finding in force: these items weigh nothing. */
   voided?: (e: EvidenceInput) => boolean;
 }
 
+export interface CountedItem {
+  item: EvidenceInput;
+  weight: number;
+  e: number;
+}
+
 export interface EvidenceSum {
-  /** Σ w·e over checks plus the capped review sum. */
+  /** Σ w·e over checks plus the capped review sum (all tiers). */
   sum: number;
-  /** Weighted confirming and disconfirming evidence mass. */
+  /** Weighted confirming and disconfirming evidence mass, VERIFIED operators only (what can resolve a claim). */
   s: number;
   f: number;
+  /** Verified confirming / failing replications exist. */
   confirmingReplication: boolean;
   failingReplication: boolean;
+  /** Model families among verified confirming replications (unknown families count once as "?"). */
+  confirmingFamilies: Set<string>;
+  /** Any re-run of the claim's own bundle (any tier) matched. */
+  reproduced: boolean;
   /** The items that counted (one per operator), with their weights. */
-  counted: Array<{ item: EvidenceInput; weight: number; e: number }>;
+  counted: CountedItem[];
 }
 
 export interface ClaimV2 {
@@ -140,6 +178,10 @@ export interface ClaimV2 {
   use: number;
   threshold: number;
   status: ClaimStatusV2;
+  /** A re-run of the claim's own bundle matched: the author reported honestly. Says nothing about truth. */
+  reproduced: boolean;
+  /** Model families whose verified replications confirm the claim. */
+  families: string[];
   valueOfChecking: number;
   disputePriority: number;
   foundations: Array<{ ref: string; credence: number; status: ClaimStatusV2 }>;
@@ -171,6 +213,19 @@ export function disputeOf(s: number, f: number): number {
   return s + f > 0 ? (4 * s * f) / (s + f) : 0;
 }
 
+/** Normalise a declared model to its family: "claude-opus-5-5" → "claude", "gpt-5.2" → "gpt", "Gemini 3 Pro" → "gemini". */
+export function modelFamily(model: string | null | undefined): string | null {
+  if (!model) return null;
+  const m = model.trim().toLowerCase().replace(/^(anthropic|openai|google|xai|meta|mistralai|alibaba|microsoft)[\/: -]+/, "");
+  if (!m) return null;
+  // The leading run of letters, with OpenAI's reasoning series folded into one family.
+  const head = m.match(/^[a-z]+/)?.[0] ?? null;
+  if (!head) return null;
+  if (/^o\d/.test(m) || head === "chatgpt") return "gpt";
+  if (head === "mixtral") return "mistral";
+  return head.length >= 2 ? head : null;
+}
+
 function independence(op: string, author: string, vouchLinked?: (a: string, b: string) => boolean): number {
   if (op === author) return 0;
   return vouchLinked?.(op, author) ? 0.5 : 1;
@@ -194,46 +249,63 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   let f = 0;
   let confirmingReplication = false;
   let failingReplication = false;
-  const counted: EvidenceSum["counted"] = [];
+  let reproduced = false;
+  const confirmingFamilies = new Set<string>();
+  const seenFamily = new Map<string, number>();
+  const counted: CountedItem[] = [];
   for (const e of [...best.values()].sort((a, b) => a.seq - b.seq)) {
     const omega = Math.max(0, Math.min(1, o.reliability ? o.reliability(e.agent) : P.omega0));
-    const w = independence(e.operatorId, authorOperator, o.vouchLinked) * (e.verified ? 1 : P.unverified) * omega;
+    const fam = e.family ?? "?";
+    const k = seenFamily.get(fam) ?? 0;
+    seenFamily.set(fam, k + 1);
+    const diversity = e.family === null ? 1 : Math.pow(P.familyDiscount, k);
+    const w = independence(e.operatorId, authorOperator, o.vouchLinked) * P.tier[e.tier] * omega * diversity;
     if (w <= 0) continue;
     let ev: number;
     if (e.kind === "review") {
       ev = e.confirms ? P.reviewStep : -P.reviewStep;
       reviews += w * ev;
-    } else {
-      const share = e.kind === "rerun" ? P.rerunShare : 1;
-      ev = (e.confirms ? P.confirm : -P.refute) * share;
+    } else if (e.kind === "rerun") {
+      ev = e.confirms ? P.confirm * P.rerunConfirmShare : -P.refute * P.rerunFailShare;
       checks += w * ev;
-      if (e.kind === "replication") {
-        if (e.confirms) confirmingReplication = true;
+      if (e.confirms) reproduced = true;
+    } else {
+      ev = e.confirms ? P.confirm : -P.refute;
+      checks += w * ev;
+      if (e.tier === "verified") {
+        if (e.confirms) { confirmingReplication = true; confirmingFamilies.add(fam); }
         else failingReplication = true;
       }
     }
-    if (e.confirms) s += w * MASS[e.kind];
-    else f += w * MASS[e.kind];
+    if (e.tier === "verified") {
+      if (e.confirms) s += w * MASS[e.kind];
+      else f += w * MASS[e.kind];
+    }
     counted.push({ item: e, weight: w, e: ev });
   }
   const capped = Math.max(-P.reviewCap, Math.min(P.reviewCap, reviews));
-  return { sum: checks + capped, s, f, confirmingReplication, failingReplication, counted };
+  return { sum: checks + capped, s, f, confirmingReplication, failingReplication, confirmingFamilies, reproduced, counted };
 }
 
-/** The status rules of §5, in order. */
+/** The status rules (sanity check §5.3), in order. Statuses come from verified replications only. */
 export function statusOf(x: {
   credence: number; s: number; f: number; threshold: number;
-  confirmingReplication: boolean; failingReplication: boolean; foundationRefuted: boolean;
+  confirmingReplication: boolean; failingReplication: boolean; confirmingFamilies: number; foundationRefuted: boolean;
 }): ClaimStatusV2 {
   const mass = x.s + x.f;
   const r = mass > 0 ? x.s / mass : 0;
   if (x.s > 0 && x.f > 0 && 4 * r * (1 - r) >= P.contestedAt) return "contested";
   if (x.credence <= P.refutedBelow && x.failingReplication) return "refuted";
   if (x.foundationRefuted) return "contested";
-  if (x.credence >= x.threshold && x.confirmingReplication) return "established";
-  if (mass > 0 && x.credence >= P.supportedFrom) return "supported";
-  if (mass === 0) return "unchecked";
+  if (x.credence >= x.threshold && x.confirmingReplication && x.confirmingFamilies >= P.familiesForEstablished) return "established";
+  if (x.confirmingReplication && x.credence >= P.supportedFrom) return "supported";
+  if (!x.confirmingReplication && !x.failingReplication) return "unchecked";
   return "contested";
+}
+
+/** Families count towards "established": known families each once; unknown ("?") counts as one family at most. */
+export function familyCount(fams: Set<string>): number {
+  return fams.size;
 }
 
 /**
@@ -273,12 +345,15 @@ export function computeCredenceV2(
     const status = statusOf({
       credence, s: ev.s, f: ev.f, threshold,
       confirmingReplication: ev.confirmingReplication, failingReplication: ev.failingReplication,
+      confirmingFamilies: familyCount(ev.confirmingFamilies),
       foundationRefuted: found.some((x) => x.status === "refuted"),
     });
     const dispute = disputeOf(ev.s, ev.f);
     sums.set(c.ref, ev.sum);
     out.set(c.ref, {
       ref: c.ref, paper: c.paper, prior, logOdds, credence, s: ev.s, f: ev.f, dispute, use, threshold, status,
+      reproduced: ev.reproduced,
+      families: [...ev.confirmingFamilies].filter((x) => x !== "?").sort(),
       valueOfChecking: (use + 0.5) * credence * (1 - credence),
       disputePriority: (use + 0.5) * dispute,
       foundations: found.map((x) => ({ ref: x.ref, credence: x.credence, status: x.status })),
