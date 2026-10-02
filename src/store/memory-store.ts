@@ -3,7 +3,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, AuditRecord, BuildRecord, ClaimRecord, DeliveryRecord, HeraldRecord, IssueRecord, JurorOperatorRecord, JurorVouchRecord, JuryAlertRecord, SettingRecord,
+  AgentRecord, AuditRecord, BuildRecord, ClaimRecord, DeliveryRecord, DoorbellRecord, DoorbellRing, HeraldRecord, IssueRecord, JurorOperatorRecord, JurorVouchRecord, JuryAlertRecord, SettingRecord,
   LogRowView, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
 } from "./store.js";
 
@@ -236,7 +236,7 @@ export class MemoryStore implements Store {
 
   // --- jury alerts ---
   private alerts = new Map<string, JuryAlertRecord>();
-  private alertSends = new Set<string>();
+  private alertSends = new Map<string, { kind: string; at: string }>();
   async putJuryAlert(a: JuryAlertRecord): Promise<void> {
     const clash = [...this.alerts.values()].find((x) => x.handle === a.handle && x.id !== a.id);
     if (clash) throw new Error("UNIQUE constraint failed: jury_alerts.handle");
@@ -256,10 +256,52 @@ export class MemoryStore implements Store {
   async deleteJuryAlert(id: string): Promise<void> {
     this.alerts.delete(id);
   }
-  async claimAlertSend(handle: string, subject: string, kind: string, _at: string): Promise<boolean> {
+  private doorbells = new Map<string, DoorbellRecord>();
+  async putDoorbell(d: DoorbellRecord): Promise<void> {
+    const clash = [...this.doorbells.values()].find((x) => x.setupId === d.setupId && x.handle !== d.handle);
+    if (clash) throw new Error("UNIQUE constraint failed: doorbells.setup_id");
+    this.doorbells.set(d.handle, structuredClone(d));
+  }
+  async getDoorbell(handle: string): Promise<DoorbellRecord | null> {
+    const d = this.doorbells.get(handle);
+    return d ? structuredClone(d) : null;
+  }
+  async getDoorbellBySetup(setupId: string): Promise<DoorbellRecord | null> {
+    const d = [...this.doorbells.values()].find((x) => x.setupId === setupId);
+    return d ? structuredClone(d) : null;
+  }
+  async listDoorbells(limit: number): Promise<DoorbellRecord[]> {
+    return [...this.doorbells.values()].sort((a, b) => a.handle.localeCompare(b.handle)).slice(0, limit).map((d) => structuredClone(d));
+  }
+  async recordDoorbellRing(handle: string, expectUpdatedAt: string, r: DoorbellRing): Promise<boolean> {
+    const d = this.doorbells.get(handle);
+    if (!d || d.status !== "active" || d.updatedAt !== expectUpdatedAt) return false;
+    d.updatedAt = r.at;
+    d.lastRingAt = r.at;
+    if (r.ok) d.lastOkAt = r.at;
+    if (r.research) d.lastResearchAt = r.research;
+    if (r.sessionUrl) d.lastSessionUrl = r.sessionUrl;
+    d.failures = r.failures;
+    d.lastError = r.error;
+    d.ringsDay = r.ringsDay;
+    d.ringsToday = r.ringsToday;
+    if (r.pause) d.status = "paused";
+    return true;
+  }
+  async purgeRingClaims(beforeIso: string): Promise<number> {
+    let n = 0;
+    for (const [k, v] of this.alertSends) {
+      if (v.kind.startsWith("ring:") && v.at < beforeIso) {
+        this.alertSends.delete(k);
+        n += 1;
+      }
+    }
+    return n;
+  }
+  async claimAlertSend(handle: string, subject: string, kind: string, at: string): Promise<boolean> {
     const k = `${handle}|${subject}|${kind}`;
     if (this.alertSends.has(k)) return false;
-    this.alertSends.add(k);
+    this.alertSends.set(k, { kind, at });
     return true;
   }
   async releaseAlertSend(handle: string, subject: string, kind: string): Promise<void> {

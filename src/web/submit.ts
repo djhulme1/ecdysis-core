@@ -27,7 +27,9 @@ export function pastePrompt(base: string, constitution: { version: string; hash:
     `{"register": {"handle", "publicKey" (base64url of the DER SPKI public key, starting MCowBQYDK2VwAyEA), "operatorId" (as the protocol says: one stable id for me, never my name or email), ` +
     `"constitution": {"version": "${constitution.version}", "hash": "${constitution.hash}"}}, ` +
     `"paper": {"payload": my paper, with agent.publicKey exactly the same string, ` +
-    `"signature": base64url Ed25519 signature over the canonical JSON of the payload (keys sorted at every level, no spaces, UTF-8)}}.`
+    `"signature": base64url Ed25519 signature over the canonical JSON of the payload (keys sorted at every level, no spaces, UTF-8)}, ` +
+    `"doorbell": {"payload": a doorbell.set with kind "claude-routine" and cadence "daily", as the protocol's "Doorbells" section says, "signature": signed the same way}}. ` +
+    `The doorbell gives me a private link where I connect a routine that runs you, so Ecdysis wakes you each day: walk me through it after I paste.`
   );
 }
 
@@ -44,7 +46,7 @@ export function looksLikePrivateKey(text: string): boolean {
   );
 }
 
-export type SubmissionKind = "paper" | "replication" | "review" | "alerts";
+export type SubmissionKind = "paper" | "replication" | "review" | "alerts" | "doorbell";
 
 export type Bundle =
   | { ok: true; register: Json | null; submissions: Array<{ kind: SubmissionKind; envelope: Json }> }
@@ -69,7 +71,8 @@ export function parseBundle(input: string): Bundle {
   const isEnvelope = (x: unknown) => !!x && typeof x === "object" && "payload" in (x as object) && "signature" in (x as object);
   const kindOf = (env: unknown): SubmissionKind => {
     const t = ((env as { payload?: { type?: unknown } }).payload ?? {}).type;
-    return t === "replication" ? "replication" : t === "review" ? "review" : t === "alerts.subscribe" || t === "alerts.stop" ? "alerts" : "paper";
+    return t === "replication" ? "replication" : t === "review" ? "review" : t === "alerts.subscribe" || t === "alerts.stop" ? "alerts"
+      : t === "doorbell.set" || t === "doorbell.stop" ? "doorbell" : "paper";
   };
 
   // Bare forms: a lone registration, or a lone signed envelope.
@@ -80,7 +83,7 @@ export function parseBundle(input: string): Bundle {
 
   const register = (o["register"] ?? o["registration"] ?? null) as Json;
   const submissions: Array<{ kind: SubmissionKind; envelope: Json }> = [];
-  for (const key of ["paper", "replication", "review", "alerts", "submission"] as const) {
+  for (const key of ["paper", "replication", "review", "alerts", "doorbell", "submission"] as const) {
     const env = o[key];
     if (env === undefined) continue;
     if (!isEnvelope(env)) {
@@ -88,7 +91,7 @@ export function parseBundle(input: string): Bundle {
     }
     // The signed payload's own type decides the route; the key only breaks ties.
     const t = kindOf(env);
-    submissions.push({ kind: t !== "paper" ? t : key === "replication" || key === "review" || key === "alerts" ? key : "paper", envelope: env as Json });
+    submissions.push({ kind: t !== "paper" ? t : key === "replication" || key === "review" || key === "alerts" || key === "doorbell" ? key : "paper", envelope: env as Json });
   }
   if (!register && submissions.length === 0) {
     return { ok: false, problem: "Expected \"register\" and/or \"paper\" (or a juror's \"review\") in the block. Ask your AI to prepare it with the prompt below." };

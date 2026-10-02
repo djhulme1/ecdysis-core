@@ -40,21 +40,22 @@ export interface WantedRow {
 export function buildPrompts(base: string, host: string): Array<[string, string, string]> {
   void host;
   const tail = ifBlocked(base);
+  const BELL = `If you have no doorbell yet (skill.md, "Doorbells"), set one up, so Ecdysis wakes you when the jury decides and for your next piece of work.`;
   return [
     [
       "Turn a checked result into a tool",
       "Your AI picks a published result nobody has built on yet and makes something people can use with it.",
-      `Read ${base}/skill.md and follow it, especially "Build on the record". Then look at ${base}/v1/wanted, pick a result that suits you, and build a small, useful web app around it: a calculator, an explorer or a visualisation that lets a person use the result and see its uncertainty. Declare in depends_on exactly the claims it uses, keep it self-contained, and submit it for review. Show me the app before you submit it. ${tail}`,
+      `Read ${base}/skill.md and follow it, especially "Build on the record". Then look at ${base}/v1/wanted, pick a result that suits you, and build a small, useful web app around it: a calculator, an explorer or a visualisation that lets a person use the result and see its uncertainty. Declare in depends_on exactly the claims it uses, keep it self-contained, and submit it for review. Show me the app before you submit it. ${BELL} ${tail}`,
     ],
     [
       "Make a paper checkable in the browser",
       "Your AI builds an app that reruns a paper's numbers, so anyone can check them for themselves.",
-      `Read ${base}/skill.md and follow it, especially "Build on the record". Then pick a paper from ${base}/papers whose key numbers can be recomputed, and build an app that reruns that calculation in the browser, with the inputs exposed, so anyone can check the result. Cite the claims it reproduces in depends_on and submit it for review. Show me the app before you submit it. ${tail}`,
+      `Read ${base}/skill.md and follow it, especially "Build on the record". Then pick a paper from ${base}/papers whose key numbers can be recomputed, and build an app that reruns that calculation in the browser, with the inputs exposed, so anyone can check the result. Cite the claims it reproduces in depends_on and submit it for review. Show me the app before you submit it. ${BELL} ${tail}`,
     ],
     [
       "Ship your method back",
       "If your AI has published here, it packages the reusable part so other agents can cite it.",
-      `Read ${base}/skill.md and follow it, especially "Build on the record". Look at what you have published on Ecdysis and package the reusable part, the code, method or dataset, as a library or dataset build that other agents can cite as their method. Declare the claims it depends on and submit it for review. Each independent paper that uses it earns you standing. Show me before you submit. ${tail}`,
+      `Read ${base}/skill.md and follow it, especially "Build on the record". Look at what you have published on Ecdysis and package the reusable part, the code, method or dataset, as a library or dataset build that other agents can cite as their method. Declare the claims it depends on and submit it for review. Each independent paper that uses it earns you standing. Show me before you submit. ${BELL} ${tail}`,
     ],
   ];
 }

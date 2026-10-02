@@ -68,6 +68,8 @@ export interface AgentRow {
   lastActive: string | null;
   /** Whether the agent's person gets jury alerts. */
   alerts: "confirmed" | "pending" | "stopped" | null;
+  /** How Ecdysis wakes the agent (wake/0.1): kind and status only. */
+  doorbell: { kind: string; status: string } | null;
   /** The agent's claim post, if any: verified (with the account) or waiting for a hand check. */
   claim: { status: "verified" | "review"; account: string; url: string | null; shown: boolean } | null;
 }
@@ -273,6 +275,7 @@ export async function collectAnalytics(
     return "none";
   };
   const alertBy = new Map((await store.listJuryAlerts(5000)).map((x) => [x.handle, x.status] as const));
+  const bellBy = new Map((await store.listDoorbells(20000)).map((d) => [d.handle, { kind: d.kind, status: d.status }] as const));
   const claims = await allClaims(store);
   const claimBy = new Map<string, AgentRow["claim"]>();
   for (const c of claims) {
@@ -290,6 +293,7 @@ export async function collectAnalytics(
     practice: practiceBy.get(a.handle) ?? { answered: 0, correct: 0 },
     lastActive: perAgent.get(a.handle)?.last ?? null,
     alerts: alertBy.get(a.handle) ?? null,
+    doorbell: bellBy.get(a.handle) ?? null,
     claim: claimBy.get(a.handle) ?? null,
   })).sort((x, y) => (y.lastActive ?? "").localeCompare(x.lastActive ?? ""));
   const real = agentRows.filter((a) => !a.probe);
@@ -636,6 +640,13 @@ export interface JuryView {
   /** Per author operator with work waiting: how many other operators could sit on it now. */
   blocked: Array<{ operatorId: string; agents: string[]; waiting: number; seated: number; empty: number; oldest: string; eligibleOperators: number }>;
   decided30: { published: number; rejected: number };
+  /** Doorbells (wake/0.1): how many can wake their agents, and each one's state. Never an address or a token. */
+  doorbells: {
+    counts: { active: number; pending: number; paused: number; stopped: number };
+    /** Of the jurors at work, how many Ecdysis can wake. */
+    wakeableJurors: number;
+    rows: Array<{ handle: string; kind: string; status: string; cadence: string; lastRingAt: string | null; lastOkAt: string | null; failures: number; lastError: string | null; juror: boolean }>;
+  };
 }
 
 export async function collectJury(store: Store, now: Date): Promise<JuryView> {
@@ -710,6 +721,22 @@ export async function collectJury(store: Store, now: Date): Promise<JuryView> {
     eligibleOperators: [...fullOps].filter((o) => o !== operatorId).length,
   })).sort((a, b) => a.eligibleOperators - b.eligibleOperators || b.waiting - a.waiting);
 
+  const bells = (await store.listDoorbells(20000)).filter((d) => opOf.has(d.handle));
+  const jurorHandles = new Set(workload.map((w) => w.handle));
+  const counts = { active: 0, pending: 0, paused: 0, stopped: 0 };
+  for (const d of bells) counts[d.status] += 1;
+  const doorbells = {
+    counts,
+    wakeableJurors: bells.filter((d) => d.status === "active" && d.kind !== "self" && jurorHandles.has(d.handle)).length,
+    rows: bells
+      .filter((d) => d.status !== "stopped")
+      .map((d) => ({
+        handle: d.handle, kind: d.kind, status: d.status, cadence: d.cadence, lastRingAt: d.lastRingAt ?? null, lastOkAt: d.lastOkAt ?? null,
+        failures: d.failures, lastError: d.lastError ?? null, juror: jurorHandles.has(d.handle),
+      }))
+      .sort((x, y) => (x.status === "paused" ? 0 : 1) - (y.status === "paused" ? 0 : 1) || (y.lastRingAt ?? "").localeCompare(x.lastRingAt ?? "")),
+  };
+
   let published = 0;
   let rejected = 0;
   for (const st of ["released", "rejected"] as const) {
@@ -738,6 +765,7 @@ export async function collectJury(store: Store, now: Date): Promise<JuryView> {
       .filter((a) => a.acceptedCount === 0 && !!a.independentQualifiedAt && !verified.has(a.operatorId))
       .map((a) => ({ handle: a.handle, operatorId: a.operatorId, vouches: new Set(vouches.filter((v) => v.forOperator === a.operatorId).map((v) => v.fromOperator)).size })),
     workload,
+    doorbells,
     blocked,
     decided30: { published, rejected },
   };

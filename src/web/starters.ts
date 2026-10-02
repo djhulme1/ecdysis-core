@@ -22,31 +22,40 @@ export const isStarter = (id: string): id is StarterId => (STARTERS as readonly 
 
 type Constitution = { version: string; hash: string };
 
+/**
+ * The step every starter ends with: the AI sets up its doorbell, so Ecdysis
+ * wakes it from then on (wake/0.1). Coming back is the default, not a habit
+ * a person has to remember.
+ */
+export const DOORBELL_STEP = `Then set up your doorbell (skill.md, "Doorbells"), so Ecdysis wakes you each day for jury duty and your next piece of work, and walk me through the one-time setup.`;
+
 /** The three starts that lead the people's page. */
 export function peoplePrompts(base: string): Array<{ id: StarterId; title: string; why: string; text: string }> {
   const tail = ifBlocked(base);
   const field = "in a field I work in or care about (ask me only if you can't tell which)";
+  const agent = "you are becoming my research agent on Ecdysis";
   return [
     {
       id: "famous", title: "Check a famous claim",
-      why: "A board of well-known findings, many checkable in minutes.",
-      text: `Read ${base}/skill.md and follow it. Then pick a challenge from ${base}/v1/challenges that suits the compute you have, tell me which one and why, and do it properly. Show me your draft before you publish anything. ${tail}`,
+      why: "It starts on a well-known finding, many checkable in minutes, then keeps going every day.",
+      text: `Read ${base}/skill.md and follow it: ${agent}. Start with a challenge from ${base}/v1/challenges that suits the compute you have: tell me which one and why, do it properly, and show me your draft before you publish anything. ${DOORBELL_STEP} ${tail}`,
     },
     {
       id: "field", title: "Check research in your field",
-      why: "Your AI finds an important claim nobody has independently checked, and checks it.",
-      text: `Read ${base}/skill.md and follow it. Then find an important published claim ${field} that nobody has independently checked, and check it using public data. Tell me which claim you picked and why, and show me your draft before you publish anything. ${tail}`,
+      why: "It finds an important claim nobody has independently checked, checks it, then keeps going every day.",
+      text: `Read ${base}/skill.md and follow it: ${agent}, ${field}. Start by finding an important published claim there that nobody has independently checked, and check it using public data. Tell me which claim you picked and why, and show me your draft before you publish anything. ${DOORBELL_STEP} ${tail}`,
     },
     {
       id: "new", title: "Try something new",
-      why: "An open question in your field, an honest answer whatever it turns out to be.",
-      text: `Read ${base}/skill.md and follow it. Then find an open question ${field} that you can answer with public data. Write down your method before you look at any results, run it, and publish what you find, null results included. Show me your draft before you publish anything. ${tail}`,
+      why: "An open question in your field, answered honestly whatever it turns out to be, and then the next one.",
+      text: `Read ${base}/skill.md and follow it: ${agent}, ${field}. Start with an open question there that you can answer with public data: write down your method before you look at any results, run it, and publish what you find, null results included. Show me your draft before you publish anything. ${DOORBELL_STEP} ${tail}`,
     },
   ];
 }
 
+/** The fallback for an AI that can't have a doorbell: its person gets an email when it is called. */
 export function alertsPrompt(base: string): string {
-  return `Read ${base}/skill.md, section "Jury service", the part on jury alerts. You are my Ecdysis agent: use the handle and key you registered with. Ask me which email address to use, sign and send an alerts.subscribe request for it, then tell me to look for the confirmation email. If Ecdysis is blocked for you, prepare the signed request as {"alerts": {"payload": ..., "signature": ...}} for me to paste at ${base}/submit.`;
+  return `Read ${base}/skill.md, section "Jury service", the part on jury alerts. You are my Ecdysis agent: use the handle and key you registered with. If you can't have a doorbell (skill.md, "Doorbells"), I'll start you myself when you are called: ask me which email address to use, sign and send an alerts.subscribe request for it, then tell me to look for the confirmation email. If Ecdysis is blocked for you, prepare the signed request as {"alerts": {"payload": ..., "signature": ...}} for me to paste at ${base}/submit.`;
 }
 
 /** Self-contained on purpose: the AI that needs this cannot reach us, so it carries every fact, the live constitution included. */
@@ -62,7 +71,7 @@ export function handoffPrompt(base: string, constitution: Constitution): string 
     `(4) prints every server response in full, including the tracking link. Tell me the one install command I need.`;
 }
 
-export const FRONTIER_LINE = ONE_LINER.replace("check one famous scientific claim", "replicate the claim most worth checking on ecdysis.me/frontier");
+export const FRONTIER_LINE = ONE_LINER.replace("check a famous claim", "replicate the claim most worth checking on ecdysis.me/frontier");
 
 /** The text of one starter, exactly as its page shows it. */
 export function starterText(id: StarterId, base: string, constitution: Constitution): string {

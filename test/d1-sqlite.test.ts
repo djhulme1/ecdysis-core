@@ -117,6 +117,36 @@ describe("the D1 store against SQLite, every migration applied", { skip: !sqlite
     await assert.rejects(store.putClaim({ ...base, id: "d".repeat(32), code: "ecd-2222-3333", createdAt: "2026-10-01T13:00:00.000Z" }));
   });
 
+  it("stores doorbells: an upsert keeps the creation time, the setup id is unique, and every column round-trips", async () => {
+    const store = new D1Store(d1Over(migrated()));
+    const bell = {
+      handle: "Moth-1", kind: "claude-routine" as const, status: "pending" as const, cadence: "daily" as const,
+      routineId: null, url: null, tokenSealed: null, keyRef: null,
+      setupId: "s".repeat(32), setupToken: "t".repeat(64), setupIssuedAt: "2026-10-02T09:00:00.000Z", challenge: null,
+      createdAt: "2026-10-02T09:00:00.000Z", updatedAt: "2026-10-02T09:00:00.000Z",
+      lastRingAt: null, lastResearchAt: null, lastOkAt: null, lastSessionUrl: null, failures: 0, lastError: null, ringsDay: null, ringsToday: 0,
+    };
+    await store.putDoorbell(bell);
+    const active = {
+      ...bell, status: "active" as const, routineId: "trig_01ABCDEFGHJKMNPQRSTVWXYZ0", tokenSealed: "v1.abc.def", keyRef: "hkdf-sth/v1",
+      createdAt: "2026-10-02T10:00:00.000Z", updatedAt: "2026-10-02T10:00:00.000Z", lastRingAt: "2026-10-02T10:00:01.000Z",
+      lastResearchAt: "2026-10-02T10:00:01.000Z", lastOkAt: "2026-10-02T10:00:01.000Z", lastSessionUrl: "https://claude.ai/code/session_01X",
+      failures: 1, lastError: "timeout", ringsDay: "2026-10-02", ringsToday: 1,
+    };
+    await store.putDoorbell(active);
+    const got = (await store.getDoorbell("Moth-1"))!;
+    assert.deepEqual(got, { ...active, createdAt: bell.createdAt }, "every column round-trips, and the first creation time stands");
+    assert.equal((await store.getDoorbellBySetup("s".repeat(32)))?.handle, "Moth-1");
+    assert.equal(await store.getDoorbellBySetup("x".repeat(32)), null);
+    await store.putDoorbell({ ...bell, handle: "Wasp-1", kind: "webhook", url: "https://hooks.example.org/ring", setupId: "w".repeat(32) });
+    assert.deepEqual((await store.listDoorbells(10)).map((d) => d.handle), ["Moth-1", "Wasp-1"]);
+    assert.equal((await store.listDoorbells(1)).length, 1);
+    // One setup page per doorbell: another agent can't take a setup id.
+    await assert.rejects(store.putDoorbell({ ...bell, handle: "Gnat-1", setupId: "s".repeat(32) }));
+    // The kind is checked by the schema, not only by the code.
+    await assert.rejects(store.putDoorbell({ ...bell, handle: "Gnat-1", setupId: "g".repeat(32), kind: "smtp" as never }));
+  });
+
   it("runs registration, a preprint, a switch, a withdrawal and an uninvite through the real SQL", async () => {
     const store = new D1Store(d1Over(migrated()));
     let t = Date.UTC(2026, 9, 1, 9, 0, 0);

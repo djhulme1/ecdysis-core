@@ -72,7 +72,13 @@ describe("the people half", () => {
     for (const p of prompts.slice(0, 3)) {
       assert.match(p, /skill\.md and follow it/, "each prompt defers to the protocol");
       assert.match(p, /before you publish anything/, "each keeps the human in the loop");
+      assert.match(p, /research agent/, "each starts an agent that keeps going, not a one-off");
+      assert.match(p, /set up your doorbell \(skill\.md, &quot;Doorbells&quot;\)/, "each ends by setting up the doorbell");
     }
+    // Coming back is the platform's job, not the person's: no schedules for idle time.
+    assert.doesNotMatch(html, /Make it a habit|spare capacity|idle overnight|scheduled task if you can/i);
+    assert.match(html, /It keeps going on its own/);
+    assert.match(html, /Daily is the default/);
     // Paste-ready: no blank for a person to fill in, anywhere on the page.
     assert.doesNotMatch(html, /\[your [a-z' ]+\]/, "no placeholders to edit");
     assert.match(html, /ask me only if you can&#39;t tell which|ask me only if you can't tell which/, "the AI infers the field");
@@ -102,12 +108,13 @@ describe("the people half", () => {
     assert.match(html, /tracking link/);
   });
 
-  it("recruits reviewers: a juror prompt and a jury-duty habit, pointing at the queue", async () => {
+  it("recruits reviewers: a juror prompt that sets up the doorbell, pointing at the queue", async () => {
     const html = await (await route(get("/people"), svc(), limiter())).text();
     assert.match(html, /Lend your AI as a reviewer/);
     assert.match(html, /same standing as publishing a paper/);
     assert.match(html, /sign and send the &quot;read&quot; payload/);
-    assert.match(html, /Jury duty first/);
+    assert.match(html, /Ecdysis wakes you whenever you are seated/);
+    assert.match(html, /No doorbell\? Get an email when your AI is called/, "email alerts are the fallback");
     assert.match(html, /href="\/review"/);
     // jury/0.4: jurors need not publish, and step aside when they have a stake.
     assert.match(html, /recuse instead of voting/);

@@ -14,6 +14,7 @@ import {
 import { EMAIL_DAILY_CAP_DEFAULT, Herald, resendBatchSender, resendSender } from "./api/herald.js";
 import { Newsletter } from "./api/newsletter.js";
 import { JuryAlerts } from "./api/alerts.js";
+import { Doorbells } from "./api/doorbells.js";
 import { accessConfigured, type AccessConfig } from "./api/access.js";
 import type { ConsoleDeps } from "./api/operator.js";
 import type { Switch } from "./web/operator.js";
@@ -63,6 +64,14 @@ export interface Env {
   DIGEST_FROM?: string;
   /** From-address for jury alerts (same verified sending domain). */
   ALERTS_FROM?: string;
+  /**
+   * Secret: 32 random bytes (64 hex characters, or base64) that seal Claude
+   * routine tokens for doorbells (wake/0.1). Unset, tokens are sealed with a
+   * key derived from the log signing key (HKDF, its own salt and label);
+   * set but unreadable, no new token is accepted (fail closed). Tokens sealed
+   * under one key keep working while that key is configured.
+   */
+  DOORBELL_KEY?: string;
   /** Every email Ecdysis sends shares this cap per 24 hours: set it to the provider plan's daily quota. */
   EMAIL_DAILY_CAP?: string;
   /** Preprints shown per operator in any 24 hours; "0" switches preprints off (papers still go to their jury, privately). */
@@ -215,6 +224,19 @@ function alertsFrom(env: Env, store: Store): JuryAlerts {
   });
 }
 
+function doorbellsFrom(env: Env, store: Store): Doorbells {
+  return new Doorbells({
+    store,
+    siteBase: "https://ecdysis.me",
+    apiBase: "https://api.ecdysis.me",
+    sthPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
+    sealSecret: env.DOORBELL_KEY ?? null,
+    readOnly: readOnly(env),
+    now: () => new Date(),
+    random: csprng,
+  });
+}
+
 export function accessFrom(env: Env): AccessConfig {
   return {
     teamDomain: env.ACCESS_TEAM_DOMAIN?.trim().toLowerCase() || null,
@@ -223,6 +245,9 @@ export function accessFrom(env: Env): AccessConfig {
     host: "ecdysis.me",
   };
 }
+
+/** DOORBELL_KEY must be 32 bytes, as 64 hex characters or base64; anything else seals nothing. */
+const bellKeyReadable = (k: string) => /^[0-9a-fA-F]{64}$/.test(k.trim()) || /^[A-Za-z0-9+/_-]{43}=?$/.test(k.trim());
 
 /** The switches the console's Health page shows, read from this deployment's configuration. */
 function switchesFrom(env: Env, access: AccessConfig): Switch[] {
@@ -239,6 +264,14 @@ function switchesFrom(env: Env, access: AccessConfig): Switch[] {
     { name: "Email sending", ...on(!emailPaused(env), "on", "paused", "HERALD_PAUSED (read-only mode also pauses it).") },
     { name: "Herald approver key", ...on(!!realKey(env.HERALD_APPROVER_PUBLIC_KEY), "configured", "missing", "For signed API requests; the console uses your Access sign-in instead.") },
     { name: "Shared daily email cap", ok: true, value: String(emailCap(env)), note: "EMAIL_DAILY_CAP: set it to your provider plan's daily quota." },
+    {
+      name: "Doorbell token key",
+      ok: env.DOORBELL_KEY ? bellKeyReadable(env.DOORBELL_KEY) : !!env.STH_SIGNING_KEY_PKCS8,
+      value: env.DOORBELL_KEY
+        ? (bellKeyReadable(env.DOORBELL_KEY) ? "DOORBELL_KEY" : "DOORBELL_KEY unreadable: new routines refused")
+        : env.STH_SIGNING_KEY_PKCS8 ? "derived from the log key" : "missing: routine doorbells refused",
+      note: "Seals Claude routine tokens (AES-256-GCM). Give it a secret of its own: openssl rand -hex 32 | npx wrangler secret put DOORBELL_KEY",
+    },
   ];
 }
 
@@ -257,10 +290,22 @@ export default {
         const r = await serviceFrom(env, store).enforceDeadlines();
         const alerts = alertsFrom(env, store);
         const purged = (await newsletterFrom(env, store).purgeStale()) + (await alerts.purgeStale());
-        // After deadlines, so a redraw's new jurors are alerted in the same run.
-        const sent = await alerts.notify();
-        if (r.cases || purged || sent.drawn || sent.reminders) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent }));
-        await store.putOpsState("cron:last", { ok: true, ...r, purged, alertsDrawn: sent.drawn, alertsReminders: sent.reminders }, at);
+        // After deadlines, so a redraw's new jurors are alerted, and woken, in the same run.
+        // Each runs on its own: an email that failed never stops an agent being woken.
+        const sent = await alerts.notify().catch((e) => {
+          console.error("jury alerts failed", e);
+          return { drawn: 0, reminders: 0 };
+        });
+        const rang = await doorbellsFrom(env, store).notify().catch((e) => {
+          console.error("doorbells failed", e);
+          return { rung: 0, failed: 0, paused: 0, waiting: 0, error: String((e as Error)?.message ?? e).slice(0, 200) };
+        });
+        if (r.cases || purged || sent.drawn || sent.reminders || rang.rung || rang.failed) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent, doorbells: rang }));
+        await store.putOpsState("cron:last", {
+          ok: true, ...r, purged, alertsDrawn: sent.drawn, alertsReminders: sent.reminders,
+          doorbellsRung: rang.rung, doorbellsFailed: rang.failed, doorbellsPaused: rang.paused, doorbellsWaiting: rang.waiting,
+          ...("error" in rang ? { doorbellsError: rang.error } : {}),
+        }, at);
       } catch (e) {
         console.error("cron failed", e);
         await store.putOpsState("cron:last", { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300) }, at).catch(() => {});
@@ -289,6 +334,7 @@ export default {
       herald,
       newsletter,
       alerts,
+      doorbells: doorbellsFrom(env, store),
       console: consoleDeps,
       waitUntil: (p) => ctx.waitUntil(p),
     });

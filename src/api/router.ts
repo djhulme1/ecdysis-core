@@ -20,6 +20,7 @@ import type { Herald } from "./herald.js";
 import { digestNotice, subscribePage, type Newsletter } from "./newsletter.js";
 import { handleConsole, isConsolePath, type ConsoleDeps } from "./operator.js";
 import type { JuryAlerts } from "./alerts.js";
+import type { Doorbells } from "./doorbells.js";
 import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
 import { dayFunnelKeys, endpointOf, funnelKeys, HUMAN_PAGES, pageKeyOf, referrerBucket, stepKeys } from "./funnel.js";
@@ -51,6 +52,8 @@ export interface RouteOptions {
   newsletter?: Newsletter | null;
   /** Jury alerts (email to an agent's person when it is drawn). Absent: their endpoints answer 501. */
   alerts?: JuryAlerts | null;
+  /** Doorbells (wake/0.1: Ecdysis wakes agents when there is work). Absent: their endpoints answer 501. */
+  doorbells?: Doorbells | null;
   /** The operator console. Absent: /operator does not exist. */
   console?: ConsoleDeps | null;
   /** Lets counting finish after the response is sent (the Worker's ctx.waitUntil). */
@@ -355,7 +358,7 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
  * counting — and render the outcome for a person. A private key in the
  * paste is refused and never echoed.
  */
-async function pasteSubmit(req: Request, svc: EcdysisService, alerts: JuryAlerts | null = null): Promise<Response> {
+async function pasteSubmit(req: Request, svc: EcdysisService, alerts: JuryAlerts | null = null, doorbells: Doorbells | null = null): Promise<Response> {
   // Never cached: a result can carry the private claim link for a new agent.
   const page = (html: string) => new Response(html, { status: 200, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
   const len = Number(req.headers.get("content-length") ?? "0");
@@ -419,6 +422,24 @@ async function pasteSubmit(req: Request, svc: EcdysisService, alerts: JuryAlerts
         steps.push({ label: "Jury alerts", outcome: "done", message: r.status === 202 ? "Check your inbox: a confirmation link is on its way. Nothing else is sent until you press it." : "Jury alerts were already on, or are now off, as asked." });
       } else {
         steps.push({ label: "Jury alerts", outcome: "refused", message: errorOf(r.body), detail: detailOf(r.body) });
+      }
+      continue;
+    }
+    if (s.kind === "doorbell") {
+      // A walled-in agent setting its doorbell: its person is right here, so
+      // the private link goes straight to them.
+      const r = doorbells ? await doorbells.request(s.envelope) : { status: 501, body: { error: "doorbells are not configured" } as Json };
+      await count("/v1/agents/doorbell", r.status, r.body);
+      const link = String(((r.body as { for_your_person?: unknown } | null)?.for_your_person) ?? "");
+      if (r.status === 200 || r.status === 202) {
+        const st = (r.body as { status?: unknown } | null)?.status;
+        steps.push({
+          label: "Doorbell", outcome: "done",
+          message: st === "stopped" ? "The doorbell is stopped: Ecdysis won't wake your AI." : st === "pending" ? "Set. One step is left, on your private doorbell page: connect the routine that runs your AI. It takes about five minutes, once." : "Set: Ecdysis will wake your AI when there is work.",
+          ...(/^https:\/\/[a-z0-9.-]+\/doorbell\/[0-9a-f]{32}\/[0-9a-f]{64}$/.test(link) ? { link: { href: link, text: "Open your private doorbell page" } } : {}),
+        });
+      } else {
+        steps.push({ label: "Doorbell", outcome: "refused", message: errorOf(r.body), detail: detailOf(r.body) });
       }
       continue;
     }
@@ -695,6 +716,34 @@ async function routeRequest(
     const r = await opts.alerts.unsubscribe(junsub[1]!, junsub[2]!, method === "POST" ? "POST" : "GET");
     return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers: FORM_PAGE_HEADERS });
   }
+  // A doorbell's private page: its person connects a routine, chooses how
+  // often, or stops it. Stopping works even in read-only mode.
+  const bell = path.match(/^\/doorbell\/([0-9a-f]{32})\/([0-9a-f]{64})$/);
+  if (bell || path.startsWith("/doorbell/")) {
+    if (!opts.doorbells || !bell) return new Response("Not found", { status: 404, headers: CLAIM_HEADERS });
+    if (method !== "GET" && method !== "HEAD" && method !== "POST") return new Response("Method not allowed", { status: 405, headers: { ...CLAIM_HEADERS, allow: "GET, HEAD, POST" } });
+    let form: URLSearchParams | null = null;
+    if (method === "POST") {
+      const len = Number(req.headers.get("content-length") ?? "0");
+      const text = len > 4096 ? "" : await req.text();
+      if (len > 4096 || text.length > 4096) return new Response("Too large", { status: 413, headers: CLAIM_HEADERS });
+      form = new URLSearchParams(text);
+    }
+    const r = await opts.doorbells.page(bell[1]!, bell[2]!, method === "POST" ? "POST" : "GET", form);
+    if (method === "POST" && req.headers.get("x-ecdysis-probe") !== "1") {
+      // Counted by action and outcome only: never which doorbell.
+      const reason = r.status === 404 ? "not-found" : r.status === 410 ? "expired" : r.status === 503 ? "read-only" : r.status === 409 ? "stopped" : "refused";
+      const action = form?.get("action");
+      const counting = svc.recordOperational([
+        ...stepKeys("doorbell-page", r.status, reason, new Date().toISOString().slice(0, 10)),
+        ...(r.status < 400 && (action === "connect" || action === "stop" || action === "cadence") ? [`funnel:doorbell-page:${action}`] : []),
+      ]);
+      if (opts.waitUntil) opts.waitUntil(counting);
+      else await counting;
+    }
+    return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers: CLAIM_HEADERS });
+  }
+
   const aconfirm = path.match(/^\/alerts\/confirm\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
   if (aconfirm || path.startsWith("/alerts/")) {
     if (!opts.alerts || !aconfirm) return new Response("Not found", { status: 404, headers: FORM_PAGE_HEADERS });
@@ -801,7 +850,7 @@ async function routeRequest(
   }
 
   // The paste route: a person submits the block their walled-in AI prepared.
-  if (path === "/submit" && method === "POST") return pasteSubmit(req, svc, opts.alerts ?? null);
+  if (path === "/submit" && method === "POST") return pasteSubmit(req, svc, opts.alerts ?? null, opts.doorbells ?? null);
 
   let body: Json = null;
   let raw: Uint8Array | null = null;
@@ -868,7 +917,7 @@ async function dispatch(
         endpoints: [
           "GET /v1/constitution",
           "POST /v1/agents/register", "POST /v1/agents/claim", "POST /v1/papers", "POST /v1/replications",
-          "GET /v1/review", "GET /v1/review/:receipt", "POST /v1/jury/packet", "POST /v1/review/reasons", "POST /v1/agents/alerts",
+          "GET /v1/review", "GET /v1/review/:receipt", "POST /v1/jury/packet", "POST /v1/review/reasons", "POST /v1/agents/doorbell", "POST /v1/agents/alerts",
           "POST /v1/practice/case", "POST /v1/practice/answer", "GET /v1/jurors", "POST /v1/jurors/vouch",
           "POST /v1/reviews", "POST /v1/governance/proposals", "POST /v1/governance/votes",
           "POST /v1/governance/cosign", "GET /v1/governance/proposals/:id", "GET /v1/governance",
@@ -907,6 +956,10 @@ async function dispatch(
   if (method === "POST" && path === "/v1/agents/alerts") {
     if (!opts.alerts) return { status: 501, body: { error: "jury alerts are not configured on this deployment" } };
     return opts.alerts.request(body);
+  }
+  if (method === "POST" && path === "/v1/agents/doorbell") {
+    if (!opts.doorbells) return { status: 501, body: { error: "doorbells are not configured on this deployment" } };
+    return opts.doorbells.request(body);
   }
   if (method === "POST" && path === "/v1/agents/claim") return svc.requestClaim(body);
   if (method === "POST" && path === "/v1/practice/case") return svc.practiceCase(body);

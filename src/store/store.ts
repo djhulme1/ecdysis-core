@@ -115,6 +115,58 @@ export interface JuryAlertRecord {
   stoppedAt?: string | null;
 }
 
+/**
+ * A doorbell (wake/0.1): how Ecdysis wakes an agent when there is work for
+ * it. One per agent; operational and private, never in the public log.
+ */
+export interface DoorbellRecord {
+  handle: string;
+  /** claude-routine: Ecdysis fires a Claude Code routine's API trigger; webhook: Ecdysis POSTs a signed ring; self: the agent schedules itself. */
+  kind: "claude-routine" | "webhook" | "self";
+  /** pending: waiting for its person's token (routine) or for verification (webhook). */
+  status: "pending" | "active" | "paused" | "stopped";
+  /** How often research is rung; jury rings come whenever there is a seat. */
+  cadence: "daily" | "weekly" | "jury-only";
+  routineId?: string | null;
+  url?: string | null;
+  /** The routine's API token, sealed with AES-GCM and bound to the handle; never shown again. */
+  tokenSealed?: string | null;
+  keyRef?: string | null;
+  /** The person's private page: /doorbell/<setupId>/<setupToken>. */
+  setupId: string;
+  setupToken: string;
+  setupIssuedAt: string;
+  /** A webhook's verification challenge, until it is answered. */
+  challenge?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastRingAt?: string | null;
+  lastResearchAt?: string | null;
+  lastOkAt?: string | null;
+  /** The Claude session the last ring started: shown only on the private page. */
+  lastSessionUrl?: string | null;
+  failures: number;
+  lastError?: string | null;
+  ringsDay?: string | null;
+  ringsToday: number;
+}
+
+/** What one ring did, for recordDoorbellRing. */
+export interface DoorbellRing {
+  /** When it was sent: becomes lastRingAt and updatedAt (and lastOkAt if it worked). */
+  at: string;
+  ok: boolean;
+  /** Set when the ring carried research and worked. */
+  research?: string | null;
+  sessionUrl?: string | null;
+  failures: number;
+  error: string | null;
+  ringsDay: string;
+  ringsToday: number;
+  /** Pause the doorbell (a revoked token, or too many failures in a row). */
+  pause: boolean;
+}
+
 /** One digest issue, written and sent from the operator console. */
 export interface IssueRecord {
   id: string;
@@ -324,6 +376,20 @@ export interface Store extends LogBackend {
   /** Give a claim back after a failed send, so the next run retries. */
   releaseAlertSend(handle: string, subject: string, kind: string): Promise<void>;
   countEmailSends(sinceIso: string, kind?: string): Promise<number>;
+
+  // doorbells (wake/0.1): ring dedupe reuses claimAlertSend with kinds "ring:*"
+  putDoorbell(d: DoorbellRecord): Promise<void>;
+  getDoorbell(handle: string): Promise<DoorbellRecord | null>;
+  getDoorbellBySetup(setupId: string): Promise<DoorbellRecord | null>;
+  listDoorbells(limit: number): Promise<DoorbellRecord[]>;
+  /**
+   * Record a ring's outcome, only if the doorbell is still active and
+   * unchanged since it was read (updatedAt): a person's stop, or a new token,
+   * always wins over a sweep in flight. False if nothing was written.
+   */
+  recordDoorbellRing(handle: string, expectUpdatedAt: string, r: DoorbellRing): Promise<boolean>;
+  /** Erase ring claims older than `beforeIso` (their cases are long closed); returns how many. */
+  purgeRingClaims(beforeIso: string): Promise<number>;
 
   // operator console: small state (last cron run, last audit) and the action trail
   putOpsState(key: string, value: Json, at: string): Promise<void>;

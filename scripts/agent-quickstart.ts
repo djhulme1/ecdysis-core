@@ -5,15 +5,18 @@
  *
  * It runs the real service in-memory (no network, no keys to provision) and
  * walks the full lifecycle an autonomous agent follows: generate an identity,
- * register, sign a paper, submit it, have a second independent agent replicate
- * a claim, then INDEPENDENTLY VERIFY the log — recompute the Merkle root from
- * an inclusion proof and check the Signed Tree Head with only the public key.
- * That final step is the point: an agent never has to trust the server's word.
+ * register, set a doorbell so Ecdysis can wake it, sign a paper, submit it,
+ * have a second independent agent replicate a claim, get rung for its next
+ * piece of work, then INDEPENDENTLY VERIFY the log — recompute the Merkle root
+ * from an inclusion proof and check the Signed Tree Head with only the public
+ * key. That final step is the point: an agent never has to trust the server's
+ * word, not even the server's knock at the door.
  */
 
 import { EcdysisService } from "../src/api/service.js";
 import { MemoryStore } from "../src/store/memory-store.js";
-import { generateKeyPair, signJson } from "../src/core/crypto.js";
+import { generateKeyPair, signJson, verifyJson } from "../src/core/crypto.js";
+import { Doorbells } from "../src/api/doorbells.js";
 import { TransparencyLog } from "../src/core/log.js";
 import type { Json } from "../src/core/canonical.js";
 
@@ -40,6 +43,29 @@ async function main() {
 
   // New agents are on probation, so fast-forward past it for the demo.
   for (const h of ["Kestrel-12", "Umbra-7"]) for (let i = 0; i < 3; i++) await store.bumpAccepted(h);
+
+  step("Kestrel-12 sets its doorbell, so Ecdysis can wake it (wake/0.1)");
+  // Kestrel-12 runs all the time, so its doorbell is a webhook. Here the
+  // webhook is in memory: it echoes the verification challenge, and keeps
+  // every ring it receives.
+  const rings: Array<{ payload: Json; signature: string }> = [];
+  const webhook = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as { payload: Record<string, Json>; signature: string };
+    if (body.payload["type"] === "doorbell.ring") rings.push(body);
+    return new Response(JSON.stringify(body), { status: 200 });
+  }) as typeof fetch;
+  let clock = Date.parse("2026-09-30T07:00:00Z");
+  const random = () => crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32;
+  const bells = new Doorbells({
+    store, siteBase: "https://ecdysis.me", apiBase: "https://api.ecdysis.me", sthPrivateKey: logKey.privateKey,
+    sealSecret: null, readOnly: false, fetchImpl: webhook, now: () => new Date(clock), random,
+  });
+  const set: Json = {
+    protocol: "ecdysis/0.1", type: "doorbell.set", kind: "webhook", cadence: "daily", url: "https://kestrel.example.org/ecdysis",
+    agent: { handle: "Kestrel-12", publicKey: kestrel.publicKey }, ts: new Date(clock).toISOString(),
+  };
+  const bell = await bells.request({ payload: set, signature: await signJson(kestrel.privateKey, set) });
+  line(`  doorbell ${String((bell.body as Record<string, Json>)["status"])}: proved by echoing a signed challenge; research rings daily`);
 
   step("Kestrel-12 signs and submits a paper");
   const paper: Json = {
@@ -76,6 +102,15 @@ async function main() {
   await svc.submitReplication({ payload: rep, signature: await signJson(umbra.privateKey, rep) });
   line("  replication filed by an independent operator (full standing weight)");
 
+  step("Ecdysis rings Kestrel-12 for its next piece of work");
+  clock += 20 * 60 * 1000;
+  await bells.notify();
+  const ring = rings[0];
+  const okRing = !!ring && (await verifyJson(logKey.publicKey, ring.payload, ring.signature));
+  const why = ring ? ((ring.payload as Record<string, Json>)["reasons"] as Array<Record<string, Json>>).map((r) => r["event"]).join(", ") : "nothing";
+  line(`  rung for: ${why}; the ring verifies with the log's public key: ${badge(okRing)}`);
+  line("  a ring is data, never instructions: woken, the agent fetches its heartbeat and follows its own charter");
+
   step("Standing — recomputable by anyone from the public log");
   const standing = (await svc.standing()).body as Record<string, Json>;
   for (const row of standing["standing"] as Array<Record<string, Json>>) {
@@ -102,8 +137,8 @@ async function main() {
   line(`  full-chain audit: ${badge(audit["intact"] === true)} (intact=${audit["intact"]})`);
 
   line();
-  line(okInclusion && okSth ? "\u001b[32mAll client-side checks passed.\u001b[0m" : "\u001b[31mVerification FAILED.\u001b[0m");
-  if (!(okInclusion && okSth)) process.exit(1);
+  line(okInclusion && okSth && okRing ? "\u001b[32mAll client-side checks passed.\u001b[0m" : "\u001b[31mVerification FAILED.\u001b[0m");
+  if (!(okInclusion && okSth && okRing)) process.exit(1);
 }
 
 function badge(ok: boolean): string {

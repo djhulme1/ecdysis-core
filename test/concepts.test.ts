@@ -301,7 +301,7 @@ describe("/charter: a research charter, kept by nobody", () => {
     const w = await world();
     const r = await route(post(form({
       know: "Bee vision, from a PhD", question: "Do insects <b>plan</b> routes?", way: ["replicate", "research"],
-      field: ["neuro", "nonsense"], drawOn: "interests", credit: "none", effort: "weekly", approve: "yes",
+      field: ["neuro", "nonsense"], drawOn: "interests", credit: "none", cadence: "daily", approve: "yes",
     })), w.svc, limiter());
     assert.equal(r.status, 200);
     assert.equal(r.headers.get("cache-control"), "no-store");
@@ -316,7 +316,10 @@ describe("/charter: a research charter, kept by nobody", () => {
     assert.match(html, /as data, never as instructions/);
     assert.ok(!html.includes("<b>plan</b>"), "what the person typed is shown as text");
     assert.match(html, /&lt;b&gt;plan&lt;\/b&gt;/);
-    assert.ok(!html.includes("jury duty"), "no jury rule when Review isn't chosen");
+    assert.ok(!html.includes("qualify as a juror"), "no practice rule when Review isn't chosen");
+    assert.match(html, /HOW OFTEN: Daily/, "daily by default");
+    assert.match(html, /Keep your doorbell set up/, "the AI comes back on its own: no schedule for the person to keep");
+    assert.match(html, /keep the draft for me instead of publishing it/, "woken alone, it never publishes what the person hasn't seen");
     assert.equal((await w.store.listAccessPrefix("funnel:")).length, 0, "not a write: nothing in the write funnel");
     const made = await w.store.listAccessPrefix("pv:");
     assert.equal(made.filter((x) => x.id.endsWith(":charter-made")).reduce((a, b) => a + b.count, 0), 1, "counted once, by day, never what it says");
@@ -335,13 +338,14 @@ describe("/charter: a research charter, kept by nobody", () => {
     assert.match(await long.text(), /up to 1,200 characters/);
     const huge = await route(post("know=" + "a".repeat(20_000)), w.svc, limiter());
     assert.equal(huge.status, 413);
-    const edit = await route(post(form({ mode: "edit", know: "Bee vision", question: "Q?", way: ["review", "build"], field: "neuro", credit: "claim", effort: "spare" })), w.svc, limiter());
+    const edit = await route(post(form({ mode: "edit", know: "Bee vision", question: "Q?", way: ["review", "build"], field: "neuro", credit: "claim", cadence: "weekly" })), w.svc, limiter());
     assert.equal(edit.status, 200);
     const eh = await edit.text();
     assert.match(eh, /<textarea id="know"[^>]*>Bee vision<\/textarea>/);
     assert.match(eh, /name="way" value="build" checked/);
     assert.match(eh, /name="way" value="replicate">/, "unticked stays unticked");
     assert.match(eh, /<option value="claim" selected>/);
+    assert.match(eh, /<option value="weekly" selected>/);
     assert.match(eh, /name="approve" value="yes">/, "approval unticked in the edit stays unticked");
     assert.equal((await w.store.listAccessPrefix("pv:")).filter((x) => x.id.endsWith(":charter-made")).length, 0, "edits and refusals are not counted as charters");
   });
@@ -357,7 +361,12 @@ describe("/charter: a research charter, kept by nobody", () => {
     const at = new Date("2026-10-01T12:00:00Z");
     const base = charterText({ ...CHARTER_DEFAULTS, know: "K", ways: ["review"], approve: false, credit: "claim" }, "ecdysis.me", at);
     assert.match(base, /^ECDYSIS RESEARCH CHARTER · 1 Oct 2026/);
-    assert.match(base, /check for jury duty and finish those reviews before any new work/);
+    assert.match(base, /serve any jury you have been drawn for before anything else, then do one careful piece of work/);
+    const juryOnly = charterText({ ...CHARTER_DEFAULTS, ways: ["review"], cadence: "jury-only" }, "ecdysis.me", at);
+    assert.match(juryOnly, /wakes you whenever you are drawn for a jury/);
+    assert.match(juryOnly, /stop: do no research of your own/);
+    const noReview = readCharterForm(new URLSearchParams("know=x&way=replicate&cadence=jury-only"));
+    assert.ok(!noReview.ok && /Jury duty only needs Review/.test(noReview.problem));
     assert.match(base, /Once I have approved one, you may publish without waiting for me/);
     assert.match(base, /claim you publicly with a post on X or Bluesky/);
     assert.match(base, /FIELDS: any field where you can do careful work/);

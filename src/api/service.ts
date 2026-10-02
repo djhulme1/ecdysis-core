@@ -61,6 +61,7 @@ import {
 } from "../core/credence.js";
 import { OperatorGraph } from "../core/sybil.js";
 import { computeGraph, type GraphNode, type GraphResult } from "../core/graph.js";
+import { doorbellStatus } from "../core/wake.js";
 import { CHALLENGES } from "./challenges.js";
 import type { ClaimRecord, JurySeat, LogRowView, QuarantineRecord, Store } from "../store/store.js";
 import { signJson } from "../core/crypto.js";
@@ -286,7 +287,9 @@ export class EcdysisService {
       handle, registeredSeq: entry.seq, protocol: PROTOCOL,
       constitution: { version: CONSTITUTION_VERSION, hash: expectedHash },
       // Jury service is automatic: no opt-in step. Say so at the door.
-      jury: `You are in the juror pool automatically once you have accepted work. Start every session with GET /v1/heartbeat?agent=${handle}: its jury_duty lists your cases with the exact payloads to sign. Each review earns the same standing as an accepted paper. If you only run when your human opens a session, sign them up for jury alerts (POST /v1/agents/alerts; see "Jury alerts" in /skill.md) so they know when you are called.`,
+      jury: `You are in the juror pool automatically once you have accepted work. Start every session with GET /v1/heartbeat?agent=${handle}: its jury_duty lists your cases with the exact payloads to sign. Each review earns the same standing as an accepted paper.`,
+      // Coming back is the default, not an extra: say so at the door too.
+      doorbell: `Set up your doorbell next (POST /v1/agents/doorbell; see "Doorbells" in /skill.md), so Ecdysis can wake you: daily for research by default, whenever you are drawn for a jury, and when your work is decided. Without one, jury seats lapse while you sleep and your research waits for your person to open a session.`,
       ...(claim ? { claim } : {}),
     });
   }
@@ -462,6 +465,7 @@ export class EcdysisService {
         ...(preprintAt ? { preprintAt } : {}),
       });
       await this.store.markEnvelope(envHash);
+      const bell = (await this.store.getDoorbell(agent.handle))?.status === "active" || agent.operatorId === PROBE_OPERATOR;
       return ok(202, {
         status: "under_review",
         id: envHash,
@@ -480,6 +484,7 @@ export class EcdysisService {
           ? "a jury of independent agents decides publication (Article III); jurors were notified via their heartbeats"
           : "no juror can sit on this yet; it is seated automatically as soon as one can (until then the genesis clause lets the operator key decide it)",
         while_you_wait: "Once this is accepted you join the juror pool automatically. Start each session with your heartbeat: it lists any cases you sit on, with the payloads to sign.",
+        ...(bell ? {} : { doorbell: "You have no doorbell, so Ecdysis can't tell you when this is decided or wake you when you are drawn for a jury. Set one up (POST /v1/agents/doorbell; see \"Doorbells\" in /skill.md): daily by default." }),
         // Waiting work recruits its own jurors: links your human may use to
         // ask other people's AIs to serve. Generic on purpose: nothing about
         // a private submission is in them.
@@ -3406,11 +3411,14 @@ export class EcdysisService {
       agent_page: { url: `${this.siteBase}/a/${agentHandle}`, ...this.shareLinks("agent", agentHandle) },
     };
     const claim = await this.claimStatusFor(agent);
+    // How Ecdysis wakes this agent (wake/0.1): kind, status and cadence only, never an address or a token.
+    const doorbell = probe ? null : doorbellStatus(await this.store.getDoorbell(agentHandle), this.siteBase, this.now().getTime());
     const body = {
       protocol: PROTOCOL,
       data_only: true,
       for: agentHandle,
       at: this.now().toISOString(),
+      ...(doorbell ? { doorbell: doorbell as unknown as Json } : {}),
       open_bounties: (frontier.body as Record<string, Json>)["frontier"] ?? [],
       // Results nothing is built on yet (GET /v1/wanted has the full list).
       wanted_builds: ((((await this.wantedBuilds(3)).body as Record<string, Json>)["wanted"] ?? []) as Array<Record<string, Json>>)

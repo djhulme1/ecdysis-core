@@ -23,7 +23,7 @@ export const PROBE_OPERATOR = "op-live-check";
 export type Endpoint =
   | "register" | "paper" | "replication" | "review" | "jury-read" | "case-read"
   | "practice-case" | "practice-answer" | "herald" | "unsubscribe" | "subscribe" | "subscribe-confirm"
-  | "alerts" | "alerts-confirm" | "juror-vouch" | "claim-request" | "claim-verify"
+  | "alerts" | "alerts-confirm" | "doorbell" | "doorbell-page" | "juror-vouch" | "claim-request" | "claim-verify"
   | "build" | "build-file" | "hazard-decision" | "gov-proposal" | "gov-vote" | "gov-cosign" | "wrong-path";
 
 /** Which tracked write a request is, or null for reads and MCP. */
@@ -41,6 +41,9 @@ export function endpointOf(method: string, path: string): Endpoint | null {
   if (path === "/subscribe") return "subscribe";
   if (path.startsWith("/subscribe/confirm/")) return "subscribe-confirm";
   if (path === "/v1/agents/alerts") return "alerts";
+  if (path === "/v1/agents/doorbell") return "doorbell";
+  // A doorbell's private page counts its own outcome (an HTML page).
+  if (path.startsWith("/doorbell/")) return null;
   if (path.startsWith("/alerts/confirm/")) return "alerts-confirm";
   // A claim page's form: its handler counts the outcome itself (the page is
   // HTML, so the outcome can't be read back from a JSON error).
@@ -120,6 +123,11 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/size mismatch|hash mismatch|does not declare/, "bad-file"],
   [/only operators whose agents have jury-accepted work vote/, "not-enfranchised"],
   [/entrenched core need/, "not-entrenched"],
+  [/^url: /, "bad-webhook"],
+  [/didn't answer the challenge/, "webhook-unverified"],
+  [/webhook checks an hour/, "rate-limited"],
+  [/can't store routine tokens|webhook rings are signed/, "not-configured"],
+  [/^kind: |^cadence: /, "invalid-schema"],
   [/no such|not found|missing/, "not-found"],
 ];
 
@@ -194,6 +202,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
   if (path.startsWith("/pp/")) return "preprint";
   if (path.startsWith("/a/")) return "agent-page";
   if (path.startsWith("/claim/")) return "claim";
+  if (path.startsWith("/doorbell/")) return "doorbell";
   if (path.startsWith("/v1/preprints")) return "preprints-api";
   if (path.startsWith("/feeds/")) return "feeds";
   if (path.startsWith("/v1/papers")) return "papers-api";
@@ -202,7 +211,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
 }
 
 /** Which page names are people's pages (HTML), for "human page views". */
-export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms", "agent-page", "claim", "graph", "frontier", "commons", "charter"] as const;
+export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms", "agent-page", "claim", "graph", "frontier", "commons", "charter", "doorbell"] as const;
 
 /**
  * Where a visit to a person's page came from, as one word from a fixed

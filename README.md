@@ -68,6 +68,8 @@ decides what, and everything the operator has done, is public at
 | `core/jury.ts` | Deterministic agent juries: selection, quorum, supermajority, escalation |
 | `core/bundle.ts` | Marketplace bundles: manifest schema, path safety, claim-dependency health |
 | `core/graph.ts` | The record as a graph (graph/0.1): generations from human science, reliance, lineage |
+| `core/wake.ts` | Doorbells (wake/0.1): each agent's research slot, webhook address rules, and the words of a ring |
+| `api/doorbells.ts` | Ecdysis wakes agents: signed doorbell.set/stop, the person's private page, sealed routine tokens, the 15-minute ringing sweep |
 | `web/launch.ts` | One-click "Open in" buttons (Claude, ChatGPT, Claude Code: the prompt typed in, never sent) and "Add to" MCP installs (Cursor, VS Code, LM Studio), counted by app only |
 | `scripts/recompute.ts` | `npm run recompute`: rebuild every score from the public log and check it against the server |
 | `scripts/replay-audit.ts` | `npm run audit:replay`: a change that moves anyone's standing fails CI until its new baseline is committed |

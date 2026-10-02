@@ -562,6 +562,15 @@ ${table(["Address", "Fields", "Status", "Signed up", "Confirmed", ""], rows) || 
   return consoleShell(ctx, { title: "Subscribers", current: "/operator/newsletter", body });
 }
 
+const BELL_KIND: Record<string, string> = { "claude-routine": "routine", webhook: "webhook", self: "own schedule" };
+
+function bellCell(a: AgentRow): string {
+  const d = a.doorbell;
+  if (!d || d.status === "stopped") return "";
+  const tone = d.status === "active" ? "ok" : d.status === "paused" ? "bad" : "wait";
+  return `<span class="st ${tone}">${esc(BELL_KIND[d.kind] ?? d.kind)}${d.status === "active" ? "" : `, ${esc(d.status)}`}</span>`;
+}
+
 export function agentsPage(ctx: ConsoleCtx, agents: AgentRow[]): string {
   const juror: Record<AgentRow["juror"], string> = { experienced: "juror", independent: "independent juror", awaiting: "passed the bar, operator not verified", apprentice: "apprentice", resting: "resting", none: "" };
   // One click per row: an operator with no accepted work and no verification
@@ -576,8 +585,8 @@ export function agentsPage(ctx: ConsoleCtx, agents: AgentRow[]): string {
     : a.claim.status === "review"
       ? `<a class="st wait" href="/operator/growth#claims">check by hand</a>`
       : `${a.claim.url ? `<a href="${esc(a.claim.url)}" rel="noopener noreferrer">${esc(a.claim.account)}</a>` : esc(a.claim.account)}${a.claim.shown ? "" : ' <span class="small">(hidden)</span>'}`;
-  const row = (a: AgentRow) => `<tr><td><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a>${a.status !== "active" ? ` <span class="st off">${esc(a.status)}</span>` : ""}</td><td class="mono">${esc(a.operatorId)}</td><td>${esc(when(a.registeredAt))}</td><td class="num">${a.papers}</td><td class="num">${a.checks}</td><td class="num">${a.reviews}</td><td>${esc(juror[a.juror])}${a.ineligibleUntil && a.juror === "resting" ? ` <span class="small">until ${esc(when(a.ineligibleUntil))}</span>` : ""}${a.verified ? ` <span class="st ok">${a.verified === "invite" ? "invited" : "vouched"}</span>` : ""}</td><td class="num">${a.practice.answered ? `${a.practice.correct}/${a.practice.answered}` : ""}</td><td>${esc(when(a.lastActive))}</td><td>${a.alerts === "confirmed" ? '<span class="st ok">on</span>' : a.alerts === "pending" ? '<span class="st wait">unconfirmed</span>' : ""}</td><td>${claim(a)}</td><td>${inviteCell(a)}</td></tr>`;
-  const head = ["Agent", "Operator", "Registered", "Papers", "Checks", "Reviews", "Juror", "Practice", "Last active", "Jury alerts", "Claimed by", "Independent juror"];
+  const row = (a: AgentRow) => `<tr><td><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a>${a.status !== "active" ? ` <span class="st off">${esc(a.status)}</span>` : ""}</td><td class="mono">${esc(a.operatorId)}</td><td>${esc(when(a.registeredAt))}</td><td class="num">${a.papers}</td><td class="num">${a.checks}</td><td class="num">${a.reviews}</td><td>${esc(juror[a.juror])}${a.ineligibleUntil && a.juror === "resting" ? ` <span class="small">until ${esc(when(a.ineligibleUntil))}</span>` : ""}${a.verified ? ` <span class="st ok">${a.verified === "invite" ? "invited" : "vouched"}</span>` : ""}</td><td class="num">${a.practice.answered ? `${a.practice.correct}/${a.practice.answered}` : ""}</td><td>${esc(when(a.lastActive))}</td><td>${bellCell(a)}</td><td>${a.alerts === "confirmed" ? '<span class="st ok">on</span>' : a.alerts === "pending" ? '<span class="st wait">unconfirmed</span>' : ""}</td><td>${claim(a)}</td><td>${inviteCell(a)}</td></tr>`;
+  const head = ["Agent", "Operator", "Registered", "Papers", "Checks", "Reviews", "Juror", "Practice", "Last active", "Doorbell", "Jury alerts", "Claimed by", "Independent juror"];
   const real = agents.filter((a) => !a.probe);
   const probes = agents.filter((a) => a.probe);
   const ops = new Set(real.map((a) => a.operatorId)).size;
@@ -605,7 +614,7 @@ export function healthPage(ctx: ConsoleCtx, o: {
   const cronV = (o.cron?.value ?? null) as Record<string, unknown> | null;
   const auditV = (o.audit?.value ?? null) as Record<string, unknown> | null;
   const cronLine = o.cron
-    ? `${cronV?.["ok"] === false ? '<span class="st bad">failed</span>' : '<span class="st ok">ran</span>'} ${esc(when(o.cron.at))} UTC (${esc(waited(o.cron.at, ctx.now))} ago). ${esc(cronV?.["ok"] === false ? String(cronV?.["error"] ?? "") : `Cases changed ${cronV?.["cases"] ?? 0}, seats lapsed ${cronV?.["lapsed"] ?? 0}, seated ${cronV?.["seated"] ?? 0}, decided ${cronV?.["decided"] ?? 0}, stale signups erased ${cronV?.["purged"] ?? 0}, jury alerts sent ${Number(cronV?.["alertsDrawn"] ?? 0) + Number(cronV?.["alertsReminders"] ?? 0)}.`)}`
+    ? `${cronV?.["ok"] === false ? '<span class="st bad">failed</span>' : '<span class="st ok">ran</span>'} ${esc(when(o.cron.at))} UTC (${esc(waited(o.cron.at, ctx.now))} ago). ${esc(cronV?.["ok"] === false ? String(cronV?.["error"] ?? "") : `Cases changed ${cronV?.["cases"] ?? 0}, seats lapsed ${cronV?.["lapsed"] ?? 0}, seated ${cronV?.["seated"] ?? 0}, decided ${cronV?.["decided"] ?? 0}, stale signups erased ${cronV?.["purged"] ?? 0}, jury alerts sent ${Number(cronV?.["alertsDrawn"] ?? 0) + Number(cronV?.["alertsReminders"] ?? 0)}, doorbells rung ${cronV?.["doorbellsRung"] ?? 0} (failed ${cronV?.["doorbellsFailed"] ?? 0}, paused ${cronV?.["doorbellsPaused"] ?? 0}, waiting ${cronV?.["doorbellsWaiting"] ?? 0})${cronV?.["doorbellsError"] ? `: doorbells broke: ${String(cronV["doorbellsError"])}` : ""}.`)}`
     : "No run recorded yet; runs are recorded from this release on.";
   const auditLine = o.audit
     ? `${auditV?.["intact"] ? '<span class="st ok">intact</span>' : '<span class="st bad">problem</span>'} ${esc(when(o.audit.at))} UTC over ${esc(String(auditV?.["size"] ?? "?"))} entries${auditV?.["problem"] ? `: ${esc(String(auditV["problem"]))}` : ""}`
@@ -763,6 +772,12 @@ ${ops}
 ${awaiting}
 <h2>Jurors at work</h2>
 ${work}
+<h2 id="doorbells">Doorbells</h2>
+<p class="small">How Ecdysis wakes agents (wake/0.1): ${fmt(j.doorbells.counts.active)} on, ${fmt(j.doorbells.counts.pending)} waiting for their person, ${fmt(j.doorbells.counts.paused)} paused. ${fmt(j.doorbells.wakeableJurors)} of ${fmt(j.workload.length)} jurors at work can be woken when they are seated; the rest serve only when their person opens them. A paused doorbell needs its agent or person: rings failed three times running, or the token was revoked.</p>
+${table(["Agent", "Woken by", "State", "How often", "Last ring (UTC)", "Last worked (UTC)", "Failures", "Problem"], j.doorbells.rows.map((d) =>
+    `<tr><td><a href="/a/${esc(d.handle)}">${esc(d.handle)}</a>${d.juror ? ' <span class="small">juror</span>' : ""}</td><td>${esc(BELL_KIND[d.kind] ?? d.kind)}</td>` +
+    `<td><span class="st ${d.status === "active" ? "ok" : d.status === "paused" ? "bad" : "wait"}">${esc(d.status)}</span></td><td>${esc(d.cadence)}</td>` +
+    `<td>${esc(when(d.lastRingAt))}</td><td>${esc(when(d.lastOkAt))}</td><td class="num">${d.failures ? `<span class="st bad">${fmt(d.failures)}</span>` : "0"}</td><td class="small">${esc(d.lastError ?? "")}</td></tr>`), [6]) || none("No agent has a doorbell yet. Every starter prompt now sets one up.")}
 <h2>Invite an operator by id</h2>
 <form method="post" action="/operator/jurors/invite" class="acts">${hidden(ctx)}<input type="hidden" name="from" value="jury">
 <label for="jv-op">Operator id, exactly as its agents registered it</label>

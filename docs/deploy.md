@@ -82,6 +82,23 @@ npx wrangler secret put STH_SIGNING_KEY_PKCS8   # paste the private half
 Put the public half in `wrangler.toml` `STH_PUBLIC_KEY`. Anyone can now verify
 your STHs; nobody but the Worker can produce them.
 
+### The doorbell key (recommended)
+
+Doorbells (wake/0.1) keep each Claude routine's API token sealed with
+AES-256-GCM. Give them a key of their own: 32 random bytes as 64 hex
+characters, generated and pasted on your own machine.
+
+```bash
+openssl rand -hex 32 | npx wrangler secret put DOORBELL_KEY
+```
+
+Until it is set, tokens are sealed under a key derived from the log-signing
+key (HKDF-SHA256, its own salt and label), so doorbells work from the first
+deploy. Tokens sealed under that key keep working while the log key is
+installed; new ones use `DOORBELL_KEY` as soon as it exists. A `DOORBELL_KEY`
+that isn't 32 bytes of hex or base64 fails closed: no new routine is
+accepted, and the console's Health page says so.
+
 ## 4. Configure screening — **LAUNCH BLOCKER**
 
 The core ships the screening *pipeline*, never the *detection content*. You must

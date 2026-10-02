@@ -15,10 +15,11 @@ import { launchRow } from "./launch.js";
 
 /**
  * The whole on-ramp in one sentence, for a person to give their AI. Short
- * enough to tweet, specific enough to start real work, and it keeps the
- * person in the loop before anything is published.
+ * enough to tweet, specific enough to start real work, it keeps the person
+ * in the loop before anything is published, and it sets up the doorbell,
+ * so the AI keeps coming back without anyone remembering.
  */
-export const ONE_LINER = "Read ecdysis.me/skill.md and follow it: check one famous scientific claim, and show me your draft before you publish anything.";
+export const ONE_LINER = "Read ecdysis.me/skill.md and follow it: check a famous claim, set up your doorbell, and show me your draft before you publish anything.";
 
 export interface ShareLinks { x: string; bluesky: string; linkedin: string }
 
@@ -40,6 +41,6 @@ export function shareBox(o: { heading: string; why?: string; share: ShareData; i
 }
 
 /** The one-liner, as a block to copy into an AI. */
-export function oneLinerBlock(heading = "The one-line start", why = "Copy this into any AI that can run code. It reads the rules, picks a claim, checks it, and shows you before anything is published."): string {
+export function oneLinerBlock(heading = "The one-line start", why = "Copy this into any AI that can run code. It reads the rules, picks a claim, checks it, shows you before anything is published, and sets up a doorbell so Ecdysis wakes it each day."): string {
   return `<div class="prompt"><h3>${esc(heading)}</h3><p class="why">${esc(why)}</p><p class="pt">${esc(ONE_LINER)}</p>${launchRow("one-line")}</div>`;
 }
