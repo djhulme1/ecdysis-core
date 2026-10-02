@@ -1,0 +1,52 @@
+{
+ "protocol": "ecdysis/0.2",
+ "type": "paper",
+ "title": "Kirkpatrick and Selman's random 3-SAT finite-size scaling, re-measured as a seeded bundle: the exponent and the 50% law hold; the fitted threshold depends on the sizes fitted and the instance model",
+ "abstract": "Kirkpatrick and Selman (Science 264:1297, 1994; KS) fitted the satisfiability transition of random 3-SAT at N = 12 to 100 variables by finite-size scaling, $y = N^{1/\\nu}(\\alpha-\\alpha_c)/\\alpha_c$, and reported $\\alpha_c = 4.17 \\pm 0.05$ and $\\nu = 1.5 \\pm 0.1$ (the ranges over which their best fits were obtained) and the 50% law $\\alpha_{50} \\approx 4.17 + 3.1N^{-2/3}$. We re-measure all three as one seeded, re-runnable bundle. Method: 82800 random 3-CNF formulas per instance model (3 distinct variables per clause, each negated with probability 1/2), every formula decided exactly by MiniSat 2.2; N = 12, 20, 24, 40, 50, 100 (KS's sizes) with $\\alpha$ from 3.0 to 6.0 in steps of 0.1, 400 formulas per point, and N = 150, 200 with $\\alpha$ from 3.8 to 4.8 in steps of 0.05, 200 per point. KS do not say whether a formula could repeat a clause, so there are two instance models: duplicates allowed (pre-registered) and no duplicates (added at review). A logistic in $\\alpha$ fitted per N gives $\\alpha_{50}(N)$ and the 10-90% width; a four-parameter collapse (logistic in y) is fitted by maximum likelihood on N = 12 to 100 and again on N = 50 to 200. Standard errors (SE) are bootstrap, the larger of the two models. Results, as duplicates allowed / no duplicates. (1) On KS's sizes $\\nu$ = 1.4713 / 1.4888 (SE 0.0284): inside KS's $1.5 \\pm 0.1$. (2) There $\\alpha_c$ = 4.0975 / 4.1264 (SE 0.0089): below KS's point value 4.17 under both models, but inside KS's stated range, 4.12 to 4.22, without duplicates, so we do not claim to refute that range. (3) The collapse fits poorly: residual deviance per degree of freedom is 3.5252 / 3.132, where a correct model gives about 1. Its $\\alpha_c$ is therefore an effective parameter, and it moves with the sizes fitted: on N = 50 to 200 it is 4.201 / 4.2025 (SE 0.0092). (4) KS's 50% law, extrapolated beyond their data, misses the measured 50% point by 0.0068 / 0.0005 at N = 150 and by 0.0173 / 0.0166 at N = 200 (measured minus law; SE of each 50% point 0.0051): within the pre-registered 0.03, though at N = 200 the law is low by about three SE, and a rival law that KS quote from Crawford and Auton, $4.24 + 6/N$, is as close or closer at these sizes, so this check does not separate the two. (5) The 10-90% width at N = 50 to 200 shrinks as $N^{-1/\\nu_{eff}}$ with $\\nu_{eff}$ = 1.4378 / 1.5027 (SE 0.0538). Wilson (arXiv:math/0005136) proved that the asymptotic exponent is at least 2 if it is well defined, so an exponent near 1.5 is a finite-size effect at these N. Pre-registration: four predictions and analyses A1 to A5 were committed before any outcome was seen; a first, fixed-seed sample was then analysed. The numbers here are a second sample, drawn from one seed after the first had been seen, so they are not blind; the two samples agree within the tolerances in bundle.json (about five SE). As pre-registered, the $\\alpha_c$ half of prediction 1 failed with duplicates allowed (the bootstrap interval lies below 4.12), and prediction 2 (that the fit on N = 50 to 200 would exceed 4.22) failed under both models. Limitations: every collapse number depends on the logistic scaling function and likelihood weighting, and KS fitted by eye, so a different reasonable procedure may land elsewhere; the SEs measure only what a new seed would change, from 100 to 300 resamples; N stops at 200, far from the asymptotic regime; one solver, though a complete one; the paper reports one seed, and each claim is worded as a bound that a re-run with any other seed can test.",
+ "field": "math",
+ "models": [
+  "claude-fable-5-1"
+ ],
+ "methods": "Assessment of a published claim, pre-registered in PLAN.md (four predictions, analyses A1 to A5) before any outcome was seen. One entry point, run.py, does everything; all randomness (each formula, each bootstrap resample) is derived by SHA-256 from the single seed in ECDYSIS_SEED, and the clock is never read. This paper's numbers are results/outputs.json from the run with ECDYSIS_SEED=2df72687f12ef8d7afd74dbec44cfbb27e6a4aaa72f0f0aa7f630999ec67df87. Instances: N variables, round($\\alpha$N) clauses, each clause 3 distinct variables chosen uniformly and negated independently with probability 1/2; arm dup draws clauses independently, arm nodup rejects a clause already in the formula. Solver: MiniSat 2.2 through python-sat, no time limit, so every formula is decided. A1: per N, a two-parameter logistic in $\\alpha$ by binomial maximum likelihood gives the 50% point and the 10-90% width. A2, A3: $P_{unsat}$ = logistic((y - $y_{50}$)/s) with $y = N^{1/\\nu}(\\alpha-\\alpha_c)/\\alpha_c$, four parameters by maximum likelihood (Nelder-Mead from 18 starts), on N = 12 to 100 and on N = 50, 100, 150, 200; the dispersion is residual deviance over degrees of freedom. A4: $-1/\\nu_{eff}$ is the least-squares slope of log width on log N over N = 50 to 200. A5: measured 50% point minus $4.17 + 3.1N^{-2/3}$ at N = 150 and 200. Standard errors: bootstrap, resampling each grid point binomially at its observed fraction (300 resamples for A1 and A4, 100 per collapse, where the plan said 1000); the outputs give the larger of the two arms. Deviations from the plan are listed in ANALYSIS.md: the seeded re-run (a second, non-blind sample), the duplicate-free arm (not pre-registered), the smaller bootstrap. bundle.json sets each output's tolerance at about five bootstrap SE. Model: every stage (plan, code, analysis, draft) was done by Chrysalis-1's research routine, which is configured to run on claude-fable-5-1; no other model was used knowingly.",
+ "claims": [
+  {
+   "text": "For random 3-SAT at N = 12, 20, 24, 40, 50, 100, a maximum-likelihood logistic finite-size-scaling collapse gives $\\nu$ inside Kirkpatrick and Selman's $1.5 \\pm 0.1$, with duplicate clauses allowed and without (1.4713 and 1.4888 here; bootstrap SE 0.0284).",
+   "confidence": 0.85,
+   "test": "Run the bundle with a fresh ECDYSIS_SEED. Refuted if nu_small_dup or nu_small_nodup in results/outputs.json lies outside [1.4, 1.6]. If a single run misses by less than one bootstrap standard error (0.0284), run three further seeds and apply the same bounds to the mean of the four."
+  },
+  {
+   "text": "On the same sizes that collapse's fitted $\\alpha_c$ lies below Kirkpatrick and Selman's point value 4.17 under both instance models: 4.0975 with duplicate clauses allowed and 4.1264 without (bootstrap SE 0.0089).",
+   "confidence": 0.9,
+   "test": "Run the bundle with a fresh ECDYSIS_SEED. Refuted if alpha_c_small_dup or alpha_c_small_nodup in results/outputs.json is 4.17 or more. If a single run misses by less than one bootstrap standard error (0.0089), run three further seeds and apply the same bounds to the mean of the four."
+  },
+  {
+   "text": "The collapse-fitted $\\alpha_c$ of random 3-SAT depends on the sizes fitted: on N = 50, 100, 150, 200 it is 4.201 (duplicate clauses allowed) and 4.2025 (none), SE 0.0092, at least 0.04 above the fit on N = 12 to 100 under each model.",
+   "confidence": 0.85,
+   "test": "Run the bundle with a fresh ECDYSIS_SEED. Refuted if alpha_c_large_dup minus alpha_c_small_dup, or alpha_c_large_nodup minus alpha_c_small_nodup, is below 0.04. If a single run misses by less than one bootstrap standard error (0.0092), run three further seeds and apply the same bounds to the mean of the four."
+  },
+  {
+   "text": "Kirkpatrick and Selman's law $\\alpha_{50} = 4.17 + 3.1N^{-2/3}$, extrapolated beyond their data, gives the 50% point of random 3-SAT at N = 150 and N = 200 to within 0.03 under both instance models (measured minus law: 0.0068, 0.0173, 0.0005, 0.0166; SE 0.0051).",
+   "confidence": 0.9,
+   "test": "Run the bundle with a fresh ECDYSIS_SEED. Refuted if any of ks_law_miss_150_dup, ks_law_miss_200_dup, ks_law_miss_150_nodup, ks_law_miss_200_nodup in results/outputs.json exceeds 0.03 in absolute value. If a single run misses by less than one bootstrap standard error (0.0051), run three further seeds and apply the same bounds to the mean of the four."
+  },
+  {
+   "text": "At N = 50 to 200 the 10-90% width of the random 3-SAT transition shrinks as $N^{-1/\\nu_{eff}}$ with $\\nu_{eff}$ in [1.3, 1.9] under both instance models (1.4378 and 1.5027 here; SE 0.0538), below the asymptotic lower bound of 2.",
+   "confidence": 0.85,
+   "test": "Run the bundle with a fresh ECDYSIS_SEED. Refuted if nu_eff_dup or nu_eff_nodup in results/outputs.json lies outside [1.3, 1.9]. If a single run misses by less than one bootstrap standard error (0.0538), run three further seeds and apply the same bounds to the mean of the four."
+  }
+ ],
+ "builds_on": [
+  {
+   "id": "doi:10.1126/science.264.5163.1297",
+   "rel": "replicates",
+   "note": "Tested Table 1 (k = 3): nu = 1.5 +/- 0.1, alpha_c = 4.17 +/- 0.05, and the law alpha_50 = 4.17 + 3.1 N^(-2/3), on fresh data at the parent's sizes plus N = 150, 200. nu is recovered and the law holds within 0.03 out of sample. A maximum-likelihood collapse does not recover alpha_c = 4.17 as a point value (it gives 4.10 or 4.13 by instance model), but the parent's stated range is left only with duplicate clauses allowed, so this is not a refutation."
+  },
+  {
+   "id": "arxiv:math/0005136",
+   "rel": "background"
+  }
+ ],
+ "artefacts": [
+  "https://github.com/djhulme1/ecdysis-core/tree/7b56ac9b7bc01ab694bf31b4b30ced7b0c88f5b3/projects/2026-10-01-ks94-3sat-threshold"
+ ]
+}
