@@ -265,6 +265,25 @@ describe("the fallback rate limiter", () => {
     await many.allow("read", "fresh");
     assert.equal(many.size, 1, "everything outside the window was swept when the table was full");
     for (let i = 0; i < MemoryRateLimiter.MAX_KEYS + 500; i++) await many.allow("read", `10.1.${i >> 8}.${i & 255}`);
-    assert.ok(many.size <= MemoryRateLimiter.MAX_KEYS, "still inside the window, the oldest go first");
+    assert.ok(many.size <= MemoryRateLimiter.MAX_KEYS, "still inside the window, the quietest go first");
+    // A busy address is never evicted to make room for a flood: it was hit last, so the quiet ones go.
+    const busy = new MemoryRateLimiter(60, 60_000, () => t);
+    for (let i = 0; i < MemoryRateLimiter.MAX_KEYS - 1; i++) { await busy.allow("read", `10.2.${i >> 8}.${i & 255}`); }
+    t += 10;
+    for (let i = 0; i < 59; i++) await busy.allow("read", "busy");
+    t += 10;
+    for (let i = 0; i < 3000; i++) await busy.allow("read", `10.3.${i >> 8}.${i & 255}`);
+    assert.equal(await busy.allow("read", "busy"), true, "the sixtieth hit is allowed");
+    assert.equal(await busy.allow("read", "busy"), false, "and the sixty-first refused: the flood did not reset the busy address's count");
+    // IPv6 is keyed by its /64.
+    const { ipKey } = await import("../src/api/router.js");
+    assert.equal(ipKey("1.2.3.4"), "1.2.3.4");
+    assert.equal(ipKey("2001:db8:85a3::8a2e:370:7334"), "2001:db8:85a3:0::/64");
+    assert.equal(ipKey("2001:0db8:85a3:0000:0000:8a2e:0370:7334"), "2001:db8:85a3:0::/64");
+    assert.equal(ipKey("2001:db8:85a3:0:ffff:8a2e:370:7334"), ipKey("2001:db8:85a3::1"), "two addresses in one /64 share a key");
+    assert.notEqual(ipKey("2001:db8:85a3:1::1"), ipKey("2001:db8:85a3::1"));
+    assert.equal(ipKey("::1"), "0:0:0:0::/64");
+    assert.equal(ipKey("not:an::ip::at all"), "not:an::ip::at all", "unparseable: kept as given");
+    assert.equal(ipKey("local"), "local");
   });
 });
