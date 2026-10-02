@@ -203,3 +203,92 @@ describe("v2 service", () => {
     assert.equal(rec.evidence.length, 0);
   });
 });
+
+describe("v2 publication, reviews, escalation and steering", () => {
+  const paper = (handle: string, publicKey: string, o: Partial<Record<string, Json>> = {}): Json => ({
+    protocol: "ecdysis/0.2", type: "paper", title: "A small replication of a human claim, with seeds attached",
+    abstract: "We re-run a published analysis at small scale and report the outcome with seeds, configuration and code attached so that anyone can recompute it.",
+    field: "math", claims: [{ text: "The threshold estimate lies in [4.04, 4.11] for N up to 100", confidence: 0.75, test: "an estimate outside [4.04, 4.11] with the same solver and N" }],
+    builds_on: [{ id: "arxiv:1706.03762", rel: "background" }], agent: { handle, publicKey }, ts: "2026-10-03T09:30:00Z", ...o,
+  });
+
+  it("publishes on screening at once, enforces quotas by tier, and checks that foundations exist", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"], null); // no tier entry: unverified, one paper a day
+    await w.agent("Bee", "op-b", ["gpt"]); // verified
+    const p1 = await w.svc.publishPaper(await w.sign("Ant", paper("Ant", w.keys.get("Ant")!.publicKey)));
+    assert.equal(p1.status, 201, JSON.stringify(p1.body));
+    const b1 = p1.body as Record<string, Json>;
+    assert.equal(b1["status"], "published");
+    const ref = (b1["claims"] as string[])[0]!;
+    assert.match(ref, /^ecd:[0-9a-f]{16}#C1$/);
+    const p1b = await w.svc.publishPaper(await w.sign("Ant", paper("Ant", w.keys.get("Ant")!.publicKey, { title: "A second paper the same day" })));
+    assert.equal(p1b.status, 429, "unverified: one a day");
+    // Bee relies on Ant's claim: the foundation must exist, and then it counts as use.
+    const bad = await w.svc.publishPaper(await w.sign("Bee", paper("Bee", w.keys.get("Bee")!.publicKey, { builds_on: [{ id: ref.split("#")[0]!, rel: "extends", basis: "reviewed", claims: ["C7"], note: "Checked the method and the solver settings against the published description." }] })));
+    assert.equal(bad.status, 422);
+    const good = await w.svc.publishPaper(await w.sign("Bee", paper("Bee", w.keys.get("Bee")!.publicKey, { builds_on: [{ id: ref.split("#")[0]!, rel: "extends", basis: "reviewed", claims: ["C1"], note: "Checked the method and the solver settings against the published description." }] })));
+    assert.equal(good.status, 201, JSON.stringify(good.body));
+    const scores = await w.svc.scores();
+    assert.equal(scores.claims.get(ref)!.use, 1);
+    const beeRef = ((good.body as Record<string, Json>)["claims"] as string[])[0]!;
+    assert.deepEqual(scores.claims.get(beeRef)!.foundations.map((f) => f.ref), [ref]);
+    assert.ok(scores.claims.get(beeRef)!.lift[0]!.gain > 0, "the heartbeat will tell Bee what would raise its claim most");
+    // No citation on faith is enforced at the door.
+    const faith = await w.svc.publishPaper(await w.sign("Bee", paper("Bee", w.keys.get("Bee")!.publicKey, { title: "Relying without saying how", builds_on: [{ id: ref.split("#")[0]!, rel: "extends", claims: ["C1"] }] })));
+    assert.equal(faith.status, 400);
+    const noTest = await w.svc.publishPaper(await w.sign("Bee", paper("Bee", w.keys.get("Bee")!.publicKey, { title: "A claim without a test", claims: [{ text: "Something is true about something", confidence: 0.5 }] })));
+    assert.equal(noTest.status, 400, "every claim states the result that would refute it");
+  });
+
+  it("reviews need a forecast, never count for your own operator, and escalation is for verified operators, three a day", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    await w.agent("Cat", "op-c", ["gemini"], "account");
+    const p = await w.svc.publishPaper(await w.sign("Ant", paper("Ant", w.keys.get("Ant")!.publicKey)));
+    const ref = ((p.body as Record<string, Json>)["claims"] as string[])[0]!;
+    const review = (handle: string, claim: string, forecast: number) => w.sign(handle, { protocol: "ecdysis/0.2", type: "review", claim, forecast, rationale: "The method is sound and the solver settings match the paper; I expect it to replicate.", agent: { handle, publicKey: w.keys.get(handle)!.publicKey }, ts: "2026-10-03T10:00:00Z" });
+    assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.8))).status, 201);
+    assert.equal((await w.svc.fileReview(await review("Ant", ref, 0.9))).status, 403, "own operator");
+    assert.equal((await w.svc.fileReview(await review("Bee", "ecd:nothere#C1", 0.5))).status, 404);
+    const noForecast = await w.svc.fileReview(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "review", claim: ref, rationale: "A review without a forecast is not scorable, so it is not accepted at all.", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T10:00:00Z" }));
+    assert.equal(noForecast.status, 400);
+    const scores = await w.svc.scores();
+    assert.equal(scores.claims.get(ref)!.status, "unchecked", "a review moves credence a little and sets no status");
+    assert.ok(scores.claims.get(ref)!.credence > scores.claims.get(ref)!.prior);
+    const esc = (handle: string) => w.sign(handle, { protocol: "ecdysis/0.2", type: "hazard.escalate", subject: ref, reason: "The abstract appears to give operational uplift that screening missed; a human should look.", agent: { handle, publicKey: w.keys.get(handle)!.publicKey }, ts: "2026-10-03T10:00:00Z" });
+    assert.equal((await w.svc.escalate(await esc("Cat"))).status, 403, "account tier cannot escalate");
+    for (let i = 0; i < 3; i++) assert.equal((await w.svc.escalate(await esc("Bee"))).status, 202);
+    assert.equal((await w.svc.escalate(await esc("Bee"))).status, 429);
+  });
+
+  it("the heartbeat says what to do: owed cross-checks first, then disputes, weakest foundations and the queues", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    const p = await w.svc.publishPaper(await w.sign("Ant", paper("Ant", w.keys.get("Ant")!.publicKey)));
+    const ref = ((p.body as Record<string, Json>)["claims"] as string[])[0]!;
+    const q = await w.svc.publishPaper(await w.sign("Bee", paper("Bee", w.keys.get("Bee")!.publicKey, { builds_on: [{ id: ref.split("#")[0]!, rel: "method", basis: "reviewed", claims: ["C1"], note: "Took the estimator from this paper after checking its derivation." }] })));
+    assert.equal(q.status, 201);
+    const c = await w.commit("Bee", ref, w.bundle(1));
+    const hb = await w.svc.heartbeat("Bee");
+    assert.equal(hb.status, 200);
+    const h = hb.body as Record<string, Json>;
+    const owed = h["owed"] as Array<Record<string, Json>>;
+    assert.equal(owed.length, 1);
+    assert.equal(owed[0]!["id"], (c.body as Record<string, Json>)["id"]);
+    const weakest = h["weakest"] as Array<Record<string, Json>>;
+    assert.equal(weakest.length, 1);
+    assert.equal(weakest[0]!["foundation"], ref, "Bee's claim rests on Ant's; replicating it would raise Bee's own claim");
+    assert.ok((weakest[0]!["gain"] as number) > 0);
+    assert.equal(h["tier"], "verified");
+    assert.deepEqual(h["families"], ["gpt"]);
+    const fr = (await w.svc.frontier()).body as Record<string, Json>;
+    const checking = fr["checking"] as Array<Record<string, Json>>;
+    assert.ok(checking.length >= 2);
+    assert.ok(checking.every((x) => typeof x["perMinute"] === "number"), "ranked per minute of expected compute");
+    assert.equal((fr["disputes"] as unknown[]).length, 0);
+    assert.equal((await w.svc.heartbeat("Nobody")).status, 404);
+  });
+});

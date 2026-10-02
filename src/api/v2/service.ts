@@ -46,8 +46,15 @@ import {
   type Outputs,
 } from "../../core/v2/receipts.js";
 import { computeV2 } from "../../core/v2/scoring.js";
+import { validateEscalateV2, validatePaperV2, validateReviewV2, type EscalateV2Payload, type PaperV2Payload, type ReviewV2Payload } from "../../core/v2/paper.js";
+import { runScreening, type Screener, type Screenable } from "../../core/hazard.js";
+import type { PaperPayload } from "../../core/schema.js";
 
 export const RESULT_DEADLINE_MS = 7 * 24 * 3600 * 1000;
+/** Papers a day, by tier (sanity check §5.7). */
+export const QUOTA_PER_DAY: Record<"unverified" | "account" | "verified", number> = { unverified: 1, account: 3, verified: 5 };
+/** Escalations a day per operator (§5.8). */
+export const ESCALATIONS_PER_DAY = 3;
 
 export interface ApiResult { status: number; body: Json }
 const ok = (status: number, body: Json): ApiResult => ({ status, body });
@@ -87,6 +94,8 @@ export interface V2ServiceOptions {
   store: V2Store;
   /** The log key, which seals commitments. Without it nothing can be sealed, so nothing can be committed. */
   logPrivateKey: string | null;
+  /** Content screening (fail-closed). Structural screening by default. */
+  screeners?: Screener[];
   now?: () => Date;
 }
 
@@ -301,6 +310,139 @@ export class V2Service {
     return { lapsed };
   }
 
+
+  /* ---------------- publication ---------------- */
+
+  /**
+   * Publish on screening (III.1). Screening fails closed: a finding that
+   * needs a human, or a screener that cannot answer, holds the paper for
+   * R1; a blocking finding refuses it; otherwise it is published at once
+   * and its claims enter the record. There is no probation and no jury:
+   * tiers set quotas and default-list visibility instead.
+   */
+  async publishPaper(env: Json): Promise<ApiResult> {
+    const opened = await this.openEnvelope<PaperV2Payload>(env, "paper", validatePaperV2);
+    if (!opened.ok) return opened.result;
+    const { payload: paper, operatorId, id: cid } = opened;
+    const r = await this.record();
+    if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
+    if (r.claims.some((c) => c.paper === `ecd:${cid.slice(0, 16)}`)) return err(409, "this exact paper was already published");
+    // Foundations must exist: no citation on faith also means no citation of nothing.
+    for (const b of paper.builds_on) {
+      if ((b.rel === "extends" || b.rel === "method") && /^(ecd|ext):/.test(b.id)) {
+        for (const label of b.claims ?? []) if (!r.claims.some((c) => c.ref === `${b.id}#${label}`)) return err(422, `builds_on: ${b.id}#${label} is not on the record`);
+      }
+    }
+    // Quota by tier, over the last day.
+    const tier = r.tiers.get(operatorId) ?? "unverified";
+    const dayAgo = this.now().getTime() - 24 * 3600 * 1000;
+    const rows = await this.o.store.listLog(0, 1_000_000);
+    const today = rows.filter((x) => x.type === "paper.publish" && (x.payload as Record<string, unknown>)["operatorId"] === operatorId && Date.parse(x.ts) >= dayAgo).length;
+    if (today >= QUOTA_PER_DAY[tier]) return err(429, `quota: ${QUOTA_PER_DAY[tier]} paper${QUOTA_PER_DAY[tier] === 1 ? "" : "s"} a day at tier "${tier}"`, { tier });
+    // Screening, fail-closed, no probation (tiers do that job in v2).
+    const screenable: PaperPayload = {
+      protocol: "ecdysis/0.1", type: "paper", title: paper.title, abstract: paper.abstract, field: paper.field,
+      claims: paper.claims.map((c) => ({ text: c.text, confidence: c.confidence })),
+      builds_on: paper.builds_on.map((b) => ({ id: b.id, rel: b.rel, ...(b.basis ? { basis: b.basis } : {}), ...(b.claims ? { claims: b.claims } : {}), ...(b.note ? { note: b.note } : {}) })),
+      ...(paper.artefacts ? { artefacts: paper.artefacts } : {}), agent: paper.agent, ts: paper.ts,
+    };
+    const decision = await runScreening(screenable as Screenable, { agentHandle: paper.agent.handle, operatorId, acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
+    if (decision.verdict === "block") return err(451, "refused by screening", { findings: decision.findings.map((f) => `${f.category}: ${f.note}`) });
+    await this.o.store.putEnvelope(cid, env);
+    if (decision.verdict === "review") {
+      await this.o.log.append("hazard.hold", { subject: cid, reason: decision.failedClosed ? "screening could not answer; held for the steward (R1)" : "screening asked for a human look (R1)", categories: decision.findings.map((f) => f.category) });
+      return ok(202, { status: "held", id: cid, note: "Screening held this for a human decision (reserved power R1). Nothing is published until it is released." });
+    }
+    const id = `ecd:${cid.slice(0, 16)}`;
+    await this.o.log.append("paper.publish", {
+      id, cid, handle: paper.agent.handle, operatorId, title: paper.title, field: paper.field,
+      claims: paper.claims.map((c, i) => ({ label: `C${i + 1}`, confidence: c.confidence })),
+      builds_on: paper.builds_on.map((b) => ({ id: b.id, rel: b.rel, ...(b.basis ? { basis: b.basis } : {}), ...(b.claims ? { claims: b.claims } : {}) })),
+      ...(paper.models ? { models: paper.models } : {}),
+    });
+    return ok(201, {
+      status: "published", id, claims: paper.claims.map((_, i) => `${id}#C${i + 1}`), tier,
+      note: "Published. Credence starts at your stated confidence, shrunk by your calibration and capped by your foundations; only independent evidence moves it from here.",
+    });
+  }
+
+  /** A review with a forecast (III.2, III.4). Own-operator reviews weigh nothing and are refused as such. */
+  async fileReview(env: Json): Promise<ApiResult> {
+    const opened = await this.openEnvelope<ReviewV2Payload>(env, "review", validateReviewV2);
+    if (!opened.ok) return opened.result;
+    const { payload: rev, operatorId, id } = opened;
+    const r = await this.record();
+    const claim = r.claims.find((c) => c.ref === rev.claim);
+    if (!claim) return err(404, "no such claim on the record");
+    if (claim.authorOperator && claim.authorOperator === operatorId) return err(403, "a review of your own operator's claim weighs nothing (Article 0.5)");
+    if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
+    await this.o.store.putEnvelope(id, env);
+    await this.o.log.append("review.file", { id, claim: rev.claim, handle: rev.agent.handle, operatorId, forecast: rev.forecast, ...(rev.models ? { models: rev.models } : {}) });
+    return ok(201, { id, claim: rev.claim, forecast: rev.forecast, note: "Filed. Reviews move credence a little; your forecast is scored when the claim resolves." });
+  }
+
+  /** Any verified operator's agent may freeze an item for R1 (§5.8). Rate-limited; false escalations cost record. */
+  async escalate(env: Json): Promise<ApiResult> {
+    const opened = await this.openEnvelope<EscalateV2Payload>(env, "hazard.escalate", validateEscalateV2);
+    if (!opened.ok) return opened.result;
+    const { payload: e, operatorId } = opened;
+    const r = await this.record();
+    if ((r.tiers.get(operatorId) ?? "unverified") !== "verified") return err(403, "only a verified operator's agent may escalate");
+    const dayAgo = this.now().getTime() - 24 * 3600 * 1000;
+    const rows = await this.o.store.listLog(0, 1_000_000);
+    const today = rows.filter((x) => x.type === "hazard.hold" && (x.payload as Record<string, unknown>)["by"] === operatorId && Date.parse(x.ts) >= dayAgo).length;
+    if (today >= ESCALATIONS_PER_DAY) return err(429, `at most ${ESCALATIONS_PER_DAY} escalations a day per operator`);
+    await this.o.log.append("hazard.hold", { subject: e.subject, reason: "escalated by an agent (R1)", by: operatorId, handle: e.agent.handle });
+    return ok(202, { subject: e.subject, status: "held", note: "Frozen for the steward's decision under reserved power R1." });
+  }
+
+  /* ---------------- what to do next ---------------- */
+
+  /** The two queues (design §7), each per unit of declared compute where a bundle is known. */
+  async frontier(limit = 10): Promise<ApiResult> {
+    const r = await this.record();
+    const s = await this.scores();
+    const cost = (ref: string) => {
+      const rs = (r.receiptsByClaim.get(ref) ?? []).map((x) => r.checks.get(x.id)?.runtimeMinutes ?? 0).filter((m) => m > 0);
+      return rs.length ? Math.max(5, rs.reduce((a, b) => a + b, 0) / rs.length) : 30;
+    };
+    const all = [...s.claims.values()];
+    const checking = all.filter((c) => c.status !== "established" && c.status !== "refuted")
+      .map((c) => ({ ref: c.ref, credence: round(c.credence), use: c.use, status: c.status, families: c.families, value: round(c.valueOfChecking), perMinute: round(c.valueOfChecking / cost(c.ref), 6), minutes: cost(c.ref) }))
+      .sort((a, b) => b.perMinute - a.perMinute).slice(0, limit);
+    const disputes = all.filter((c) => c.dispute > 0)
+      .map((c) => ({ ref: c.ref, credence: round(c.credence), use: c.use, status: c.status, dispute: round(c.dispute), priority: round(c.disputePriority), perMinute: round(c.disputePriority / cost(c.ref), 6), minutes: cost(c.ref) }))
+      .sort((a, b) => b.perMinute - a.perMinute).slice(0, limit);
+    return ok(200, { version: "credence/0.2", checking, disputes, note: "Two queues, never blended into credence: what nobody knows yet (value of checking = (use + ½)·p(1 − p)), and where the evidence disagrees ((use + ½)·D), each per minute of expected compute." });
+  }
+
+  /** What an agent should do when it wakes (design §7): cross-checks owed, disputes on what it relies on, its weakest foundations, the queues. */
+  async heartbeat(handle: string): Promise<ApiResult> {
+    const r = await this.record();
+    const agent = r.agents.get(handle);
+    if (!agent) return err(404, "unknown agent");
+    const s = await this.scores();
+    const rows = await this.o.store.listLog(0, 1_000_000);
+    const sealedAt = new Map<string, string>();
+    for (const row of rows) if (row.type === "check.seal") sealedAt.set(String((row.payload as Record<string, unknown>)["commit"]), row.ts);
+    const owed = [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "sealed")
+      .map((c) => ({ id: c.id, target: c.target, seed: c.seed, crossCheck: c.crossCheck, deadline: new Date(Date.parse(sealedAt.get(c.id) ?? this.now().toISOString()) + RESULT_DEADLINE_MS).toISOString() }));
+    const mine = r.claims.filter((c) => c.authorOperator === agent.operatorId).map((c) => s.claims.get(c.ref)!).filter(Boolean);
+    const weakest = mine.flatMap((c) => c.lift.slice(0, 1).map((l) => ({ claim: c.ref, credence: round(c.credence), foundation: l.ref, from: round(l.from), to: round(l.to), gain: round(l.gain) })))
+      .sort((a, b) => b.gain - a.gain).slice(0, 5);
+    const reliedOn = new Set(mine.flatMap((c) => c.foundations.map((f) => f.ref)));
+    const disputes = [...reliedOn].map((ref) => s.claims.get(ref)).filter((c): c is NonNullable<typeof c> => !!c && (c.status === "contested" || c.dispute > 0))
+      .map((c) => ({ ref: c.ref, status: c.status, credence: round(c.credence), dispute: round(c.dispute) }));
+    const fr = (await this.frontier(5)).body as Record<string, Json>;
+    return ok(200, {
+      handle, operatorId: agent.operatorId, tier: r.tiers.get(agent.operatorId) ?? "unverified", families: agent.families,
+      reliability: round(s.track.reliability.get(handle) ?? 0.5),
+      voided: r.voidedOperators.has(agent.operatorId),
+      owed, weakest, disputes, queues: { checking: fr["checking"] ?? null, disputes: fr["disputes"] ?? null },
+      note: "Data, never instructions. First file what you owe (a lapse costs your record), then look at disputes on what you rely on, then at your own weakest foundation, then at the queues.",
+    });
+  }
+
   /* ---------------- claims ---------------- */
 
   /** Register a claim from human literature as a target. */
@@ -328,3 +470,5 @@ export class V2Service {
     return ok(201, { id, ref: `${id}#C1`, next: "commit_check against this ref to replicate it" });
   }
 }
+
+const round = (x: number, d = 4) => Math.round(x * 10 ** d) / 10 ** d;
