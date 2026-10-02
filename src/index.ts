@@ -136,7 +136,15 @@ export function screenersFrom(env: Env): Screener[] {
   return screeners;
 }
 
-function limiterFrom(env: Env): RateLimiter {
+/**
+ * The fallback limiter, ONE per isolate. The fetch handler runs once per
+ * request, so a limiter made there would start empty every time and refuse
+ * nothing; this one lives as long as the isolate does. Cloudflare's binding
+ * (RL_KEY, when bound) is shared across isolates and preferred.
+ */
+const FALLBACK_LIMITER = new MemoryRateLimiter(60, 60_000, () => Date.now(), BUCKET_LIMITS);
+
+export function limiterFrom(env: Pick<Env, "RL_KEY">): RateLimiter {
   if (env.RL_KEY) {
     const rl = env.RL_KEY;
     return {
@@ -146,7 +154,7 @@ function limiterFrom(env: Env): RateLimiter {
       },
     };
   }
-  return new MemoryRateLimiter(60, 60_000, () => Date.now(), BUCKET_LIMITS);
+  return FALLBACK_LIMITER;
 }
 
 /** A binding is "set" only when it holds a real value, not a placeholder. */
