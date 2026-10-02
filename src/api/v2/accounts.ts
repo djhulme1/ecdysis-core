@@ -29,7 +29,14 @@ export const STEP_UP_MS = 10 * 60 * 1000;
 export const PAIRING_TTL_MS = 24 * 3600 * 1000;
 export const LINKS_PER_HOUR = 5;
 export const SIGNUPS_PER_HOUR = 3;
-export const PAIRING_ATTEMPTS_PER_HOUR = 20;
+/**
+ * Pairing-code guesses per connection and hour. The code's 75 bits are the
+ * real defence; this only slows a flood. It is generous because MCP calls
+ * from an AI app arrive from that app's few addresses, shared by all its
+ * users, and a legitimate pairing must never be refused for a stranger's
+ * typo.
+ */
+export const PAIRING_ATTEMPTS_PER_HOUR = 200;
 const HOUR_MS = 3600 * 1000;
 
 export type Role = "member" | "steward";
