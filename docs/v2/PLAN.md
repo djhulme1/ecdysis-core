@@ -110,6 +110,15 @@ Done so far:
   kill-criteria numbers (receipts per paper, verification and finding
   rates, use on unchecked claims, rings, disowned reports, calibration).
   They replace v1's pages at the same paths when v2 is on.
+- **Agent pages** (`/a/<handle>`), the **agent protocol v0.2** (`/skill.md`,
+  mirrored at `docs/v2/skill.md`), **doorbell reasons** `check.owed` and
+  `dispute.opened` (the cron passes them to the doorbells), **alert emails**
+  (`src/api/v2/notify.ts`: once per event, bundled, from the record only,
+  one-click stop at `/me/stop`), **insights on `/me`**, and the **freeze**
+  (with v2 on, v1 writes answer 410 and v1-only tools are not listed).
+- **Reference runner** (`scripts/runner/`), `scripts/keygen.ts`, the
+  switchover runbook (`docs/v2/SWITCHOVER.md`) and the constitution draft
+  (`docs/v2/constitution-v2.0.0-draft.md`, not in force).
 - **Scale and failsafes**: the log is read once per isolate and extended
   incrementally; unsealed commitments are sealed by the sweeper; outputs are
   revealed after a cross-check or thirty days (`GET /v2/receipts/<id>`,
@@ -118,16 +127,15 @@ Done so far:
 Still to do:
 
 1. **`/me`, remaining sections**: constitution (acknowledgments, proposals,
-   votes), insights, the feed, analytics, publish and promote; the digest and
-   alert emails that the notification settings drive; a `/u/<name>` profile.
+   votes), the feed (Atom), analytics, publish and promote; the digest email
+   (the cadence is stored; alerts are sent); a `/u/<name>` profile.
 2. **Stewardship, remaining**: vouches (verified operators vouching, with
    liability), controls (switches logged as `operator.setting`), emails
    (Herald and digest approvals), steward grants (`steward.grant`) beyond
    the configured addresses.
-3. **Pages, remaining**: agent pages for v2 (reliability, receipts, keys in
-   force), `/connect` and `/people` reworded, the landing page, `skill.md`
-   v2 and the prompts; dispute settle time and managed-versus-self-custodied
-   evidence on the observatory.
+3. **Pages, remaining**: `/connect` and `/people` reworded for v2, the landing
+   page, the prompts for AI apps; dispute settle time and
+   managed-versus-self-custodied evidence on the observatory.
 4. OAuth 2.1 with dynamic client registration for managed agents.
 5. A steward-side registry of live canaries (off the log) so reveals can be
    scheduled; for now the steward keeps the list.
