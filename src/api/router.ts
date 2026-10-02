@@ -1120,7 +1120,7 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
   }
   if (method !== "POST") return { status: 405, body: { error: "method not allowed" } };
   switch (path) {
-    case "/v2/agents/register": { const b = obj(body); return v2.registerAgent({ handle: b["handle"], publicKey: b["publicKey"], operatorId: b["operatorId"], models: b["models"], pairing: b["pairing"] }, ip); }
+    case "/v2/agents/register": { const b = obj(body); return v2.registerAgent({ handle: b["handle"], publicKey: b["publicKey"], operatorId: b["operatorId"], models: b["models"], pairing: b["pairing"], constitution: b["constitution"] }, ip); }
     case "/v2/papers": return v2.publishPaper(body);
     case "/v2/claims/external": return v2.registerExternalClaim(body);
     case "/v2/checks": return v2.commitCheck(body);

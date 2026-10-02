@@ -14,6 +14,8 @@ import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.j
 import { CHECK_KEYS_MAX, MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "../src/api/v2/service.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
+import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const DAY = 24 * 3600 * 1000;
 
@@ -29,7 +31,7 @@ async function world() {
   const agent = async (handle: string, op: string, models?: string[], tier: "account" | "verified" | null = "verified") => {
     const kp = await generateKeyPair();
     main.set(handle, kp);
-    const r = await svc.registerAgent({ handle, publicKey: kp.publicKey, operatorId: op, ...(models ? { models } : {}) });
+    const r = await svc.registerAgent({ constitution: ACK, handle, publicKey: kp.publicKey, operatorId: op, ...(models ? { models } : {}) });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     if (tier) await svc.setTier(op, tier);
     return kp;
@@ -67,7 +69,7 @@ describe("check keys (I.3)", () => {
     assert.equal((await w.delegate("Ant", runner)).status, 409, "a key is delegated once");
     assert.equal((await w.delegate("Ant", w.main.get("Ant")!)).status, 400, "the main key is not a check key");
     assert.equal((await w.delegate("Ant", w.main.get("Bee")!)).status, 409, "another agent's main key cannot be delegated");
-    assert.equal((await w.svc.registerAgent({ handle: "Cat", publicKey: runner.publicKey, operatorId: "op-c" })).status, 409, "a delegated key cannot register an agent");
+    assert.equal((await w.svc.registerAgent({ constitution: ACK, handle: "Cat", publicKey: runner.publicKey, operatorId: "op-c" })).status, 409, "a delegated key cannot register an agent");
 
     const ext = await w.external("Bee", "arxiv:1706.03762", "attention alone reaches 28.4 BLEU on WMT14 En-De");
     const ref = String((ext.body as Record<string, Json>)["ref"]);
@@ -222,7 +224,7 @@ describe("check keys (I.3)", () => {
     assert.equal((rv.body as Record<string, Json>)["scope"], "main");
     assert.equal((await w.commit("Ant", ref, w.bundle(2))).status, 401, "the main key signs nothing more");
     assert.equal((await w.commit("Ant", ref, w.bundle(2), runner)).status, 401, "nor do its check keys: the agent is retired");
-    assert.equal((await w.svc.registerAgent({ handle: "Ant", publicKey: (await generateKeyPair()).publicKey, operatorId: "op-a" })).status, 409, "the handle keeps its history");
+    assert.equal((await w.svc.registerAgent({ constitution: ACK, handle: "Ant", publicKey: (await generateKeyPair()).publicKey, operatorId: "op-a" })).status, 409, "the handle keeps its history");
     const rec = await w.svc.record();
     assert.equal(rec.agents.get("Ant")!.revokedAt !== null, true);
     assert.equal(rec.evidence.filter((e) => e.agent === "Ant").length, 1, "no compromise was declared: the receipt stands");

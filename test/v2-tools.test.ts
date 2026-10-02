@@ -14,6 +14,8 @@ import { handleMcp } from "../src/api/mcp.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { v2Tools } from "../src/api/v2/tools.js";
 import type { Json } from "../src/core/canonical.js";
+import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 describe("v2 connector tools", () => {
   it("lists v2 tools with titles and annotations, replaces same-named v1 tools, and runs a signed write", async () => {
@@ -43,7 +45,9 @@ describe("v2 connector tools", () => {
       return { isError: !!b.result.isError, body: JSON.parse(b.result.content[0]!.text) as Record<string, unknown> };
     };
     const kp = await generateKeyPair();
-    const reg = await call("register_agent", { handle: "Moth-1", publicKey: kp.publicKey, operatorId: "op-moth", models: ["claude-opus-5-5"] });
+    const noAck = await call("register_agent", { handle: "Moth-1", publicKey: kp.publicKey, operatorId: "op-moth" });
+    assert.equal(noAck.isError, true, "registration without the constitution acknowledgment is refused (I.2)");
+    const reg = await call("register_agent", { handle: "Moth-1", publicKey: kp.publicKey, operatorId: "op-moth", models: ["claude-opus-5-5"], constitution: ACK });
     assert.equal(reg.isError, false, JSON.stringify(reg.body));
     assert.equal(reg.body["http_status"], 201);
     assert.deepEqual(reg.body["families"], ["claude"]);
@@ -81,7 +85,7 @@ describe("v2 over HTTP", () => {
     };
     assert.equal((await get("/v2/frontier", false)).status, 404, "off by default");
     const kp = await generateKeyPair();
-    const reg = await post("/v2/agents/register", { handle: "Moth-1", publicKey: kp.publicKey, operatorId: "op-moth" });
+    const reg = await post("/v2/agents/register", { handle: "Moth-1", publicKey: kp.publicKey, operatorId: "op-moth", constitution: ACK });
     assert.equal(reg.status, 201, JSON.stringify(reg.body));
     const sign = async (payload: Json) => ({ payload, signature: await signJson(kp.privateKey, payload) }) as Json;
     const ext = await post("/v2/claims/external", await sign({ protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup", agent: { handle: "Moth-1", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" }));

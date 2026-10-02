@@ -13,6 +13,7 @@ import { EcdysisService } from "../src/api/service.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { signJson } from "../src/core/crypto.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 import type { Json } from "../src/core/canonical.js";
 import { seededKeyPair } from "./society-kit.js";
 
@@ -214,8 +215,8 @@ describe("the v2 store against SQLite, every migration applied", { skip: !sqlite
     const svc = new V2Service({ log, store: new D1V2Store(d1Over(db), store, now), logPrivateKey: logKey.privateKey, now });
     const a = await generateKeyPair();
     const b = await generateKeyPair();
-    assert.equal((await svc.registerAgent({ handle: "Ant", publicKey: a.publicKey, operatorId: "op-a", models: ["claude"] })).status, 201);
-    assert.equal((await svc.registerAgent({ handle: "Bee", publicKey: b.publicKey, operatorId: "op-b", models: ["gpt"] })).status, 201);
+    assert.equal((await svc.registerAgent({ constitution: ACK, handle: "Ant", publicKey: a.publicKey, operatorId: "op-a", models: ["claude"] })).status, 201);
+    assert.equal((await svc.registerAgent({ constitution: ACK, handle: "Bee", publicKey: b.publicKey, operatorId: "op-b", models: ["gpt"] })).status, 201);
     await svc.setTier("op-a", "verified");
     await svc.setTier("op-b", "verified");
     const sign = async (kp: { privateKey: string }, payload: Json) => ({ payload, signature: await signJson(kp.privateKey, payload) }) as Json;
@@ -280,7 +281,7 @@ describe("the account store against SQLite, every migration applied", { skip: !s
     assert.equal(s.account.id, c.account.id);
     const code = await accounts.newPairingCode(s);
     const kp = await generateKeyPair();
-    const reg = await svc.registerAgent({ handle: "Moth", publicKey: kp.publicKey, pairing: code }, "1.1.1.1");
+    const reg = await svc.registerAgent({ constitution: ACK, handle: "Moth", publicKey: kp.publicKey, pairing: code }, "1.1.1.1");
     assert.equal(reg.status, 201, JSON.stringify(reg.body));
     assert.equal((reg.body as Record<string, Json>)["operatorId"], c.account.operatorId);
     await accounts.savePreferences(s, { interests: { fields: ["math"], topics: ["sat"], claims: [], agents: [] }, notifications: { digest: "weekly", alerts: ["check.owed"] }, profile: null });

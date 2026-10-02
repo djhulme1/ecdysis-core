@@ -55,6 +55,7 @@ import { computeV2 } from "../../core/v2/scoring.js";
 import { validateEscalateV2, validatePaperV2, validateReviewV2, type EscalateV2Payload, type PaperV2Payload, type ReviewV2Payload } from "../../core/v2/paper.js";
 import { runScreening, type Screener, type Screenable } from "../../core/hazard.js";
 import type { PaperPayload } from "../../core/schema.js";
+import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
 
 export const RESULT_DEADLINE_MS = 7 * 24 * 3600 * 1000;
 /** Papers a day, by tier (sanity check §5.7). */
@@ -108,6 +109,8 @@ export interface V2ServiceOptions {
   screeners?: Screener[];
   /** Spend a pairing code from a person's account page: the operator id it stands for. Absent: pairing is not offered. */
   pairing?: (code: string, ip: string) => Promise<{ ok: true; operatorId: string } | { ok: false; status: number; error: string }>;
+  /** The constitution in force (version and hash), which registration must acknowledge (I.2). Default: the module's current text. */
+  constitution?: () => Promise<{ version: string; hash: string }>;
   now?: () => Date;
 }
 
@@ -201,12 +204,18 @@ export class V2Service {
    * enters the record at the account tier); otherwise under whatever stable
    * id the agent gives, unverified.
    */
-  async registerAgent(p: { handle: unknown; publicKey: unknown; operatorId?: unknown; models?: unknown; pairing?: unknown }, ip = "local"): Promise<ApiResult> {
+  async registerAgent(p: { handle: unknown; publicKey: unknown; operatorId?: unknown; models?: unknown; pairing?: unknown; constitution?: unknown }, ip = "local"): Promise<ApiResult> {
     const handle = typeof p.handle === "string" ? p.handle : "";
     if (!HANDLE.test(handle)) return err(400, "handle must be 2-40 chars: letters, digits, hyphens");
     const publicKey = typeof p.publicKey === "string" ? p.publicKey : "";
     const kp = await publicKeyProblem(publicKey);
     if (kp) return err(400, `publicKey: ${kp}`);
+    // Article I.2: registration is assent. Acknowledging the version in force, by version and hash, is the signature; the log records it.
+    const inForce = await (this.o.constitution ?? (async () => ({ version: CONSTITUTION_VERSION, hash: await constitutionHash() })))();
+    const ack = (p.constitution ?? null) as { version?: unknown; hash?: unknown } | null;
+    if (!ack || ack.version !== inForce.version || ack.hash !== inForce.hash) {
+      return err(428, "registration must acknowledge the constitution in force", { constitution: inForce, how: "GET /v1/constitution (or the get_constitution tool), then include constitution: {version, hash} in this request" });
+    }
     let operatorId = typeof p.operatorId === "string" ? p.operatorId.trim() : "";
     const paired = p.pairing !== undefined;
     if (paired) {
@@ -227,10 +236,10 @@ export class V2Service {
       if (!pr.ok) return err(pr.status, pr.error);
       operatorId = pr.operatorId;
     }
-    await this.o.log.append("agent.register", { handle, publicKey, operatorId, ...(models.length ? { models } : {}) });
+    await this.o.log.append("agent.register", { handle, publicKey, operatorId, constitution: inForce, ...(models.length ? { models } : {}) });
     if (paired && !r.tiers.has(operatorId)) await this.o.log.append("operator.tier", { operatorId, tier: "account" });
     const tier = paired ? (r.tiers.get(operatorId) ?? "account") : (r.tiers.get(operatorId) ?? "unverified");
-    return ok(201, { handle, operatorId, tier, families: modelFamilies(models), next: "delegate_key for the machine that will run bundles, then commit_check or publish" });
+    return ok(201, { handle, operatorId, tier, constitution: inForce, families: modelFamilies(models), next: "delegate_key for the machine that will run bundles, then commit_check or publish" });
   }
 
   /**

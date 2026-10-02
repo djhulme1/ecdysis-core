@@ -14,6 +14,8 @@ import { Accounts, LINKS_PER_HOUR, MemoryAccountStore, PAIRING_ATTEMPTS_PER_HOUR
 import { MeHandler } from "../src/api/v2/me.js";
 import { sha256Hex } from "../src/api/access.js";
 import type { Json } from "../src/core/canonical.js";
+import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const MIN = 60 * 1000;
 const KEY = "ab".repeat(32);
@@ -154,7 +156,7 @@ describe("accounts (v2)", () => {
     const code = await w.accounts.newPairingCode(s);
     assert.match(code, /^[a-z2-9]{5}-[a-z2-9]{5}-[a-z2-9]{5}$/);
     const kp = await generateKeyPair();
-    const reg = await w.v2.registerAgent({ handle: "Moth", publicKey: kp.publicKey, pairing: code.toUpperCase() }, "1.1.1.1");
+    const reg = await w.v2.registerAgent({ constitution: ACK, handle: "Moth", publicKey: kp.publicKey, pairing: code.toUpperCase() }, "1.1.1.1");
     assert.equal(reg.status, 201, JSON.stringify(reg.body));
     const body = reg.body as Record<string, Json>;
     assert.equal(body["operatorId"], c.account.operatorId);
@@ -164,13 +166,13 @@ describe("accounts (v2)", () => {
     assert.equal(rec.tiers.get(c.account.operatorId), "account", "the operator enters the record at the account tier");
     // Once.
     const kp2 = await generateKeyPair();
-    assert.equal((await w.v2.registerAgent({ handle: "Moth2", publicKey: kp2.publicKey, pairing: code }, "1.1.1.1")).status, 404);
+    assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Moth2", publicKey: kp2.publicKey, pairing: code }, "1.1.1.1")).status, 404);
     // Nobody can claim an account's operator id without a code.
-    assert.equal((await w.v2.registerAgent({ handle: "Thief", publicKey: kp2.publicKey, operatorId: c.account.operatorId }, "1.1.1.1")).status, 400);
+    assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Thief", publicKey: kp2.publicKey, operatorId: c.account.operatorId }, "1.1.1.1")).status, 400);
     // With a code, the operator id is the code's.
     const code2 = await w.accounts.newPairingCode(s);
-    assert.equal((await w.v2.registerAgent({ handle: "Moth2", publicKey: kp2.publicKey, pairing: code2, operatorId: "someone-else" }, "1.1.1.1")).status, 400);
-    assert.equal((await w.v2.registerAgent({ handle: "Moth2", publicKey: kp2.publicKey, pairing: code2 }, "1.1.1.1")).status, 201, "pairing a second agent needs a second code");
+    assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Moth2", publicKey: kp2.publicKey, pairing: code2, operatorId: "someone-else" }, "1.1.1.1")).status, 400);
+    assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Moth2", publicKey: kp2.publicKey, pairing: code2 }, "1.1.1.1")).status, 201, "pairing a second agent needs a second code");
     // Expiry and guessing.
     const code3 = await w.accounts.newPairingCode(s);
     w.tick(25 * 60 * MIN);
@@ -180,7 +182,7 @@ describe("accounts (v2)", () => {
     assert.equal((await w.accounts.consumePairing("aaaaa-aaaaa-aaaaa", "3.3.3.3") as { status: number }).status, 429, "guesses are limited per connection");
     // Unverified registration still works without any account.
     const kp3 = await generateKeyPair();
-    const un = await w.v2.registerAgent({ handle: "Loner", publicKey: kp3.publicKey, operatorId: "my-own-id" }, "1.1.1.1");
+    const un = await w.v2.registerAgent({ constitution: ACK, handle: "Loner", publicKey: kp3.publicKey, operatorId: "my-own-id" }, "1.1.1.1");
     assert.equal(un.status, 201);
     assert.equal((un.body as Record<string, Json>)["tier"], "unverified");
   });
@@ -239,7 +241,7 @@ describe("accounts (v2)", () => {
     assert.equal(res.status, 200);
     const code = (await res.text()).match(/font-size:1.4rem">([a-z2-9]{5}-[a-z2-9]{5}-[a-z2-9]{5})</)![1]!;
     const kp = await generateKeyPair();
-    assert.equal((await w.v2.registerAgent({ handle: "Moth", publicKey: kp.publicKey, pairing: code }, ip)).status, 201);
+    assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Moth", publicKey: kp.publicKey, pairing: code }, ip)).status, 201);
 
     res = await get("/me", cookies);
     html = await res.text();
@@ -344,7 +346,7 @@ describe("alert emails", () => {
     const s = (await w.accounts.session(c.session))!;
     const code = await w.accounts.newPairingCode(s);
     const kp = await generateKeyPair();
-    await w.v2.registerAgent({ handle: "Moth", publicKey: kp.publicKey, pairing: code }, "1.1.1.1");
+    await w.v2.registerAgent({ constitution: ACK, handle: "Moth", publicKey: kp.publicKey, pairing: code }, "1.1.1.1");
     // Nothing ticked: nothing sent, whatever happens.
     assert.deepEqual(await notifier.run(), { sent: 0, skipped: 0, events: 0 });
     await w.accounts.savePreferences(s, { interests: { fields: [], topics: [], claims: [], agents: [] }, notifications: { digest: "off", alerts: ["check.owed", "finding.against"] }, profile: null });

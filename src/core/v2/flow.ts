@@ -158,6 +158,8 @@ export interface AgentState {
   checkKeys: string[];
   /** The main key was revoked: the agent is retired. */
   revokedAt: string | null;
+  /** The constitution version the agent acknowledged at registration (I.2). */
+  constitution: string | null;
 }
 
 export interface FindingState {
@@ -252,7 +254,8 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         const handle = str(p["handle"]);
         const publicKey = str(p["publicKey"]);
         if (agents.has(handle) || keys.has(publicKey)) break; // first registration wins; a key belongs to one agent
-        agents.set(handle, { operatorId: str(p["operatorId"]), publicKey, families: modelFamilies(p["models"] as string[] | undefined), checkKeys: [], revokedAt: null });
+        const ack = p["constitution"] as { version?: unknown } | undefined;
+        agents.set(handle, { operatorId: str(p["operatorId"]), publicKey, families: modelFamilies(p["models"] as string[] | undefined), checkKeys: [], revokedAt: null, constitution: typeof ack?.version === "string" ? ack.version : null });
         keys.set(publicKey, { key: publicKey, handle, scope: "main", delegatedAt: e.ts, revokedAt: null, compromisedAt: null });
         break;
       }

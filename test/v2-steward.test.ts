@@ -15,6 +15,8 @@ import { StewardHandler } from "../src/api/v2/steward.js";
 import { sha256Hex } from "../src/api/access.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
+import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const MIN = 60 * 1000;
 
@@ -36,7 +38,7 @@ async function world() {
   const agent = async (handle: string, op: string, models?: string[], tier: "account" | "verified" | null = "verified") => {
     const kp = await generateKeyPair();
     keys.set(handle, kp);
-    assert.equal((await svc.registerAgent({ handle, publicKey: kp.publicKey, operatorId: op, ...(models ? { models } : {}) })).status, 201);
+    assert.equal((await svc.registerAgent({ constitution: ACK, handle, publicKey: kp.publicKey, operatorId: op, ...(models ? { models } : {}) })).status, 201);
     if (tier) await svc.setTier(op, tier);
     return kp;
   };

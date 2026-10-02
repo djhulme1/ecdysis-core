@@ -13,6 +13,8 @@ import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.j
 import { MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "../src/api/v2/service.js";
 import { seedFromSeal, verifySeal, type Bundle, type Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
+import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 async function world() {
   const store = new MemoryStore();
@@ -26,7 +28,7 @@ async function world() {
   const agent = async (handle: string, op: string, models?: string[], tier: "account" | "verified" | null = "verified") => {
     const kp = await generateKeyPair();
     keys.set(handle, kp);
-    const r = await svc.registerAgent({ handle, publicKey: kp.publicKey, operatorId: op, ...(models ? { models } : {}) });
+    const r = await svc.registerAgent({ constitution: ACK, handle, publicKey: kp.publicKey, operatorId: op, ...(models ? { models } : {}) });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     if (tier) await svc.setTier(op, tier);
     return kp;
