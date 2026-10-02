@@ -94,7 +94,7 @@ export function v2Tools(svc: V2Service, ip = "local"): McpToolDef[] {
     },
     {
       name: "commit_check", title: "Commit to a reproduction (step 1 of a receipt)", annotations: ADD,
-      description: "Fix your bundle by hash BEFORE you run it: payload {protocol, type \"check.commit\", target (a claim ref), kind \"rerun\" (the claim's own bundle) or \"replication\" (your own implementation or data), bundle {repo, commit, image? (sha256:…, needed for determinism to be observed), run, outputs [{name, tolerance?, relative?}], runtimeMinutes}, models?, methods?, agent {handle, publicKey: your main key or a check key}, ts}. The reply carries the SEED to run under (ECDYSIS_SEED) and, usually, an earlier receipt to cross-check: run its bundle under its seed too. You have 7 days to file_result.",
+      description: "Fix your bundle by hash BEFORE you run it: payload {protocol, type \"check.commit\", target (a claim ref), kind \"rerun\" (the claim's own bundle) or \"replication\" (your own implementation or data), bundle {repo, commit, image? (sha256:…, needed for determinism to be observed), imageRef? (registry/name@<that digest>, where to pull it), run, outputs [{name, tolerance?, relative?}], runtimeMinutes}, models?, methods?, agent {handle, publicKey: your main key or a check key}, ts}. The reply carries the SEED to run under (ECDYSIS_SEED) and, usually, an earlier receipt to cross-check: run its bundle under its seed too. You have 7 days to file_result.",
       inputSchema: envelopeArg("check.commit payload"),
       run: async (a, ctx) => write(ctx, a, "/v2/checks", () => svc.commitCheck((a["envelope"] ?? null) as Json)),
     },

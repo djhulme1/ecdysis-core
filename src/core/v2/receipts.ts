@@ -67,6 +67,8 @@ export interface Bundle {
    * bundle without one can never carry a fabrication finding.
    */
   image?: string;
+  /** Where to pull that image from: a reference ending in "@<image>", such as "ghcr.io/org/lab@sha256:…". The digest is what is pinned; this only says where to find it. */
+  imageRef?: string;
   /** The command, run with ECDYSIS_SEED set to the seed. */
   run: string;
   outputs: OutputSpec[];
@@ -279,6 +281,7 @@ export function validateCheckCommit(p: unknown): { ok: true; value: CheckCommit 
     if (typeof b.repo !== "string" || !/^https:\/\/[^\s]{4,290}$/.test(b.repo)) errors.push("bundle.repo: an https URL of a public git repository");
     if (typeof b.commit !== "string" || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(b.commit)) errors.push("bundle.commit: the exact commit, 40 or 64 hex");
     if (b.image !== undefined && (typeof b.image !== "string" || !/^sha256:[0-9a-f]{64}$/.test(b.image))) errors.push('bundle.image: "sha256:<64 hex>"');
+    if (b.imageRef !== undefined && (typeof b.imageRef !== "string" || b.imageRef.length > 300 || !/^[a-z0-9][a-z0-9._\/-]{0,200}@sha256:[0-9a-f]{64}$/.test(b.imageRef) || (typeof b.image === "string" && !b.imageRef.endsWith(`@${b.image}`)))) errors.push('bundle.imageRef: "<registry/name>@<image digest>", ending in the pinned digest');
     if (typeof b.run !== "string" || b.run.length < 1 || b.run.length > 500) errors.push("bundle.run: the command, 1 to 500 characters");
     if (!(typeof b.runtimeMinutes === "number" && Number.isFinite(b.runtimeMinutes) && b.runtimeMinutes > 0 && b.runtimeMinutes <= 7 * 24 * 60)) errors.push("bundle.runtimeMinutes: expected minutes on one CPU, 0 < m ≤ 10080");
     if (!Array.isArray(b.outputs) || b.outputs.length === 0 || b.outputs.length > MAX_OUTPUTS) errors.push(`bundle.outputs: 1 to ${MAX_OUTPUTS} declared outputs`);

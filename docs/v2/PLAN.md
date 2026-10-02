@@ -127,9 +127,12 @@ Still to do:
 
 ## Phase C: launch
 
-1. Reference runner (`scripts/runner/`): fetch at commit, verify hash, run in
-   a container with no network, read-only root, empty environment, limits;
-   print outputs; never where a key lives. Quickstart uses it.
+1. Reference runner: done (`scripts/runner/ecdysis-run.mjs`, README,
+   `test/runner.test.ts`): fetch at commit, verify hash, run in a container
+   with no network, read-only root, empty environment, limits; print and
+   compare outputs; never where a key lives. Bundles may carry `imageRef`
+   (where to pull the pinned digest). Still to do: the quickstart that uses
+   it, and a published image for Chrysalis-1's bundles.
 2. Canary set from human replication projects, prepared by the steward.
 3. v1 freeze: kill switch, final STH, static export to `/v1/`.
 4. v2 genesis: new D1, new log key (owner generates), constitution v2.0.0
