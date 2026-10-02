@@ -12,7 +12,8 @@ import { APPEAL_MS } from "../../core/v2/receipts.js";
 import { ME_HEADERS, sameOrigin } from "./me.js";
 import { cookie, type Accounts, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
-import { auditPage, contentPage, evidencePage, overviewPage, peoplePage, refusedPage, type PersonRow } from "../../web/steward.js";
+import type { CanaryRegistry } from "./canaries.js";
+import { auditPage, canariesPage, contentPage, evidencePage, overviewPage, peoplePage, refusedPage, type PersonRow } from "../../web/steward.js";
 
 export interface StewardOptions {
   accounts: Accounts;
@@ -22,6 +23,8 @@ export interface StewardOptions {
   fetchImpl?: typeof fetch;
   now?: () => Date;
   readOnly?: boolean;
+  /** The canary registry (off the log), when configured. */
+  canaries?: CanaryRegistry | null;
 }
 
 const MAX_FORM = 8 * 1024;
@@ -87,6 +90,23 @@ export class StewardHandler {
         if (r.status !== 200) return this.page("/steward/evidence", signed, url, null, `Couldn't reverse: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
         return this.redirect("/steward/evidence?ok=Finding+reversed.+Everything+it+voided+is+restored.");
       }
+      case "/steward/canaries/register": {
+        if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
+        const r = await this.o.canaries.register({ claim: f.get("claim") ?? "", outcome: f.get("outcome") ?? "", label: f.get("label") ?? "", source: f.get("source") ?? "", revealAfter: f.get("revealAfter") }, steward);
+        if (!r.ok) return this.page("/steward/canaries", signed, url, null, `Couldn't register: ${r.error}.`);
+        return this.redirect("/steward/canaries?ok=Registered.+Nothing+marks+it+on+the+record%3B+reveal+it+from+here+when+the+time+comes.");
+      }
+      case "/steward/canaries/reveal": {
+        if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
+        const r = await this.o.canaries.reveal(f.get("claim") ?? "", steward);
+        if (!r.ok) return this.page("/steward/canaries", signed, url, null, `Couldn't reveal: ${r.error}.`);
+        return this.redirect(`/steward/canaries?ok=${encodeURIComponent(r.note)}`);
+      }
+      case "/steward/canaries/remove": {
+        if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
+        if (!(await this.o.canaries.remove(f.get("claim") ?? ""))) return this.page("/steward/canaries", signed, url, null, "Couldn't remove: not in the registry.");
+        return this.redirect("/steward/canaries?ok=Removed+from+the+registry.+The+log+is+untouched.");
+      }
       default:
         return this.html(404, refusedPage("There is nothing at that address."));
     }
@@ -113,6 +133,7 @@ export class StewardHandler {
           findingsInForce: r.findings.filter((f) => f.inForce).length, voided: r.voidedOperators.size,
           lapses: [...r.lapses.values()].reduce((a, b) => a + b, 0),
           holdsOpen: (await this.o.v2.holds(500)).filter((h) => h.open).length,
+          canariesDue: this.o.canaries ? await this.o.canaries.due() : null,
           disputes: all.filter((c) => c.dispute > 0).length,
           queue: all.filter((c) => c.status !== "established" && c.status !== "refuted").sort((a, b) => b.valueOfChecking - a.valueOfChecking).slice(0, 10).map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, use: c.use })),
         }, flash, problem));
@@ -142,6 +163,10 @@ export class StewardHandler {
         });
         const anchors = [...r.anchors].map(([claim, confirmed]) => ({ claim, confirmed }));
         return this.html(200, evidencePage({ findings, disputes, anchors, csrf, fresh }, flash, problem));
+      }
+      case "/steward/canaries": {
+        if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
+        return this.html(200, canariesPage({ rows: await this.o.canaries.list(), csrf, fresh, now: this.now().toISOString() }, flash, problem));
       }
       case "/steward/content":
         return this.html(200, contentPage({ holds: await this.o.v2.holds(100) }, flash, problem));

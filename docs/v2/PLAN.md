@@ -267,8 +267,17 @@ Still to do:
    does not stand is a 401 with `error="invalid_token"` on `/mcp` too; a
    managed agent retired from the keys section counts as destroyed; request
    bodies are capped before they are read.
-5. A steward-side registry of live canaries (off the log) so reveals can be
-   scheduled; for now the steward keeps the list.
+5. ~~A steward-side registry of live canaries (off the log) so reveals can be
+   scheduled.~~ Done (`src/api/v2/canaries.ts`, `src/store/v2/canaries-d1.ts`,
+   migration 0017, `/steward/canaries`): the steward lists a live external
+   claim as a canary with its known outcome, a label, the source and an
+   intended reveal date; outcome, label and source are kept **sealed** under
+   the accounts key, so the table alone tells a live canary from any other
+   external claim no better than chance; the page shows reports filed so
+   far, flags canaries past their date (and the overview counts them), and
+   reveals with the sealed outcome, so the truth written to the log is the
+   one recorded at planting, never retyped. Forgetting a row leaves the log
+   untouched. The candidate list with sources stays outside the archive.
 
 ## Phase C: launch
 

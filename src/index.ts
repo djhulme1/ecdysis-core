@@ -16,6 +16,8 @@ import { V2Governance } from "./api/v2/governance.js";
 import { OAuth } from "./api/v2/oauth.js";
 import { OAuthHandler } from "./api/v2/oauth-http.js";
 import { V2Feeds } from "./api/v2/feed.js";
+import { CanaryRegistry } from "./api/v2/canaries.js";
+import { D1CanaryStore } from "./store/v2/canaries-d1.js";
 import { D1OAuthStore } from "./store/v2/oauth-d1.js";
 import { TransparencyLog } from "./core/log.js";
 import { D1V2Store } from "./store/v2/d1.js";
@@ -258,7 +260,7 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
     governance,
     me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
-    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env) }),
+    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env), canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }) }),
     pages: new PagesHandler(v2, {
       host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts,
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },

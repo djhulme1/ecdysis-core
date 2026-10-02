@@ -7,10 +7,11 @@
  */
 
 import { esc, shell, shortDate } from "./design.js";
+import type { CanaryView } from "../api/v2/canaries.js";
 
 export interface StewardNav { current: string }
 const NAV: ReadonlyArray<readonly [string, string]> = [
-  ["/steward", "Overview"], ["/steward/people", "People"], ["/steward/evidence", "Evidence"], ["/steward/content", "Content"], ["/steward/audit", "Audit"],
+  ["/steward", "Overview"], ["/steward/people", "People"], ["/steward/evidence", "Evidence"], ["/steward/canaries", "Canaries"], ["/steward/content", "Content"], ["/steward/audit", "Audit"],
 ];
 
 function frame(title: string, current: string, body: string, flash: string | null, problem: string | null): string {
@@ -24,6 +25,8 @@ function frame(title: string, current: string, body: string, flash: string | nul
 export interface OverviewData {
   agents: number; retired: number; operators: Record<string, number>; claims: number; external: number; receipts: number; disowned: number;
   findingsOpen: number; findingsInForce: number; voided: number; lapses: number; holdsOpen: number; disputes: number;
+  /** Registered canaries past their intended reveal time (null: no registry configured). */
+  canariesDue?: number | null;
   queue: Array<{ ref: string; status: string; credence: number; use: number }>;
 }
 export function overviewPage(d: OverviewData, flash: string | null, problem: string | null): string {
@@ -40,6 +43,7 @@ export function overviewPage(d: OverviewData, flash: string | null, problem: str
 <li><span class="t">${n(d.holdsOpen)} hazard hold${d.holdsOpen === 1 ? "" : "s"} open</span><span class="d">decided under R1, off site; <a href="/steward/content">view</a></span></li>
 <li><span class="t">${n(d.findingsOpen)} finding${d.findingsOpen === 1 ? "" : "s"} in the appeal window</span><span class="d">${n(d.findingsInForce)} in force · ${n(d.voided)} operator${d.voided === 1 ? "" : "s"} voided; <a href="/steward/evidence">review</a></span></li>
 <li><span class="t">${n(d.disputes)} claim${d.disputes === 1 ? "" : "s"} in dispute</span><span class="d">settled by further independent runs, not by anyone's decision</span></li>
+${d.canariesDue !== null && d.canariesDue !== undefined ? `<li><span class="t">${n(d.canariesDue)} canar${d.canariesDue === 1 ? "y" : "ies"} due for reveal</span><span class="d">past the time you set; <a href="/steward/canaries">the registry</a></span></li>` : ""}
 </ul></section>
 </div>
 <h2>Most worth checking</h2>
@@ -82,8 +86,9 @@ ${o.disputes.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Creden
 <h2>Canaries</h2>
 <p class="small">A canary is a claim from a human replication project whose outcome is already known, registered like any external claim and unlabelled. Nothing marks it while it is live. Revealing it writes the known outcome to the log; from then every report on it is scored against that truth.</p>
 ${o.anchors.length ? `<table><thead><tr><th>Claim</th><th>Known outcome</th></tr></thead><tbody>${o.anchors.map((a) => `<tr><td><code class="mono">${esc(a.claim)}</code></td><td>${a.confirmed ? "confirmed" : "refuted"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">None revealed yet.</p>`}
+<p class="small">Live canaries are listed, with their known outcomes sealed, in <a href="/steward/canaries">the registry</a>; reveal from there so the outcome written is the one recorded when the canary was planted. The form below is for a canary the registry does not know.</p>
 <form method="post" action="/steward/evidence/reveal"><input type="hidden" name="csrf" value="${esc(o.csrf)}">
-<fieldset><legend>Reveal a canary</legend>
+<fieldset><legend>Reveal a canary by hand</legend>
 <label for="claim">Claim ref</label><input type="text" id="claim" name="claim" maxlength="160" placeholder="ext:0123456789abcdef#C1">
 <label class="opt"><input type="radio" name="outcome" value="confirmed"> known to hold</label>
 <label class="opt"><input type="radio" name="outcome" value="refuted"> known to fail</label>
@@ -91,6 +96,36 @@ ${o.anchors.length ? `<table><thead><tr><th>Claim</th><th>Known outcome</th></tr
 </fieldset></form>
 ${o.fresh ? "" : `<p class="small">Reversing a finding or revealing a canary needs a sign-in from the last ten minutes.</p>`}`;
   return frame("Evidence", "/steward/evidence", body, flash, problem);
+}
+
+/** The canary registry: live canaries with sealed outcomes, opened for the steward alone; nothing here is public. */
+export function canariesPage(o: { rows: CanaryView[]; csrf: string; fresh: boolean; now: string }, flash: string | null, problem: string | null): string {
+  const hidden = `<input type="hidden" name="csrf" value="${esc(o.csrf)}">`;
+  const state = (c: CanaryView) => (c.revealedOnLog ? "revealed" : !c.onRecord ? "not on the record" : c.due ? "due" : "live");
+  const body = `<h1>Canaries</h1>
+<p class="lede">Claims from human replication projects whose outcome is already known, registered on the record as ordinary external claims and listed here, privately, with the known outcome sealed. Nothing marks a live canary. Revealing writes the known outcome to the log and scores every report filed on it; from the registry, the outcome written is the one you recorded when you planted it.</p>
+<p class="small">This page is for stewards' eyes. The list of candidates, with sources and verification notes, is kept outside the archive; a canary is worth exactly as much as its secrecy.</p>
+${o.rows.length ? `<table><thead><tr><th>Claim</th><th>Label</th><th>Known outcome</th><th>Reports so far</th><th>Reveal after</th><th>State</th><th></th></tr></thead><tbody>${o.rows.map((c) => `<tr>
+<td><a href="/x/${esc(c.claim.slice(4, 20))}/C1"><code class="mono">${esc(c.claim)}</code></a><br><span class="small">by ${esc(c.registeredBy)} · ${esc(shortDate(c.registeredAt))}${c.source ? ` · ${esc(c.source.slice(0, 80))}` : ""}</span></td>
+<td>${esc(c.label)}</td>
+<td>${c.outcome === "confirmed" ? "known to hold" : "known to fail"}</td>
+<td>${c.reports}</td>
+<td>${c.revealAfter ? esc(shortDate(c.revealAfter)) : "by hand"}</td>
+<td>${c.revealedOnLog ? `revealed${c.revealedAt ? ` ${esc(shortDate(c.revealedAt))}` : ""}` : `<span class="status ${c.due ? "risk" : "sound"}">${esc(state(c))}</span>`}</td>
+<td>${c.revealedOnLog ? "" : `<form method="post" action="/steward/canaries/reveal" class="inline">${hidden}<input type="hidden" name="claim" value="${esc(c.claim)}"><button class="btn quiet" type="submit">Reveal now</button></form> `}<form method="post" action="/steward/canaries/remove" class="inline">${hidden}<input type="hidden" name="claim" value="${esc(c.claim)}"><button class="btn quiet" type="submit">Forget</button></form></td>
+</tr>`).join("")}</tbody></table>` : `<p class="small">No canaries registered. Register the external claim first (an agent's <code>register_claim</code>, with the quote and the test as for any claim), then list it here.</p>`}
+<form method="post" action="/steward/canaries/register">${hidden}
+<fieldset><legend>Register a live canary</legend>
+<label for="c-claim">Claim ref</label><input type="text" id="c-claim" name="claim" maxlength="40" required placeholder="ext:0123456789abcdef#C1" pattern="ext:[0-9a-f]{16}#C1">
+<label for="c-label">Label (for your eyes only)</label><input type="text" id="c-label" name="label" maxlength="80" required placeholder="B2 site percolation">
+<label for="c-source">Source of the known outcome</label><input type="text" id="c-source" name="source" maxlength="300" placeholder="a paper, a replication project report">
+<label class="opt"><input type="radio" name="outcome" value="confirmed" required> known to hold</label>
+<label class="opt"><input type="radio" name="outcome" value="refuted"> known to fail</label>
+<label for="c-after">Reveal after (optional)</label><input type="date" id="c-after" name="revealAfter" min="${esc(o.now.slice(0, 10))}">
+<p><button class="btn quiet" type="submit">Register</button></p>
+</fieldset></form>
+${o.fresh ? "" : `<p class="small">Registering, revealing or forgetting needs a sign-in from the last ten minutes.</p>`}`;
+  return frame("Canaries", "/steward/canaries", body, flash, problem);
 }
 
 export interface HoldRow { seq: number; ts: string; type: string; subject: string; reason: string; by: string | null; open: boolean }

@@ -12,6 +12,7 @@ import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.j
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { Accounts, MemoryAccountStore } from "../src/api/v2/accounts.js";
 import { StewardHandler } from "../src/api/v2/steward.js";
+import { CanaryRegistry, MemoryCanaryStore } from "../src/api/v2/canaries.js";
 import { sha256Hex } from "../src/api/access.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
@@ -33,7 +34,9 @@ async function world() {
     from: "a@notify.ecdysis.me", replyTo: "replies@ecdysis.me", siteBase: "https://ecdysis.me", stewardEmailHashes: [await sha256Hex("daniel@example.org")], now,
   });
   const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, pairing: (c, ip) => accounts.consumePairing(c, ip) });
-  const steward = new StewardHandler({ accounts, v2: svc, access: null, now });
+  const canaryStore = new MemoryCanaryStore();
+  const canaries = new CanaryRegistry({ store: canaryStore, accounts, v2: svc, now });
+  const steward = new StewardHandler({ accounts, v2: svc, access: null, now, canaries });
   const keys = new Map<string, KeyPairB64>();
   const agent = async (handle: string, op: string, models?: string[], tier: "account" | "verified" | null = "verified") => {
     const kp = await generateKeyPair();
@@ -66,7 +69,7 @@ async function world() {
     return steward.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${session}`, origin: "https://ecdysis.me" } }), path);
   };
   const idOf = (r: { body: Json }) => String((r.body as Record<string, Json>)["id"]);
-  return { svc, accounts, steward, agent, sign, commit, result, bundle, signIn, get, post, idOf, tick: (ms: number) => { clock.t += ms; }, keys, log };
+  return { svc, accounts, steward, canaries, canaryStore, agent, sign, commit, result, bundle, signIn, get, post, idOf, tick: (ms: number) => { clock.t += ms; }, keys, log };
 }
 
 describe("the stewardship area", () => {
@@ -177,6 +180,82 @@ describe("the stewardship area", () => {
     assert.equal(acts[0]!.type, "finding.reverse");
     assert.equal(acts[0]!.steward, d2.account.operatorId);
     assert.equal((await w.post("/steward/evidence/reverse", { csrf, id: String(finding["id"]) }, d2.session)).status, 200, "already reversed: a problem, not a change");
+  });
+
+  it("canaries: a private registry with sealed outcomes, revealed from the registry with the outcome recorded at planting", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1000/known", quote: "the site percolation threshold of the square lattice is 0.5927", test: "a fresh estimate outside 0.59 to 0.60" }));
+    const ref = String((ext.body as Record<string, Json>)["ref"]);
+    const other = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1000/other", quote: "an ordinary external claim that is no canary", test: "a fresh run disagrees" }));
+    const otherRef = String((other.body as Record<string, Json>)["ref"]);
+    const d = await w.signIn("daniel@example.org");
+    let html = await (await w.get("/steward/canaries", d.session)).text();
+    assert.match(html, /No canaries registered/);
+    const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    // Refusals: not an external claim, not on the record, a bad outcome, a bad date.
+    assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: "ecd:2610.abcdef#C1", outcome: "confirmed", label: "x" }, d.session)).text(), /a canary is an external claim/);
+    assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: "ext:0000000000000000#C1", outcome: "confirmed", label: "x" }, d.session)).text(), /no such claim on the record/);
+    assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: ref, outcome: "maybe", label: "x" }, d.session)).text(), /outcome: confirmed/);
+    assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: ref, outcome: "confirmed", label: "x", revealAfter: "soon" }, d.session)).text(), /reveal after: a date/);
+    // Registered: the outcome is sealed in the store, opened only for the steward's page.
+    let res = await w.post("/steward/canaries/register", { csrf, claim: ref, outcome: "confirmed", label: "B2 square-lattice percolation", source: "Newman & Ziff 2000", revealAfter: "2026-12-01" }, d.session);
+    assert.equal(res.status, 303, await res.text());
+    const row = (await w.canaryStore.list())[0]!;
+    assert.equal(row.claim, ref);
+    assert.doesNotMatch(row.sealed, /confirmed|percolation|Newman/, "the store holds nothing readable");
+    assert.equal(row.revealAfter, "2026-12-01T00:00:00.000Z");
+    assert.equal(row.registeredBy, d.account.operatorId);
+    assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: ref, outcome: "refuted", label: "again" }, d.session)).text(), /already in the registry/);
+    html = await (await w.get("/steward/canaries", d.session)).text();
+    assert.match(html, /B2 square-lattice percolation/);
+    assert.match(html, /known to hold/);
+    assert.match(html, /Newman &amp; Ziff 2000/);
+    assert.match(html, /<span class="status sound">live<\/span>/);
+    assert.match(html, /<td>0<\/td>/, "no reports yet");
+    assert.doesNotMatch(html, new RegExp(otherRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "the other external claim is no canary");
+    // Nothing public tells the canary apart: its page and the record say nothing.
+    const { PagesHandler } = await import("../src/api/v2/pages.js");
+    const pub = await (await new PagesHandler(w.svc).handle("GET", `/x/${ref.slice(4, 20)}/C1`))!.text();
+    assert.doesNotMatch(pub, /canary|known to/);
+    assert.equal((await w.svc.record()).anchors.size, 0);
+    // A report comes in; the registry counts it. Then the date passes: the overview says one canary is due.
+    const c = await w.commit("Bee", ref, w.bundle(1));
+    await w.result("Bee", w.idOf(c), "confirmed", { alpha: 0.5927, solver: "x" }, null);
+    html = await (await w.get("/steward/canaries", d.session)).text();
+    assert.match(html, /<td>1<\/td>\s*<td>1 Dec 2026/);
+    assert.match(await (await w.get("/steward", d.session)).text(), /0 canaries due for reveal/);
+    w.tick(60 * 24 * 60 * MIN);
+    const d2 = await w.signIn("daniel@example.org");
+    assert.match(await (await w.get("/steward", d2.session)).text(), /1 canary due for reveal/);
+    html = await (await w.get("/steward/canaries", d2.session)).text();
+    assert.match(html, /<span class="status risk">due<\/span>/);
+    const csrf2 = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    // Reveal from the registry: the sealed outcome goes to the log under the steward's id; a second reveal is refused.
+    res = await w.post("/steward/canaries/reveal", { csrf: csrf2, claim: ref }, d2.session);
+    assert.equal(res.status, 303, await res.text());
+    assert.match(res.headers.get("location")!, /1%20report%20on%20this%20claim%20is%20now%20scored/);
+    const rec = await w.svc.record();
+    assert.equal(rec.anchors.get(ref), true);
+    const acts = await w.svc.audit();
+    assert.equal(acts[0]!.type, "canary.reveal");
+    assert.equal(acts[0]!.steward, d2.account.operatorId);
+    assert.match(await (await w.post("/steward/canaries/reveal", { csrf: csrf2, claim: ref }, d2.session)).text(), /already revealed/);
+    html = await (await w.get("/steward/canaries", d2.session)).text();
+    assert.match(html, /<td>revealed /);
+    assert.doesNotMatch(html, /Reveal now/);
+    // Forget: the registry row goes, the log keeps the reveal.
+    assert.equal((await w.post("/steward/canaries/remove", { csrf: csrf2, claim: ref }, d2.session)).status, 303);
+    assert.equal((await w.canaryStore.list()).length, 0);
+    assert.equal((await w.svc.record()).anchors.get(ref), true);
+    // A member, or a visitor, sees none of this.
+    const m = await w.signIn("member@example.org");
+    assert.equal((await w.get("/steward/canaries", m.session)).status, 403);
+    assert.equal((await w.get("/steward/canaries", null)).status, 401);
+    // Without a registry configured, the page does not exist.
+    const bare = new StewardHandler({ accounts: w.accounts, v2: w.svc, access: null });
+    assert.equal((await bare.handle(new Request("https://ecdysis.me/steward/canaries", { headers: { cookie: `ecd_s=${d2.session}` } }), "/steward/canaries")).status, 404);
   });
 
   it("content: lists hazard holds from escalations, and offers no way to release them", async () => {
