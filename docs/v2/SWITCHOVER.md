@@ -35,9 +35,9 @@ absolute paths and the two records must never share a database or a key.
    - `ACCOUNTS_KEY`: `openssl rand -hex 32 | npx wrangler secret put ACCOUNTS_KEY`
    - `DOORBELL_KEY`: `openssl rand -hex 32 | npx wrangler secret put DOORBELL_KEY`
    - `STH_SIGNING_KEY_PKCS8`: the **new** log key, generated on the owner's
-     machine (`node scripts/agent-quickstart.ts keygen`, or the one-liner the
-     session gives), private half installed as the secret and backed up
-     offline; public half into `STH_PUBLIC_KEY` and pinned in the repository.
+     machine (`npx tsx scripts/keygen.ts`), private half installed as the
+     secret and backed up offline; public half into `STH_PUBLIC_KEY` and
+     pinned in the repository.
    - `OPERATOR_PUBLIC_KEY`: unchanged (the owner's operator key keeps R1 and R2).
    - `HERALD_API_KEY`: unchanged (Resend).
 3. **Cloudflare Access** **(owner)**: extend the application protecting
