@@ -9,6 +9,7 @@ import { BUCKET_LIMITS, MemoryRateLimiter, route, type RateLimiter } from "./api
 import { V2Service } from "./api/v2/service.js";
 import { Accounts } from "./api/v2/accounts.js";
 import { MeHandler } from "./api/v2/me.js";
+import { StewardHandler } from "./api/v2/steward.js";
 import { TransparencyLog } from "./core/log.js";
 import { D1V2Store } from "./store/v2/d1.js";
 import { D1AccountStore } from "./store/v2/accounts-d1.js";
@@ -202,7 +203,7 @@ function accountsFrom(env: Env): Accounts {
   });
 }
 
-function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler } | null {
+function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; steward: StewardHandler } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accounts = accountsFrom(env);
   const v2 = new V2Service({
@@ -212,7 +213,12 @@ function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler } | nu
     screeners: screenersFrom(env),
     pairing: (code, ip) => accounts.consumePairing(code, ip),
   });
-  return { v2, me: new MeHandler({ accounts, v2, readOnly: readOnly(env) }) };
+  return {
+    v2,
+    me: new MeHandler({ accounts, v2, readOnly: readOnly(env) }),
+    // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
+    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env) }),
+  };
 }
 
 /** The preprint cap from configuration; anything unreadable keeps the default. */
@@ -391,6 +397,7 @@ export default {
       waitUntil: (p) => ctx.waitUntil(p),
       v2: v2?.v2 ?? null,
       me: v2?.me ?? null,
+      steward: v2?.steward ?? null,
     });
   },
 } satisfies ExportedHandler<Env>;

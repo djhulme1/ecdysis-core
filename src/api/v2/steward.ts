@@ -1,0 +1,147 @@
+/**
+ * /steward: the stewardship area's handler (design §7). Two locks, both
+ * required when configured: Cloudflare Access in front (the header it sets
+ * after admitting a request, verified again here), and a signed-in account
+ * with the steward role. Acts (tier changes, reversals) also need a sign-in
+ * from the last ten minutes, carry the session's anti-forgery token, and go
+ * on the log with the steward's operator id. Reserved power R1 is not here.
+ */
+
+import { verifyAccess, accessConfigured, type AccessConfig } from "../access.js";
+import { APPEAL_MS } from "../../core/v2/receipts.js";
+import { ME_HEADERS } from "./me.js";
+import type { Accounts, Signed } from "./accounts.js";
+import type { V2Service } from "./service.js";
+import { auditPage, contentPage, evidencePage, overviewPage, peoplePage, refusedPage, type PersonRow } from "../../web/steward.js";
+
+export interface StewardOptions {
+  accounts: Accounts;
+  v2: V2Service;
+  /** Cloudflare Access configuration; when configured, the Access header is required too. Null: no Access layer (tests). */
+  access: AccessConfig | null;
+  fetchImpl?: typeof fetch;
+  now?: () => Date;
+  readOnly?: boolean;
+}
+
+const MAX_FORM = 8 * 1024;
+const SESSION_COOKIE = "ecd_s";
+
+export function isStewardPath(path: string): boolean {
+  return /^\/steward(\/|$)/.test(path);
+}
+
+export class StewardHandler {
+  private now: () => Date;
+  constructor(private o: StewardOptions) { this.now = o.now ?? (() => new Date()); }
+
+  private html(status: number, body: string): Response {
+    return new Response(body, { status, headers: ME_HEADERS });
+  }
+  private redirect(to: string): Response {
+    return new Response(null, { status: 303, headers: { location: to, "cache-control": "no-store" } });
+  }
+
+  async handle(req: Request, path: string): Promise<Response> {
+    const method = req.method.toUpperCase();
+    if (method !== "GET" && method !== "HEAD" && method !== "POST") return new Response("Method not allowed", { status: 405, headers: { ...ME_HEADERS, allow: "GET, HEAD, POST" } });
+    // Lock one: Cloudflare Access, when configured.
+    if (this.o.access && accessConfigured(this.o.access)) {
+      const v = await verifyAccess(req, this.o.access, this.o.fetchImpl ?? fetch, this.now().getTime());
+      if (!v.ok) return this.html(403, refusedPage("This area sits behind Cloudflare Access; the request did not carry a valid Access token."));
+    }
+    // Lock two: a signed-in steward.
+    const cookieHeader = req.headers.get("cookie");
+    const cookieValue = cookieHeader?.split(";").map((p) => p.trim()).find((p) => p.startsWith(`${SESSION_COOKIE}=`))?.slice(SESSION_COOKIE.length + 1) ?? null;
+    const signed = await this.o.accounts.session(cookieValue ? decodeURIComponent(cookieValue) : null);
+    if (!signed) return this.html(401, refusedPage("Sign in to your Ecdysis first; stewardship needs a signed-in steward."));
+    if (signed.account.role !== "steward") return this.html(403, refusedPage("Your account does not hold the steward role."));
+
+    const url = new URL(req.url);
+    const flash = url.searchParams.get("ok");
+    if (method !== "POST") return this.page(path, signed, url, flash, null);
+
+    const len = Number(req.headers.get("content-length") ?? "0");
+    const text = len > MAX_FORM ? "" : await req.text();
+    if (len > MAX_FORM || text.length > MAX_FORM) return this.html(413, refusedPage("That form was too large."));
+    const f = new URLSearchParams(text);
+    if (!(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.page("/steward", signed, url, null, "That form had expired. Please try again.");
+    if (this.o.readOnly) return this.page("/steward", signed, url, null, "Ecdysis isn't taking changes at the moment.");
+    if (!this.o.accounts.fresh(signed)) return this.html(401, refusedPage("This act needs a sign-in from the last ten minutes. Sign in again from your Ecdysis page, then return."));
+    const steward = signed.account.operatorId;
+    switch (path) {
+      case "/steward/people/tier": {
+        const tier = f.get("tier") ?? "";
+        const r = await this.o.v2.setTier(f.get("operatorId") ?? "", tier as "unverified" | "account" | "verified", steward);
+        if (r.status !== 200) return this.page("/steward/people", signed, url, null, `Couldn't set the tier: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
+        return this.redirect(`/steward/people?ok=${encodeURIComponent(`Tier set to ${tier}.`)}`);
+      }
+      case "/steward/evidence/reverse": {
+        const r = await this.o.v2.reverseFinding(f.get("id") ?? "", steward);
+        if (r.status !== 200) return this.page("/steward/evidence", signed, url, null, `Couldn't reverse: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
+        return this.redirect("/steward/evidence?ok=Finding+reversed.+Everything+it+voided+is+restored.");
+      }
+      default:
+        return this.html(404, refusedPage("There is nothing at that address."));
+    }
+  }
+
+  private async page(path: string, signed: Signed, url: URL, flash: string | null, problem: string | null): Promise<Response> {
+    const r = await this.o.v2.record();
+    const csrf = await this.o.accounts.csrf(signed);
+    const fresh = this.o.accounts.fresh(signed);
+    switch (path) {
+      case "/steward": {
+        const s = await this.o.v2.scores();
+        const operators = new Map<string, string>();
+        for (const a of r.agents.values()) operators.set(a.operatorId, r.tiers.get(a.operatorId) ?? "unverified");
+        const byTier: Record<string, number> = {};
+        for (const t of operators.values()) byTier[t] = (byTier[t] ?? 0) + 1;
+        const checks = [...r.checks.values()];
+        const all = [...s.claims.values()];
+        return this.html(200, overviewPage({
+          agents: r.agents.size, retired: [...r.agents.values()].filter((a) => a.revokedAt).length, operators: byTier,
+          claims: r.claims.length, external: r.external.size,
+          receipts: checks.filter((c) => c.stage === "resulted" && !c.disowned).length, disowned: checks.filter((c) => c.disowned).length,
+          findingsOpen: r.findings.filter((f) => !f.reversed && f.verdict === "fabrication" && !f.inForce).length,
+          findingsInForce: r.findings.filter((f) => f.inForce).length, voided: r.voidedOperators.size,
+          lapses: [...r.lapses.values()].reduce((a, b) => a + b, 0),
+          holdsOpen: (await this.o.v2.holds(500)).filter((h) => h.open).length,
+          disputes: all.filter((c) => c.dispute > 0).length,
+          queue: all.filter((c) => c.status !== "established" && c.status !== "refuted").sort((a, b) => b.valueOfChecking - a.valueOfChecking).slice(0, 10).map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, use: c.use })),
+        }, flash, problem));
+      }
+      case "/steward/people": {
+        const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80);
+        const s = await this.o.v2.scores();
+        const ops = new Map<string, PersonRow>();
+        for (const [handle, a] of r.agents) {
+          const row = ops.get(a.operatorId) ?? { operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", account: false, agents: [], voided: r.voidedOperators.has(a.operatorId) };
+          row.agents.push({ handle, reliability: s.track.reliability.get(handle) ?? 0.5, retired: a.revokedAt !== null });
+          ops.set(a.operatorId, row);
+        }
+        for (const [op, tier] of r.tiers) if (!ops.has(op)) ops.set(op, { operatorId: op, tier, account: false, agents: [], voided: r.voidedOperators.has(op) });
+        let rows = [...ops.values()];
+        if (q) rows = rows.filter((x) => x.operatorId.includes(q) || x.agents.some((a) => a.handle.toLowerCase().includes(q.toLowerCase())));
+        rows = rows.slice(0, 100);
+        for (const row of rows) row.account = !!(await this.o.accounts.accountForOperator(row.operatorId));
+        return this.html(200, peoplePage({ rows, q, csrf, fresh }, flash, problem));
+      }
+      case "/steward/evidence": {
+        const s = await this.o.v2.scores();
+        const findings = [...r.findings].reverse().map((f) => ({ id: f.id, verdict: f.verdict, oddAgent: f.oddAgent, oddOperator: f.oddOperator, decidedAt: f.decidedAt, appealUntil: new Date(Date.parse(f.decidedAt) + APPEAL_MS).toISOString(), inForce: f.inForce, reversed: f.reversed, bundle: f.bundle, seed: f.seed }));
+        const disputes = [...s.claims.values()].filter((c) => c.dispute > 0).sort((a, b) => b.disputePriority - a.disputePriority).map((c) => {
+          const rs = r.receiptsByClaim.get(c.ref) ?? [];
+          return { ref: c.ref, credence: c.credence, dispute: c.dispute, status: c.status, receipts: rs.length, disputedReceipts: rs.filter((x) => (r.checks.get(x.id)?.disputedBy.length ?? 0) > 0).length };
+        });
+        return this.html(200, evidencePage({ findings, disputes, csrf, fresh }, flash, problem));
+      }
+      case "/steward/content":
+        return this.html(200, contentPage({ holds: await this.o.v2.holds(100) }, flash, problem));
+      case "/steward/audit":
+        return this.html(200, auditPage({ rows: await this.o.v2.audit(200) }, flash, problem));
+      default:
+        return this.html(404, refusedPage("There is nothing at that address."));
+    }
+  }
+}

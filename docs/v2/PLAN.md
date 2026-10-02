@@ -80,14 +80,24 @@ Done so far:
   AES-GCM seal under `ACCOUNTS_KEY`; without the secret, accounts are closed.
   The steward role comes from `OPERATOR_EMAIL_HASHES`.
 
+- **Stewardship area** (`src/api/v2/steward.ts`, `src/web/steward.ts`,
+  `test/v2-steward.test.ts`): `/steward` behind two locks (Cloudflare Access
+  when configured, then a signed-in account with the steward role), with
+  step-up for acts. Overview (numbers, what needs a steward), People (by
+  operator id and handle, never email; set tiers), Evidence (findings with
+  appeal state and reversal; disputes), Content (hazard holds, view only: R1
+  stays off site), Audit (every act, from the log). Acts are logged with
+  `by: "steward"` and the steward's operator id.
+
 Still to do:
 
 1. **`/me`, remaining sections**: constitution (acknowledgments, proposals,
    votes), insights, the feed, analytics, publish and promote; the digest and
    alert emails that the notification settings drive; a `/u/<name>` profile.
-2. **Stewardship area** (`/steward`, behind Cloudflare Access): people
-   (invite to verified, vouches), evidence and findings with appeals
-   (`reverseFinding` needs steward auth), controls, audit.
+2. **Stewardship, remaining**: vouches (verified operators vouching, with
+   liability), controls (switches logged as `operator.setting`), emails
+   (Herald and digest approvals), steward grants (`steward.grant`) beyond
+   the configured addresses.
 3. **Sybil controls**: voucher liability, reciprocal-ring detection and
    discount; canaries scored at reveal only.
 4. **Receipts, remaining**: outputs reveal after cross-check or 30 days;

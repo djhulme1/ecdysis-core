@@ -198,9 +198,40 @@ export class V2Service {
     return ok(201, { handle, operatorId, tier, families: modelFamilies(models), next: "delegate_key for the machine that will run bundles, then commit_check or publish" });
   }
 
-  async setTier(operatorId: string, tier: "account" | "verified"): Promise<ApiResult> {
-    await this.o.log.append("operator.tier", { operatorId, tier });
+  /**
+   * Set an operator's tier. A steward's act names the steward's own operator
+   * id (pseudonymous, like everything on the log) so the audit trail is
+   * public; the account pairing path writes the entry without one.
+   */
+  async setTier(operatorId: string, tier: "unverified" | "account" | "verified", steward?: string): Promise<ApiResult> {
+    if (!operatorId || operatorId.length > 80) return err(400, "operatorId");
+    if (tier !== "unverified" && tier !== "account" && tier !== "verified") return err(400, "tier: unverified, account or verified");
+    const r = await this.record();
+    if ((r.tiers.get(operatorId) ?? "unverified") === tier) return err(409, `already at tier "${tier}"`);
+    await this.o.log.append("operator.tier", { operatorId, tier, ...(steward ? { by: "steward", steward } : {}) });
     return ok(200, { operatorId, tier });
+  }
+
+  /** Hazard holds (screening, escalations) and releases, newest first: what waits for reserved power R1. View only here. */
+  async holds(limit = 50): Promise<Array<{ seq: number; ts: string; type: "hazard.hold" | "hazard.release"; subject: string; reason: string; by: string | null; open: boolean }>> {
+    const rows = await this.o.store.listLog(0, 1_000_000);
+    const released = new Set<string>();
+    for (const x of rows) if (x.type === "hazard.release") released.add(String((x.payload as Record<string, unknown>)["subject"] ?? ""));
+    return rows.filter((x) => x.type === "hazard.hold" || x.type === "hazard.release").map((x) => {
+      const p = x.payload as Record<string, unknown>;
+      const subject = String(p["subject"] ?? "");
+      return { seq: x.seq, ts: x.ts, type: x.type as "hazard.hold" | "hazard.release", subject, reason: String(p["reason"] ?? ""), by: typeof p["by"] === "string" ? (p["by"] as string) : null, open: x.type === "hazard.hold" && !released.has(subject) };
+    }).reverse().slice(0, limit);
+  }
+
+  /** Entries that record a steward's or an operator's act, newest first: the audit trail. */
+  async audit(limit = 100): Promise<Array<{ seq: number; ts: string; type: string; by: string; steward: string | null; summary: string }>> {
+    const rows = await this.o.store.listLog(0, 1_000_000);
+    return rows.filter((x) => typeof (x.payload as Record<string, unknown>)["by"] === "string").map((x) => {
+      const p = x.payload as Record<string, unknown>;
+      const summary = Object.entries(p).filter(([k]) => k !== "by" && k !== "steward").map(([k, v]) => `${k}=${typeof v === "string" ? v.slice(0, 40) : JSON.stringify(v)}`).join(" ");
+      return { seq: x.seq, ts: x.ts, type: x.type, by: String(p["by"]), steward: typeof p["steward"] === "string" ? (p["steward"] as string) : null, summary };
+    }).reverse().slice(0, limit);
   }
 
   /* ---------------- keys (constitution I.3) ---------------- */
@@ -441,13 +472,13 @@ export class V2Service {
     return { status: "decided", id, verdict: s.verdict, oddCommit, deterministic, appealUntil: s.verdict === "fabrication" ? new Date(this.now().getTime() + 14 * 24 * 3600 * 1000).toISOString() : null };
   }
 
-  /** Reverse a finding (a steward's act after an appeal, logged). */
-  async reverseFinding(id: string): Promise<ApiResult> {
+  /** Reverse a finding (a steward's act after an appeal, logged with the steward's operator id). */
+  async reverseFinding(id: string, steward?: string): Promise<ApiResult> {
     const r = await this.record();
     const f = r.findings.find((x) => x.id === id);
     if (!f) return err(404, "no such finding");
     if (f.reversed) return err(409, "already reversed");
-    await this.o.log.append("finding.reverse", { id });
+    await this.o.log.append("finding.reverse", { id, ...(steward ? { by: "steward", steward } : {}) });
     return ok(200, { id, reversed: true });
   }
 

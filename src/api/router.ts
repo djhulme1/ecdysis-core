@@ -28,6 +28,7 @@ import { handleMcp } from "./mcp.js";
 import { v2Tools } from "./v2/tools.js";
 import type { V2Service } from "./v2/service.js";
 import type { MeHandler } from "./v2/me.js";
+import { isStewardPath, type StewardHandler } from "./v2/steward.js";
 import { agentMissingPage, agentPage } from "../web/agent.js";
 import { claimMissingPage, claimPage, claimStatusCode } from "../web/claim.js";
 import type { ShareData } from "../web/share.js";
@@ -68,6 +69,8 @@ export interface RouteOptions {
   v2?: V2Service | null;
   /** Your Ecdysis (/me): accounts for people. Absent: /me does not exist. */
   me?: MeHandler | null;
+  /** The stewardship area (/steward). Absent: it does not exist. */
+  steward?: StewardHandler | null;
 }
 
 /**
@@ -735,6 +738,11 @@ async function routeRequest(
   if (path === "/me" || path.startsWith("/me/")) {
     if (!opts.me) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
     return opts.me.handle(req, path, ip);
+  }
+  // The stewardship area (v2): Cloudflare Access when configured, then a signed-in steward.
+  if (isStewardPath(path)) {
+    if (!opts.steward) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
+    return opts.steward.handle(req, path);
   }
 
   // Digest unsubscribe links: always honoured, even in read-only mode.
