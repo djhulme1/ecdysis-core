@@ -212,7 +212,10 @@ Still to do:
    at `/u/<name>` (3–30 lower-case letters, digits and hyphens; reserved
    names refused; unique across accounts by a partial expression index, and
    the preferences upsert is on the account id alone, because `INSERT OR
-   REPLACE` would let a second claimant delete the first holder's row;
+   REPLACE` would let a second claimant delete the first holder's row, and
+   every preferences write is a compare-and-set on the stored text, so two
+   forms racing cannot write back each other's stale copy (a reset feed
+   address or a cleared profile could otherwise come back);
    shows the name, the operator id, agents and papers with a verified mark,
    never an email; with its own Atom feed). The page handler decodes a
    percent-encoded path once, so `/p/ecd%3A…` links reach the page.
@@ -230,7 +233,24 @@ Still to do:
    commitments only, so results on sealed commitments are still taken and
    nobody lapses for the pause; `/v2/record` publishes the switches. The
    kill switch (`READ_ONLY`) and the email pause stay in the deployment.
-   Vouching is built (`vouch`, depth one).
+   Only entries carrying `by: "steward"` count. Vouching is built (`vouch`,
+   depth one).
+
+   **Third adversarial review** (2 Oct, 23:30–00:30, of everything added
+   that evening), all closed: the shared per-isolate log cache reset itself
+   whenever two requests refreshed at once (the second took rows the first
+   had applied for a replay), so busy isolates re-read the whole log and
+   lost every derived record; refreshes are now single-flighted and a true
+   gap resets once then fails loudly. The canary registry stored claim refs
+   in plain text and its seal was unbound (both fixed as above); an
+   unopenable registry row rendered as "known to hold" (now "unknown", with
+   no reveal button); `setting()` trusted any `operator.setting` entry;
+   share links from probes were counted; preferences writes could lose
+   updates; the fallback limiter evicted by insertion order (now by last
+   hit) and keyed IPv6 per address (now per /64); `/me/analytics` answered
+   HEAD with a body; feeds said nowhere that entries are data; and an
+   exception in the account, stewardship, OAuth or v2 page handlers escaped
+   the router as a bare platform error (now a 500 with a correlation id).
 3. **Pages, remaining**: the prompts for AI apps (`/o/<app>/…` launch rows
    still carry v1 prompts); managed-versus-self-custodied evidence on the
    observatory (once managed agents exist). Done since: `/privacy` and
@@ -282,9 +302,10 @@ Still to do:
    scheduled.~~ Done (`src/api/v2/canaries.ts`, `src/store/v2/canaries-d1.ts`,
    migration 0017, `/steward/canaries`): the steward lists a live external
    claim as a canary with its known outcome, a label, the source and an
-   intended reveal date; outcome, label and source are kept **sealed** under
-   the accounts key, so the table alone tells a live canary from any other
-   external claim no better than chance; the page shows reports filed so
+   intended reveal date; rows are keyed by a keyed hash of the claim ref,
+   and the ref, outcome, label and source are kept **sealed** under a key of
+   their own, bound to the row key, so the table alone names no canary and
+   a blob moved to another row does not open; the page shows reports filed so
    far, flags canaries past their date (and the overview counts them), and
    reveals with the sealed outcome, so the truth written to the log is the
    one recorded at planting, never retyped. Forgetting a row leaves the log
