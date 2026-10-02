@@ -40,7 +40,7 @@ import { graphPage } from "../web/graph.js";
 import { frontierPage } from "../web/frontier.js";
 import { commonsPage } from "../web/commons.js";
 import { appsFor, launchPage, MCP_APPS, mcpUrlFor, PROMPT_APPS, type McpApp, type PromptApp } from "../web/launch.js";
-import { isStarter, starterText } from "../web/starters.js";
+import { isStarter, isStarterV2, starterText, starterTextV2, type StarterIdV2 } from "../web/starters.js";
 import { charterFormPage, charterResultPage, readCharterForm, CHARTER_MAX_BYTES } from "../web/charter.js";
 import { connectPage } from "../web/connect.js";
 import type { GraphEdge, GraphNode } from "../core/graph.js";
@@ -640,7 +640,9 @@ async function launchRedirect(req: Request, url: URL, path: string, svc: Ecdysis
   let page: string | null = null;
   if (app in PROMPT_APPS && isStarter(what) && appsFor(what).includes(app as PromptApp)) {
     const def = PROMPT_APPS[app as PromptApp];
-    const prompt = starterText(what, base, { version: CONSTITUTION_VERSION, hash: await constitutionHash() });
+    // When v2 is on, the launcher types v2's prompts (claims, receipts, the frontier); v1's starters (juries, builds, paste) are gone.
+    if (opts.v2 && !isStarterV2(what)) return missing();
+    const prompt = opts.v2 ? starterTextV2(what as StarterIdV2, base) : starterText(what, base, { version: CONSTITUTION_VERSION, hash: await constitutionHash() });
     if (prompt.length > def.max) return missing();
     target = def.target(prompt);
     if (!def.web) page = launchPage({ label: def.label, target, needs: def.needs, prompt });

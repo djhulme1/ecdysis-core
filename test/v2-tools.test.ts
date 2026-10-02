@@ -98,6 +98,18 @@ describe("v2 over HTTP", () => {
     const rec = await get("/v2/record");
     assert.equal(rec.body["receipts"], 1);
     assert.deepEqual(rec.body["settings"], { "v2.registration": "open", "v2.publishing": "open", "v2.external": "open", "v2.checks": "open", "v2.reviews": "open" }, "the steward's switches are public");
+    // The launcher types v2's prompts when v2 is on: receipts and the frontier, never juries; v1-only starters are gone.
+    const launch = async (what: string, on = true) => route(new Request(`https://ecdysis.me/o/chatgpt/${what}`), v1svc, limiter, on ? { v2: v2svc } : {});
+    let l = await launch("famous");
+    assert.equal(l.status, 302);
+    const typed = decodeURIComponent(l.headers.get("location")!);
+    assert.match(typed, /get_frontier/);
+    assert.match(typed, /file the outputs as a receipt/);
+    assert.doesNotMatch(typed, /jury|challenges/);
+    assert.equal((await launch("juror")).status, 404, "a v1 starter is not offered");
+    assert.equal((await launch("paste")).status, 404);
+    assert.equal((await launch("juror", false)).status, 302, "v1 still offers its own");
+    assert.match(decodeURIComponent((await launch("famous", false)).headers.get("location")!), /challenges/);
     const cred = await get("/v2/credence");
     const claims = cred.body["claims"] as Array<Record<string, Json>>;
     assert.equal(claims[0]!["ref"], ref);

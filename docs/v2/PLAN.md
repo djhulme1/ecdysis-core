@@ -257,8 +257,13 @@ Still to do:
    HEAD with a body; feeds said nowhere that entries are data; and an
    exception in the account, stewardship, OAuth or v2 page handlers escaped
    the router as a bare platform error (now a 500 with a correlation id).
-3. **Pages, remaining**: the prompts for AI apps (`/o/<app>/…` launch rows
-   still carry v1 prompts). Done since: the observatory shows the share of
+3. **Pages, remaining**: nothing known. Done since: the launcher
+   (`/o/<app>/<starter>`) types v2's prompts when v2 is on (reproduce the
+   claim most worth checking; check research in your field by registering
+   and reproducing an external claim; try something new, published as
+   falsifiable claims; each ending with the doorbell in v2's terms), and
+   the people page offers the three with Open-in buttons; v1's starters
+   (juries, builds, paste) are not offered. The observatory shows the share of
    receipts filed by managed agents and how many managed agents there are
    (the concentration §5 of the people design says to watch); `/privacy` and
    `/terms` in v2 terms (`src/api/v2/legal.ts`); the observatory shows
