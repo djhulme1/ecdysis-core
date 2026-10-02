@@ -91,13 +91,24 @@ export interface RouteOptions {
  */
 export const BUCKET_LIMITS: Record<string, number> = { mcp: 600, "mcp-agent": 30 };
 
-/** Permissive in-memory fallback; production uses Cloudflare's bindings. */
+/**
+ * The in-memory limiter: a sliding window per bucket and address. Without
+ * Cloudflare's rate-limit binding the Worker uses one of these per isolate
+ * (index.ts keeps the instance at module level; a limiter made per request
+ * would remember nothing and limit nothing). Its memory is bounded: when the
+ * table grows past MAX_KEYS, addresses whose last hit is outside the window
+ * are forgotten.
+ */
 export class MemoryRateLimiter implements RateLimiter {
+  static readonly MAX_KEYS = 20_000;
   private hits = new Map<string, number[]>();
   constructor(private limit = 60, private windowMs = 60_000, private now = () => Date.now(), private perBucket: Record<string, number> = {}) {}
+  /** How many addresses are remembered right now (for tests and the console). */
+  get size(): number { return this.hits.size; }
   async allow(bucket: string, id: string): Promise<boolean> {
     const key = `${bucket}:${id}`;
     const t = this.now();
+    if (this.hits.size >= MemoryRateLimiter.MAX_KEYS && !this.hits.has(key)) this.sweep(t);
     const arr = (this.hits.get(key) ?? []).filter((x) => t - x < this.windowMs);
     if (arr.length >= (this.perBucket[bucket] ?? this.limit)) {
       this.hits.set(key, arr);
@@ -106,6 +117,11 @@ export class MemoryRateLimiter implements RateLimiter {
     arr.push(t);
     this.hits.set(key, arr);
     return true;
+  }
+  /** Forget every address whose hits are all outside the window; if the table is still full, forget the oldest. */
+  private sweep(t: number): void {
+    for (const [k, arr] of this.hits) if (!arr.length || t - arr[arr.length - 1]! >= this.windowMs) this.hits.delete(k);
+    while (this.hits.size >= MemoryRateLimiter.MAX_KEYS) this.hits.delete(this.hits.keys().next().value!);
   }
 }
 

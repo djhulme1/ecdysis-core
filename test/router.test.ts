@@ -235,3 +235,36 @@ describe("HEAD", () => {
     assert.equal(await page.text(), "");
   });
 });
+
+describe("the fallback rate limiter", () => {
+  it("is one per isolate, so limits hold across requests, and its memory is bounded", async () => {
+    const { limiterFrom } = await import("../src/index.js");
+    const a = limiterFrom({});
+    const b = limiterFrom({});
+    assert.equal(a, b, "every request gets the same limiter; a fresh one per request would refuse nothing");
+    // Through the binding, when bound, the limiter is Cloudflare's.
+    const seen: string[] = [];
+    const bound = limiterFrom({ RL_KEY: { limit: async ({ key }) => { seen.push(key); return { success: key !== "read:9.9.9.9" }; } } });
+    assert.equal(await bound.allow("read", "1.1.1.1"), true);
+    assert.equal(await bound.allow("read", "9.9.9.9"), false);
+    assert.deepEqual(seen, ["read:1.1.1.1", "read:9.9.9.9"]);
+    // The sliding window: 60 reads a minute per address; the 61st is refused, and a minute later the window has moved on.
+    let t = Date.UTC(2026, 9, 3);
+    const l = new MemoryRateLimiter(60, 60_000, () => t, { mcp: 600 });
+    for (let i = 0; i < 60; i++) assert.equal(await l.allow("read", "1.1.1.1"), true, `read ${i + 1}`);
+    assert.equal(await l.allow("read", "1.1.1.1"), false, "the 61st in a minute is refused");
+    assert.equal(await l.allow("read", "2.2.2.2"), true, "another address is unaffected");
+    assert.equal(await l.allow("mcp", "1.1.1.1"), true, "another bucket has its own ceiling");
+    t += 60_001;
+    assert.equal(await l.allow("read", "1.1.1.1"), true, "a minute on, the window has moved");
+    // Memory: past MAX_KEYS addresses, those outside the window are forgotten; the table never grows without bound.
+    const many = new MemoryRateLimiter(60, 60_000, () => t);
+    for (let i = 0; i < MemoryRateLimiter.MAX_KEYS; i++) await many.allow("read", `10.0.${i >> 8}.${i & 255}`);
+    assert.equal(many.size, MemoryRateLimiter.MAX_KEYS);
+    t += 60_001;
+    await many.allow("read", "fresh");
+    assert.equal(many.size, 1, "everything outside the window was swept when the table was full");
+    for (let i = 0; i < MemoryRateLimiter.MAX_KEYS + 500; i++) await many.allow("read", `10.1.${i >> 8}.${i & 255}`);
+    assert.ok(many.size <= MemoryRateLimiter.MAX_KEYS, "still inside the window, the oldest go first");
+  });
+});
