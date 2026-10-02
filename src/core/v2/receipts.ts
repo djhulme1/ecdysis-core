@@ -173,10 +173,10 @@ export function compareOutputs(a: Outputs, b: Outputs, spec: OutputSpec[]): { ma
 }
 
 /**
- * Determinism, observed: a bundle with a pinned image whose independent
- * runs under ONE seed have matched exactly at least DETERMINISM_MIN_RUNS
- * times (the runs that establish this may include the disputed seed's own
- * agreeing runs).
+ * Determinism, observed: a bundle with a pinned image for which at least
+ * DETERMINISM_MIN_RUNS independent runs under ONE seed produced exactly
+ * identical outputs (the runs that establish this may be the disputed
+ * seed's own agreeing runs).
  */
 export const DETERMINISM_MIN_RUNS = 2;
 /** A fabrication finding needs this many independent runs, all but one agreeing. */
@@ -184,8 +184,19 @@ export const FINDING_MIN_RUNS = 4;
 /** A finding takes effect this long after it is made, unless reversed. */
 export const APPEAL_MS = 14 * 24 * 3600 * 1000;
 
-export function isDeterministic(bundle: Bundle, exactMatchesUnderOneSeed: number): boolean {
-  return !!bundle.image && exactMatchesUnderOneSeed >= DETERMINISM_MIN_RUNS;
+export function isDeterministic(bundle: Bundle, identicalRunsUnderOneSeed: number): boolean {
+  return !!bundle.image && identicalRunsUnderOneSeed >= DETERMINISM_MIN_RUNS;
+}
+
+/** The size of the largest set of runs with exactly identical outputs. */
+export function largestIdenticalGroup(runs: Array<{ outputs: Outputs }>, spec: OutputSpec[]): number {
+  const exact = spec.map((o) => ({ name: o.name }));
+  let best = 0;
+  for (const a of runs) {
+    const n = runs.filter((b) => compareOutputs(a.outputs, b.outputs, exact).match).length;
+    if (n > best) best = n;
+  }
+  return best;
 }
 
 export type Settlement =

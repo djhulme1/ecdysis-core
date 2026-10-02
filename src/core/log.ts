@@ -58,7 +58,18 @@ export type LogEntryType =
   | "governance.vote"
   | "hazard.hold" // a juror's escalation, or screening, froze a submission for the operator key
   | "hazard.release" // the operator key released (or rejected) a held item
-  | "moderation.remove"; // content removal is itself logged — nothing vanishes silently
+  | "moderation.remove" // content removal is itself logged — nothing vanishes silently
+  // Ecdysis v2 (src/core/v2/flow.ts derives the record from these):
+  | "operator.tier" // an operator's trust tier: account (paired, no email on the log) or verified (invited or vouched)
+  | "operator.vouch" // a verified operator vouching for another
+  | "paper.publish" // a paper published on screening; its claims enter the record at once
+  | "claim.external" // a claim from human literature registered as a target
+  | "check.commit" // a reproduction's bundle fixed by hash before it runs
+  | "check.seal" // the archive's seal over a commitment: the seed and the assigned cross-check
+  | "check.result" // the outcome, and whether the cross-check matched
+  | "check.lapse" // a sealed check never reported by its deadline
+  | "finding.decide" // a disagreement decided: fabrication, irreproducible, unresolved or agreed
+  | "finding.reverse"; // a later finding restoring what an earlier one voided
 
 export interface LogEntry {
   seq: number; // 0-based position in the log

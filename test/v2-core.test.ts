@@ -347,7 +347,7 @@ describe("receipts", () => {
     assert.deepEqual(settleRuns([honest, fourth], spec, true), { verdict: "agreed" });
   });
 
-  it("determinism is observed, never declared: a pinned image and two exact matches", () => {
+  it("determinism is observed, never declared: a pinned image and two identical independent runs", () => {
     const bundle: Bundle = { repo: "https://github.com/x/y", commit: "a".repeat(40), run: "python run.py", outputs: [{ name: "a" }], runtimeMinutes: 5 };
     assert.equal(isDeterministic(bundle, 5), false, "no pinned image: never deterministic");
     assert.equal(isDeterministic({ ...bundle, image: "sha256:" + "b".repeat(64) }, 1), false);
