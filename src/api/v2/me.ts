@@ -34,6 +34,8 @@ export interface MeOptions {
   /** Secure cookies (off only in local tests over http). */
   secure?: boolean;
   readOnly?: boolean;
+  /** The one-click stop for alert emails: valid token → everything off. Works signed out. */
+  stop?: (accountId: string, token: string) => Promise<boolean>;
 }
 
 export class MeHandler {
@@ -67,6 +69,15 @@ export class MeHandler {
     const browser = cookie(req.headers.get("cookie"), BROWSER_COOKIE);
     const signed = await this.o.accounts.session(cookie(req.headers.get("cookie"), SESSION_COOKIE));
 
+    // One-click stop from an alert email: no session needed, GET or POST, always honoured (even read-only).
+    if (path === "/me/stop") {
+      const a = url.searchParams.get("a") ?? "";
+      const t = url.searchParams.get("t") ?? "";
+      const ok = this.o.stop ? await this.o.stop(a, t) : false;
+      return this.html(ok ? 200 : 404, ok
+        ? noticePage("Alerts stopped", "Ecdysis will send you no more alert or digest emails. You can turn any of them back on from your page.")
+        : noticePage("Link not recognised", "This stop link isn't valid. Sign in to your page to change your notifications instead."));
+    }
     // Sign-in flow.
     if (path === "/me/login") {
       if (method === "POST") {

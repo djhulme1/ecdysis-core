@@ -45,3 +45,9 @@ CREATE TABLE IF NOT EXISTS account_events (
   at            TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS account_events_bucket ON account_events (bucket, at);
+CREATE TABLE IF NOT EXISTS account_alerts (
+  account_id    TEXT NOT NULL,         -- which alert email went to whom: sent once per key
+  key           TEXT NOT NULL,         -- "<kind>:<subject>"
+  at            TEXT NOT NULL,
+  PRIMARY KEY (account_id, key)
+);

@@ -83,9 +83,13 @@ export interface AccountStore {
   usePairing(hash: string, usedAt: string): Promise<void>;
   getPreferences(accountId: string): Promise<Preferences | null>;
   putPreferences(accountId: string, prefs: Preferences): Promise<void>;
-  /** Rate limiting: how many events a bucket saw since `sinceIso`, and record one. */
+  /** Rate limiting: how many events a bucket saw since `sinceIso`, and record one. Events are forgotten after a day. */
   countEvents(bucket: string, sinceIso: string): Promise<number>;
   recordEvent(bucket: string, atIso: string): Promise<void>;
+  /** Alert emails: accounts with any alert ticked, and the durable record of what was sent to whom. */
+  listAlertAccounts(): Promise<Array<{ account: AccountRow; alerts: Alert[] }>>;
+  wasSent(accountId: string, key: string): Promise<boolean>;
+  markSent(accountId: string, key: string, atIso: string): Promise<void>;
 }
 
 export class MemoryAccountStore implements AccountStore {
@@ -102,6 +106,7 @@ export class MemoryAccountStore implements AccountStore {
   async deleteAccount(id: string) {
     this.accounts.delete(id);
     this.prefs.delete(id);
+    for (const k of this.sent) if (k.startsWith(`${id}|`)) this.sent.delete(k);
     for (const [h, s] of this.sessions) if (s.accountId === id) this.sessions.delete(h);
     for (const [h, p] of this.pairings) if (p.accountId === id) this.pairings.delete(h);
   }
@@ -119,6 +124,14 @@ export class MemoryAccountStore implements AccountStore {
   async putPreferences(accountId: string, prefs: Preferences) { this.prefs.set(accountId, structuredClone(prefs)); }
   async countEvents(bucket: string, sinceIso: string) { return this.events.filter((e) => e.bucket === bucket && e.at >= sinceIso).length; }
   async recordEvent(bucket: string, atIso: string) { this.events.push({ bucket, at: atIso }); }
+  sent = new Set<string>();
+  async listAlertAccounts() {
+    const out: Array<{ account: AccountRow; alerts: Alert[] }> = [];
+    for (const [id, p] of this.prefs) { const a = this.accounts.get(id); if (a && p.notifications.alerts.length) out.push({ account: a, alerts: p.notifications.alerts }); }
+    return out;
+  }
+  async wasSent(accountId: string, key: string) { return this.sent.has(`${accountId}|${key}`); }
+  async markSent(accountId: string, key: string) { this.sent.add(`${accountId}|${key}`); }
 }
 
 export interface AccountsOptions {

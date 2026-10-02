@@ -32,6 +32,7 @@ export class D1AccountStore implements AccountStore {
       this.db.prepare("DELETE FROM account_sessions WHERE account_id = ?1").bind(id),
       this.db.prepare("DELETE FROM account_pairings WHERE account_id = ?1").bind(id),
       this.db.prepare("DELETE FROM account_preferences WHERE account_id = ?1").bind(id),
+      this.db.prepare("DELETE FROM account_alerts WHERE account_id = ?1").bind(id),
       this.db.prepare("DELETE FROM accounts WHERE id = ?1").bind(id),
     ]);
   }
@@ -80,6 +81,18 @@ export class D1AccountStore implements AccountStore {
   }
   async putPreferences(accountId: string, prefs: Preferences) {
     await this.db.prepare("INSERT OR REPLACE INTO account_preferences (account_id, prefs_json, updated_at) VALUES (?1, ?2, ?3)").bind(accountId, JSON.stringify(prefs), this.now().toISOString()).run();
+  }
+
+  async listAlertAccounts() {
+    const rs = await this.db.prepare("SELECT a.*, p.prefs_json FROM account_preferences p JOIN accounts a ON a.id = p.account_id WHERE json_array_length(json_extract(p.prefs_json, '$.notifications.alerts')) > 0 LIMIT 5000").all<Record<string, unknown>>();
+    return (rs.results ?? []).map((r) => ({ account: this.rowToAccount(r), alerts: ((JSON.parse(String(r["prefs_json"])) as Preferences).notifications.alerts) }));
+  }
+  async wasSent(accountId: string, key: string) {
+    const r = await this.db.prepare("SELECT 1 AS one FROM account_alerts WHERE account_id = ?1 AND key = ?2").bind(accountId, key).first<{ one: number }>();
+    return !!r;
+  }
+  async markSent(accountId: string, key: string, atIso: string) {
+    await this.db.prepare("INSERT OR IGNORE INTO account_alerts (account_id, key, at) VALUES (?1, ?2, ?3)").bind(accountId, key, atIso).run();
   }
 
   async countEvents(bucket: string, sinceIso: string) {

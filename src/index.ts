@@ -11,6 +11,7 @@ import { Accounts } from "./api/v2/accounts.js";
 import { MeHandler } from "./api/v2/me.js";
 import { StewardHandler } from "./api/v2/steward.js";
 import { PagesHandler } from "./api/v2/pages.js";
+import { Notifier } from "./api/v2/notify.js";
 import { TransparencyLog } from "./core/log.js";
 import { D1V2Store } from "./store/v2/d1.js";
 import { D1AccountStore } from "./store/v2/accounts-d1.js";
@@ -192,9 +193,9 @@ function serviceFrom(env: Env, store: Store = new D1Store(env.DB)): EcdysisServi
 
 /** Ecdysis v2, when switched on: the same log and database, the v2 tables, the log key as the sealer. */
 /** Accounts for people (v2), present whenever v2 is; closed without ACCOUNTS_KEY. */
-function accountsFrom(env: Env): Accounts {
+function accountsFrom(env: Env, store: D1AccountStore): Accounts {
   return new Accounts({
-    store: new D1AccountStore(env.DB),
+    store,
     key: env.ACCOUNTS_KEY ?? null,
     send: env.HERALD_API_KEY ? resendSender(env.HERALD_API_KEY) : null,
     from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>",
@@ -204,9 +205,10 @@ function accountsFrom(env: Env): Accounts {
   });
 }
 
-function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler } | null {
+function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
-  const accounts = accountsFrom(env);
+  const accountStore = new D1AccountStore(env.DB);
+  const accounts = accountsFrom(env, accountStore);
   const v2 = new V2Service({
     log: new TransparencyLog(store),
     store: new D1V2Store(env.DB, store),
@@ -214,9 +216,15 @@ function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; stewa
     screeners: screenersFrom(env),
     pairing: (code, ip) => accounts.consumePairing(code, ip),
   });
+  const notifier = new Notifier({
+    accounts, accountStore, ledger: store, v2,
+    send: env.HERALD_API_KEY && !emailPaused(env) ? resendSender(env.HERALD_API_KEY) : null,
+    from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>", replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
+    siteBase: "https://ecdysis.me", emailDailyCap: emailCap(env),
+  });
   return {
-    v2,
-    me: new MeHandler({ accounts, v2, readOnly: readOnly(env) }),
+    v2, notifier,
+    me: new MeHandler({ accounts, v2, readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
     steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env) }),
     pages: new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY) }),
@@ -364,12 +372,14 @@ export default {
         });
         // v2: seal any commitment whose seal never reached the log, and lapse sealed checks past their deadline.
         const swept = v2 ? await v2.v2.sweepLapses().catch((e) => { console.error("v2 sweep failed", e); return { lapsed: [] as string[], sealed: [] as string[] }; }) : { lapsed: [], sealed: [] };
+        // v2: alert emails people asked for, once each, within the shared daily cap.
+        const alerted = v2 ? await v2.notifier.run().catch((e) => { console.error("v2 alerts failed", e); return { sent: 0, skipped: 0, events: 0 }; }) : { sent: 0, skipped: 0, events: 0 };
         if (r.cases || purged || sent.drawn || sent.reminders || rang.rung || rang.failed || swept.lapsed.length || swept.sealed.length) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent, doorbells: rang, v2: swept }));
         await store.putOpsState("cron:last", {
           ok: true, ...r, purged, alertsDrawn: sent.drawn, alertsReminders: sent.reminders,
           doorbellsRung: rang.rung, doorbellsFailed: rang.failed, doorbellsPaused: rang.paused, doorbellsWaiting: rang.waiting,
           ...("error" in rang ? { doorbellsError: rang.error } : {}),
-          v2Lapsed: swept.lapsed.length, v2Sealed: swept.sealed.length,
+          v2Lapsed: swept.lapsed.length, v2Sealed: swept.sealed.length, v2AlertsSent: alerted.sent,
         }, at);
       } catch (e) {
         console.error("cron failed", e);

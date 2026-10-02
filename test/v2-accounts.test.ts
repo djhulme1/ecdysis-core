@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
-import { generateKeyPair } from "../src/core/crypto.js";
+import { generateKeyPair, signJson } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { Accounts, LINKS_PER_HOUR, MemoryAccountStore, PAIRING_ATTEMPTS_PER_HOUR, SIGNUPS_PER_HOUR } from "../src/api/v2/accounts.js";
 import { MeHandler } from "../src/api/v2/me.js";
@@ -316,5 +316,57 @@ describe("accounts (v2)", () => {
     assert.equal((await post("/me/login", { email: "x@example.org" })).status, 503);
     assert.equal((await post("/me/signout", { csrf })).status, 303);
     assert.equal(await w.accounts.session(c.session), null);
+  });
+});
+
+describe("alert emails", () => {
+  it("sends each alert once, bundled, from the record only, with a one-click stop that works signed out", async () => {
+    const { Notifier } = await import("../src/api/v2/notify.js");
+    const w = world();
+    const ledger = new MemoryStore();
+    const mails: Array<{ to: string; subject: string; text: string; headers: Record<string, string> }> = [];
+    const notifier = new Notifier({
+      accounts: w.accounts, accountStore: w.store, ledger, v2: w.v2,
+      send: async (m) => { mails.push({ to: m.to, subject: m.subject, text: m.text, headers: m.headers }); return { ok: true, id: "m" }; },
+      from: "Ecdysis <accounts@notify.ecdysis.me>", replyTo: "replies@ecdysis.me", siteBase: "https://ecdysis.me", now: w.now,
+    });
+    const c = await w.signIn("dan@example.org");
+    const s = (await w.accounts.session(c.session))!;
+    const code = await w.accounts.newPairingCode(s);
+    const kp = await generateKeyPair();
+    await w.v2.registerAgent({ handle: "Moth", publicKey: kp.publicKey, pairing: code }, "1.1.1.1");
+    // Nothing ticked: nothing sent, whatever happens.
+    assert.deepEqual(await notifier.run(), { sent: 0, skipped: 0, events: 0 });
+    await w.accounts.savePreferences(s, { interests: { fields: [], topics: [], claims: [], agents: [] }, notifications: { digest: "off", alerts: ["check.owed", "finding.against"] }, profile: null });
+    // A check Moth owes, due within two days: one email, with a stop link and no text from anyone's paper.
+    const sealedAt = w.now().toISOString();
+    const log = (w.v2 as unknown as { o: { log: { append: (t: string, p: Json) => Promise<unknown> } } }).o.log;
+    const ext = await w.v2.registerExternalClaim({ payload: { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De <script>", test: "BLEU below 27 with the stated setup", agent: { handle: "Moth", publicKey: kp.publicKey }, ts: sealedAt.replace(/\.\d{3}Z$/, "Z") }, signature: await signJson(kp.privateKey, { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De <script>", test: "BLEU below 27 with the stated setup", agent: { handle: "Moth", publicKey: kp.publicKey }, ts: sealedAt.replace(/\.\d{3}Z$/, "Z") }) });
+    assert.equal(ext.status, 201, JSON.stringify(ext.body));
+    const ref = String((ext.body as Record<string, Json>)["ref"]);
+    await log.append("check.commit", { id: "a".repeat(64), target: ref, kind: "replication", bundle: "b".repeat(64), image: true, runtimeMinutes: 5, handle: "Moth", operatorId: c.account.operatorId });
+    await log.append("check.seal", { commit: "a".repeat(64), seal: "x", seed: "c".repeat(64), crossCheck: null });
+    assert.deepEqual(await notifier.run(), { sent: 0, skipped: 0, events: 0 }, "six days to go: nothing yet");
+    w.tick(5 * 24 * 60 * MIN + 10 * MIN);
+    let r = await notifier.run();
+    assert.deepEqual(r, { sent: 1, skipped: 0, events: 1 });
+    assert.equal(mails[0]!.to, "dan@example.org");
+    assert.match(mails[0]!.text, /Moth owes the result of its check of ext:/);
+    assert.doesNotMatch(mails[0]!.text, /attention alone|<script>/, "nothing anyone wrote reaches an inbox");
+    const stop = mails[0]!.text.match(/https:\/\/ecdysis\.me\/me\/stop\?a=([^&\s]+)&t=([0-9a-f]{40})/)!;
+    assert.ok(stop);
+    assert.match(mails[0]!.headers["list-unsubscribe"] ?? "", /\/me\/stop/);
+    // Once.
+    w.tick(60 * MIN);
+    assert.deepEqual(await notifier.run(), { sent: 0, skipped: 0, events: 0 });
+    // The stop link, signed out, in another browser: everything off; a wrong token does nothing.
+    const bad = await w.me.handle(new Request(`https://ecdysis.me/me/stop?a=${stop[1]}&t=${"0".repeat(40)}`), "/me/stop", "9.9.9.9");
+    assert.equal(bad.status, 404);
+    const me2 = new MeHandler({ accounts: w.accounts, v2: w.v2, secure: false, stop: (a, t) => notifier.stop(a, t) });
+    const good = await me2.handle(new Request(`https://ecdysis.me/me/stop?a=${decodeURIComponent(stop[1]!)}&t=${stop[2]}`), "/me/stop", "9.9.9.9");
+    assert.equal(good.status, 200);
+    assert.match(await good.text(), /Alerts stopped/);
+    assert.deepEqual((await w.accounts.preferences(s)).notifications, { digest: "off", alerts: [] });
+    assert.deepEqual(await notifier.run(), { sent: 0, skipped: 0, events: 0 });
   });
 });
