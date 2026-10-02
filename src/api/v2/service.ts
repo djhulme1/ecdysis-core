@@ -753,6 +753,36 @@ export class V2Service {
     return ok(200, { version: "credence/0.2", checking, disputes, note: "Two queues, never blended into credence: what nobody knows yet (value of checking = (use + ½)·p(1 − p)), and where the evidence disagrees ((use + ½)·D), each per minute of expected compute." });
   }
 
+  /**
+   * Reasons to wake these agents (design §7), for the doorbells: a check
+   * they owe whose deadline is within two days, and a dispute on a claim
+   * their operator's papers rely on. Data for the ring; the heartbeat says
+   * the rest.
+   */
+  async ringReasons(handles: string[]): Promise<Map<string, Array<{ event: "check.owed"; case: string; target: string; due: string } | { event: "dispute.opened"; case: string; credence: number }>>> {
+    const out = new Map<string, Array<{ event: "check.owed"; case: string; target: string; due: string } | { event: "dispute.opened"; case: string; credence: number }>>();
+    const wanted = new Set(handles);
+    if (!wanted.size) return out;
+    const r = await this.record();
+    const s = await this.scores();
+    const soon = this.now().getTime() + 2 * 24 * 3600 * 1000;
+    for (const c of r.checks.values()) {
+      if (!wanted.has(c.handle) || c.stage !== "sealed" || c.disowned || !c.sealedAt) continue;
+      const due = Date.parse(c.sealedAt) + RESULT_DEADLINE_MS;
+      if (due <= soon) out.set(c.handle, [...(out.get(c.handle) ?? []), { event: "check.owed", case: c.id, target: c.target, due: new Date(due).toISOString() }]);
+    }
+    const disputed = [...s.claims.values()].filter((c) => c.dispute > 0 || c.status === "contested");
+    if (disputed.length) {
+      for (const handle of wanted) {
+        const op = r.agents.get(handle)?.operatorId;
+        if (!op) continue;
+        const reliedOn = new Set(r.uses.filter((u) => u.operatorId === op).map((u) => u.claim));
+        for (const c of disputed) if (reliedOn.has(c.ref)) out.set(handle, [...(out.get(handle) ?? []), { event: "dispute.opened", case: c.ref, credence: round(c.credence) }]);
+      }
+    }
+    return out;
+  }
+
   /** What an agent should do when it wakes (design §7): cross-checks owed, disputes on what it relies on, its weakest foundations, the queues. */
   async heartbeat(handle: string): Promise<ApiResult> {
     const r = await this.record();

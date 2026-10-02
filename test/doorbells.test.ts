@@ -22,7 +22,7 @@ import { structuralScreener } from "../src/core/hazard.js";
 import { TransparencyLog } from "../src/core/log.js";
 import type { Json } from "../src/core/canonical.js";
 import {
-  lastSlot, nextResearch, parseRoutine, researchDue, RINGS_PER_DAY, slotOffset, webhookProblem,
+  lastSlot, nextResearch, parseRoutine, researchDue, RINGS_PER_DAY, slotOffset, webhookProblem, type RingReason,
 } from "../src/core/wake.js";
 
 const T0 = Date.UTC(2026, 9, 2, 9, 0, 0);
@@ -644,5 +644,34 @@ describe("the router", () => {
     const day = new Date().toISOString().slice(0, 10);
     const counts = await w.store.listAccessPrefix("f");
     assert.ok(counts.some((c) => c.id === "funnel:doorbell:200") && counts.some((c) => c.id === `fd:${day}:doorbell:ok`), JSON.stringify(counts.map((c) => c.id)));
+  });
+});
+
+describe("v2 reasons through the doorbells", () => {
+  it("rings an owed check once a day while it is owed, and a dispute on what the agent relies on once", async () => {
+    const w = await world();
+    await connected(w);
+    w.calls.length = 0;
+    const extra = new Map<string, RingReason[]>();
+    const bells = w.make({ extraReasons: async (handles) => new Map([...extra].filter(([h]) => handles.includes(h))) });
+    const due = new Date(w.now + 36 * HOUR).toISOString();
+    extra.set("Moth-1", [{ event: "check.owed", case: "c".repeat(64), target: "ext:0123456789abcdef#C1", due }, { event: "dispute.opened", case: "ecd:2610.abcd#C2", credence: 0.52 }]);
+    w.tick(2 * HOUR);
+    let r = await bells.notify();
+    assert.equal(r.rung, 1);
+    assert.deepEqual(events(w.calls[0]!), ["check.owed", "dispute.opened"], "owed first, then the dispute");
+    const text = String(w.calls[0]!.body.text);
+    assert.ok(text.includes("check.owed") && text.includes("ext:0123456789abcdef#C1") && text.includes("/v2/receipts/" + "c".repeat(64)));
+    assert.ok(text.includes("dispute.opened") && text.includes("ecd:2610.abcd#C2"));
+    // Two hours on: still owed, same day, same dispute: nothing new to say.
+    w.tick(2 * HOUR);
+    r = await bells.notify();
+    assert.equal(r.rung, 0);
+    // The deadline's day changes as it approaches? No: the claim is keyed by the deadline's date, which is fixed; a different owed check rings.
+    extra.set("Moth-1", [{ event: "check.owed", case: "d".repeat(64), target: "ext:0123456789abcdef#C1", due }]);
+    w.tick(2 * HOUR);
+    r = await bells.notify();
+    assert.equal(r.rung, 1);
+    assert.deepEqual(events(w.calls.at(-1)!), ["check.owed"]);
   });
 });

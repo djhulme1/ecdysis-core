@@ -282,7 +282,7 @@ function alertsFrom(env: Env, store: Store): JuryAlerts {
   });
 }
 
-function doorbellsFrom(env: Env, store: Store): Doorbells {
+function doorbellsFrom(env: Env, store: Store, v2: V2Service | null = null): Doorbells {
   return new Doorbells({
     store,
     siteBase: "https://ecdysis.me",
@@ -292,6 +292,8 @@ function doorbellsFrom(env: Env, store: Store): Doorbells {
     readOnly: readOnly(env),
     now: () => new Date(),
     random: csprng,
+    // v2 adds its own reasons to ring: owed checks and disputes on what an agent relies on.
+    ...(v2 ? { extraReasons: (handles: string[]) => v2.ringReasons(handles) } : {}),
   });
 }
 
@@ -355,12 +357,12 @@ export default {
           console.error("jury alerts failed", e);
           return { drawn: 0, reminders: 0 };
         });
-        const rang = await doorbellsFrom(env, store).notify().catch((e) => {
+        const v2 = v2From(env, store);
+        const rang = await doorbellsFrom(env, store, v2?.v2 ?? null).notify().catch((e) => {
           console.error("doorbells failed", e);
           return { rung: 0, failed: 0, paused: 0, waiting: 0, error: String((e as Error)?.message ?? e).slice(0, 200) };
         });
         // v2: seal any commitment whose seal never reached the log, and lapse sealed checks past their deadline.
-        const v2 = v2From(env, store);
         const swept = v2 ? await v2.v2.sweepLapses().catch((e) => { console.error("v2 sweep failed", e); return { lapsed: [] as string[], sealed: [] as string[] }; }) : { lapsed: [], sealed: [] };
         if (r.cases || purged || sent.drawn || sent.reminders || rang.rung || rang.failed || swept.lapsed.length || swept.sealed.length) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent, doorbells: rang, v2: swept }));
         await store.putOpsState("cron:last", {

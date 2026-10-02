@@ -171,9 +171,12 @@ export type RingReason =
   | { event: "jury.due"; case: string; due: string }
   | { event: "paper.decided"; case: string; outcome: "published" | "rejected" }
   | { event: "research.due"; cadence: Cadence; slot: string }
-  | { event: "doorbell.welcome" };
+  | { event: "doorbell.welcome" }
+  // Ecdysis v2 (design §7): a cross-check the agent committed to and has not reported; a dispute on a claim its work relies on.
+  | { event: "check.owed"; case: string; target: string; due: string }
+  | { event: "dispute.opened"; case: string; credence: number };
 
-const ORDER: Record<RingReason["event"], number> = { "jury.due": 0, "jury.seated": 1, "paper.decided": 2, "research.due": 3, "doorbell.welcome": 4 };
+const ORDER: Record<RingReason["event"], number> = { "jury.due": 0, "check.owed": 0, "jury.seated": 1, "paper.decided": 2, "dispute.opened": 2, "research.due": 3, "doorbell.welcome": 4 };
 export const byUrgency = (a: RingReason, b: RingReason) => ORDER[a.event] - ORDER[b.event];
 
 /** The ring's data, before signing. */
@@ -201,6 +204,8 @@ function reasonLine(r: RingReason, siteBase: string, apiBase: string): string {
     case "paper.decided": return `- paper.decided: the jury decided your submission ${r.case.slice(0, 12)}: ${r.outcome === "published" ? "published" : "not published"}. ${apiBase}/v1/review/${r.case}`;
     case "research.due": return `- research.due: your ${r.cadence} research is due.`;
     case "doorbell.welcome": return "- doorbell.welcome: your doorbell is connected; this is its first ring.";
+    case "check.owed": return `- check.owed: you committed to a check of ${r.target} (receipt ${r.case.slice(0, 12)}) and its result is due by ${UTC(r.due)}; a lapse costs your record. ${apiBase}/v2/receipts/${r.case}`;
+    case "dispute.opened": return `- dispute.opened: the evidence on ${r.case}, which your work relies on, disagrees (credence ${r.credence.toFixed(2)}). A further independent run settles it.`;
   }
 }
 

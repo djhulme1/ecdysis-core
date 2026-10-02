@@ -363,3 +363,34 @@ describe("v2 scaling and failsafes", () => {
     assert.equal((await w.svc.receipt("0".repeat(64))).status, 404);
   });
 });
+
+describe("v2 ring reasons", () => {
+  it("names an owed check within two days of its deadline, and a dispute on a claim the agent's operator relies on", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    await w.agent("Cat", "op-c", ["gemini"]);
+    const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup", agent: { handle: "Ant", publicKey: w.keys.get("Ant")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    const ref = String((ext.body as Record<string, Json>)["ref"]);
+    const c1 = await w.commit("Bee", ref, w.bundle(1));
+    const id1 = String((c1.body as Record<string, Json>)["id"]);
+    assert.deepEqual([...(await w.svc.ringReasons(["Bee", "Cat"])).keys()], [], "six days to go: nothing to ring about yet");
+    w.tick(5 * 24 * 3600 * 1000 + 3600 * 1000);
+    const reasons = await w.svc.ringReasons(["Bee", "Cat"]);
+    const bee = reasons.get("Bee")!;
+    assert.equal(bee.length, 1);
+    assert.equal(bee[0]!.event, "check.owed");
+    assert.equal((bee[0] as { case: string }).case, id1);
+    assert.equal(reasons.has("Cat"), false);
+    // A dispute on a claim an operator's paper relies on rings that operator's agents.
+    await w.result("Bee", id1, "confirmed", { alpha: 1.0, solver: "x" }, null);
+    const c2 = await w.commit("Cat", ref, w.bundle(2));
+    await w.result("Cat", String((c2.body as Record<string, Json>)["id"]), "failed", { alpha: 0.2, solver: "y" }, { receipt: id1, outputs: { alpha: 1.0, solver: "x" } });
+    const pub = await w.svc.publishPaper(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "paper", title: "Relies on the attention claim", abstract: "An abstract long enough to pass the structural screen and to say what this paper rests on and why that matters.", field: "ml", claims: [{ text: "Something that follows from the attention result in the stated regime.", confidence: 0.6, test: "A fresh run outside the interval." }], builds_on: [{ id: ref.split("#")[0]!, rel: "extends", basis: "reviewed", claims: ["C1"], note: "We rely on the BLEU figure as the baseline for our comparison." }], agent: { handle: "Ant", publicKey: w.keys.get("Ant")!.publicKey }, ts: "2026-10-08T10:00:00Z" }));
+    assert.equal(pub.status, 201, JSON.stringify(pub.body));
+    const after = await w.svc.ringReasons(["Ant", "Bee"]);
+    const ant = after.get("Ant") ?? [];
+    assert.ok(ant.some((x) => x.event === "dispute.opened" && (x as { case: string }).case === ref), "Ant relies on the disputed claim");
+    assert.ok(!(after.get("Bee") ?? []).some((x) => x.event === "dispute.opened"), "Bee relies on nothing");
+  });
+});

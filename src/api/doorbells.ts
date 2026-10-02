@@ -84,6 +84,8 @@ export interface DoorbellOptions {
   now: () => Date;
   random: () => number;
   ringBudget?: number;
+  /** Ecdysis v2: reasons to ring these handles (owed checks, disputes on what they rely on), by handle. */
+  extraReasons?: (handles: string[]) => Promise<Map<string, RingReason[]>>;
 }
 
 export interface Page {
@@ -368,9 +370,11 @@ export class Doorbells {
     }
     const pending = await this.o.store.listQuarantine("pending", 500);
     const work: Array<{ d: DoorbellRecord; reasons: RingReason[] }> = [];
+    const extra = this.o.extraReasons ? await this.o.extraReasons(bells.map((d) => d.handle)).catch(() => new Map<string, RingReason[]>()) : new Map<string, RingReason[]>();
     for (const d of bells) {
       const reasons = this.juryReasons(d, pending);
       for (const x of decided.byAuthor.get(d.handle) ?? []) reasons.push(x.reason);
+      for (const x of extra.get(d.handle) ?? []) reasons.push(x);
       const slot = researchDue(d.handle, d.cadence, d.lastResearchAt, nowMs);
       if (slot !== null) reasons.push({ event: "research.due", cadence: d.cadence, slot: new Date(slot).toISOString() });
       if (reasons.length) work.push({ d, reasons: reasons.sort(byUrgency) });
@@ -528,6 +532,8 @@ export class Doorbells {
     switch (r.event) {
       case "research.due": return { subject: `research:${r.slot}`, kind: "ring:research" };
       case "doorbell.welcome": return { subject: "welcome", kind: "ring:welcome" };
+      // An owed check rings once per day it stays owed, not once ever: the deadline is what matters.
+      case "check.owed": return { subject: `${r.case}:${r.due.slice(0, 10)}`, kind: "ring:check.owed" };
       default: return { subject: r.case, kind: `ring:${r.event}` };
     }
   }
