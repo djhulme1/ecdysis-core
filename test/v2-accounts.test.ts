@@ -307,6 +307,30 @@ describe("accounts (v2)", () => {
     assert.match(html, /href="\/p\/ecd:[^"]+#cite">Moth&#39;s first result<\/a>/, "each paper links to its cite-and-share section");
     assert.match(html, /https:\/\/ecdysis\.me\/badge\/paper\/ecd:[^<]+\.svg/);
     assert.match(html, /https:\/\/ecdysis\.me\/badge\/agent\/Moth\.svg/);
+    // Analytics: per agent and per claim, the trajectory, and the CSV (quoted, formula-safe).
+    res = await get("/me/analytics", cookies);
+    assert.equal(res.status, 200);
+    html = await res.text();
+    assert.match(html, /<h1>Analytics<\/h1>/);
+    assert.match(html, /<td><a href="\/a\/Moth">Moth<\/a><\/td><td>—<\/td><td>1<\/td><td>1<\/td><td class="small">1 unchecked<\/td><td>0\.\d\d<\/td>/, "the agent row");
+    assert.match(html, /Mean credence of your claims: <b>0\.\d\d<\/b> now/);
+    assert.match(html, /— a week ago; — a month ago/, "no record then");
+    res = await get("/me/analytics.csv", cookies);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type")!, /text\/csv/);
+    assert.match(res.headers.get("content-disposition")!, /attachment; filename="ecdysis-op_[0-9a-f]{24}\.csv"/);
+    const csv = await res.text();
+    const rows = csv.trim().split("\r\n");
+    assert.equal(rows[0], '"kind","agent","handle_or_ref","title","status_or_models","credence_or_reliability","use","dispute","receipts","verification_rate","lapses","credence_7d_ago","credence_30d_ago","families"');
+    assert.match(rows[1]!, /^"agent","Moth","Moth","","","0\.5000","0","","0","","0","","",""$/);
+    assert.match(rows[2]!, /^"claim","Moth","ecd:[a-z0-9.]+#C1","Moth's first result","unchecked","0\.\d{4}","0","0(\.0000)?","","","","","",""$/);
+    assert.equal(rows.length, 3);
+    assert.equal((await get("/me/analytics")).status, 401, "signed out: nothing");
+    const { analyticsCsv } = await import("../src/api/v2/me.js");
+    const hostile = analyticsCsv({ operatorId: "op", tier: "account", at: "2026-10-03T09:00:00Z", agents: [], trajectory: { now: null, weekAgo: null, monthAgo: null },
+      claims: [{ ref: "ecd:x#C1", paper: "ecd:x", agent: "Moth", title: '=HYPERLINK("https://evil.example","click") "quoted"', stated: 0.5, status: "unchecked", credence: 0.5, use: 0, dispute: 0, families: ["-gpt"], weekAgo: null, monthAgo: null }] });
+    assert.match(hostile, /"'=HYPERLINK\(""https:\/\/evil\.example"",""click""\) ""quoted"""/, "a cell can never be a formula, and quotes are doubled");
+    assert.match(hostile, /"'-gpt"$/m);
     res = await post("/me/keys/issue", { csrf, handle: "Moth", label: "lab box" }, cookies);
     html = await res.text();
     assert.equal(res.status, 200, html);

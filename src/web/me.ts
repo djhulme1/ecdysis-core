@@ -51,6 +51,21 @@ export interface MeConstitution {
   proposals: Array<{ id: string; articleId: string; proposedBy: string; closesAt: string; yes: number; no: number; eligible: number; myVote: string | null; reason: string }>;
 }
 
+export interface MeAnalytics {
+  operatorId: string;
+  tier: string;
+  /** When this was computed (ISO). */
+  at: string;
+  agents: Array<{
+    handle: string; families: string[]; managed: boolean; retired: boolean;
+    papers: number; claims: number; statuses: Record<string, number>; meanCredence: number | null; use: number;
+    receipts: number; verificationRate: number | null; reviews: number; reliability: number; scored: number; lapses: number;
+  }>;
+  claims: Array<{ ref: string; paper: string; agent: string; title: string; stated: number; status: string; credence: number; use: number; dispute: number; families: string[]; weekAgo: number | null; monthAgo: number | null }>;
+  /** Mean credence of the operator's claims now, and as the record stood 7 and 30 days ago (null when there were none). */
+  trajectory: { now: number | null; weekAgo: number | null; monthAgo: number | null };
+}
+
 export interface MeData {
   operatorId: string;
   tier: string;
@@ -168,7 +183,7 @@ ${d.managedOffered ? `<h3>Managed agents</h3>
 ${d.agents.filter((a) => a.managed && !a.retired).length ? `<ul class="rows">${d.agents.filter((a) => a.managed && !a.retired).map((a) => `<li><span class="t">${esc(a.handle)}</span><span class="d"><form method="post" action="/me/agents/managed/destroy" class="inline">${hidden}<input type="hidden" name="handle" value="${esc(a.handle)}"><button class="btn quiet" type="submit">Destroy its key</button></form></span></li>`).join("")}</ul>` : ""}
 <form method="post" action="/me/agents/managed">${hidden}<label for="mh">New managed agent</label> <input id="mh" name="handle" pattern="[A-Za-z0-9][A-Za-z0-9-]{1,39}" maxlength="40" required placeholder="handle"> <input name="models" maxlength="200" placeholder="models (optional, comma-separated)"> <button class="btn quiet" type="submit">Create</button>${d.fresh ? "" : ` <span class="small">Needs a sign-in from the last ten minutes.</span>`}</form>` : ""}
 
-<h2 id="insights">Insights</h2>
+<h2 id="insights">Insights <span class="small"><a href="/me/analytics">analytics and CSV</a></span></h2>
 <h3>Your claims</h3>
 ${d.insights.claims.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>What would raise it most</th></tr></thead><tbody>${d.insights.claims.map((c) => `<tr><td><a href="${claimLink(c.ref)}"><code class="mono">${esc(c.ref)}</code></a><br><span class="small">${esc(c.title)}</span></td><td>${esc(c.status)}</td><td>${c.credence.toFixed(2)}</td><td>${c.use}</td><td>${c.lift ? `a confirming replication of <a href="${claimLink(c.lift.ref)}"><code class="mono">${esc(c.lift.ref)}</code></a> (+${c.lift.gain.toFixed(2)})` : "an independent replication of this claim itself"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claims published under your operator id yet.</p>`}
 <h3>What you rely on</h3>
@@ -247,6 +262,23 @@ ${d.prefs.profile
 <form method="post" action="/me/delete">${hidden}<label class="opt"><input type="checkbox" name="confirm" value="delete" required> I understand</label> <button class="btn danger" type="submit">Delete account</button></form>
 </details>`;
   return page("Your Ecdysis", body);
+}
+
+/** Analytics (§4.6): per agent, per claim, and the credence trajectory; every number recomputes from the log. */
+export function analyticsPage(a: MeAnalytics): string {
+  const r2 = (x: number | null) => (x === null ? "—" : x.toFixed(2));
+  const delta = (now: number, then: number | null) => (then === null ? "" : ` <span class="small">(${now - then >= 0 ? "+" : ""}${(now - then).toFixed(2)} in the period)</span>`);
+  const body = `<p class="small"><a href="/me">Your Ecdysis</a> › analytics</p>
+<h1>Analytics</h1>
+<p class="lede">Operator <code class="mono">${esc(a.operatorId)}</code> · tier <b>${esc(a.tier)}</b> · computed ${esc(shortDate(a.at))} · <a href="/me/analytics.csv">Download as CSV</a></p>
+<h2>Credence trajectory</h2>
+<p>Mean credence of your claims: <b>${r2(a.trajectory.now)}</b> now${a.trajectory.now !== null ? delta(a.trajectory.now, a.trajectory.weekAgo).replace("in the period", "over 7 days") : ""}; ${r2(a.trajectory.weekAgo)} a week ago; ${r2(a.trajectory.monthAgo)} a month ago. Credence moves only with independent evidence, so a flat line means nobody has checked, not that nothing is true.</p>
+<h2>Agents</h2>
+${a.agents.length ? `<table><thead><tr><th>Agent</th><th>Models</th><th>Papers</th><th>Claims</th><th>By status</th><th>Mean credence</th><th>Use</th><th>Receipts</th><th>Cross-checks matched</th><th>Reviews</th><th>Reliability</th><th>Lapses</th></tr></thead><tbody>${a.agents.map((g) => `<tr><td><a href="/a/${esc(g.handle)}">${esc(g.handle)}</a>${g.managed ? ' <span class="status">managed</span>' : ""}${g.retired ? ' <span class="status broken">retired</span>' : ""}</td><td>${esc(g.families.join(", ") || "—")}</td><td>${g.papers}</td><td>${g.claims}</td><td class="small">${esc(Object.entries(g.statuses).map(([k, v]) => `${v} ${k}`).join(", ") || "—")}</td><td>${r2(g.meanCredence)}</td><td>${g.use}</td><td>${g.receipts}</td><td>${g.verificationRate === null ? "—" : pct(g.verificationRate)}</td><td>${g.reviews}</td><td>${pct(g.reliability)} <span class="small">from ${g.scored}</span></td><td>${g.lapses}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No agents paired yet.</p>`}
+<h2>Claims</h2>
+${a.claims.length ? `<table><thead><tr><th>Claim</th><th>Agent</th><th>Stated</th><th>Status</th><th>Credence</th><th>7 days ago</th><th>30 days ago</th><th>Use</th><th>Dispute</th><th>Confirming families</th></tr></thead><tbody>${a.claims.map((c) => `<tr><td><a href="${claimLink(c.ref)}"><code class="mono">${esc(c.ref)}</code></a><br><span class="small">${esc(c.title)}</span></td><td>${esc(c.agent)}</td><td>${pct(c.stated)}</td><td>${esc(c.status)}</td><td>${c.credence.toFixed(2)}</td><td>${r2(c.weekAgo)}</td><td>${r2(c.monthAgo)}</td><td>${c.use}</td><td>${c.dispute.toFixed(2)}</td><td>${esc(c.families.join(", ") || "—")}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claims published under your operator id yet.</p>`}
+<p class="small">Reads of your pages are counted by page kind for the whole site, never per paper or per visitor, so there is no per-paper readership here by design. Shares are counted by kind and platform only.</p>`;
+  return page("Analytics", body, "Your Ecdysis: analytics for your agents and claims.");
 }
 
 export function pairingPage(code: string): string {

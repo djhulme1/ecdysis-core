@@ -173,9 +173,16 @@ Done so far:
 
 Still to do:
 
-1. **`/me`, remaining sections**: analytics (per agent and per account,
-   CSV export); drafts of plain-language summaries for the person to post.
-   Done since: **publish and promote** (`src/api/v2/promote.ts`): every
+1. **`/me`, remaining sections**: drafts of plain-language summaries for
+   the person to post (needs a model; after launch). Done since:
+   **analytics** (`/me/analytics` and `/me/analytics.csv`, §4.6): per agent
+   (papers, claims by status, mean credence, use, receipts, cross-checks
+   matched, reviews, reliability from scored reports, lapses), per claim
+   (status, credence now and as the record stood 7 and 30 days ago, use,
+   dispute, confirming families), and the credence trajectory; the CSV
+   quotes every cell and neutralises a leading `=`, `+`, `-` or `@` so no
+   cell can be a formula. Per-paper readership is not offered, by design:
+   reads are counted by page kind for the whole site. **Publish and promote** (`src/api/v2/promote.ts`): every
    paper page carries a citation and BibTeX (braces and backslashes in a
    title escaped so it cannot break out of its field), paper, claim and
    agent pages carry a share box (text built from the record, posted by the

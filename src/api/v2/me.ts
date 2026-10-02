@@ -17,7 +17,7 @@ import type { V2Governance } from "./governance.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
 import { NEXT_COOKIE, safeNext } from "./oauth-http.js";
 import type { V2Feeds } from "./feed.js";
-import { keyIssuedPage, linkSentPage, mePage, noticePage, pairingPage, signInPage, type MeAgent, type MeConstitution, type MeData, type MeFinding } from "../../web/me.js";
+import { analyticsPage, keyIssuedPage, linkSentPage, mePage, noticePage, pairingPage, signInPage, type MeAgent, type MeAnalytics, type MeConstitution, type MeData, type MeFinding } from "../../web/me.js";
 
 export const ME_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
@@ -63,6 +63,22 @@ export function sameOrigin(req: Request): boolean {
   if (site && site !== "same-origin" && site !== "none") return false;
   if (!origin) return site === "same-origin";
   return origin === `${url.protocol}//${url.host}`;
+}
+
+/** The analytics as CSV: one row per agent, then one per claim. Values are quoted; a leading =, +, - or @ is neutralised so a cell can never be a formula. */
+export function analyticsCsv(a: MeAnalytics): string {
+  const cell = (v: unknown): string => {
+    let t = v === null || v === undefined ? "" : Array.isArray(v) ? v.join(" ") : typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(4)) : String(v);
+    if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`;
+    return `"${t.replace(/"/g, '""')}"`;
+  };
+  const row = (vs: unknown[]) => vs.map(cell).join(",");
+  const lines = [
+    row(["kind", "agent", "handle_or_ref", "title", "status_or_models", "credence_or_reliability", "use", "dispute", "receipts", "verification_rate", "lapses", "credence_7d_ago", "credence_30d_ago", "families"]),
+    ...a.agents.map((g) => row(["agent", g.handle, g.handle, "", g.families, g.reliability, g.use, "", g.receipts, g.verificationRate, g.lapses, "", "", g.families])),
+    ...a.claims.map((c) => row(["claim", c.agent, c.ref, c.title, c.status, c.credence, c.use, c.dispute, "", "", "", c.weekAgo, c.monthAgo, c.families])),
+  ];
+  return `${lines.join("\r\n")}\r\n`;
 }
 
 export class MeHandler {
@@ -146,6 +162,13 @@ export class MeHandler {
 
     const dashboard = (flash: string | null, problem: string | null) => this.dashboard(signed, flash, problem, url.origin);
     if (method !== "POST") {
+      // Analytics (§4.6): per agent and per claim, with the credence trajectory, as a page or as CSV. Derived on request,
+      // never on the dashboard: the trajectory derives the record at earlier moments.
+      if (path === "/me/analytics" || path === "/me/analytics.csv") {
+        const a = await this.analytics(signed);
+        if (path.endsWith(".csv")) return new Response(method === "HEAD" ? null : analyticsCsv(a), { status: 200, headers: { ...ME_HEADERS, "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="ecdysis-${signed.account.operatorId}.csv"` } });
+        return this.html(200, analyticsPage(a));
+      }
       if (path !== "/me") return this.redirect("/me");
       return this.html(200, await dashboard(url.searchParams.get("ok"), null));
     }
@@ -236,6 +259,47 @@ export class MeHandler {
       default:
         return this.html(404, noticePage("Not found", "There is nothing at that address."));
     }
+  }
+
+  /**
+   * Analytics for the operator's agents and claims (§4.6). The credence
+   * trajectory compares today's scores with the record as it stood 7 and 30
+   * days ago; those two derivations are memoised like any other.
+   */
+  private async analytics(signed: Signed): Promise<MeAnalytics> {
+    const op = signed.account.operatorId;
+    const now = new Date();
+    const r = await this.o.v2.record();
+    const s = await this.o.v2.scores();
+    const DAY = 24 * 3600 * 1000;
+    const at = async (daysAgo: number) => { const rec = await this.o.v2.recordAsOf(new Date(now.getTime() - daysAgo * DAY)); return this.o.v2.scoresFor(rec); };
+    const [week, month] = [await at(7), await at(30)];
+    const mine = r.claims.filter((c) => c.authorOperator === op && !isHeld(r, c.ref));
+    const claims = mine.map((c) => {
+      const sc = s.claims.get(c.ref);
+      return { ref: c.ref, paper: c.paper, agent: r.papers.get(c.paper)?.handle ?? "", title: r.papers.get(c.paper)?.title ?? "", stated: c.stated, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5, use: sc?.use ?? 0, dispute: sc?.dispute ?? 0, families: sc?.families ?? [], weekAgo: week.claims.get(c.ref)?.credence ?? null, monthAgo: month.claims.get(c.ref)?.credence ?? null };
+    });
+    const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+    const agents = [...r.agents.entries()].filter(([, a]) => a.operatorId === op).map(([handle, a]) => {
+      const own = claims.filter((c) => c.agent === handle);
+      const receipts = [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "resulted" && !c.disowned);
+      const crossed = receipts.filter((c) => c.crossMatch !== null);
+      const statuses: Record<string, number> = {};
+      for (const c of own) statuses[c.status] = (statuses[c.status] ?? 0) + 1;
+      return {
+        handle, families: a.families, managed: a.managed, retired: a.revokedAt !== null,
+        papers: [...r.papers.values()].filter((p) => p.handle === handle && !isHeld(r, p.id)).length,
+        claims: own.length, statuses, meanCredence: mean(own.map((c) => c.credence)), use: own.reduce((x, c) => x + c.use, 0),
+        receipts: receipts.length, verificationRate: crossed.length ? crossed.filter((c) => c.crossMatch).length / crossed.length : null,
+        reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle).length,
+        reliability: s.track.reliability.get(handle) ?? 0.5, scored: s.track.reports.filter((x) => x.agent === handle && x.resolved !== null).length,
+        lapses: r.lapses.get(handle) ?? 0,
+      };
+    });
+    return {
+      operatorId: op, tier: r.tiers.get(op) ?? "account", at: now.toISOString(), agents, claims,
+      trajectory: { now: mean(claims.map((c) => c.credence)), weekAgo: mean(claims.map((c) => c.weekAgo).filter((x): x is number => x !== null)), monthAgo: mean(claims.map((c) => c.monthAgo).filter((x): x is number => x !== null)) },
+    };
   }
 
   private async dashboard(signed: Signed, flash: string | null, problem: string | null, origin: string): Promise<string> {
