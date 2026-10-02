@@ -1119,6 +1119,7 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/escalate": return v2.escalate(body);
     case "/v2/keys/delegate": return v2.delegateKey(body);
     case "/v2/keys/revoke": return v2.revokeKey(body);
+    case "/v2/vouch": return v2.vouch(body);
     default: return { status: 404, body: { error: "no such v2 endpoint" } };
   }
 }

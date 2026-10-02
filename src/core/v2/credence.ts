@@ -21,7 +21,9 @@
  *
  * Each operator counts once per claim: its strongest kind of item, then
  * its latest. Weight w is the product of
- *   independence   0 for the claim author's own operator, ½ if vouch-linked, else 1
+ *   independence   0 for the claim author's own operator; ½ if the operators are
+ *                  vouch-linked or in a reciprocal-confirmation ring (each has
+ *                  confirmed the other's claims: sanity check §5.6); else 1
  *   tier           ¼ unverified, ½ account, 1 verified (sanity check §5.4)
  *   reliability ω  the reporting agent's track record (scoring.ts; ½ for a newcomer)
  *   diversity      agents on one model make the same mistakes (ten same-model
@@ -144,6 +146,8 @@ export interface UseInput {
 
 export interface CredenceV2Options {
   vouchLinked?: (a: string, b: string) => boolean;
+  /** Two operators that have each confirmed the other's claims: flagged, and their evidence on each other weighs half. */
+  ringLinked?: (a: string, b: string) => boolean;
   /** ω of an agent, in [0, 1]; ω0 when absent. */
   reliability?: (agent: string) => number;
   /** Under a fabrication finding in force: these items weigh nothing. */
@@ -250,9 +254,9 @@ export function diversityFactor(s: string[], earlier: string[][]): number {
   return f;
 }
 
-function independence(op: string, author: string, vouchLinked?: (a: string, b: string) => boolean): number {
+function independence(op: string, author: string, vouchLinked?: (a: string, b: string) => boolean, ringLinked?: (a: string, b: string) => boolean): number {
   if (op === author) return 0;
-  return vouchLinked?.(op, author) ? 0.5 : 1;
+  return vouchLinked?.(op, author) || ringLinked?.(op, author) ? 0.5 : 1;
 }
 
 /**
@@ -280,7 +284,7 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   for (const e of [...best.values()].sort((a, b) => a.seq - b.seq)) {
     const omega = Math.max(0, Math.min(1, o.reliability ? o.reliability(e.agent) : P.omega0));
     const diversity = diversityFactor(e.families, earlierFamilies);
-    const w = independence(e.operatorId, authorOperator, o.vouchLinked) * P.tier[e.tier] * omega * diversity;
+    const w = independence(e.operatorId, authorOperator, o.vouchLinked, o.ringLinked) * P.tier[e.tier] * omega * diversity;
     if (w <= 0) continue;
     earlierFamilies.push(e.families);
     let ev: number;
@@ -356,7 +360,7 @@ export function computeCredenceV2(
   for (const u of uses) {
     const a = author.get(u.claim);
     if (a === undefined) continue;
-    const w = independence(u.operatorId, a, o.vouchLinked);
+    const w = independence(u.operatorId, a, o.vouchLinked, o.ringLinked);
     const m = useBy.get(u.claim) ?? new Map<string, number>();
     m.set(u.paper, Math.max(m.get(u.paper) ?? 0, w));
     useBy.set(u.claim, m);

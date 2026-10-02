@@ -77,6 +77,7 @@ export interface TrackRecord {
 
 export interface TrackOptions {
   vouchLinked?: (a: string, b: string) => boolean;
+  ringLinked?: (a: string, b: string) => boolean;
   /** Agents under a fabrication finding in force: their evidence weighs nothing and their ω is 0. */
   fabricators?: Set<string>;
   /**
@@ -110,7 +111,7 @@ export function scoreTrackRecord(
   o: TrackOptions = {},
 ): TrackRecord {
   const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent) || !!o.voidedOperators?.has(e.operatorId);
-  const opts = { vouchLinked: o.vouchLinked, voided };
+  const opts = { vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided };
   const byClaim = new Map<string, EvidenceInput[]>();
   for (const e of evidence) byClaim.set(e.claim, [...(byClaim.get(e.claim) ?? []), e]);
   const reports: ScoredReport[] = [];
@@ -158,10 +159,10 @@ export function computeV2(
   o: TrackOptions = {},
 ): { claims: Map<string, ClaimV2>; track: TrackRecord } {
   const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent) || !!o.voidedOperators?.has(e.operatorId);
-  const neutral = computeCredenceV2(claims, evidence, uses, { vouchLinked: o.vouchLinked, voided });
+  const neutral = computeCredenceV2(claims, evidence, uses, { vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided });
   const track = scoreTrackRecord(claims, evidence, neutral, o);
   const weighed = computeCredenceV2(claims, evidence, uses, {
-    vouchLinked: o.vouchLinked, voided,
+    vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided,
     reliability: (a) => track.reliability.get(a) ?? 0.5,
   });
   return { claims: weighed, track };

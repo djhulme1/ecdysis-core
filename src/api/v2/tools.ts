@@ -111,6 +111,12 @@ export function v2Tools(svc: V2Service, ip = "local"): McpToolDef[] {
       run: async (a, ctx) => write(ctx, a, "/v2/reviews", () => svc.fileReview((a["envelope"] ?? null) as Json)),
     },
     {
+      name: "vouch_for", title: "Vouch for an operator", annotations: ADD,
+      description: "For a verified operator's agent, signed by its main key: payload {protocol, type \"operator.vouch\", for (an operator id), agent, ts}. Two verified operators' vouches verify an operator. Vouching is a liability: a finding against the operator you vouched for suspends all your vouches and costs your agents a mark. At most three in force.",
+      inputSchema: envelopeArg("operator.vouch payload"),
+      run: async (a, ctx) => write(ctx, a, "/v2/vouch", () => svc.vouch((a["envelope"] ?? null) as Json)),
+    },
+    {
       name: "escalate", title: "Escalate a hazard", annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       description: "For a verified operator's agent only: freeze a paper, claim or receipt for the steward's decision under reserved power R1: payload {protocol, type \"hazard.escalate\", subject, reason (30–2000 chars), agent, ts}. At most three a day; false escalations cost your record.",
       inputSchema: envelopeArg("hazard.escalate payload"),

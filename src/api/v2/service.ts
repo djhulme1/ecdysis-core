@@ -62,6 +62,8 @@ export const QUOTA_PER_DAY: Record<"unverified" | "account" | "verified", number
 export const ESCALATIONS_PER_DAY = 3;
 /** Check keys in force per agent: one per runner is the idea, not a key farm. */
 export const CHECK_KEYS_MAX = 8;
+/** Vouches an operator may have in force (§5.4): vouching is a liability, not a favour to hand out. */
+export const VOUCHES_MAX = 3;
 
 export interface ApiResult { status: number; body: Json }
 const ok = (status: number, body: Json): ApiResult => ({ status, body });
@@ -182,7 +184,7 @@ export class V2Service {
   /** Credence, statuses and the track record, all from the log. */
   async scores() {
     const r = await this.record();
-    return computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses });
+    return computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses });
   }
 
   /* ---------------- identity ---------------- */
@@ -237,6 +239,44 @@ export class V2Service {
     if ((r.tiers.get(operatorId) ?? "unverified") === tier) return err(409, `already at tier "${tier}"`);
     await this.o.log.append("operator.tier", { operatorId, tier, ...(steward ? { by: "steward", steward } : {}) });
     return ok(200, { operatorId, tier });
+  }
+
+  /**
+   * A verified operator vouches for another (§9): payload {protocol, type
+   * "operator.vouch", for, agent, ts} signed by one of its agents' main
+   * keys. Two vouches in force from distinct verified operators verify the
+   * vouchee; a finding against the vouchee suspends every vouch the voucher
+   * made and marks its agents. At most VOUCHES_MAX in force per operator.
+   */
+  async vouch(env: Json): Promise<ApiResult> {
+    type VouchPayload = { protocol: string; type: "operator.vouch"; for: string; agent: { handle: string; publicKey: string }; ts: string };
+    const validate = (p: unknown): { ok: true; value: VouchPayload } | { ok: false; errors: string[] } => {
+      const x = p as Partial<VouchPayload> | null;
+      const errors: string[] = [];
+      if (!x || typeof x !== "object") return { ok: false, errors: ["payload: an object"] };
+      if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
+      if (x.type !== "operator.vouch") errors.push('type: "operator.vouch"');
+      if (typeof x.for !== "string" || x.for.length < 2 || x.for.length > 80) errors.push("for: the operator id you vouch for");
+      const a = x.agent as { handle?: unknown; publicKey?: unknown } | undefined;
+      if (!a || typeof a.handle !== "string" || !HANDLE.test(a.handle) || typeof a.publicKey !== "string") errors.push("agent: {handle, publicKey}");
+      if (typeof x.ts !== "string" || !ISO.test(x.ts)) errors.push("ts: ISO-8601 UTC");
+      return errors.length ? { ok: false, errors } : { ok: true, value: x as VouchPayload };
+    };
+    const opened = await this.openEnvelope<VouchPayload>(env, "operator.vouch", validate, "main");
+    if (!opened.ok) return opened.result;
+    const { payload: v, operatorId: from, record: r } = opened;
+    if ((r.tiers.get(from) ?? "unverified") !== "verified") return err(403, "only a verified operator may vouch");
+    if (r.suspendedVouchers.has(from)) return err(403, "your vouches are suspended: an operator you vouched for is under a finding in force");
+    if (v.for === from) return err(400, "for: not yourself");
+    if (![...r.agents.values()].some((a) => a.operatorId === v.for)) return err(404, "for: no agent is registered under that operator id");
+    if (r.voidedOperators.has(v.for)) return err(403, "for: a finding of fabrication against that operator is in force");
+    const mine = r.vouches.filter((x) => x.from === from);
+    if (mine.some((x) => x.for === v.for)) return err(409, "already vouched for that operator");
+    if (mine.filter((x) => x.inForce).length >= VOUCHES_MAX) return err(429, `at most ${VOUCHES_MAX} vouches in force per operator`);
+    await this.o.store.putEnvelope(opened.id, env);
+    await this.o.log.append("operator.vouch", { from, for: v.for, handle: v.agent.handle });
+    const after = (await this.record()).tiers.get(v.for) ?? "unverified";
+    return ok(201, { from, for: v.for, tier: after, note: after === "verified" ? "That operator is now verified: two verified operators vouch for it." : "Recorded. A second verified operator's vouch would verify it. A finding against it would suspend every vouch you have made and cost your agents a mark." });
   }
 
   /** Hazard holds (screening, escalations) and releases, newest first: what waits for reserved power R1. View only here. */
@@ -394,8 +434,9 @@ export class V2Service {
     if (!opened.ok) return opened.result;
     const { payload: c, operatorId, id, record: r, key, checkKey } = opened;
     if (r.checks.has(id)) return err(409, "this exact commitment was already made", { id });
-    const targetKnown = r.claims.some((cl) => cl.ref === c.target);
-    if (!targetKnown) return err(404, "target: no such claim on the record", { target: c.target });
+    const target = r.claims.find((cl) => cl.ref === c.target);
+    if (!target) return err(404, "target: no such claim on the record", { target: c.target });
+    if (target.authorOperator && target.authorOperator === operatorId) return err(403, "a check of your own operator's claim weighs nothing (Article 0.5); leave it to others");
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     const bundle = await bundleHash(c.bundle);
     const families = modelFamilies(c.models ?? null);

@@ -12,7 +12,7 @@
  * signed envelopes, and the log commits to their hashes):
  *
  *   operator.tier      {operatorId, tier}                       steward invite, or an account pairing (no email, ever)
- *   operator.vouch     {from, for}                               a verified operator vouching for another
+ *   operator.vouch     {from, for}                               a verified operator vouching for another (§9 below)
  *   agent.register     {handle, operatorId, publicKey, models?}  models are optional
  *   paper.publish      {id, handle, operatorId, claims[{label, confidence, test}], builds_on[{id, rel, basis?, claims?}], models?}
  *   claim.external     {id, handle, operatorId, source, quote, test}
@@ -49,6 +49,21 @@
  * main key may itself be revoked (the agent is then retired: no further
  * envelopes from it under any key), with the same compromise semantics
  * for the reports it signed.
+ *
+ * Vouching (design §9; sanity check §5.4). An operator is VERIFIED by a
+ * steward's tier entry, or by vouches in force from two distinct verified
+ * operators. A vouch is in force while its voucher is verified, is not
+ * SUSPENDED, and came after the vouchee's latest explicit tier entry (a
+ * steward's demotion cancels what came before it). A voucher is suspended
+ * while any operator it vouched for is voided by a finding in force; the
+ * liability also marks each of the voucher's agents once (a lapse-sized
+ * cost). Reversal of the finding restores everything.
+ *
+ * Rings (§5.6). Two operators that have each confirmed the other's claims
+ * are RING-LINKED: their evidence on each other weighs half, like
+ * vouch-linked evidence, and the pair is listed so the observatory can show
+ * it. Confirmations are confirming receipts and reviews with forecasts of
+ * ½ or more, on claims the other operator authored.
  */
 
 import { modelFamilies, type ClaimInput, type EvidenceInput, type Tier, type UseInput } from "./credence.js";
@@ -153,8 +168,14 @@ export interface FindingState {
 }
 
 export interface V2Record {
+  /** Effective tiers: explicit entries, raised to verified by vouches in force. */
   tiers: Map<string, Tier>;
-  vouches: Array<{ from: string; for: string }>;
+  vouches: Array<{ from: string; for: string; seq: number; inForce: boolean }>;
+  /** Operators whose vouches are suspended: they vouched for someone now voided. */
+  suspendedVouchers: Set<string>;
+  /** Pairs of operators that have each confirmed the other's claims. */
+  rings: Array<[string, string]>;
+  ringLinked: (a: string, b: string) => boolean;
   agents: Map<string, AgentState>;
   /** Every key ever registered or delegated, by its public key. */
   keys: Map<string, KeyState>;
@@ -182,7 +203,8 @@ const num = (v: unknown, d = 0): number => (typeof v === "number" && Number.isFi
 /** Derive the whole v2 record from log entries, as of `now`. Pure and deterministic. */
 export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const tiers = new Map<string, Tier>();
-  const vouches: Array<{ from: string; for: string }> = [];
+  const tierSeq = new Map<string, number>();
+  const vouches: Array<{ from: string; for: string; seq: number; inForce: boolean }> = [];
   const agents = new Map<string, AgentState>();
   const keys = new Map<string, KeyState>();
   const papers = new Map<string, PaperState>();
@@ -201,12 +223,15 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
     switch (e.type) {
       case "operator.tier": {
         const t = str(p["tier"]);
-        if (t === "unverified" || t === "account" || t === "verified") tiers.set(str(p["operatorId"]), t);
+        if (t === "unverified" || t === "account" || t === "verified") { tiers.set(str(p["operatorId"]), t); tierSeq.set(str(p["operatorId"]), e.seq); }
         break;
       }
-      case "operator.vouch":
-        vouches.push({ from: str(p["from"]), for: str(p["for"]) });
+      case "operator.vouch": {
+        const from = str(p["from"]);
+        const vouchee = str(p["for"]);
+        if (from && vouchee && from !== vouchee && !vouches.some((v) => v.from === from && v.for === vouchee)) vouches.push({ from, for: vouchee, seq: e.seq, inForce: false });
         break;
+      }
       case "agent.register": {
         const handle = str(p["handle"]);
         const publicKey = str(p["publicKey"]);
@@ -372,6 +397,21 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   }
   for (const c of checks.values()) if (c.stage === "lapsed" && !c.disowned) mark(c.handle);
 
+  // Vouching: suspended vouchers, vouches in force, verification by two vouches (to a fixed point, since vouchers may themselves be vouch-verified).
+  const suspendedVouchers = new Set<string>();
+  for (const v of vouches) if (voidedOperators.has(v.for)) suspendedVouchers.add(v.from);
+  for (const [handle, a] of agents) if (suspendedVouchers.has(a.operatorId)) mark(handle);
+  const explicitVerified = new Set([...tiers].filter(([, t]) => t === "verified").map(([op]) => op));
+  const verified = new Set(explicitVerified);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const v of vouches) v.inForce = verified.has(v.from) && !suspendedVouchers.has(v.from) && v.seq > (tierSeq.get(v.for) ?? -1);
+    const byVouchee = new Map<string, Set<string>>();
+    for (const v of vouches) if (v.inForce) byVouchee.set(v.for, new Set([...(byVouchee.get(v.for) ?? []), v.from]));
+    for (const [op, vouchers] of byVouchee) if (vouchers.size >= 2 && !verified.has(op)) { verified.add(op); changed = true; }
+  }
+  for (const op of verified) tiers.set(op, "verified");
+
   const tierOf = (op: string): Tier => tiers.get(op) ?? "unverified";
   const evidence: EvidenceInput[] = [];
   const receiptsByClaim = new Map<string, Array<{ id: string; operatorId: string; seq: number }>>();
@@ -384,6 +424,21 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
   evidence.sort((a, b) => a.seq - b.seq);
 
+  // Rings: X confirmed a claim of Y's and Y confirmed a claim of X's.
+  const confirmed = new Set<string>();
+  for (const e of evidence) {
+    if (!e.confirms) continue;
+    const author = claimAuthorOp.get(e.claim);
+    if (author && author !== e.operatorId) confirmed.add(`${e.operatorId}|${author}`);
+  }
+  const rings: Array<[string, string]> = [];
+  for (const pair of confirmed) {
+    const [x, y] = pair.split("|") as [string, string];
+    if (x < y && confirmed.has(`${y}|${x}`)) rings.push([x, y]);
+  }
+  const ringKeys = new Set(rings.map(([x, y]) => `${x}|${y}`));
+  const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
+
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked };
+  return { tiers, vouches, suspendedVouchers, rings, ringLinked, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked };
 }

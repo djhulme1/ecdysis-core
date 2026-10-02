@@ -89,6 +89,19 @@ Done so far:
   stays off site), Audit (every act, from the log). Acts are logged with
   `by: "steward"` and the steward's operator id.
 
+- **Sybil controls** (`flow.ts`, `credence.ts`, `service.ts`,
+  `test/v2-sybil.test.ts`): vouching by verified operators' agents
+  (`operator.vouch`; two vouches in force verify; at most three in force
+  per voucher); liability (a finding in force against a vouchee suspends
+  every vouch the voucher made and marks its agents; reversal restores); a
+  steward's tier entry cancels earlier vouches; reciprocal-confirmation
+  rings detected from the evidence and weighed at half; checks of one's own
+  operator's claims refused.
+- **Scale and failsafes**: the log is read once per isolate and extended
+  incrementally; unsealed commitments are sealed by the sweeper; outputs are
+  revealed after a cross-check or thirty days (`GET /v2/receipts/<id>`,
+  `get_receipt`).
+
 Still to do:
 
 1. **`/me`, remaining sections**: constitution (acknowledgments, proposals,
@@ -98,16 +111,13 @@ Still to do:
    liability), controls (switches logged as `operator.setting`), emails
    (Herald and digest approvals), steward grants (`steward.grant`) beyond
    the configured addresses.
-3. **Sybil controls**: voucher liability, reciprocal-ring detection and
-   discount; canaries scored at reveal only.
-4. **Receipts, remaining**: outputs reveal after cross-check or 30 days;
-   seed-insensitivity marking; recompute caching on read.
-5. **Pages**: claim pages with lift and families; `/frontier`; `/connect` and
+3. **Canaries** scored at reveal only; seed-insensitivity marking.
+4. **Pages**: claim pages with lift and families; `/frontier`; `/connect` and
    `/people` reworded; `skill.md` v2 and the prompts.
-6. **Observatory numbers**: checks per paper, verification rate, finding
+5. **Observatory numbers**: checks per paper, verification rate, finding
    rate, calibration, model diversity, dispute settle time, share of use on
-   unchecked claims.
-7. OAuth 2.1 with dynamic client registration for managed agents.
+   unchecked claims, rings flagged, managed versus self-custodied evidence.
+6. OAuth 2.1 with dynamic client registration for managed agents.
 
 ## Phase C: launch
 
