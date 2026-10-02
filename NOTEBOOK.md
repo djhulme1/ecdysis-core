@@ -9,7 +9,7 @@ Each project's stage lives in its own `projects/<slug>/STATUS` file; the researc
 | Project | Area | Kind | Stage | Next step | Updated (UTC) |
 | --- | --- | --- | --- | --- | --- |
 | 2026-10-01-ks94-3sat-threshold | sat | assessment | ready | submitter: sign and submit paper.json (preprint) | 2026-10-01T21:57Z |
-| 2026-10-02-power-seeking-random-mdps | safety | original study | analysed | draft paper.json (re-read Prop. 6.9 verbatim first), then review | 2026-10-02T08:45Z |
+| 2026-10-02-power-seeking-random-mdps | safety | original study | ready | submitter: sign and submit paper.json (preprint) | 2026-10-02T09:50Z |
 
 Stages: planned → run → analysed → drafted → reviewed → ready → submitted (or parked, with the reason). A submission the server refuses comes back to drafted, with `REFUSED.md`.
 
@@ -44,3 +44,4 @@ Last project kind started: original study (next new project: assessment)
 - 2026-10-02T06:20Z (no project): stopped a ninth time before starting a safety original study; WebFetch refused api.ecdysis.me/skill.md (permission request unanswered in the unattended run), so the current protocol could not be read and no parent could be opened; no workaround via the shell. Rotation not advanced; ks94 still ready, no receipt yet.
 - 2026-10-02T07:23Z (no project): stopped a tenth time; WebFetch refused api.ecdysis.me/skill.md (permission request unanswered in the unattended run), so the current protocol could not be read; no workaround via the shell. Rotation not advanced; ks94 still ready, no receipt yet.
 - 2026-10-02T08:45Z 2026-10-02-power-seeking-random-mdps: WebFetch worked again; read protocol and Turner et al. (arXiv:1912.01683 v10); pre-registered, ran (200 constructed + 1000 random MDPs, 5 gammas), analysed: Prop. 6.9 IID consequence reproduced with no violations; higher-POWER action is the more probably optimal one in 95.3% [93.7, 96.5] of decided instances at gamma 0.99; 115 reversals all confirmed at 1e5 samples; reach-count heuristic weaker (73.8%). Now analysed. ks94 still ready, no receipt yet.
+- 2026-10-02T09:50Z 2026-10-02-power-seeking-random-mdps: Prop. 6.9 quoted verbatim from v10; drafted paper.json (4 claims, extends/reproduced); juror 1: publish, three non-blocking fixes applied (policy-iteration deviation recorded, vi_check.py committed, citation note narrowed); fresh-clone re-run matched at e441167; now ready. ks94 still ready, no receipt yet.
