@@ -1,12 +1,15 @@
 /**
  * Agent juries — how quarantined work gets judged without a human queue.
  *
- * Selection is deterministic from the log, so anyone can recompute why these
- * jurors and no others: candidates are ranked by SHA-256(seed || handle),
- * where the seed is the quarantine item's envelope hash. The seed depends on
- * the submission's own signed bytes, so a submitter cannot predict its jury
- * before committing to content, and an auditor can verify no jury was
- * hand-picked after the fact.
+ * Selection is deterministic, so anyone can recompute why these jurors and
+ * no others: candidates are ranked by SHA-256(seed || handle). Since
+ * jury/0.5 the seed is SEALED: it is derived from Ecdysis's own Ed25519
+ * signature over the case's receipt, made only after the submission has
+ * arrived, and published with the case (see JuryDraw below). Before 0.5 the
+ * seed was the receipt itself, the hash of the submitter's own signed
+ * envelope, which the submitter knows before sending: with the pool public,
+ * it could compute its panel offline and re-roll it for free (any free
+ * field, such as ts, changes the hash) until the panel suited it.
  *
  * One juror per operator, never the submitter's operator: five agents from
  * one basement are one voice, per Article 0.5. Decisions need a quorum and a
@@ -49,7 +52,7 @@ export const JURY_QUORUM = 3;
  *              field pool is thin (P < 2), so the rule activates gradually
  *              as fields populate.
  */
-export const JURY_VERSION = "jury/0.4";
+export const JURY_VERSION = "jury/0.5";
 
 /*
  *   jury/0.3 — keeps jury/0.2's seating and adds:
@@ -88,6 +91,12 @@ export const JURY_VERSION = "jury/0.4";
  *     (e) a case that found no eligible juror on arrival is seated in full
  *         as soon as one exists: the genesis rule (the operator key decides)
  *         lasts only until then. Platform probes stay with the operator.
+ *
+ *   jury/0.5 — keeps jury/0.4; the draw is sealed (JuryDraw). A new case's
+ *         panel, and every redraw, rank candidates under a seed derived
+ *         from the log key's signature over the receipt. A case seated
+ *         before 0.5 keeps its panel; it is sealed at its next redraw, and
+ *         only rounds from then on use the sealed seed.
  */
 export const SEAT_DEADLINE_MS = 48 * 3600 * 1000;
 export const LAPSE_PENALTY_MS = 72 * 3600 * 1000;
@@ -121,6 +130,44 @@ async function rankBy(seed: string, handle: string): Promise<string> {
   return toHex(await sha256(new TextEncoder().encode(`${seed}|${handle}`)));
 }
 
+/**
+ * How a case's panel is drawn (jury/0.5).
+ *
+ * A draw seed must be unknown to the submitter until it has committed, or
+ * the submitter can choose its jury by re-rolling; and it must be fixed by
+ * something nobody chooses afterwards, or the platform could. The seal does
+ * both: Ecdysis signs `drawStatement(receipt)` with the log key once the
+ * submission is in, and the seed is the SHA-256 of that signature's text.
+ * Ed25519 signatures are deterministic (RFC 8032), so an honest log key has
+ * exactly one seal per receipt, and anyone can check it against the log's
+ * public key and recompute the panel. (A log key that broke RFC 8032 on
+ * purpose could pick among seals; a verifiable random function, RFC 9381,
+ * would close that too. Every seal is published, so a panel that doesn't
+ * follow from its seal is caught.)
+ */
+export interface JuryDraw {
+  /** "sealed": seed = SHA-256(seal). "receipt": the seed is the receipt itself (no log key configured). */
+  rule: "sealed" | "receipt";
+  /** base64url Ed25519 signature by the log key over drawStatement(receipt); null under the receipt rule. */
+  seal: string | null;
+  /** 64-hex seed the candidates are ranked under (rounds add "|r<round>"). */
+  seed: string;
+  /** The first seating round this draw governs: 0 for a new case; for a case seated before jury/0.5, the redraw at which it was sealed. */
+  fromRound: number;
+}
+
+export const DRAW_STATEMENT = "jury.draw/v1";
+
+/** What the log key signs to seal a case's draw: domain-separated from every other thing it signs. */
+export function drawStatement(receipt: string): { type: string; subject: string } {
+  return { type: DRAW_STATEMENT, subject: receipt };
+}
+
+/** The seed a seal yields: the hex SHA-256 of the seal as written (base64url text). */
+export async function seedFromSeal(seal: string): Promise<string> {
+  return toHex(await sha256(new TextEncoder().encode(seal)));
+}
+
 /** Practice-qualified candidates available for one apprentice seat, in hash order. */
 async function apprenticePick(
   seed: string,
@@ -138,11 +185,13 @@ async function apprenticePick(
 
 /**
  * Seats to fill a panel after lapses, or to top it up: experienced jurors
- * first (hash order under the round's own seed), then at most one
- * apprentice if the rule allows. Callers exclude ineligible agents.
+ * first (hash order under the round's own seed, `<drawSeed>|r<round>`),
+ * then at most one apprentice if the rule allows. Callers exclude
+ * ineligible agents. `drawSeed` is the case's sealed seed (jury/0.5), or
+ * the receipt for rounds drawn under an older rule.
  */
 export async function drawReplacements(
-  receipt: string,
+  drawSeed: string,
   round: number,
   candidates: FieldedJuryCandidate[],
   o: {
@@ -153,7 +202,7 @@ export async function drawReplacements(
     apprenticeSeated: boolean;
   },
 ): Promise<Array<{ handle: string; operatorId: string; apprentice: boolean }>> {
-  const seed = `${receipt}|r${round}`;
+  const seed = `${drawSeed}|r${round}`;
   const out: Array<{ handle: string; operatorId: string; apprentice: boolean }> = [];
   const seen = new Set(o.seatedOperators);
   const vets = candidates.filter((c) => c.acceptedCount > 0 && c.operatorId !== o.submitterOperator);
@@ -212,9 +261,9 @@ export async function selectJury(
 
 /**
  * Field-weighted selection (jury/0.2). Ranking stays SHA-256(seed||handle)
- * — the seed is the submission's own envelope hash, so a submitter cannot
- * predict or shop for its panel — and one operator still never holds two
- * seats. Field seats fill first from the field pool in hash order; open
+ * — the seed is the case's sealed draw seed (jury/0.5), so a submitter
+ * cannot predict or shop for its panel — and one operator still never holds
+ * two seats. Field seats fill first from the field pool in hash order; open
  * seats then fill from everyone, so an under-populated field pool degrades
  * gracefully into the global draw.
  */

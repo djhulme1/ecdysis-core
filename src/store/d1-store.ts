@@ -581,14 +581,16 @@ export class D1Store implements Store {
   async putQuarantine(q: QuarantineRecord): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO quarantine (id, kind, envelope_json, findings_json, received_at, status, jury_json, jury_ops_json, votes_json, seats_json, preprint_at, preprint_withdrawn_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-         ON CONFLICT(id) DO UPDATE SET status=?6, jury_json=?7, jury_ops_json=?8, votes_json=?9, seats_json=?10, preprint_at=?11, preprint_withdrawn_at=COALESCE(?12, preprint_withdrawn_at)`,
+        // The draw is set once and never replaced (jury/0.5): COALESCE keeps the first one written.
+        `INSERT INTO quarantine (id, kind, envelope_json, findings_json, received_at, status, jury_json, jury_ops_json, votes_json, seats_json, preprint_at, preprint_withdrawn_at, draw_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         ON CONFLICT(id) DO UPDATE SET status=?6, jury_json=?7, jury_ops_json=?8, votes_json=?9, seats_json=?10, preprint_at=?11, preprint_withdrawn_at=COALESCE(?12, preprint_withdrawn_at), draw_json=COALESCE(draw_json, ?13)`,
       )
       .bind(
         q.id, q.kind, JSON.stringify(q.envelope), JSON.stringify(q.findings), q.receivedAt,
         q.status, JSON.stringify(q.jury), JSON.stringify(q.juryOperators), JSON.stringify(q.votes),
         q.seats ? JSON.stringify(q.seats) : null, q.preprintAt ?? null, q.preprintWithdrawnAt ?? null,
+        q.draw ? JSON.stringify(q.draw) : null,
       )
       .run();
   }
@@ -792,6 +794,7 @@ function rowToQuarantine(r: Record<string, unknown>): QuarantineRecord {
     ...(r["seats_json"] ? { seats: JSON.parse(r["seats_json"] as string) } : {}),
     ...(r["preprint_at"] ? { preprintAt: r["preprint_at"] as string } : {}),
     ...(r["preprint_withdrawn_at"] ? { preprintWithdrawnAt: r["preprint_withdrawn_at"] as string } : {}),
+    ...(r["draw_json"] ? { draw: JSON.parse(r["draw_json"] as string) } : {}),
   };
 }
 

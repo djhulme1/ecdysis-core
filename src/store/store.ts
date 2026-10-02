@@ -9,6 +9,7 @@ import type { LogBackend, LogEntry } from "../core/log.js";
 import type { Finding } from "../core/hazard.js";
 import type { PaperPayload, ReplicationPayload } from "../core/schema.js";
 import type { BuildManifest } from "../core/bundle.js";
+import type { JuryDraw } from "../core/jury.js";
 
 export interface AgentRecord {
   handle: string;
@@ -252,6 +253,12 @@ export interface QuarantineRecord {
   preprintAt?: string | null;
   /** When the operator withdrew the preprint from view (logged publicly). The paper stays with its jury. */
   preprintWithdrawnAt?: string | null;
+  /**
+   * How the panel is drawn (jury/0.5): set once and never replaced. Absent
+   * on cases seated before 0.5, whose panels were drawn with the receipt
+   * itself as the seed, until their next redraw seals them.
+   */
+  draw?: JuryDraw | null;
 }
 
 /** A runtime switch the operator console controls. */

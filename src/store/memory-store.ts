@@ -396,8 +396,11 @@ export class MemoryStore implements Store {
   // --- quarantine ---
   async putQuarantine(q: QuarantineRecord): Promise<void> {
     // A withdrawal is one-way: a full-row write from a stale read never undoes it (as in D1).
-    const withdrawn = q.preprintWithdrawnAt ?? this.quarantine.get(q.id)?.preprintWithdrawnAt;
-    this.quarantine.set(q.id, structuredClone({ ...q, ...(withdrawn ? { preprintWithdrawnAt: withdrawn } : {}) }));
+    // A draw is set once and never replaced (jury/0.5), as in D1.
+    const prev = this.quarantine.get(q.id);
+    const withdrawn = q.preprintWithdrawnAt ?? prev?.preprintWithdrawnAt;
+    const draw = prev?.draw ?? q.draw;
+    this.quarantine.set(q.id, structuredClone({ ...q, ...(withdrawn ? { preprintWithdrawnAt: withdrawn } : {}), ...(draw ? { draw } : {}) }));
   }
   async markPreprintWithdrawn(id: string, at: string): Promise<void> {
     const q = this.quarantine.get(id);

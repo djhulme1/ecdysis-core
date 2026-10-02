@@ -44,6 +44,10 @@ import {
   selectJuryFielded,
   tallyJury,
   drawReplacements,
+  drawStatement,
+  seedFromSeal,
+  DRAW_STATEMENT,
+  type JuryDraw,
   JURY_QUORUM,
   JURY_SIZE,
   JURY_VERSION,
@@ -425,8 +429,11 @@ export class EcdysisService {
       // jury/0.4: an operator whose work this checks is never seated on it.
       const conflicts = await this.conflictsOf({ kind, envelope: { payload: payload as unknown as Json, signature: "" } });
       await this.loadGraph();
+      // jury/0.5: the seed is sealed now that the submission is in, so the
+      // submitter could not have computed, or re-rolled, its panel.
+      const draw = await this.sealDraw(envHash, 0);
       const jury = await selectJuryFielded(
-        envHash,
+        draw?.seed ?? envHash,
         await this.juryCandidates(fieldOps, conflicts),
         agent.operatorId,
         (x, y) => this.graph.vouchLinked(x, y),
@@ -465,6 +472,7 @@ export class EcdysisService {
           ...(jury.apprentices.includes(h) ? { apprentice: true } : {}),
         })),
         ...(preprintAt ? { preprintAt } : {}),
+        ...(draw ? { draw } : {}),
       });
       await this.store.markEnvelope(envHash);
       const bell = (await this.store.getDoorbell(agent.handle))?.status === "active" || agent.operatorId === PROBE_OPERATOR;
@@ -646,6 +654,31 @@ export class EcdysisService {
   }
 
   /**
+   * jury/0.5: seal a case's draw. The log key signs drawStatement(receipt)
+   * now that the submission is in; the seed is the SHA-256 of that seal.
+   * Ed25519 is deterministic (RFC 8032), so this log key has exactly one
+   * seal per receipt, unknown to the submitter until now and checkable by
+   * anyone against the log's public key. Without a log key (tests, local
+   * runs) there is nothing to seal with: the receipt stays the seed.
+   */
+  private async sealDraw(receipt: string, fromRound: number): Promise<JuryDraw | null> {
+    if (!this.sthKey) return null;
+    const seal = await signJson(this.sthKey, drawStatement(receipt) as unknown as Json);
+    return { rule: "sealed", seal, seed: await seedFromSeal(seal), fromRound };
+  }
+
+  /** How a case's panel was drawn, for anyone to check (jury/0.5). */
+  private drawView(q: QuarantineRecord): Json {
+    if (!q.draw) {
+      return { rule: "receipt", seed: q.id, note: "drawn before the draw was sealed (jury/0.5): the seed is the receipt itself" };
+    }
+    return {
+      rule: "sealed", seal: q.draw.seal, seed: q.draw.seed, fromRound: q.draw.fromRound,
+      verify: `The seal is an Ed25519 signature by the log key (its public key is in skill.md and pinned in the source repository, mirror/README.md) over the canonical JSON of {"subject": "<this receipt>", "type": "${DRAW_STATEMENT}"}. The seed is the hex SHA-256 of the seal's text. Candidates are ranked by SHA-256(seed|handle); redraw round n by SHA-256(seed|rn|handle).`,
+    } as unknown as Json;
+  }
+
+  /**
    * Re-examine one open case's panel: unseat lapsed jurors (with the
    * penalty), jurors with a stake (no penalty) and, when given, a juror who
    * has just recused; draw replacements from everyone eligible except the
@@ -687,8 +720,14 @@ export class EcdysisService {
 
     const exclude = new Set([...conflicts, ...seats.filter((st) => st.recused || st.handle === recused).map((st) => st.operatorId)]);
     const round = Math.max(0, ...seats.map((st) => st.round)) + 1;
+    // jury/0.5: a case seated before the draw was sealed is sealed at its
+    // first redraw; this round and every later one use the sealed seed.
+    if (count > 0 && !q.draw) {
+      const sealed = await this.sealDraw(q.id, round);
+      if (sealed) q.draw = sealed;
+    }
     const drawn = count > 0
-      ? await drawReplacements(q.id, round, await this.juryCandidates(new Set(), exclude), {
+      ? await drawReplacements(q.draw?.seed ?? q.id, round, await this.juryCandidates(new Set(), exclude), {
           submitterOperator: author?.operatorId ?? "",
           seatedOperators: new Set(remainingSeats.map((st) => st.operatorId)),
           count,
@@ -711,6 +750,8 @@ export class EcdysisService {
       conflicted: conflicted.map((st) => st.handle),
       recused: recused ? [recused] : [],
       seated: drawn.map((d) => d.handle),
+      // The seal this round was drawn under, so the log alone shows the draw is the one its seal fixes.
+      ...(q.draw && drawn.length ? { seal: q.draw.seal } : {}),
     });
     const nowIso = now.toISOString();
     q.jury = [...remaining, ...drawn.map((d) => d.handle)];
@@ -855,6 +896,7 @@ export class EcdysisService {
       jurySize: q.jury.length,
       votesCast: q.votes.length,
       juryVersion: JURY_VERSION,
+      draw: this.drawView(q),
       note: notes[q.status],
       ...(decided ? { verdicts: verdicts as unknown as Json } : {}),
       ...(q.status === "rejected"
@@ -1288,7 +1330,8 @@ export class EcdysisService {
       });
     }
 
-    await this.log.append("review.decide", { subject: q.id, outcome: tally.outcome, reason: tally.reason });
+    // A sealed case's decision carries its seal (jury/0.5), so the panel that decided it can be checked from the log alone.
+    await this.log.append("review.decide", { subject: q.id, outcome: tally.outcome, reason: tally.reason, ...(q.draw ? { seal: q.draw.seal } : {}) });
     if (tally.outcome === "reject") {
       q.status = "rejected";
       await this.store.putQuarantine(q);
@@ -1858,7 +1901,8 @@ export class EcdysisService {
       // The same pool as papers (agents sitting out a lapse are not drawn),
       // with experienced jurors only, and the same seat deadlines.
       const conflicts = await this.conflictsOf({ kind: "build", envelope: { payload: manifest as unknown as Json, signature: "" } });
-      const jury = await selectJury(envHash, await this.juryCandidates(new Set(), conflicts), agent.operatorId, JURY_SIZE);
+      const draw = await this.sealDraw(envHash, 0);
+      const jury = await selectJury(draw?.seed ?? envHash, await this.juryCandidates(new Set(), conflicts), agent.operatorId, JURY_SIZE);
       const seatedAt = this.now().toISOString();
       await this.store.putQuarantine({
         id: envHash, kind: "build",
@@ -1867,6 +1911,7 @@ export class EcdysisService {
         receivedAt: seatedAt,
         status: "pending", jury: jury.jurors, juryOperators: jury.operators, votes: [],
         seats: jury.jurors.map((h, i) => ({ handle: h, operatorId: jury.operators[i]!, seatedAt, round: 0 })),
+        ...(draw ? { draw } : {}),
       });
       await this.store.markEnvelope(envHash);
       return ok(202, {
