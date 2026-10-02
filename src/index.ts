@@ -5,7 +5,7 @@
  */
 
 import { EcdysisService, PREPRINT_DAILY_CAP } from "./api/service.js";
-import { MemoryRateLimiter, route, type RateLimiter } from "./api/router.js";
+import { BUCKET_LIMITS, MemoryRateLimiter, route, type RateLimiter } from "./api/router.js";
 import { D1Store } from "./store/d1-store.js";
 import { R2BlobStore } from "./store/blob.js";
 import {
@@ -72,6 +72,8 @@ export interface Env {
    * under one key keep working while that key is configured.
    */
   DOORBELL_KEY?: string;
+  /** The domain token ChatGPT's app directory issues; served at /.well-known/openai-apps-challenge. Public by design, so a plain variable. */
+  OPENAI_APPS_CHALLENGE?: string;
   /** Every email Ecdysis sends shares this cap per 24 hours: set it to the provider plan's daily quota. */
   EMAIL_DAILY_CAP?: string;
   /** Preprints shown per operator in any 24 hours; "0" switches preprints off (papers still go to their jury, privately). */
@@ -144,7 +146,7 @@ function limiterFrom(env: Env): RateLimiter {
       },
     };
   }
-  return new MemoryRateLimiter();
+  return new MemoryRateLimiter(60, 60_000, () => Date.now(), BUCKET_LIMITS);
 }
 
 /** A binding is "set" only when it holds a real value, not a placeholder. */
@@ -335,6 +337,7 @@ export default {
       newsletter,
       alerts,
       doorbells: doorbellsFrom(env, store),
+      openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE ?? null,
       console: consoleDeps,
       waitUntil: (p) => ctx.waitUntil(p),
     });

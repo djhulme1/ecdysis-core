@@ -10,7 +10,7 @@ import { ARTICLES, constitutionHash, CONSTITUTION_VERSION, REVIEW_WINDOW_DAYS } 
 import { badgeSvg, bibtexFor, constitutionMd, feedAtom, FIELD_LABELS, llmsTxt, robotsTxt, sitemapXml, skillMd, termsMd } from "./site.js";
 import { PAPER_ID } from "../web/design.js";
 import { looksLikePrivateKey, MAX_PASTE_CHARS, parseBundle, submitFormPage, submitResultPage, type StepResult } from "../web/submit.js";
-import { aboutPage, agentsPage, forkPage, kitPage, papersPage, peoplePage } from "../web/pages.js";
+import { aboutPage, agentsPage, forkPage, kitPage, papersPage, peoplePage, privacyPage } from "../web/pages.js";
 import { observatoryPage } from "../web/observatory.js";
 import { reviewPage, type Decision, type QueueBody } from "../web/review.js";
 import { appsPage } from "../web/apps.js";
@@ -34,6 +34,7 @@ import { commonsPage } from "../web/commons.js";
 import { appsFor, launchPage, MCP_APPS, mcpUrlFor, PROMPT_APPS, type McpApp, type PromptApp } from "../web/launch.js";
 import { isStarter, starterText } from "../web/starters.js";
 import { charterFormPage, charterResultPage, readCharterForm, CHARTER_MAX_BYTES } from "../web/charter.js";
+import { connectPage } from "../web/connect.js";
 import type { GraphEdge, GraphNode } from "../core/graph.js";
 
 export interface RateLimiter {
@@ -54,21 +55,31 @@ export interface RouteOptions {
   alerts?: JuryAlerts | null;
   /** Doorbells (wake/0.1: Ecdysis wakes agents when there is work). Absent: their endpoints answer 501. */
   doorbells?: Doorbells | null;
+  /** The token ChatGPT's app directory issued, served at /.well-known/openai-apps-challenge to prove the domain. */
+  openaiAppsChallenge?: string | null;
   /** The operator console. Absent: /operator does not exist. */
   console?: ConsoleDeps | null;
   /** Lets counting finish after the response is sent (the Worker's ctx.waitUntil). */
   waitUntil?: (p: Promise<unknown>) => void;
 }
 
+/**
+ * Buckets that need a different ceiling from the default. MCP calls from an
+ * AI app arrive from its servers' few addresses, shared by all its users,
+ * so the per-address MCP ceiling is ten times the ordinary one; writes
+ * through MCP are also limited per agent ("mcp-agent").
+ */
+export const BUCKET_LIMITS: Record<string, number> = { mcp: 600, "mcp-agent": 30 };
+
 /** Permissive in-memory fallback; production uses Cloudflare's bindings. */
 export class MemoryRateLimiter implements RateLimiter {
   private hits = new Map<string, number[]>();
-  constructor(private limit = 60, private windowMs = 60_000, private now = () => Date.now()) {}
+  constructor(private limit = 60, private windowMs = 60_000, private now = () => Date.now(), private perBucket: Record<string, number> = {}) {}
   async allow(bucket: string, id: string): Promise<boolean> {
     const key = `${bucket}:${id}`;
     const t = this.now();
     const arr = (this.hits.get(key) ?? []).filter((x) => t - x < this.windowMs);
-    if (arr.length >= this.limit) {
+    if (arr.length >= (this.perBucket[bucket] ?? this.limit)) {
       this.hits.set(key, arr);
       return false;
     }
@@ -203,6 +214,18 @@ async function sitePage(req: Request, url: URL, path: string, opts: RouteOptions
   }
   if (path === "/agents") {
     return sitehit(agentsPage(host), STATIC_PAGE_HEADERS, head);
+  }
+  if (path === "/connect") {
+    return sitehit(connectPage({ host, mcpUrl: mcpUrlFor(host) }), STATIC_PAGE_HEADERS, head);
+  }
+  if (path === "/privacy") {
+    return sitehit(privacyPage(host), STATIC_PAGE_HEADERS, head);
+  }
+  if (path === "/.well-known/openai-apps-challenge") {
+    // ChatGPT's app directory checks domain ownership by fetching a token it issued; the operator sets it as OPENAI_APPS_CHALLENGE.
+    const t = (opts.openaiAppsChallenge ?? "").trim();
+    if (!/^[A-Za-z0-9._~-]{8,512}$/.test(t)) return null;
+    return sitehit(t, TEXT_SITE_HEADERS("text/plain; charset=utf-8"), head);
   }
   if (path === "/submit") {
     // Script-free, but it posts a form to itself, so form-action is 'self'.
@@ -690,7 +713,7 @@ async function routeRequest(
   // MCP is POST-shaped but read-only: it shares the read bucket and stays
   // up in read-only mode, like every other read surface.
   const isMcp = path === "/mcp";
-  if (!(await limiter.allow(reading || isMcp ? "read" : "write", ip))) {
+  if (!(await limiter.allow(isMcp ? "mcp" : reading ? "read" : "write", ip))) {
     return respond(429, { error: "rate limit exceeded; slow down" });
   }
 
@@ -875,7 +898,26 @@ async function routeRequest(
       if (method !== "POST") {
         return respond(405, { error: "MCP endpoint: POST JSON-RPC messages here; see https://modelcontextprotocol.io" });
       }
-      const r = await handleMcp(body, svc, safeHost(url), opts.sthPublicKey ?? null);
+      // Writes through MCP count under the same funnel names as the HTTP API,
+      // are limited per agent, and honour the kill switch (see mcp.ts).
+      const probe = req.headers.get("x-ecdysis-probe") === "1";
+      const count = async (apiPath: string, status: number, b: Json) => {
+        if (probe) return;
+        const e = (b as { error?: unknown } | null)?.error;
+        const day = new Date().toISOString().slice(0, 10);
+        const counting = svc.recordOperational([
+          ...funnelKeys("POST", apiPath, status, status >= 400 && typeof e === "string" ? e : null),
+          ...dayFunnelKeys(day, "POST", apiPath, status),
+          `mcpw:${day}:${status < 400 ? "ok" : "no"}`,
+        ]);
+        if (opts.waitUntil) opts.waitUntil(counting);
+        else await counting;
+      };
+      const r = await handleMcp(body, {
+        svc, host: safeHost(url), logKey: opts.sthPublicKey ?? null,
+        doorbells: opts.doorbells ?? null, alerts: opts.alerts ?? null,
+        limiter, readOnly: !!opts.readOnly, count,
+      });
       if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
       return respond(r.status, r.body);
     }

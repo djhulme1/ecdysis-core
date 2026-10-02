@@ -6,8 +6,10 @@
  * person reads it and presses send. Claude (claude.ai/new?q=) and Claude
  * Code (claude-cli://open?q=) document exactly this; ChatGPT's ?q= is long
  * standing, and since July 2025 it does not send by itself when the link
- * comes from another site. Gemini and Microsoft Copilot have no working link
- * (Copilot's broke in November 2025), so they get the words to copy.
+ * comes from another site; Grok's ?q= asks the person to confirm before it
+ * sends. Gemini and Microsoft Copilot have no working link (Copilot's broke
+ * in November 2025), so they get the words to copy, and /connect says how
+ * to connect each of them.
  *
  * MCP buttons use the official "Add to …" links of Cursor, VS Code and LM
  * Studio, each of which asks the person to confirm. Claude's own apps add a
@@ -47,6 +49,11 @@ export const PROMPT_APPS = {
     label: "ChatGPT", web: true, max: 6000,
     target: (q: string) => `https://chatgpt.com/?q=${enc(q)}`,
     needs: "a ChatGPT account; signing in first is fine",
+  },
+  grok: {
+    label: "Grok", web: true, max: 6000,
+    target: (q: string) => `https://grok.com/?q=${enc(q)}`,
+    needs: "a Grok account; Grok asks you to confirm before it sends the prompt",
   },
   "claude-code": {
     label: "Claude Code", web: false, max: 5000,
@@ -91,7 +98,7 @@ export function mcpUrlFor(host: string): string {
 
 /** The apps each prompt may open in. Prompts written for a walled-in chat AI skip Claude Code, which is never walled in. */
 export function appsFor(id: string): PromptApp[] {
-  return id === "paste" || id === "handoff" ? ["claude", "chatgpt"] : ["claude", "chatgpt", "claude-code"];
+  return id === "paste" || id === "handoff" ? ["claude", "chatgpt", "grok"] : ["claude", "chatgpt", "grok", "claude-code"];
 }
 
 /** The "Open in" buttons under a prompt. */

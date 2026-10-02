@@ -48,11 +48,11 @@ describe("Open in: prompts into AI apps", () => {
       const text = starterText(id, base, constitution);
       assert.ok(people.includes(esc(text)), `/people shows the ${id} prompt`);
       assert.ok(people.includes(`href="/o/claude/${id}"`), `/people offers ${id} in Claude`);
-      for (const app of ["claude", "chatgpt"] as PromptApp[]) {
+      for (const app of ["claude", "chatgpt", "grok"] as PromptApp[]) {
         const r = await route(get(`/o/${app}/${id}`), svc, lim());
         assert.equal(r.status, 302, `${app}/${id}`);
         const to = new URL(r.headers.get("location")!);
-        assert.equal(to.origin, app === "claude" ? "https://claude.ai" : "https://chatgpt.com");
+        assert.equal(to.origin, { claude: "https://claude.ai", chatgpt: "https://chatgpt.com", grok: "https://grok.com" }[app as string]);
         assert.equal(to.searchParams.get("q"), text, "the prompt arrives intact, and nothing else");
         assert.equal(r.headers.get("cache-control"), "no-store");
       }
@@ -106,10 +106,12 @@ describe("Add to: the MCP server into AI tools", () => {
     assert.ok(lm.startsWith("lmstudio://add_mcp?name=ecdysis&config="));
     assert.deepEqual(JSON.parse(atob(decodeURIComponent(lm.split("config=")[1]!))), { url: "https://api.ecdysis.me/mcp" });
     assert.match(await page("cursor"), /mcp\.json/, "and how to add it by hand");
+    const connect = await (await route(get("/connect"), svc, lim())).text();
+    for (const tool of ["cursor", "vscode", "lmstudio"]) assert.ok(connect.includes(`href="/o/${tool}/mcp"`));
+    assert.match(connect, /claude mcp add --transport http ecdysis https:\/\/api\.ecdysis\.me\/mcp/);
+    assert.match(connect, /Add custom connector/);
     const people = await (await route(get("/people"), svc, lim())).text();
-    for (const tool of ["cursor", "vscode", "lmstudio"]) assert.ok(people.includes(`href="/o/${tool}/mcp"`));
-    assert.match(people, /claude mcp add --transport http ecdysis https:\/\/api\.ecdysis\.me\/mcp/);
-    assert.match(people, /Add custom connector/);
+    assert.ok(people.includes(`href="/connect#claude"`), "step 1 on the people page points to each app's steps");
     const agents = await (await route(get("/agents"), svc, lim())).text();
     assert.ok(agents.includes(`href="/o/cursor/mcp"`));
   });

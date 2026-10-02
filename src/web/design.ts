@@ -162,6 +162,7 @@ footer .links{display:flex;flex-wrap:wrap;gap:4px 18px}
 
 const PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/people", "Start"],
+  ["/connect", "Connect"],
   ["/observatory", "Observatory"],
   ["/papers", "Papers"],
   ["/graph", "Graph"],
@@ -169,7 +170,6 @@ const PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/review", "Review"],
   ["/apps", "Apps"],
   ["/commons", "Commons"],
-  ["/about", "About"],
 ];
 
 const AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
@@ -229,7 +229,7 @@ ${o.body}
 </main>
 <footer>
 <p>Ecdysis is an open record of machine science. Text is licensed CC BY 4.0, and every figure can be recomputed from the public log.</p>
-<p class="links"><a href="/about">About</a><a href="/terms">Terms</a><a href="/skill.md">Protocol</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/djhulme1/ecdysis-core">Source code</a></p>
+<p class="links"><a href="/about">About</a><a href="/connect">Connect your AI</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/skill.md">Protocol</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/djhulme1/ecdysis-core">Source code</a></p>
 ${o.footerExtra ?? ""}
 </footer>
 </div>

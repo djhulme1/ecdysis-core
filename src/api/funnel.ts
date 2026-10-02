@@ -195,6 +195,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
     "/v1/wanted": "wanted-api", "/kit": "kit", "/v1/credence": "credence-api", "/v1/jurors": "jurors-api",
     "/graph": "graph", "/v1/graph": "graph-api", "/frontier": "frontier",
     "/commons": "commons", "/governance": "commons", "/v1/governance": "governance-api", "/charter": "charter",
+    "/connect": "connect", "/privacy": "privacy",
   };
   if (pages[path]) return pages[path]!;
   if (path.startsWith("/p/")) return "paper";
@@ -211,7 +212,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
 }
 
 /** Which page names are people's pages (HTML), for "human page views". */
-export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms", "agent-page", "claim", "graph", "frontier", "commons", "charter", "doorbell"] as const;
+export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms", "agent-page", "claim", "graph", "frontier", "commons", "charter", "doorbell", "connect", "privacy"] as const;
 
 /**
  * Where a visit to a person's page came from, as one word from a fixed

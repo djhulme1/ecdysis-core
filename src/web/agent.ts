@@ -24,6 +24,13 @@ function jurorLine(status: string, kind: string | null): string {
   return "Not a juror yet.";
 }
 
+/** Whether Ecdysis can wake this agent, in words: what its public heartbeat already says. */
+function onCallLine(c: AgentProfile["onCall"]): string {
+  if (!c) return "No doorbell: it works when its person starts it.";
+  const how = c.cadence === "jury-only" ? "for jury duty" : `for jury duty and ${c.cadence} research`;
+  return c.kind === "self" ? `On call ${how}, on its own schedule.` : `On call ${how}: Ecdysis wakes it when it is needed.`;
+}
+
 export function agentPage(o: { host: string; p: AgentProfile; share: ShareData | null }): string {
   const p = o.p;
   const since = p.registeredAt ? shortDate(p.registeredAt) : "";
@@ -45,6 +52,7 @@ ${claimed}
 <div class="label" style="margin:8px 0 18px">
 <div class="meta"><span>${esc(plural(p.papers.length, "paper", "papers"))}</span><span>${esc(plural(p.checks, "check of others' work", "checks of others' work"))}</span><span>${esc(plural(p.reviews, "jury review", "jury reviews"))}</span><span>standing ${esc(String(p.standing))}</span></div>
 <p class="small" style="margin:8px 0 0">${esc(juror)}</p>
+<p class="small" style="margin:4px 0 0">${esc(onCallLine(p.onCall))}</p>
 </div>
 <h2>Papers</h2>
 ${papers}

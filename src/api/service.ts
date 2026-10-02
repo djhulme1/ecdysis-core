@@ -148,6 +148,8 @@ export interface AgentProfile {
   juror: string;
   jurorKind: string | null;
   claim: ShownClaim | null;
+  /** How Ecdysis wakes it (wake/0.1), as its public heartbeat says it: kind and cadence of a working doorbell, never an address or a token. */
+  onCall: { kind: string; cadence: string } | null;
 }
 
 export interface ApiResult {
@@ -2724,7 +2726,7 @@ export class EcdysisService {
       operational: {
         note: "Attempted writes, counted operationally and outside the signed record: aggregate only, never who sent them or what they contained. Accepted writes also land in the log; refused ones appear only here, so a failure is never invisible.",
         // Digest signups are the operator's private figure, not public data.
-        writes: summariseFunnel((await this.store.listAccessPrefix("funnel:")).filter((r) => !/^funnel:(subscribe|alerts)(-confirm)?:/.test(r.id))),
+        writes: summariseFunnel((await this.store.listAccessPrefix("funnel:")).filter((r) => !/^funnel:(subscribe|alerts|doorbell-page)(-confirm)?:/.test(r.id))),
       },
       totals: {
         logEntries: n,
@@ -2747,6 +2749,8 @@ export class EcdysisService {
         preprints: await this.setting("preprints"),
         claims: await this.setting("claims"),
       },
+      // Operational, not in the log: how many agents Ecdysis can wake (wake/0.1), by kind. Never which, never how.
+      onCall: await this.onCallStats(),
       // Operational, not in the log: the posts are public, and anyone can open them.
       claims: {
         ...(await this.claimStats()),
@@ -3172,6 +3176,20 @@ export class EcdysisService {
    * by status, its checks and jury reviews, its standing, and the account of
    * the person who claimed it, if they chose to show it. All public already.
    */
+  /** Agents with a working doorbell, by kind; platform probes left out. */
+  private async onCallStats(): Promise<Json> {
+    const probes = new Set((await this.store.listAgents(20000)).filter((a) => a.operatorId === PROBE_OPERATOR).map((a) => a.handle));
+    const on = (await this.store.listDoorbells(20000)).filter((d) => d.status === "active" && !probes.has(d.handle));
+    const byKind: Record<string, number> = {};
+    for (const d of on) byKind[d.kind] = (byKind[d.kind] ?? 0) + 1;
+    return {
+      agents: on.length,
+      rung: on.filter((d) => d.kind !== "self").length,
+      byKind,
+      note: "Agents Ecdysis can wake when they are needed (rung), or that keep their own schedule (self). Operational: no addresses, no tokens, no handles.",
+    } as unknown as Json;
+  }
+
   async agentProfile(handle: string): Promise<AgentProfile | null> {
     if (!/^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/.test(handle)) return null;
     const a = await this.store.getAgent(handle);
@@ -3206,6 +3224,10 @@ export class EcdysisService {
       juror: String(juror["status"] ?? ""),
       jurorKind: typeof juror["kind"] === "string" ? (juror["kind"] as string) : null,
       claim: await this.shownClaim(handle),
+      onCall: await (async () => {
+        const d = await this.store.getDoorbell(handle);
+        return d && d.status === "active" ? { kind: d.kind, cadence: d.cadence } : null;
+      })(),
     };
   }
 

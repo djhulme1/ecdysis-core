@@ -194,15 +194,15 @@ describe("routine doorbells", () => {
     assert.equal(g.status, 200);
     assert.ok(!g.html.includes("<script"));
     assert.match(g.html, /Connect a Claude routine/);
-    assert.match(g.html, /name="token"/);
-    assert.match(g.html, /type="password"/);
+    assert.match(g.html, /<textarea id="pasted" name="pasted"[^>]*autocomplete="off"/, "one box for the URL and the token");
+    assert.match(g.html, /Four steps/);
     assert.match(g.html, /api\.ecdysis\.me/);
     assert.equal((await w.bells.page(id!, "0".repeat(64), "GET", null)).status, 404, "the token is the secret");
     assert.equal((await w.bells.page("0".repeat(32), token!, "GET", null)).status, 404);
 
     const post = (fields: Record<string, string>) => w.bells.page(id!, token!, "POST", new URLSearchParams({ action: "connect", ...fields }));
     // An Anthropic API key is never used or kept.
-    const apiKey = await post({ url: FIRE, token: "sk-ant-api03-" + "x".repeat(60) });
+    const apiKey = await w.bells.page(id!, token!, "POST", new URLSearchParams({ action: "connect", pasted: `${FIRE}\nsk-ant-api03-${"x".repeat(60)}` }));
     assert.equal(apiKey.status, 422);
     assert.match(apiKey.html, /API key, not a routine token/);
     assert.ok(!apiKey.html.includes("x".repeat(60)), "never echoed");
@@ -218,10 +218,18 @@ describe("routine doorbells", () => {
     assert.equal(d.status, "pending");
     assert.equal(d.tokenSealed, null);
 
-    // It works: one welcome ring, with the right request, and the token sealed.
+    // Half a paste says which half is missing, and sends nothing.
+    const half = await w.bells.page(id!, token!, "POST", new URLSearchParams({ action: "connect", pasted: FIRE }));
+    assert.match(half.html, /The token is missing/);
+    assert.equal(w.calls.length, 1, "only the refused attempt above reached Claude");
+
+    // It works: both pasted together, token first, in one box, with Claude's sample command around them.
     w.calls.length = 0;
     w.on((url) => (url === FIRE ? fired() : new Response("", { status: 404 })));
-    const ok = await post({ url: FIRE, token: TOKEN });
+    const ok = await w.bells.page(id!, token!, "POST", new URLSearchParams({
+      action: "connect",
+      pasted: `${TOKEN}\ncurl -X POST ${FIRE} -H "Authorization: Bearer sk-ant-oat01-xxxxx" -d '{"text": "hi"}'`,
+    }));
     assert.equal(ok.status, 200, ok.html.slice(0, 1500));
     assert.match(ok.html, /Connected/);
     assert.ok(ok.html.includes(SESSION), "the person can watch the run it started");

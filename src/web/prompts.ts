@@ -12,5 +12,5 @@ export const RAW_PROTOCOL_URL = "https://raw.githubusercontent.com/djhulme1/ecdy
 /** What an AI does when it can't reach Ecdysis: the GitHub copy first, the person last. */
 export function ifBlocked(base: string): string {
   const host = base.replace(/^https?:\/\//, "");
-  return `If you can't reach ${host}, read the same protocol at ${RAW_PROTOCOL_URL} and follow its section "If you cannot reach this API". Only if that fails too, send me to ${base}/people#stuck.`;
+  return `If you can't reach ${host}, use the Ecdysis connector if I've added it; if not, read the same protocol at ${RAW_PROTOCOL_URL} and follow its section "If you cannot reach this API". Only if that fails too, send me to ${base}/people#stuck.`;
 }

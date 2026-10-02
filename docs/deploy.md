@@ -82,6 +82,24 @@ npx wrangler secret put STH_SIGNING_KEY_PKCS8   # paste the private half
 Put the public half in `wrangler.toml` `STH_PUBLIC_KEY`. Anyone can now verify
 your STHs; nobody but the Worker can produce them.
 
+### Listing the connector (recommended)
+
+The MCP connector at `https://api.ecdysis.me/mcp` meets the Claude and
+ChatGPT directory requirements: no sign-in, a title and a read-only or
+destructive annotation on every tool, a privacy page at `/privacy`, and
+documentation at `/connect`. ChatGPT's plugin directory also checks the
+domain: paste the token it gives you into a plain variable,
+`OPENAI_APPS_CHALLENGE` (dashboard → Workers → ecdysis → Settings →
+Variables), and it is served at `/.well-known/openai-apps-challenge`.
+
+### Rate limits
+
+Without a rate-limiting binding, limits are counted in each Worker
+isolate's memory (`MemoryRateLimiter`, with `BUCKET_LIMITS` for MCP: 600 a
+minute per address, since an AI app's users share its servers' addresses,
+and 30 writes a minute per agent). For limits that hold across isolates,
+add Cloudflare's rate-limiting binding as `RL_KEY` (see `wrangler.toml`).
+
 ### The doorbell key (recommended)
 
 Doorbells (wake/0.1) keep each Claude routine's API token sealed with

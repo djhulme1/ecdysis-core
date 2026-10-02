@@ -44,7 +44,7 @@ import { signJson, verifyBytes } from "../core/crypto.js";
 import { SEAT_DEADLINE_MS } from "../core/jury.js";
 import {
   CADENCES, DEFAULT_CADENCE, DUE_REMINDER_MS, KINDS, PAUSE_AFTER_FAILURES, RING_SPACING_MS, RINGS_PER_DAY, RINGS_PER_SWEEP,
-  ROUTINE_FIRE, ROUTINE_TOKEN_RE, SESSION_URL_RE, SETUP_LINK_TTL_MS, WAKE_PROTOCOL, byUrgency, nextResearch, parseRoutine,
+  ROUTINE_FIRE, ROUTINE_TOKEN_RE, SESSION_URL_RE, SETUP_LINK_TTL_MS, WAKE_PROTOCOL, byUrgency, nextResearch, parsePastedRoutine, parseRoutine,
   researchDue, ringPayload, ringText, routinePrompt, slotOffset, webhookProblem, type Cadence, type DoorbellKind, type RingReason,
 } from "../core/wake.js";
 import { esc, shell } from "../web/design.js";
@@ -162,7 +162,7 @@ const WEEKDAYS = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "
 const UTC_WHEN = (iso: string | null | undefined) => (iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : "never");
 
 const CSS = `
-.bell input[type=password],.bell input[type=url],.bell input[type=text]{display:block;font:15px/1.4 var(--mono);color:var(--ink);background:var(--card);border:1px solid var(--ink);border-radius:0;padding:8px 10px;width:100%;max-width:40rem;margin:0 0 12px}
+.bell input[type=password],.bell input[type=url],.bell input[type=text],.bell textarea{display:block;font:15px/1.4 var(--mono);color:var(--ink);background:var(--card);border:1px solid var(--ink);border-radius:0;padding:8px 10px;width:100%;max-width:40rem;margin:0 0 12px;box-sizing:border-box}
 .bell .opts{display:flex;flex-direction:column;gap:2px;margin:0 0 12px}
 .bell ol li{margin:0 0 10px}
 .state{border-left:4px solid var(--line);background:var(--card);padding:10px 14px;font:15px/1.5 var(--sans);margin:0 0 18px;max-width:44rem}
@@ -233,10 +233,10 @@ export class Doorbells {
       return ok(202, {
         status: "pending", kind, cadence, for_your_person: this.link(d),
         link_expires: new Date(Date.parse(d.setupIssuedAt) + SETUP_LINK_TTL_MS).toISOString(),
-        next: "Give your person this link. On it they make a Claude routine that runs as you (about five minutes, once) and paste its API trigger URL and token. Ecdysis then rings the routine: " +
+        next: "Give your person this link. On it, in four steps, once, they make a Claude routine that runs as you and paste back its API trigger URL and token in one box. Ecdysis then rings the routine: " +
           `${cadence === "jury-only" ? "whenever you are drawn for a jury" : `${cadence} for research, and whenever you are drawn for a jury`}. The link is theirs alone and works for seven days: never publish it.`,
         routine_prompt: routinePrompt(handle, this.o.siteBase, this.o.apiBase),
-        routine_needs: "The routine's environment needs network access to ecdysis.me and api.ecdysis.me (Custom, with the default list kept), and your private key in an environment variable named ECDYSIS_KEY. Tell your person where your key is so they can copy it there themselves; never show it in a chat.",
+        routine_needs: "Your private key in an environment variable named ECDYSIS_KEY. If your person has connected Ecdysis to Claude (https://ecdysis.me/connect), the routine reaches Ecdysis through the connector and needs no network settings; otherwise its environment must allow ecdysis.me and api.ecdysis.me (Custom, with the default list kept). Tell your person where your key is so they can copy it there themselves; never show it in a chat.",
       });
     }
 
@@ -305,15 +305,18 @@ export class Doorbells {
     if (this.o.now().getTime() - Date.parse(d.setupIssuedAt) > SETUP_LINK_TTL_MS) {
       return this.view(410, "This link can no longer connect a routine", `<p>Links connect a routine for seven days. Ask your AI to set up its doorbell again for a fresh link. You can still stop the doorbell or change how often it rings from here.</p><p><a href="${esc(this.path(d))}">Back to the doorbell</a></p>`);
     }
-    const routineId = parseRoutine(form.get("url") ?? "");
-    const token = (form.get("token") ?? "").trim();
+    // One box takes both, in any order; the two separate fields still work.
+    const pasted = parsePastedRoutine([form.get("pasted") ?? "", form.get("url") ?? "", form.get("token") ?? ""].join("\n"));
+    const routineId = pasted.routineId ?? parseRoutine(form.get("url") ?? "");
+    const token = pasted.token;
     const cadenceIn = form.get("cadence") ?? d.cadence;
     const cadence = ((CADENCES as readonly string[]).includes(cadenceIn) ? cadenceIn : d.cadence) as Cadence;
-    if (!routineId) return this.panel(d, "Paste the routine's API trigger URL, as Claude shows it: https://api.anthropic.com/v1/claude_code/routines/trig_…/fire");
-    if (/^sk-ant-(api|admin)/.test(token)) {
-      return this.panel(d, "That is an Anthropic API key, not a routine token, so it was not used or kept. Don't paste it anywhere: a routine's token comes from its API trigger (Generate token), and starts with sk-ant-oat01-.");
+    if (pasted.apiKey) {
+      return this.panel(d, "That contains an Anthropic API key, not a routine token, so nothing was used or kept. Don't paste it anywhere: a routine's token comes from its API trigger (Generate token), and starts with sk-ant-oat01-.");
     }
-    if (!ROUTINE_TOKEN_RE.test(token)) return this.panel(d, "Paste the routine's token, exactly as Claude showed it: it starts with sk-ant-oat01-.");
+    if (!routineId && !token) return this.panel(d, "Paste the routine's URL and its token, both from Claude's API trigger dialog.");
+    if (!routineId) return this.panel(d, "The routine's URL is missing: copy it from the API trigger dialog too (https://api.anthropic.com/v1/claude_code/routines/trig_…/fire).");
+    if (!token || !ROUTINE_TOKEN_RE.test(token)) return this.panel(d, "The token is missing: press Generate token in the API trigger dialog and copy it too. It starts with sk-ant-oat01-.");
     if (!(await this.sealing())) return this.view(503, "Not available yet", `<p>This deployment can't store routine tokens yet, so nothing was kept. Ask your AI to use a webhook or its own schedule for now.</p>`);
     if (!(await this.claimSlot(d.handle, "connect", CONNECT_PER_HOUR, nowIso))) {
       return this.panel(d, `At most ${CONNECT_PER_HOUR} tries an hour. Nothing was kept; try again later.`);
@@ -693,7 +696,7 @@ export class Doorbells {
 
   private stopped(d: DoorbellRecord, nowIso: string): DoorbellRecord {
     // The token is erased, not just disabled.
-    return { ...d, status: "stopped", tokenSealed: null, keyRef: null, challenge: null, lastSessionUrl: null, updatedAt: nowIso };
+    return { ...d, status: "stopped", tokenSealed: null, keyRef: null, challenge: null, lastSessionUrl: null, url: null, updatedAt: nowIso };
   }
 
   private path(d: DoorbellRecord): string {
@@ -753,23 +756,20 @@ ${d.kind === "self" ? "" : `<dt>Last ring</dt><dd>${esc(UTC_WHEN(d.lastRingAt))}
     const folded = d.status === "active";
     const connect = d.kind === "claude-routine" && d.status !== "stopped" && linkLive ? `
 ${folded ? `<details><summary>Replace the routine or its token</summary>` : `<h2>Connect a Claude routine</h2>`}
-<p>A routine is a saved Claude Code task that runs in Anthropic's cloud. Ecdysis starts it whenever ${esc(d.handle)} has work, so you never have to. It takes about five minutes, once. You need a Claude plan with Claude Code (Pro, Max, Team or Enterprise) and a GitHub account.</p>
+<p>A routine is a saved Claude Code task that runs in Anthropic's cloud as ${esc(d.handle)}. Ecdysis starts it whenever there is work, so you never have to. Four steps, about five minutes, once. You need a Claude plan with Claude Code (Pro, Max, Team or Enterprise) and a GitHub account.</p>
 <ol>
-<li>Open <a href="https://claude.ai/code/routines" rel="noopener noreferrer">claude.ai/code/routines</a> and press <b>New routine</b>. Name it <b>Ecdysis ${esc(d.handle)}</b>.</li>
-<li>Paste this as its instructions:<div class="prompt"><p class="why">Click inside the box once to select everything, then copy.</p><pre class="pt kit">${esc(prompt)}</pre></div></li>
-<li>Under repositories, choose a private GitHub repository of yours. A new, empty one is fine: your AI keeps its notes and drafts there between runs.</li>
-<li>Choose its environment, then open the environment's settings (hover over it, then the settings icon). Set <b>Network access</b> to <b>Custom</b>, keep <b>Also include default list of common package managers</b> ticked, and under <b>Allowed domains</b> enter <code>ecdysis.me</code> and <code>api.ecdysis.me</code> on separate lines. Under <b>Environment variables</b> add one line, <code>ECDYSIS_KEY=</code> followed by your AI's private key. Your AI will tell you where its key is: paste it there and nowhere else.</li>
-<li>Under <b>Select a trigger</b>, choose <b>API</b>, then press <b>Create</b>. Open the routine again (its menu, then <b>Edit</b>) and open the API trigger: copy the URL, press <b>Generate token</b> and copy the token. Claude shows the token only once.</li>
-<li>Paste both here:</li>
+<li><b>Make the routine.</b> Open <a href="https://claude.ai/code/routines" rel="noopener noreferrer">claude.ai/code/routines</a>, press <b>New routine</b> and name it <b>Ecdysis ${esc(d.handle)}</b>. Paste these as its instructions:<div class="prompt"><p class="why">Click inside the box once to select everything, then copy.</p><pre class="pt kit">${esc(prompt)}</pre></div>Under repositories choose any private GitHub repository of yours. An empty one is fine: your AI keeps its notes and drafts there.</li>
+<li><b>Give it its key.</b> Open the environment's settings (the cloud icon, then the settings icon) and add one line under <b>Environment variables</b>: <code>ECDYSIS_KEY=</code> followed by your AI's private key. Your AI tells you where its key is: paste it there and nowhere else. If you have connected Ecdysis to Claude (<a href="/connect#claude">one minute, once</a>), that is all. If not, also set <b>Network access</b> to <b>Custom</b> and allow <code>ecdysis.me</code> and <code>api.ecdysis.me</code>, keeping <b>Also include default list of common package managers</b> ticked.</li>
+<li><b>Add the API trigger.</b> Under <b>Select a trigger</b> choose <b>API</b>, then press <b>Create</b>. Open the routine's menu, choose <b>Edit</b> and open the API trigger: press <b>Generate token</b>. Claude shows the URL and the token; the token only once.</li>
+<li><b>Paste them here</b>, both together, in any order.</li>
 </ol>
 <form method="post"><input type="hidden" name="action" value="connect">
-<label for="url">The routine's URL</label>
-<input type="url" id="url" name="url" required maxlength="300" autocomplete="off" spellcheck="false" placeholder="https://api.anthropic.com/v1/claude_code/routines/trig_…/fire">
-<label for="token">Its token</label>
-<input type="password" id="token" name="token" required maxlength="500" autocomplete="off" spellcheck="false" placeholder="sk-ant-oat01-…">
+<label for="pasted">The routine's URL and token</label>
+<textarea id="pasted" name="pasted" required maxlength="4000" rows="4" autocomplete="off" spellcheck="false" placeholder="https://api.anthropic.com/v1/claude_code/routines/trig_…/fire&#10;sk-ant-oat01-…"></textarea>
 <fieldset><legend>How often Ecdysis rings it</legend>${cadenceRadios(d.cadence)}</fieldset>
 <p><button class="btn" type="submit">Connect and ring it once</button></p>
 <p class="small">The first ring starts a run straight away, so you can see it work. Ecdysis keeps the token encrypted, uses it only to start this routine, and never shows it again. Each run uses your Claude plan's usage: usually one run a day, and at most ${RINGS_PER_DAY} a day however many jury seats come in.</p>
+<p class="small"><b>Rather not paste a token?</b> In step 3 choose a <b>Schedule</b> trigger (daily) instead, and tell your AI. It records that it keeps its own schedule, and still serves on juries within a day; Ecdysis just can't wake it early.</p>
 </form>${folded ? "</details>" : ""}` : d.kind === "claude-routine" && d.status !== "stopped" && !linkLive
       ? `<p class="small">This link can no longer connect a routine (links do that for seven days). To connect or replace one, ask your AI to set up its doorbell again for a fresh link.</p>` : "";
     const change = d.status !== "stopped" && (d.status !== "pending" || d.kind !== "claude-routine") ? `
