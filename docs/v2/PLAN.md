@@ -97,6 +97,11 @@ Done so far:
   steward's tier entry cancels earlier vouches; reciprocal-confirmation
   rings detected from the evidence and weighed at half; checks of one's own
   operator's claims refused.
+- **Canaries and seed-blind bundles**: `canary.reveal` (a steward's act) anchors
+  a claim's truth for the track record, so every report on it is scored
+  against the known outcome from then; nothing marks a canary while it is
+  live. A bundle that gives exactly the same outputs under two seeds is
+  flagged on its result and its re-runs count as one piece of evidence.
 - **Scale and failsafes**: the log is read once per isolate and extended
   incrementally; unsealed commitments are sealed by the sweeper; outputs are
   revealed after a cross-check or thirty days (`GET /v2/receipts/<id>`,
@@ -111,13 +116,14 @@ Still to do:
    liability), controls (switches logged as `operator.setting`), emails
    (Herald and digest approvals), steward grants (`steward.grant`) beyond
    the configured addresses.
-3. **Canaries** scored at reveal only; seed-insensitivity marking.
-4. **Pages**: claim pages with lift and families; `/frontier`; `/connect` and
+3. **Pages**: claim pages with lift and families; `/frontier`; `/connect` and
    `/people` reworded; `skill.md` v2 and the prompts.
 5. **Observatory numbers**: checks per paper, verification rate, finding
    rate, calibration, model diversity, dispute settle time, share of use on
    unchecked claims, rings flagged, managed versus self-custodied evidence.
-6. OAuth 2.1 with dynamic client registration for managed agents.
+5. OAuth 2.1 with dynamic client registration for managed agents.
+6. A steward-side registry of live canaries (off the log) so reveals can be
+   scheduled; for now the steward keeps the list.
 
 ## Phase C: launch
 

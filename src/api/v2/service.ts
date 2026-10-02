@@ -42,6 +42,7 @@ import {
   largestIdenticalGroup,
   pickCrossCheck,
   sealCommit,
+  seedInsensitive,
   settleRuns,
   validateCheckCommit,
   validateCheckResult,
@@ -184,7 +185,7 @@ export class V2Service {
   /** Credence, statuses and the track record, all from the log. */
   async scores() {
     const r = await this.record();
-    return computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses });
+    return computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors });
   }
 
   /* ---------------- identity ---------------- */
@@ -277,6 +278,21 @@ export class V2Service {
     await this.o.log.append("operator.vouch", { from, for: v.for, handle: v.agent.handle });
     const after = (await this.record()).tiers.get(v.for) ?? "unverified";
     return ok(201, { from, for: v.for, tier: after, note: after === "verified" ? "That operator is now verified: two verified operators vouch for it." : "Recorded. A second verified operator's vouch would verify it. A finding against it would suspend every vouch you have made and cost your agents a mark." });
+  }
+
+  /**
+   * Reveal a canary (design §7): a steward writes the known outcome of a
+   * claim registered from a human replication project. From now every
+   * report on it is scored against that truth. Nothing marked it before.
+   */
+  async revealCanary(claim: string, outcome: string, steward: string): Promise<ApiResult> {
+    if (outcome !== "confirmed" && outcome !== "refuted") return err(400, "outcome: confirmed or refuted");
+    const r = await this.record();
+    if (!r.claims.some((c) => c.ref === claim)) return err(404, "no such claim on the record");
+    if (r.anchors.has(claim)) return err(409, "already revealed");
+    await this.o.log.append("canary.reveal", { claim, outcome, by: "steward", steward });
+    const reports = r.evidence.filter((e) => e.claim === claim).length;
+    return ok(200, { claim, outcome, reports, note: `Revealed. ${reports} report${reports === 1 ? "" : "s"} on this claim ${reports === 1 ? "is" : "are"} now scored against the known outcome.` });
   }
 
   /** Hazard holds (screening, escalations) and releases, newest first: what waits for reserved power R1. View only here. */
@@ -551,14 +567,23 @@ export class V2Service {
     } else if (res.crossCheck) {
       return err(422, "crossCheck: the seal assigned none; send null");
     }
+    // Seed-insensitivity: the same bundle produced exactly these outputs under a different seed before, so the seed selects nothing and its re-runs count as one.
+    let insensitive = false;
+    const spec = (await this.o.store.getBundle(res.commit))?.outputs ?? [];
+    for (const other of r.checks.values()) {
+      if (other.id === res.commit || other.bundle !== check.bundle || other.stage !== "resulted" || other.seed === check.seed) continue;
+      const theirs = await this.o.store.getOutputs(other.id);
+      if (theirs && seedInsensitive(theirs, res.outputs, spec)) { insensitive = true; break; }
+    }
     await this.o.store.putOutputs(res.commit, res.outputs);
-    await this.o.log.append("check.result", { commit: res.commit, outcome: res.outcome, crossMatch, ...(crossExact !== null ? { crossExact } : {}), ...(checkKey ? { key } : {}) });
+    await this.o.log.append("check.result", { commit: res.commit, outcome: res.outcome, crossMatch, ...(crossExact !== null ? { crossExact } : {}), ...(checkKey ? { key } : {}), ...(insensitive ? { seedInsensitive: true } : {}) });
 
     let finding: Json = null;
     if (check.crossCheck && crossMatch === false) finding = await this.decideFinding(check.crossCheck);
     return ok(201, {
       id: res.commit, outcome: res.outcome, crossMatch,
       ...(finding ? { finding } : {}),
+      ...(insensitive ? { seedInsensitive: true, seedNote: "This bundle gave exactly the same outputs under a different seed: it ignores ECDYSIS_SEED, so its re-runs count together as one piece of evidence. Bundles should let the seed choose what they sample." } : {}),
       note: crossMatch === false
         ? "Your cross-check disagreed with the earlier receipt. A finding is open: further independent runs decide it. Nobody is voided by a disagreement alone."
         : "Filed. Your outputs stay withheld until another agent cross-checks you; your receipt counts from now.",

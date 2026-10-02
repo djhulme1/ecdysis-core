@@ -76,6 +76,11 @@ export class StewardHandler {
         if (r.status !== 200) return this.page("/steward/people", signed, url, null, `Couldn't set the tier: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
         return this.redirect(`/steward/people?ok=${encodeURIComponent(`Tier set to ${tier}.`)}`);
       }
+      case "/steward/evidence/reveal": {
+        const r = await this.o.v2.revealCanary((f.get("claim") ?? "").trim(), f.get("outcome") ?? "", steward);
+        if (r.status !== 200) return this.page("/steward/evidence", signed, url, null, `Couldn't reveal: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
+        return this.redirect(`/steward/evidence?ok=${encodeURIComponent(String((r.body as Record<string, unknown>)["note"] ?? "Revealed."))}`);
+      }
       case "/steward/evidence/reverse": {
         const r = await this.o.v2.reverseFinding(f.get("id") ?? "", steward);
         if (r.status !== 200) return this.page("/steward/evidence", signed, url, null, `Couldn't reverse: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
@@ -134,7 +139,8 @@ export class StewardHandler {
           const rs = r.receiptsByClaim.get(c.ref) ?? [];
           return { ref: c.ref, credence: c.credence, dispute: c.dispute, status: c.status, receipts: rs.length, disputedReceipts: rs.filter((x) => (r.checks.get(x.id)?.disputedBy.length ?? 0) > 0).length };
         });
-        return this.html(200, evidencePage({ findings, disputes, csrf, fresh }, flash, problem));
+        const anchors = [...r.anchors].map(([claim, confirmed]) => ({ claim, confirmed }));
+        return this.html(200, evidencePage({ findings, disputes, anchors, csrf, fresh }, flash, problem));
       }
       case "/steward/content":
         return this.html(200, contentPage({ holds: await this.o.v2.holds(100) }, flash, problem));

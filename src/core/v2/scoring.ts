@@ -88,6 +88,13 @@ export interface TrackOptions {
   voidedOperators?: Set<string>;
   /** Committed checks never reported, per agent. */
   lapses?: Map<string, number>;
+  /**
+   * Canaries revealed (design §7): claims whose truth is known from outside
+   * the record. Every report on an anchored claim is scored against that
+   * truth, whatever the evidence on the record says; while a canary is live
+   * nothing marks it, so it is scored like any other claim until then.
+   */
+  anchors?: Map<string, boolean>;
 }
 
 /** The improvement a move from p to p′ made, once the truth T is known. */
@@ -132,7 +139,8 @@ export function scoreTrackRecord(
         confirmingFamilies: familyCount(without.confirmingFamilies),
         foundationRefuted,
       });
-      const resolved: 0 | 1 | null = status === "established" ? 1 : status === "refuted" ? 0 : null;
+      const anchor = o.anchors?.get(c.ref);
+      const resolved: 0 | 1 | null = anchor !== undefined ? (anchor ? 1 : 0) : status === "established" ? 1 : status === "refuted" ? 0 : null;
       reports.push({
         id: item.id, agent: item.agent, claim: c.ref, seq: item.seq, before, after, resolved,
         credit: resolved === null ? 0 : marketCredit(before, after, resolved),

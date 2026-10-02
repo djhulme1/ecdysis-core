@@ -65,7 +65,7 @@ ${o.fresh ? "" : `<p class="small">Changing a tier needs a sign-in from the last
 
 export interface FindingRow { id: string; verdict: string; oddAgent: string | null; oddOperator: string | null; decidedAt: string; appealUntil: string; inForce: boolean; reversed: boolean; bundle: string; seed: string }
 export interface DisputeRow { ref: string; credence: number; dispute: number; status: string; receipts: number; disputedReceipts: number }
-export function evidencePage(o: { findings: FindingRow[]; disputes: DisputeRow[]; csrf: string; fresh: boolean }, flash: string | null, problem: string | null): string {
+export function evidencePage(o: { findings: FindingRow[]; disputes: DisputeRow[]; anchors: Array<{ claim: string; confirmed: boolean }>; csrf: string; fresh: boolean }, flash: string | null, problem: string | null): string {
   const body = `<h1>Evidence</h1>
 <p class="lede">Disputes are settled by further independent runs; findings are decided by the rules in the core and can only be reversed here, on appeal. Reversing restores everything the finding voided.</p>
 <h2>Findings</h2>
@@ -79,7 +79,17 @@ ${o.findings.length ? `<table><thead><tr><th>Finding</th><th>Verdict</th><th>Aga
 </tr>`).join("")}</tbody></table>` : `<p class="small">No findings.</p>`}
 <h2>Disputes</h2>
 ${o.disputes.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Dispute</th><th>Receipts</th></tr></thead><tbody>${o.disputes.map((d) => `<tr><td><code class="mono">${esc(d.ref)}</code></td><td>${esc(d.status)}</td><td>${d.credence.toFixed(2)}</td><td>${d.dispute.toFixed(2)}</td><td>${d.receipts} (${d.disputedReceipts} disputed)</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claim is in dispute.</p>`}
-${o.fresh ? "" : `<p class="small">Reversing a finding needs a sign-in from the last ten minutes.</p>`}`;
+<h2>Canaries</h2>
+<p class="small">A canary is a claim from a human replication project whose outcome is already known, registered like any external claim and unlabelled. Nothing marks it while it is live. Revealing it writes the known outcome to the log; from then every report on it is scored against that truth.</p>
+${o.anchors.length ? `<table><thead><tr><th>Claim</th><th>Known outcome</th></tr></thead><tbody>${o.anchors.map((a) => `<tr><td><code class="mono">${esc(a.claim)}</code></td><td>${a.confirmed ? "confirmed" : "refuted"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">None revealed yet.</p>`}
+<form method="post" action="/steward/evidence/reveal"><input type="hidden" name="csrf" value="${esc(o.csrf)}">
+<fieldset><legend>Reveal a canary</legend>
+<label for="claim">Claim ref</label><input type="text" id="claim" name="claim" maxlength="160" placeholder="ext:0123456789abcdef#C1">
+<label class="opt"><input type="radio" name="outcome" value="confirmed"> known to hold</label>
+<label class="opt"><input type="radio" name="outcome" value="refuted"> known to fail</label>
+<p><button class="btn quiet" type="submit">Reveal</button></p>
+</fieldset></form>
+${o.fresh ? "" : `<p class="small">Reversing a finding or revealing a canary needs a sign-in from the last ten minutes.</p>`}`;
   return frame("Evidence", "/steward/evidence", body, flash, problem);
 }
 

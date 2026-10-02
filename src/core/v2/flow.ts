@@ -25,6 +25,11 @@
  *   review.file        {claim, handle, operatorId, forecast, models?, key?}
  *   key.delegate       {handle, key, scope: "reports"}          a CHECK KEY: signs reports only (constitution I.3)
  *   key.revoke         {handle, key, compromisedAt?}            immediate; a compromise time disowns later reports
+ *   canary.reveal      {claim, outcome}                         a steward reveals a canary's known truth (design §7)
+ *
+ * check.result may carry seedInsensitive: true when the same bundle gave
+ * exactly the same outputs under a different seed earlier; the bundle then
+ * ignores its seed, and its re-runs count together as one piece of evidence.
  *
  * A receipt is a check with a result. A check's evidence item exists once
  * its result is filed; its kind is the commit's (rerun or replication) and
@@ -72,12 +77,12 @@ import { APPEAL_MS } from "./receipts.js";
 export type V2EntryType =
   | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
   | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "finding.decide" | "finding.reverse" | "review.file"
-  | "key.delegate" | "key.revoke";
+  | "key.delegate" | "key.revoke" | "canary.reveal";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
   "check.commit", "check.seal", "check.result", "check.lapse", "finding.decide", "finding.reverse", "review.file",
-  "key.delegate", "key.revoke",
+  "key.delegate", "key.revoke", "canary.reveal",
 ];
 
 export interface V2Entry {
@@ -195,6 +200,10 @@ export interface V2Record {
   /** Receipts (resulted checks) per claim, in log order, for cross-check assignment. */
   receiptsByClaim: Map<string, Array<{ id: string; operatorId: string; seq: number }>>;
   vouchLinked: (a: string, b: string) => boolean;
+  /** Revealed canaries: claim ref → true if its known outcome confirms it. */
+  anchors: Map<string, boolean>;
+  /** Bundle hashes seen to ignore their seed. */
+  seedInsensitiveBundles: Set<string>;
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -216,6 +225,8 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const paperFamilies = new Map<string, string[]>();
   const claimAuthorOp = new Map<string, string>();
   const reviews: Array<EvidenceInput & { key: string; ts: string }> = [];
+  const anchors = new Map<string, boolean>();
+  const seedInsensitiveBundles = new Set<string>();
 
   const sorted = [...entries].sort((a, b) => a.seq - b.seq);
   for (const e of sorted) {
@@ -332,6 +343,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         c.resultKey = str(p["key"]) || (agents.get(c.handle)?.publicKey ?? "");
         c.outcome = o === "confirmed" || o === "failed" || o === "inconclusive" ? o : "inconclusive";
         c.crossMatch = typeof p["crossMatch"] === "boolean" ? (p["crossMatch"] as boolean) : null;
+        if (p["seedInsensitive"] === true) seedInsensitiveBundles.add(c.bundle);
         if (c.crossCheck && c.crossMatch !== null) {
           const earlier = checks.get(c.crossCheck);
           if (earlier) (c.crossMatch ? earlier.verifiedBy : earlier.disputedBy).push(c.id);
@@ -358,6 +370,11 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
       case "finding.reverse": {
         const f = findings.find((x) => x.id === str(p["id"]));
         if (f) f.reversed = true;
+        break;
+      }
+      case "canary.reveal": {
+        const outcome = str(p["outcome"]);
+        if (outcome === "confirmed" || outcome === "refuted") anchors.set(str(p["claim"]), outcome === "confirmed");
         break;
       }
       case "review.file": {
@@ -415,10 +432,17 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const tierOf = (op: string): Tier => tiers.get(op) ?? "unverified";
   const evidence: EvidenceInput[] = [];
   const receiptsByClaim = new Map<string, Array<{ id: string; operatorId: string; seq: number }>>();
+  const seedless = new Set<string>(); // claim|bundle pairs already counted once for a seed-insensitive bundle
   for (const c of [...checks.values()].sort((a, b) => a.seq - b.seq)) {
     if (c.stage !== "resulted" || !c.outcome || c.disowned) continue;
     receiptsByClaim.set(c.target, [...(receiptsByClaim.get(c.target) ?? []), { id: c.id, operatorId: c.operatorId, seq: c.seq }]);
     if (c.outcome === "inconclusive") continue;
+    if (seedInsensitiveBundles.has(c.bundle)) {
+      // The bundle ignores its seed: however many operators re-run it, it is one piece of evidence (the first).
+      const key = `${c.target}|${c.bundle}`;
+      if (seedless.has(key)) continue;
+      seedless.add(key);
+    }
     evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq });
   }
   for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
@@ -440,5 +464,5 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, rings, ringLinked, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked };
+  return { tiers, vouches, suspendedVouchers, rings, ringLinked, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, seedInsensitiveBundles };
 }

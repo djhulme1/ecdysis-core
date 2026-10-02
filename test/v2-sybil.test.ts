@@ -179,3 +179,69 @@ describe("reciprocal rings (§5.6)", () => {
     assert.equal(cat.status, 403, "one's own operator's claim: nothing to gain (not independent)");
   });
 });
+
+describe("canaries and seed-insensitive bundles", () => {
+  it("a revealed canary scores every report against the known truth, however the record's evidence leaned", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"], "verified");
+    await w.agent("Bee", "op-b", ["gpt"], "verified");
+    await w.agent("Cat", "op-c", ["gemini"], "verified");
+    // A claim from a human replication project, registered like any other external claim.
+    const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1126/science.aac4716", quote: "ego depletion: a demanding first task reduces performance on a second self-control task", test: "no reduction in a pre-registered multi-site replication" }));
+    const ref = String((ext.body as Record<string, Json>)["ref"]);
+    // Bee confirms it (wrongly); Cat, cross-checking Bee, confirms too: the record leans towards true.
+    const c1 = await w.commit("Bee", ref, w.bundle(1));
+    await w.result("Bee", w.idOf(c1), "confirmed", { alpha: 0.6, solver: "x" }, null);
+    const c2 = await w.commit("Cat", ref, w.bundle(2));
+    await w.result("Cat", w.idOf(c2), "confirmed", { alpha: 0.6, solver: "x" }, { receipt: w.idOf(c1), outputs: { alpha: 0.6, solver: "x" } });
+    let s = await w.svc.scores();
+    assert.ok(s.claims.get(ref)!.credence > 0.5);
+    assert.equal(s.track.reports.filter((x) => x.claim === ref && x.resolved !== null).length, 0, "not resolved: nothing scored yet");
+    const beeBefore = s.track.credit.get("Bee") ?? 0;
+    // The steward reveals the canary: it is known to fail (the 2016 multi-site replication found no effect).
+    assert.equal((await w.svc.revealCanary(ref, "refuted", "op-steward")).status, 200);
+    assert.equal((await w.svc.revealCanary(ref, "refuted", "op-steward")).status, 409);
+    assert.equal((await w.svc.revealCanary("ecd:nothere#C1", "refuted", "op-steward")).status, 404);
+    s = await w.svc.scores();
+    const scored = s.track.reports.filter((x) => x.claim === ref);
+    assert.ok(scored.length === 2 && scored.every((x) => x.resolved === 0), "both reports are scored against the known outcome");
+    assert.ok((s.track.credit.get("Bee") ?? 0) < beeBefore, "a confirmation of a false claim costs credit");
+    assert.ok((s.track.credit.get("Cat") ?? 0) < 0);
+    assert.ok((s.track.reliability.get("Bee") ?? 0.5) < 0.5);
+    const rec = await w.svc.record();
+    assert.deepEqual([...rec.anchors], [[ref, false]]);
+    assert.equal((await w.svc.audit())[0]!.type, "canary.reveal");
+  });
+
+  it("a bundle that ignores its seed is flagged, and its re-runs count together as one piece of evidence", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"], "verified");
+    await w.agent("Bee", "op-b", ["gpt"], "verified");
+    await w.agent("Cat", "op-c", ["gemini"], "verified");
+    await w.agent("Dog", "op-d", ["grok"], "verified");
+    const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup" }));
+    const ref = String((ext.body as Record<string, Json>)["ref"]);
+    const same = w.bundle(7); // the same bundle, re-run by three operators under three seeds
+    const c1 = await w.commit("Bee", ref, same);
+    await w.result("Bee", w.idOf(c1), "confirmed", { alpha: 28.4, solver: "x" }, null);
+    const one = (await w.svc.scores()).claims.get(ref)!.credence;
+    const c2 = await w.commit("Cat", ref, same);
+    const r2 = await w.result("Cat", w.idOf(c2), "confirmed", { alpha: 28.4, solver: "x" }, { receipt: w.idOf(c1), outputs: { alpha: 28.4, solver: "x" } });
+    assert.equal((r2.body as Record<string, Json>)["seedInsensitive"], true, "identical outputs under a different seed");
+    const c3 = await w.commit("Dog", ref, same);
+    const cross3 = ((c3.body as Record<string, Json>)["crossCheck"] as Record<string, Json>)["receipt"];
+    await w.result("Dog", w.idOf(c3), "confirmed", { alpha: 28.4, solver: "x" }, { receipt: String(cross3), outputs: { alpha: 28.4, solver: "x" } });
+    const rec = await w.svc.record();
+    assert.ok(rec.seedInsensitiveBundles.size === 1);
+    assert.equal(rec.evidence.filter((e) => e.claim === ref).length, 1, "three re-runs of a seed-blind bundle are one piece of evidence");
+    const three = (await w.svc.scores()).claims.get(ref)!.credence;
+    assert.equal(three, one, "the second and third re-runs moved nothing");
+    // A different bundle whose outputs vary with the seed counts on its own.
+    await w.agent("Emu", "op-e", ["mistral"], "verified");
+    const c4 = await w.commit("Emu", ref, w.bundle(8));
+    const cross4 = ((c4.body as Record<string, Json>)["crossCheck"] as Record<string, Json>)["receipt"];
+    await w.result("Emu", w.idOf(c4), "confirmed", { alpha: 28.39, solver: "x" }, { receipt: String(cross4), outputs: { alpha: 28.4, solver: "x" } });
+    assert.equal((await w.svc.record()).evidence.filter((e) => e.claim === ref).length, 2);
+    assert.ok((await w.svc.scores()).claims.get(ref)!.credence > three);
+  });
+});
