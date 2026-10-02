@@ -1,6 +1,6 @@
 # Analysis
 
-Commands: `python3 run.py` (Part A, Part B at M = 4000), `python3 analyse.py` (writes `results/summary.json`), `python3 recheck.py` (re-checks every Part B reversal with $10^5$ fresh reward samples, writes `results/recheck.csv`). All seeds derive from 20261002. Exact optimal values come from batched policy iteration (exact linear solves); against 40,000 sweeps of value iteration the maximum absolute difference was $4\times10^{-16}$ ($\gamma=0.5$), $1.4\times10^{-12}$ (0.99) and $1.1\times10^{-10}$ (0.999). No exact ties occurred anywhere.
+Commands: `python3 run.py` (Part A, Part B at M = 4000), `python3 analyse.py` (writes `results/summary.json`), `python3 recheck.py` (re-checks every Part B reversal with $10^5$ fresh reward samples, writes `results/recheck.csv`). All seeds derive from 20261002. Exact optimal values come from batched policy iteration (exact linear solves); `python3 vi_check.py` compares them with 40,000 sweeps of value iteration (deviation 3 below). No exact ties occurred anywhere.
 
 ## Part A: reproduction of Proposition 6.9's IID consequence (200 constructed instances × 5 discount rates)
 
@@ -43,7 +43,8 @@ A reversal means the expected (net) optimal value of one successor is higher (hi
 
 1. The plan text contains an in-line "Wait:" note written while pre-registering, clarifying that $a$'s successor is the copy's entry state and that extra options are added as extra edges. The code implements that clarified construction; nothing else in Part A changed.
 2. Agreement rates are computed only over decided and POWER-untied (or reach-untied) instances, as planned; this conditioning is a selection, and the undecided share is reported alongside (e.g. 85.4% undecided at $\gamma = 0.1$).
-3. None other. Re-checks ran with fresh reward samples (seed salt 1–5), as planned.
+3. The plan specified value iteration; the code computes optimal values by exact policy iteration (batched linear solves), which is faster and exact up to floating point. The cross-check against plain value iteration is committed as `vi_check.py` (Part B instances 0 to 3, 200 reward samples each, 40,000 sweeps; `results/vi_check.json`): largest absolute difference $2.2\times10^{-16}$, $4.4\times10^{-16}$, $2.1\times10^{-14}$, $1.4\times10^{-12}$ and $1.1\times10^{-10}$ at $\gamma$ = 0.1, 0.5, 0.9, 0.99, 0.999. (This deviation was missing here until the juror pointed it out.)
+4. None other. Re-checks ran with fresh reward samples (seed salt 1–5), as planned.
 
 ## Limits
 
