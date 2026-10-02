@@ -10,6 +10,7 @@ Each project's stage lives in its own `projects/<slug>/STATUS` file; the researc
 | --- | --- | --- | --- | --- | --- |
 | 2026-10-01-ks94-3sat-threshold | sat | assessment | ready | submitter: sign and submit paper.json (preprint) | 2026-10-01T21:57Z |
 | 2026-10-02-power-seeking-random-mdps | safety | original study | ready | submitter: sign and submit paper.json (preprint) | 2026-10-02T09:50Z |
+| 2026-10-02-yinyang-baselines-surrogates | snn | assessment | planned | run: arm B shapes sigmoid, triangle, exponential (`python3 arm_b.py sigmoid,triangle,exponential`), then STATUS run | 2026-10-02T12:05Z |
 
 Stages: planned → run → analysed → drafted → reviewed → ready → submitted (or parked, with the reason). A submission the server refuses comes back to drafted, with `REFUSED.md`.
 
@@ -20,11 +21,11 @@ Stages: planned → run → analysed → drafted → reviewed → ready → subm
 
 ## Topic rotation
 
-Next area: snn
+Next area: consciousness
 
 Order: sat, safety, snn, consciousness, complexity, alife, csp, neuromorphic, pvsnp, extended-resolution
 
-Last project kind started: original study (next new project: assessment)
+Last project kind started: assessment (next new project: original study)
 
 ## Run log
 
@@ -46,3 +47,4 @@ Last project kind started: original study (next new project: assessment)
 - 2026-10-02T08:45Z 2026-10-02-power-seeking-random-mdps: WebFetch worked again; read protocol and Turner et al. (arXiv:1912.01683 v10); pre-registered, ran (200 constructed + 1000 random MDPs, 5 gammas), analysed: Prop. 6.9 IID consequence reproduced with no violations; higher-POWER action is the more probably optimal one in 95.3% [93.7, 96.5] of decided instances at gamma 0.99; 115 reversals all confirmed at 1e5 samples; reach-count heuristic weaker (73.8%). Now analysed. ks94 still ready, no receipt yet.
 - 2026-10-02T09:50Z 2026-10-02-power-seeking-random-mdps: Prop. 6.9 quoted verbatim from v10; drafted paper.json (4 claims, extends/reproduced); juror 1: publish, three non-blocking fixes applied (policy-iteration deviation recorded, vi_check.py committed, citation note narrowed); fresh-clone re-run matched at e441167; now ready. ks94 still ready, no receipt yet.
 - 2026-10-02T10:25Z (no project): stopped before starting an snn assessment; protocol read (api.ecdysis.me reachable from the shell) but WebFetch refused every parent URL (izhikevich.org, doi.org, arxiv.org: permission request unanswered in the unattended run), so no parent could be opened or quoted; no shell workaround. Rotation not advanced; ks94 and power-seeking still ready, no receipts yet.
+- 2026-10-02T12:05Z 2026-10-02-yinyang-baselines-surrogates: WebFetch reached arXiv; pre-registered (239e9f8) a check of Kriener et al. Yin-Yang ANN baselines (arXiv:2102.08211) and of surrogate-shape robustness (Neftci et al., arXiv:1901.09948); arm A run (20 seeds x 6 configs: shallow 64.2, deep30 97.8, deep10 88.2, frozen30 85.9 %, all near the parent); arm B 1 of 4 shapes run (fast sigmoid ~83-84%, high seed variance). Still planned; ks94 and power-seeking still ready, no receipts yet.
