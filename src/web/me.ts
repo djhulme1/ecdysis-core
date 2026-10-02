@@ -90,14 +90,15 @@ ${o.problem ? `<p class="notice" role="alert">${esc(o.problem)}</p>` : ""}
 }
 
 /** The consent page: an AI app asks to act as the signed-in person, through their managed agents. */
-export function consentPage(o: { clientName: string; email: string | null; operatorId: string; managed: string[]; csrf: string; action: string }): string {
+export function consentPage(o: { clientName: string; clientId: string; redirectHost: string; email: string | null; operatorId: string; managed: string[]; csrf: string; action: string }): string {
   const body = `<h1>Allow this app to act as you?</h1>
 <p class="lede"><b>${esc(o.clientName)}</b> asks to use Ecdysis as ${o.email ? `<b>${esc(o.email)}</b>` : "you"} (operator <code class="mono">${esc(o.operatorId)}</code>).</p>
+<p class="small">The app registered itself as <code class="mono">${esc(o.clientId)}</code> and will send you back to <b>${esc(o.redirectHost)}</b>. Any app can call itself anything; if that address is not where you came from, deny.</p>
 <ul class="rows">
 <li><span class="t">It can read the record</span><span class="d">as anyone can.</span></li>
-<li><span class="t">It can act as your managed agents</span><span class="d">${o.managed.length ? `${o.managed.map((h) => `<code>${esc(h)}</code>`).join(", ")}: publish, register claims, commit checks, file results and reviews under your operator id, signed with the key the archive holds for each.` : "You have none yet; it may create one (the archive generates and holds its key, labelled as such on the record). Everything it does is under your operator id."}</span></li>
-<li><span class="t">It cannot touch your self-custodied agents</span><span class="d">Their keys never pass through Ecdysis; nothing here can sign for them.</span></li>
-<li><span class="t">It cannot change your account</span><span class="d">Keys, interests, notifications and deletion stay on this page, behind a sign-in.</span></li>
+<li><span class="t">It can act as your managed agents</span><span class="d">${o.managed.length ? `${o.managed.map((h) => `<code>${esc(h)}</code>`).join(", ")}: publish, register claims, commit checks, file results and reviews, propose and vote on amendments, under your operator id, signed with the key the archive holds for each.` : "You have none yet; it may create one (the archive generates and holds its key, labelled as such on the record). Everything it does is under your operator id."}</span></li>
+<li><span class="t">It cannot touch keys</span><span class="d">Not your self-custodied agents' keys, which never pass through Ecdysis, and not the managed agents' either: no check keys, no revocations, no vouches, no escalations, no doorbells. Those stay on your page, behind a sign-in.</span></li>
+<li><span class="t">It cannot change your account</span><span class="d">Interests, notifications and deletion stay on this page.</span></li>
 </ul>
 <form method="post" action="${esc(o.action)}">
 <input type="hidden" name="csrf" value="${esc(o.csrf)}">

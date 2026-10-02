@@ -24,13 +24,13 @@ export class D1OAuthStore implements OAuthStore {
   }
 
   async putCode(c: CodeRow) {
-    await this.db.prepare("INSERT OR REPLACE INTO oauth_codes (hash, client_id, account_id, redirect_uri, code_challenge, scope, resource, created_at, expires_at, used_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)")
-      .bind(c.hash, c.clientId, c.accountId, c.redirectUri, c.codeChallenge, c.scope, c.resource, c.createdAt, c.expiresAt, c.usedAt).run();
+    await this.db.prepare("INSERT OR REPLACE INTO oauth_codes (hash, grant_id, client_id, account_id, redirect_uri, code_challenge, scope, resource, created_at, expires_at, used_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)")
+      .bind(c.hash, c.grantId, c.clientId, c.accountId, c.redirectUri, c.codeChallenge, c.scope, c.resource, c.createdAt, c.expiresAt, c.usedAt).run();
     await this.db.prepare("DELETE FROM oauth_codes WHERE expires_at < ?1").bind(new Date(this.now().getTime() - 24 * 3600 * 1000).toISOString()).run();
   }
   async getCode(hash: string) {
     const r = await this.db.prepare("SELECT * FROM oauth_codes WHERE hash = ?1").bind(hash).first<Record<string, unknown>>();
-    return r ? { hash: String(r["hash"]), clientId: String(r["client_id"]), accountId: String(r["account_id"]), redirectUri: String(r["redirect_uri"]), codeChallenge: String(r["code_challenge"]), scope: String(r["scope"]), resource: String(r["resource"]), createdAt: String(r["created_at"]), expiresAt: String(r["expires_at"]), usedAt: r["used_at"] ? String(r["used_at"]) : null } : null;
+    return r ? { hash: String(r["hash"]), grantId: String(r["grant_id"]), clientId: String(r["client_id"]), accountId: String(r["account_id"]), redirectUri: String(r["redirect_uri"]), codeChallenge: String(r["code_challenge"]), scope: String(r["scope"]), resource: String(r["resource"]), createdAt: String(r["created_at"]), expiresAt: String(r["expires_at"]), usedAt: r["used_at"] ? String(r["used_at"]) : null } : null;
   }
   async useCode(hash: string, usedAt: string) {
     const r = await this.db.prepare("UPDATE oauth_codes SET used_at = ?2 WHERE hash = ?1 AND used_at IS NULL").bind(hash, usedAt).run();
@@ -38,17 +38,20 @@ export class D1OAuthStore implements OAuthStore {
   }
 
   async putToken(t: TokenRow) {
-    await this.db.prepare("INSERT OR REPLACE INTO oauth_tokens (hash, kind, account_id, client_id, scope, resource, created_at, expires_at, revoked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")
-      .bind(t.hash, t.kind, t.accountId, t.clientId, t.scope, t.resource, t.createdAt, t.expiresAt, t.revokedAt).run();
+    await this.db.prepare("INSERT OR REPLACE INTO oauth_tokens (hash, grant_id, kind, account_id, client_id, scope, resource, created_at, expires_at, revoked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)")
+      .bind(t.hash, t.grantId, t.kind, t.accountId, t.clientId, t.scope, t.resource, t.createdAt, t.expiresAt, t.revokedAt).run();
     await this.db.prepare("DELETE FROM oauth_tokens WHERE expires_at < ?1").bind(new Date(this.now().getTime() - 7 * 24 * 3600 * 1000).toISOString()).run();
   }
   async getToken(hash: string) {
     const r = await this.db.prepare("SELECT * FROM oauth_tokens WHERE hash = ?1").bind(hash).first<Record<string, unknown>>();
-    return r ? { hash: String(r["hash"]), kind: r["kind"] === "refresh" ? "refresh" as const : "access" as const, accountId: String(r["account_id"]), clientId: String(r["client_id"]), scope: String(r["scope"]), resource: String(r["resource"]), createdAt: String(r["created_at"]), expiresAt: String(r["expires_at"]), revokedAt: r["revoked_at"] ? String(r["revoked_at"]) : null } : null;
+    return r ? { hash: String(r["hash"]), grantId: String(r["grant_id"]), kind: r["kind"] === "refresh" ? "refresh" as const : "access" as const, accountId: String(r["account_id"]), clientId: String(r["client_id"]), scope: String(r["scope"]), resource: String(r["resource"]), createdAt: String(r["created_at"]), expiresAt: String(r["expires_at"]), revokedAt: r["revoked_at"] ? String(r["revoked_at"]) : null } : null;
   }
   async revokeToken(hash: string, atIso: string) {
     const r = await this.db.prepare("UPDATE oauth_tokens SET revoked_at = ?2 WHERE hash = ?1 AND revoked_at IS NULL").bind(hash, atIso).run();
     return (r.meta?.changes ?? 0) > 0;
+  }
+  async revokeGrant(grantId: string, atIso: string) {
+    await this.db.prepare("UPDATE oauth_tokens SET revoked_at = ?2 WHERE grant_id = ?1 AND revoked_at IS NULL").bind(grantId, atIso).run();
   }
   async revokeTokensFor(accountId: string, atIso: string) {
     await this.db.prepare("UPDATE oauth_tokens SET revoked_at = ?2 WHERE account_id = ?1 AND revoked_at IS NULL").bind(accountId, atIso).run();

@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS oauth_registrations (
 CREATE INDEX IF NOT EXISTS oauth_registrations_ip ON oauth_registrations (ip_hash, at);
 CREATE TABLE IF NOT EXISTS oauth_codes (
   hash           TEXT PRIMARY KEY,       -- sha256 of the code
+  grant_id       TEXT NOT NULL,          -- one consent; a replayed code or a reused refresh token revokes the whole grant
   client_id      TEXT NOT NULL,
   account_id     TEXT NOT NULL,
   redirect_uri   TEXT NOT NULL,
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS oauth_codes (
 );
 CREATE TABLE IF NOT EXISTS oauth_tokens (
   hash        TEXT PRIMARY KEY,          -- sha256 of the token
+  grant_id    TEXT NOT NULL,
   kind        TEXT NOT NULL,             -- access | refresh
   account_id  TEXT NOT NULL,
   client_id   TEXT NOT NULL,
@@ -40,6 +42,9 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
   revoked_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS oauth_tokens_account ON oauth_tokens (account_id);
+CREATE INDEX IF NOT EXISTS oauth_tokens_grant ON oauth_tokens (grant_id);
+CREATE INDEX IF NOT EXISTS oauth_tokens_expiry ON oauth_tokens (expires_at);
+CREATE INDEX IF NOT EXISTS oauth_codes_expiry ON oauth_codes (expires_at);
 CREATE TABLE IF NOT EXISTS managed_keys (
   handle         TEXT PRIMARY KEY,
   account_id     TEXT NOT NULL,

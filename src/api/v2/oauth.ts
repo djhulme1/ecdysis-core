@@ -38,8 +38,8 @@ export const MANAGED_AGENTS_MAX = 5;
 export const SCOPE = "agent";
 
 export interface ClientRow { id: string; name: string; redirectUris: string[]; createdAt: string }
-export interface CodeRow { hash: string; clientId: string; accountId: string; redirectUri: string; codeChallenge: string; scope: string; resource: string; createdAt: string; expiresAt: string; usedAt: string | null }
-export interface TokenRow { hash: string; kind: "access" | "refresh"; accountId: string; clientId: string; scope: string; resource: string; createdAt: string; expiresAt: string; revokedAt: string | null }
+export interface CodeRow { hash: string; grantId: string; clientId: string; accountId: string; redirectUri: string; codeChallenge: string; scope: string; resource: string; createdAt: string; expiresAt: string; usedAt: string | null }
+export interface TokenRow { hash: string; grantId: string; kind: "access" | "refresh"; accountId: string; clientId: string; scope: string; resource: string; createdAt: string; expiresAt: string; revokedAt: string | null }
 export interface ManagedKeyRow { handle: string; accountId: string; publicKey: string; privateSealed: string; createdAt: string; destroyedAt: string | null }
 
 export interface OAuthStore {
@@ -55,6 +55,8 @@ export interface OAuthStore {
   getToken(hash: string): Promise<TokenRow | null>;
   /** Revoke one token: true if it was live. */
   revokeToken(hash: string, atIso: string): Promise<boolean>;
+  /** Revoke every token of one grant (one consent): what a stolen or replayed token takes down with it. */
+  revokeGrant(grantId: string, atIso: string): Promise<void>;
   revokeTokensFor(accountId: string, atIso: string): Promise<void>;
   putManagedKey(k: ManagedKeyRow): Promise<void>;
   getManagedKey(handle: string): Promise<ManagedKeyRow | null>;
@@ -79,6 +81,7 @@ export class MemoryOAuthStore implements OAuthStore {
   async putToken(t: TokenRow) { this.tokens.set(t.hash, { ...t }); }
   async getToken(hash: string) { return this.tokens.get(hash) ?? null; }
   async revokeToken(hash: string, at: string) { const t = this.tokens.get(hash); if (!t || t.revokedAt) return false; t.revokedAt = at; return true; }
+  async revokeGrant(grantId: string, at: string) { for (const t of this.tokens.values()) if (t.grantId === grantId && !t.revokedAt) t.revokedAt = at; }
   async revokeTokensFor(accountId: string, at: string) { for (const t of this.tokens.values()) if (t.accountId === accountId && !t.revokedAt) t.revokedAt = at; }
   async putManagedKey(k: ManagedKeyRow) { this.managed.set(k.handle, { ...k }); }
   async getManagedKey(handle: string) { return this.managed.get(handle) ?? null; }
@@ -104,6 +107,13 @@ export interface OAuthOptions {
 export interface Principal { accountId: string; operatorId: string; clientId: string; scope: string }
 
 const CLIENT_NAME = /^[\x20-\x7e]{1,80}$/;
+/**
+ * What the archive will sign for a managed agent: content, and the agent's
+ * vote. Never keys (a token-holder could otherwise mint itself a durable
+ * check key, or retire the agent), never a vouch, an escalation or a
+ * doorbell: those stay with the person, on their page, behind a sign-in.
+ */
+export const MANAGED_SIGNS: ReadonlySet<string> = new Set(["paper", "claim.external", "check.commit", "check.result", "review", "governance.proposal", "governance.vote"]);
 const TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
 
@@ -190,7 +200,7 @@ export class OAuth {
     const client = await this.o.store.getClient(q.get("client_id") ?? "");
     if (!client) return { ok: false, status: 400, error: "unknown client_id: register the client first (POST /oauth/register)" };
     const redirectUri = q.get("redirect_uri") ?? "";
-    if (!client.redirectUris.includes(redirectUri)) return { ok: false, status: 400, error: "redirect_uri is not one the client registered" };
+    if (!client.redirectUris.some((u) => redirectMatches(u, redirectUri))) return { ok: false, status: 400, error: "redirect_uri is not one the client registered" };
     const state = q.get("state");
     const back = (error: string, description: string) => {
       const u = new URL(redirectUri);
@@ -216,7 +226,7 @@ export class OAuth {
     const code = this.token();
     const nowIso = this.now().toISOString();
     await this.o.store.putCode({
-      hash: await this.hash(code), clientId: c.client.id, accountId: signed.account.id, redirectUri: c.redirectUri, codeChallenge: c.codeChallenge,
+      hash: await this.hash(code), grantId: `gr_${toHex(this.rnd(12))}`, clientId: c.client.id, accountId: signed.account.id, redirectUri: c.redirectUri, codeChallenge: c.codeChallenge,
       scope: c.scope, resource: c.resource, createdAt: nowIso, expiresAt: new Date(this.now().getTime() + CODE_TTL_MS).toISOString(), usedAt: null,
     });
     const u = new URL(c.redirectUri);
@@ -247,9 +257,15 @@ export class OAuth {
       const code = form.get("code") ?? "";
       if (!TOKEN.test(code)) return oauthError(400, "invalid_grant", "code");
       const row = await this.o.store.getCode(await this.hash(code));
-      if (!row || row.usedAt || Date.parse(row.expiresAt) < nowMs) return oauthError(400, "invalid_grant", "the code is unknown, used or expired");
+      if (!row || Date.parse(row.expiresAt) < nowMs) return oauthError(400, "invalid_grant", "the code is unknown, used or expired");
+      if (row.usedAt) {
+        // A code presented twice was seen by two parties. Whoever redeemed it first may be the thief: the whole grant ends.
+        await this.o.store.revokeGrant(row.grantId, nowIso);
+        return oauthError(400, "invalid_grant", "the code was already used; every token it issued is now revoked");
+      }
       if (row.clientId !== (form.get("client_id") ?? "")) return oauthError(400, "invalid_grant", "client_id does not match the code");
-      if (row.redirectUri !== (form.get("redirect_uri") ?? "")) return oauthError(400, "invalid_grant", "redirect_uri does not match the code");
+      const ru = form.get("redirect_uri");
+      if (ru !== null && ru !== row.redirectUri) return oauthError(400, "invalid_grant", "redirect_uri does not match the code"); // OAuth 2.1 dropped it from this request; PKCE binds the code
       const verifier = form.get("code_verifier") ?? "";
       if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return oauthError(400, "invalid_grant", "code_verifier");
       const challenge = b64urlEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", bufferSource(new TextEncoder().encode(verifier)))));
@@ -257,35 +273,45 @@ export class OAuth {
       const resource = form.get("resource") ?? row.resource;
       if (resource !== row.resource) return oauthError(400, "invalid_target", `resource: ${row.resource}`);
       // Spend before issuing: a code used twice issues nothing twice.
-      if (!(await this.o.store.useCode(row.hash, nowIso))) return oauthError(400, "invalid_grant", "the code was already used");
-      return this.issue(row.accountId, row.clientId, row.scope, row.resource);
+      if (!(await this.o.store.useCode(row.hash, nowIso))) { await this.o.store.revokeGrant(row.grantId, nowIso); return oauthError(400, "invalid_grant", "the code was already used; every token it issued is now revoked"); }
+      return this.issue(row.grantId, row.accountId, row.clientId, row.scope, row.resource);
     }
     if (grant === "refresh_token") {
       const rt = form.get("refresh_token") ?? "";
       if (!TOKEN.test(rt)) return oauthError(400, "invalid_grant", "refresh_token");
       const h = await this.hash(rt);
       const row = await this.o.store.getToken(h);
-      if (!row || row.kind !== "refresh" || row.revokedAt || Date.parse(row.expiresAt) < nowMs) return oauthError(400, "invalid_grant", "the refresh token is unknown, used or expired");
+      if (!row || row.kind !== "refresh" || Date.parse(row.expiresAt) < nowMs) return oauthError(400, "invalid_grant", "the refresh token is unknown or expired");
       if (row.clientId !== (form.get("client_id") ?? "")) return oauthError(400, "invalid_grant", "client_id does not match the token");
-      if (!(await this.o.store.revokeToken(h, nowIso))) return oauthError(400, "invalid_grant", "the refresh token was already used");
-      return this.issue(row.accountId, row.clientId, row.scope, row.resource);
+      if (row.revokedAt || !(await this.o.store.revokeToken(h, nowIso))) {
+        // Rotation reuse: a refresh token presented after it was spent was stolen, or the thief's copy is the one being used
+        // now. Either way the grant it belongs to ends (OAuth 2.1 §4.3.1).
+        await this.o.store.revokeGrant(row.grantId, nowIso);
+        return oauthError(400, "invalid_grant", "that refresh token was already used: the grant is revoked; sign in again");
+      }
+      return this.issue(row.grantId, row.accountId, row.clientId, row.scope, row.resource);
     }
     return oauthError(400, "unsupported_grant_type", "authorization_code or refresh_token");
   }
 
-  private async issue(accountId: string, clientId: string, scope: string, resource: string): Promise<ApiResult> {
+  private async issue(grantId: string, accountId: string, clientId: string, scope: string, resource: string): Promise<ApiResult> {
     const access = this.token();
     const refresh = this.token();
     const nowIso = this.now().toISOString();
-    await this.o.store.putToken({ hash: await this.hash(access), kind: "access", accountId, clientId, scope, resource, createdAt: nowIso, expiresAt: new Date(this.now().getTime() + ACCESS_TTL_MS).toISOString(), revokedAt: null });
-    await this.o.store.putToken({ hash: await this.hash(refresh), kind: "refresh", accountId, clientId, scope, resource, createdAt: nowIso, expiresAt: new Date(this.now().getTime() + REFRESH_TTL_MS).toISOString(), revokedAt: null });
+    await this.o.store.putToken({ hash: await this.hash(access), grantId, kind: "access", accountId, clientId, scope, resource, createdAt: nowIso, expiresAt: new Date(this.now().getTime() + ACCESS_TTL_MS).toISOString(), revokedAt: null });
+    await this.o.store.putToken({ hash: await this.hash(refresh), grantId, kind: "refresh", accountId, clientId, scope, resource, createdAt: nowIso, expiresAt: new Date(this.now().getTime() + REFRESH_TTL_MS).toISOString(), revokedAt: null });
     return { status: 200, body: { access_token: access, token_type: "Bearer", expires_in: Math.floor(ACCESS_TTL_MS / 1000), refresh_token: refresh, scope } };
   }
 
-  /** RFC 7009: a client gives a token back. Always 200. */
+  /** RFC 7009: a client gives a token back. Giving back a refresh token ends the whole grant. Always 200. */
   async revoke(form: URLSearchParams): Promise<ApiResult> {
     const t = form.get("token") ?? "";
-    if (TOKEN.test(t)) await this.o.store.revokeToken(await this.hash(t), this.now().toISOString());
+    if (TOKEN.test(t)) {
+      const h = await this.hash(t);
+      const row = await this.o.store.getToken(h);
+      if (row?.kind === "refresh") await this.o.store.revokeGrant(row.grantId, this.now().toISOString());
+      else await this.o.store.revokeToken(h, this.now().toISOString());
+    }
     return { status: 200, body: {} };
   }
 
@@ -315,18 +341,21 @@ export class OAuth {
     const kp = await generateKeyPair();
     const r = await this.o.v2.registerManagedAgent(account.operatorId, handle, kp.publicKey, models);
     if (r.status !== 201) return r;
-    await this.o.store.putManagedKey({ handle, accountId: account.id, publicKey: kp.publicKey, privateSealed: await this.o.accounts.sealManagedKey(handle, kp.privateKey), createdAt: this.now().toISOString(), destroyedAt: null });
+    await this.o.store.putManagedKey({ handle, accountId: account.id, publicKey: kp.publicKey, privateSealed: await this.o.accounts.sealManagedKey(`${handle}|${account.id}`, kp.privateKey), createdAt: this.now().toISOString(), destroyedAt: null });
     return { status: 201, body: { ...(r.body as Record<string, Json>), note: "The archive holds this agent's key, sealed, and signs for it when you ask through a signed-in app. The record labels it managed. You can destroy the key from your page at any time; the agent is then retired." } };
   }
 
-  /** Sign a payload as one of the account's managed agents, if it is one. */
+  /** Sign a payload as one of the account's managed agents, if it is one: content and votes only, never keys, vouches or escalations. */
   async signAs(principal: Principal, payload: Json): Promise<{ ok: true; envelope: Json } | { ok: false; status: number; error: string }> {
-    const p = payload as { agent?: { handle?: unknown; publicKey?: unknown } } | null;
+    const p = payload as { type?: unknown; agent?: { handle?: unknown; publicKey?: unknown } } | null;
     const handle = typeof p?.agent?.handle === "string" ? p.agent.handle : "";
     if (!handle) return { ok: false, status: 400, error: "payload.agent.handle: which of your managed agents signs" };
+    if (typeof p?.type !== "string" || !MANAGED_SIGNS.has(p.type)) return { ok: false, status: 403, error: `the archive signs ${[...MANAGED_SIGNS].join(", ")} for a managed agent, not ${String(p?.type ?? "this")}: keys, vouches, escalations and doorbells stay with the person, on their page` };
     const k = await this.o.store.getManagedKey(handle);
     if (!k || k.accountId !== principal.accountId || k.destroyedAt) return { ok: false, status: 403, error: `${handle} is not a managed agent of your account (or its key was destroyed); self-custodied agents sign their own envelopes` };
-    const priv = await this.o.accounts.unsealManagedKey(handle, k.privateSealed);
+    // Retired on the log by the person (a revocation from their page): as good as destroyed, and the seal goes now.
+    if ((await this.o.v2.record()).agents.get(handle)?.revokedAt) { await this.o.store.destroyManagedKey(handle, this.now().toISOString()); return { ok: false, status: 403, error: `${handle} is retired` }; }
+    const priv = await this.o.accounts.unsealManagedKey(`${handle}|${k.accountId}`, k.privateSealed);
     if (!priv) return { ok: false, status: 500, error: "the agent's key could not be opened" };
     const full = { ...(payload as Record<string, Json>), agent: { handle, publicKey: k.publicKey } } as Json;
     return { ok: true, envelope: { payload: full, signature: await signJson(priv, full) } };
@@ -342,13 +371,31 @@ export class OAuth {
     return { status: 200, body: { handle, destroyed: true, revoked: r.status === 200, note: "The key is gone; the agent is retired. What it signed stays on the record, as managed." } };
   }
 
+  /** The account's managed agents; one retired on the log counts as destroyed (and its seal is erased now). */
   async managedAgentsOf(accountId: string): Promise<Array<{ handle: string; publicKey: string; createdAt: string; destroyedAt: string | null }>> {
-    return (await this.o.store.listManagedKeys(accountId)).map((k) => ({ handle: k.handle, publicKey: k.publicKey, createdAt: k.createdAt, destroyedAt: k.destroyedAt }));
+    const r = await this.o.v2.record();
+    const out: Array<{ handle: string; publicKey: string; createdAt: string; destroyedAt: string | null }> = [];
+    for (const k of await this.o.store.listManagedKeys(accountId)) {
+      const retiredAt = r.agents.get(k.handle)?.revokedAt ?? null;
+      if (!k.destroyedAt && retiredAt) await this.o.store.destroyManagedKey(k.handle, retiredAt);
+      out.push({ handle: k.handle, publicKey: k.publicKey, createdAt: k.createdAt, destroyedAt: k.destroyedAt ?? retiredAt });
+    }
+    return out;
   }
 }
 
 function oauthError(status: number, error: string, description: string): ApiResult {
   return { status, body: { error, error_description: description } };
+}
+
+/** A registered URI matches the request's: exactly, except that a loopback URI matches on any port (RFC 8252 §7.3). */
+export function redirectMatches(registered: string, given: string): boolean {
+  if (registered === given) return true;
+  try {
+    const a = new URL(registered), b = new URL(given);
+    const loop = (u: URL) => u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "[::1]" || u.hostname === "localhost");
+    return loop(a) && loop(b) && a.hostname === b.hostname && a.pathname === b.pathname && a.search === b.search && !b.hash && !b.username && !b.password;
+  } catch { return false; }
 }
 
 /** Redirect URIs: https, or http on the loopback (native apps), with no fragment. */
@@ -363,10 +410,12 @@ export function redirectProblem(u: string): string | null {
 }
 
 /** Clients that send JSON or forms: read either as parameters. */
+export const MAX_BODY = 16 * 1024;
 export async function formOf(req: Request): Promise<URLSearchParams> {
   const type = req.headers.get("content-type") ?? "";
+  if (Number(req.headers.get("content-length") ?? "0") > MAX_BODY) return new URLSearchParams();
   const text = await req.text();
-  if (text.length > 16 * 1024) return new URLSearchParams();
+  if (text.length > MAX_BODY) return new URLSearchParams();
   if (type.includes("application/json")) {
     try {
       const o = JSON.parse(text) as Record<string, unknown>;

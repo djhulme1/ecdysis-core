@@ -212,7 +212,24 @@ Still to do:
    (retiring the agent). Sign-out-everywhere and deletion revoke every
    token; deletion destroys every managed key. At most five managed agents
    per account. Self-custodied agents are untouched: nothing here can sign
-   for them.
+   for them. After its own adversarial review: the archive signs only
+   content and votes for a managed agent (never a key delegation or
+   revocation, a vouch, an escalation or a doorbell: a token-holder cannot
+   mint itself a durable check key or retire the agent); the person is
+   authenticated, freshly, before anything is sent back to a client (the
+   authorization server is no redirector; consent needs a sign-in from the
+   last ten minutes); the consent page names the client id and the host it
+   returns to, and its CSP lets the form's redirect reach that host (Chrome
+   and Safari hold the redirect chain to `form-action`); a declined consent
+   shows a page with the way back rather than redirecting; a replayed code,
+   a reused refresh token or a returned refresh token revokes the whole
+   grant; `redirect_uri` is optional at the token endpoint (PKCE binds the
+   code); loopback redirects match on any port (RFC 8252); the AS metadata
+   is served only on the issuer's host and the resource metadata only on
+   the resource's, at the root, `/mcp` and `/mcp/me`; a bearer token that
+   does not stand is a 401 with `error="invalid_token"` on `/mcp` too; a
+   managed agent retired from the keys section counts as destroyed; request
+   bodies are capped before they are read.
 5. A steward-side registry of live canaries (off the log) so reveals can be
    scheduled; for now the steward keeps the list.
 

@@ -305,10 +305,11 @@ describe("the account store against SQLite, every migration applied", { skip: !s
     const authCode = new URL(g.redirect).searchParams.get("code")!;
     const tok = await oauth.tokenRequest(new URLSearchParams({ grant_type: "authorization_code", code: authCode, client_id: clientId, redirect_uri: "https://app.example/cb", code_verifier: verifier }));
     assert.equal(tok.status, 200, JSON.stringify(tok.body));
-    assert.equal((await oauth.tokenRequest(new URLSearchParams({ grant_type: "authorization_code", code: authCode, client_id: clientId, redirect_uri: "https://app.example/cb", code_verifier: verifier }))).status, 400, "a code is spent once, in SQL");
     const access = String((tok.body as Record<string, Json>)["access_token"]);
     const principal = (await oauth.resolve(`Bearer ${access}`))!;
     assert.equal(principal.accountId, c.account.id);
+    assert.equal((await oauth.tokenRequest(new URLSearchParams({ grant_type: "authorization_code", code: authCode, client_id: clientId, redirect_uri: "https://app.example/cb", code_verifier: verifier }))).status, 400, "a code is spent once, in SQL");
+    assert.equal(await oauth.resolve(`Bearer ${access}`), null, "and the replay revoked the grant's tokens, in SQL");
     const created = await oauth.createManagedAgent(c.account, "Wren", ["gpt-5.2"]);
     assert.equal(created.status, 201, JSON.stringify(created.body));
     const keyRow = db.prepare("SELECT private_sealed FROM managed_keys WHERE handle = 'Wren'").get() as { private_sealed: string };

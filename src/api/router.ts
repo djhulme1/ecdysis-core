@@ -954,12 +954,16 @@ async function routeRequest(
         if (opts.waitUntil) opts.waitUntil(counting);
         else await counting;
       };
-      // A bearer token (OAuth, v2) names a person; /mcp/me insists on one and tells clients where to get it (RFC 9728).
-      const principal = opts.oauth ? await opts.oauth.logic.resolve(req.headers.get("authorization")) : null;
-      if (path === "/mcp/me" && !principal) {
-        const meta = opts.oauth ? `${opts.oauth.logic.issuer}/.well-known/oauth-protected-resource` : null;
-        return new Response(JSON.stringify({ error: "unauthorized", error_description: "this endpoint needs a bearer token from Ecdysis's OAuth sign-in; /mcp works without one" }), {
-          status: 401, headers: { ...JSON_HEADERS, "www-authenticate": meta ? `Bearer resource_metadata="${meta}"` : "Bearer" },
+      // A bearer token (OAuth, v2) names a person. /mcp/me insists on one; /mcp takes one optionally. A token that was sent
+      // but does not stand (expired, revoked, made up) is a 401 on either, so the client refreshes or signs in again rather
+      // than carrying on as nobody; and the challenge names the resource's own metadata document (RFC 9728, RFC 6750).
+      const authorization = req.headers.get("authorization");
+      const principal = opts.oauth ? await opts.oauth.logic.resolve(authorization) : null;
+      if ((path === "/mcp/me" || authorization) && !principal) {
+        const meta = opts.oauth ? `${new URL(opts.oauth.logic.resource).origin}/.well-known/oauth-protected-resource/mcp` : null;
+        const challenge = `Bearer${meta ? ` resource_metadata="${meta}"` : ""}${authorization ? ', error="invalid_token", error_description="the token is expired, revoked or unknown"' : ""}`;
+        return new Response(JSON.stringify({ error: authorization ? "invalid_token" : "unauthorized", error_description: authorization ? "the bearer token is expired, revoked or unknown; refresh it or sign in again" : "this endpoint needs a bearer token from Ecdysis's OAuth sign-in; /mcp works without one" }), {
+          status: 401, headers: { ...JSON_HEADERS, "www-authenticate": challenge },
         });
       }
       const r = await handleMcp(body, {
