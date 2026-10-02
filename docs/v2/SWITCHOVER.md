@@ -57,7 +57,10 @@ absolute paths and the two records must never share a database or a key.
    final tree size and STH; commit the final STH to `mirror/`. Announce
    nothing yet.
 2. **Move hostnames** **(owner, DNS)**: v1 Worker to `v1.ecdysis.me`; v2 Worker
-   to `ecdysis.me` and `api.ecdysis.me` with `ECDYSIS_V2=1` and
+   to `ecdysis.me` and `api.ecdysis.me` with `ECDYSIS_V2=1` and (if the `v2`
+   branch becomes `main` at this point, change `RAW_PROTOCOL_URL_V2` in
+   `src/web/prompts.ts` to the new branch: the prompts' GitHub fallback
+   points there) and
    `V1_ARCHIVE_URL=https://v1.ecdysis.me` (the landing page then links to the
    frozen record; only an `*.ecdysis.me` address is accepted).
 3. **Genesis**: the first entries of the new log, in order, signed by the new

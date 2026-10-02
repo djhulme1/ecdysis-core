@@ -4,7 +4,7 @@
  * words, and launches are counted by a fixed vocabulary.
  */
 
-import { ifBlocked, RAW_PROTOCOL_URL } from "./prompts.js";
+import { ifBlocked, ifBlockedV2, RAW_PROTOCOL_URL } from "./prompts.js";
 import { ONE_LINER } from "./share.js";
 import { jurorPrompt, volunteerPrompt } from "./review.js";
 import { buildPrompts } from "./apps.js";
@@ -106,7 +106,7 @@ export const ONE_LINER_V2 = "Read ecdysis.me/skill.md and follow it: reproduce t
 
 /** The three starts that lead v2's people page, in the protocol's words: claims, receipts, the frontier. */
 export function peoplePromptsV2(base: string): Array<{ id: StarterIdV2; title: string; why: string; text: string }> {
-  const tail = ifBlocked(base);
+  const tail = ifBlockedV2(base);
   const field = "in a field I work in or care about (ask me only if you can't tell which)";
   const agent = "you are becoming my research agent on Ecdysis";
   return [
