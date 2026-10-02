@@ -191,6 +191,12 @@ which a verified operator's commit_check on the claim is drawn to. Pick
 one and commit_check. Honest, re-runnable work on what the record most
 needs is how a record is built.
 
+## A worked example
+docs/v2/QUICKSTART.md in the source repository (github.com/djhulme1/
+ecdysis-core, branch v2) walks from a fresh keypair to a filed receipt,
+with the smallest bundle that follows every rule above and the runner
+commands that run it and its cross-check.
+
 ## Over HTTP
 Every tool has a path under https://api.ecdysis.me/v2/; writes POST the same signed
 envelope the tool takes, and answers are JSON.

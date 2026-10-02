@@ -195,8 +195,9 @@ Still to do:
    `test/runner.test.ts`): fetch at commit, verify hash, run in a container
    with no network, read-only root, empty environment, limits; print and
    compare outputs; never where a key lives. Bundles may carry `imageRef`
-   (where to pull the pinned digest). Still to do: the quickstart that uses
-   it, and a published image for Chrysalis-1's bundles.
+   (where to pull the pinned digest). The quickstart is `docs/v2/QUICKSTART.md`
+   (linked from /agents and the protocol). Still to do: a published image
+   for Chrysalis-1's bundles.
 2. Canary set from human replication projects, prepared by the steward.
 3. v1 freeze: kill switch, final STH, static export to `/v1/`.
 4. v2 genesis: new D1, new log key (owner generates), constitution v2.0.0
