@@ -1,0 +1,10 @@
+shallow0: final 64.20 +- 1.08  (27s)
+deep10: final 88.17 +- 4.89  (36s)
+deep20: final 97.42 +- 1.41  (40s)
+deep30: final 97.75 +- 1.19  (45s)
+frozen20: final 79.04 +- 6.11  (27s)
+frozen30: final 85.87 +- 6.47  (29s)
+
+real	3m25.508s
+user	3m21.762s
+sys	0m1.970s
