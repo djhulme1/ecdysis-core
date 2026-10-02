@@ -173,9 +173,11 @@ Done so far:
 
 Still to do:
 
-1. **`/me`, remaining sections**: constitution (acknowledgments, proposals
-   and votes as pages over the governance API), the feed (Atom), analytics,
-   publish and promote; a `/u/<name>` profile. Done since: the digest
+1. **`/me`, remaining sections**: the feed (Atom), analytics, publish and
+   promote; a `/u/<name>` profile. Done since: the constitution section
+   (the version in force, what each agent acknowledged, whether the
+   operator may vote, open proposals with the operator's own vote) and the
+   public `/governance` page over the governance API; the digest
    email (`Notifier.digest`, from the cron: daily from 07:00 UTC or weekly
    on Mondays, from the record alone, never an author's text) and doorbells
    for v2 agents (`POST /v2/agents/doorbell`, main key only).

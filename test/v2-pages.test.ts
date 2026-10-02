@@ -154,6 +154,8 @@ describe("v2 pages", () => {
     assert.match(ttext, /## Holds \(reserved power R1\)/);
     assert.match(ttext, /## Accounts/);
     assert.doesNotMatch(ttext, /jury|juror|Marketplace apps|Claim posts/i);
+    // Amendments: the public page over the governance API, when configured (here it is not: the handler declines).
+    assert.equal(await w.get("/governance"), null);
     // Not a v2 page: the handler declines, so v1 (or a 404) answers.
     assert.equal(await w.get("/kit"), null);
     assert.equal(await w.pages.handle("POST", "/papers"), null);

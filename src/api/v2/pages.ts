@@ -5,6 +5,7 @@
  */
 
 import type { V2Service } from "./service.js";
+import type { V2Governance } from "./governance.js";
 import { isHeld } from "../../core/v2/flow.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
@@ -14,7 +15,7 @@ import { agentsPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js"
 import { connectPage } from "../../web/connect.js";
 import { mcpUrlFor } from "../../web/launch.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
-import { agentPageV2, claimPageV2, frontierPageV2, frozenPageV2, missingPageV2, observatoryPageV2, papersPageV2, paperPageV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2 } from "../../web/v2/pages.js";
+import { agentPageV2, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, missingPageV2, observatoryPageV2, papersPageV2, paperPageV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2 } from "../../web/v2/pages.js";
 
 export const PAGE_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
@@ -29,7 +30,7 @@ const EXTERNAL = /^\/x\/([0-9a-f]{16})(?:\/(C1))?$/;
 const AGENT = /^\/a\/([A-Za-z0-9][A-Za-z0-9-]{1,39})$/;
 
 export class PagesHandler {
-  constructor(private v2: V2Service, private o: { host?: string; logPublicKey?: string | null } = {}) {}
+  constructor(private v2: V2Service, private o: { host?: string; logPublicKey?: string | null; governance?: V2Governance | null } = {}) {}
 
   /** Serve a v2 page, or null when the path is not one. `accept` decides whether "/" is a page (browsers) or the JSON index (agents, curl). */
   async handle(method: string, path: string, accept = ""): Promise<Response | null> {
@@ -43,6 +44,7 @@ export class PagesHandler {
     if (path === "/connect") return html(200, connectPage({ host: site, mcpUrl: mcpUrlFor(host), v2: true }));
     if (path === "/skill.md") return new Response(method === "HEAD" ? null : skillMdV2(this.o.host ?? "api.ecdysis.me", this.o.logPublicKey ?? null), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/privacy") return html(200, privacyPageV2(site));
+    if (path === "/governance" && this.o.governance) return html(200, governancePageV2(await this.governance(this.o.governance)));
     if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/papers") return html(200, papersPageV2(await this.papers()));
     const frozen = async (subject: string) => isHeld(await this.v2.record(), subject);
@@ -64,6 +66,18 @@ export class PagesHandler {
       return c ? html(200, claimPageV2(c)) : html(404, missingPageV2("claim"));
     }
     return null;
+  }
+
+  private async governance(gov: V2Governance): Promise<GovernanceViewV2> {
+    const s = (await gov.summary()).body as { articles: Array<{ id: string; title: string; entrenched: boolean }>; rules: Record<string, string>; eligibleOperators: number; proposals: Array<Record<string, unknown>> };
+    return {
+      version: CONSTITUTION_VERSION, hash: await constitutionHash(), eligibleOperators: s.eligibleOperators, rules: s.rules, articles: s.articles,
+      proposals: s.proposals.map((p) => ({
+        id: String(p["id"]), articleId: String(p["articleId"]), entrenched: p["entrenched"] === true, change: String(p["change"] ?? ""), proposedBy: String(p["proposedBy"] ?? ""),
+        proposedAt: String(p["proposedAt"] ?? ""), closesAt: String(p["closesAt"] ?? ""), open: p["open"] === true, passed: p["passed"] === true, cosigned: p["cosigned"] === true,
+        yes: Number(p["yesOperators"] ?? 0), no: Number(p["noOperators"] ?? 0), eligible: Number(p["eligibleOperators"] ?? 0), reason: String(p["reason"] ?? ""), enactedIn: typeof p["enactedIn"] === "string" ? p["enactedIn"] : null,
+      })),
+    };
   }
 
   private async landing(site: string) {

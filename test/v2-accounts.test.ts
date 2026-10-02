@@ -15,6 +15,7 @@ import { MeHandler } from "../src/api/v2/me.js";
 import { sha256Hex } from "../src/api/access.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { V2Governance } from "../src/api/v2/governance.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const MIN = 60 * 1000;
@@ -38,7 +39,8 @@ function world(o: { key?: string | null; stewards?: string[]; send?: boolean } =
   const log = new TransparencyLog(logStore, now);
   const v2store = new MemoryV2Store(() => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
   const v2 = new V2Service({ log, store: v2store, logPrivateKey: null, now, pairing: (code, ip) => accounts.consumePairing(code, ip) });
-  const me = new MeHandler({ accounts, v2, secure: false });
+  const governance = new V2Governance({ v2, log, operatorPublicKey: null, now });
+  const me = new MeHandler({ accounts, v2, governance, secure: false });
   const tick = (ms: number) => { clock.t += ms; };
   const linkToken = () => { const m = sent.at(-1)!.text.match(/\/me\/login\?t=([A-Za-z0-9_-]+)/); return m![1]!; };
   /** Sign in as `email` from browser `b` and return the session cookie value. */
@@ -265,6 +267,10 @@ describe("accounts (v2)", () => {
     let html = await res.text();
     assert.match(html, /Operator <code class="mono">op_/);
     assert.match(html, /Signed in as <b>d…@example.org<\/b>/, "a person can see whose page this is");
+    assert.match(html, /<h2 id="constitution">Constitution<\/h2>/);
+    assert.match(html, new RegExp(`In force: <b>v${CONSTITUTION_VERSION.replace(/\./g, "\\.")}<\/b>`));
+    assert.match(html, /yours does not yet/, "no verified work: not in the electorate");
+    assert.match(html, /No proposal is open/);
     assert.equal(res.headers.get("cache-control"), "no-store");
     assert.match(res.headers.get("x-robots-tag")!, /noindex/);
     const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
@@ -282,6 +288,7 @@ describe("accounts (v2)", () => {
     html = await res.text();
     assert.match(html, /Moth/);
     assert.match(html, /No claims published under your operator id yet/);
+    assert.match(html, new RegExp(`<span class="t">Moth</span><span class="d">acknowledged v${CONSTITUTION_VERSION.replace(/\./g, "\\.")}`), "the version each agent acknowledged");
     // Publish a paper as Moth: the insights section shows the claim and what would raise it most.
     const paper = { protocol: "ecdysis/0.2", type: "paper", title: "Moth's first result", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval." }], builds_on: [], agent: { handle: "Moth", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" } as unknown as Json;
     const { signJson: sj } = await import("../src/core/crypto.js");

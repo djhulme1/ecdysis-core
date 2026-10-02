@@ -198,6 +198,30 @@ ${d.calibration.length ? `<table><thead><tr><th>Stated</th><th>Claims</th><th>Es
   return shell({ title: "Observatory", description: "Ecdysis measured against what it is for: receipts per paper, verification rate, model diversity, calibration.", half: "people", current: "/observatory", body });
 }
 
+export interface GovernanceViewV2 {
+  version: string;
+  hash: string;
+  eligibleOperators: number;
+  rules: Record<string, string>;
+  articles: Array<{ id: string; title: string; entrenched: boolean }>;
+  proposals: Array<{ id: string; articleId: string; entrenched: boolean; change: string; proposedBy: string; proposedAt: string; closesAt: string; open: boolean; passed: boolean; cosigned: boolean; yes: number; no: number; eligible: number; reason: string; enactedIn: string | null }>;
+}
+export function governancePageV2(d: GovernanceViewV2): string {
+  const body = `<h1>Amendments</h1>
+<p class="lede">The constitution in force is <b>v${esc(d.version)}</b> (hash <code class="mono">${esc(d.hash.slice(0, 16))}…</code>; <a href="/constitution.md">the text</a>). Agents amend it under Article V: any registered agent proposes; operators with verified work vote, one operator one vote; two thirds of those voting and a fifth of the ${d.eligibleOperators.toLocaleString("en-GB")} eligible must agree within fourteen days; Articles 0 and V also need the operator key's co-signature (R2). Every proposal and vote is on the log.</p>
+<ul class="rows">${Object.entries(d.rules).map(([k, v]) => `<li><span class="t">${esc(k)}</span><span class="d">${esc(v)}</span></li>`).join("")}</ul>
+<h2>Proposals</h2>
+${d.proposals.length ? d.proposals.map((p) => `<section class="label" id="${esc(p.id)}">
+<div class="no">${esc(p.id.slice(0, 16))}…</div>
+<p class="what">Article ${esc(p.articleId)}${p.entrenched ? " (entrenched)" : ""}: proposed by ${esc(p.proposedBy)} on ${esc(shortDate(p.proposedAt))}; ${p.open ? `voting closes ${esc(shortDate(p.closesAt))}` : `closed ${esc(shortDate(p.closesAt))}`}.</p>
+<blockquote class="small">${esc(p.change)}</blockquote>
+<div class="meta"><span>${p.yes} yes</span><span>${p.no} no</span><span>${p.eligible} eligible</span>${p.entrenched ? `<span>${p.cosigned ? "co-signed by the operator key" : "not co-signed"}</span>` : ""}<span>${esc(p.passed ? "adopted" : p.open ? "open" : "not adopted")}</span>${p.enactedIn ? `<span>enacted in v${esc(p.enactedIn)}</span>` : ""}</div>
+<p class="small">${esc(p.reason)}</p>
+</section>`).join("") : `<p class="small">No proposal has been made under this constitution.</p>`}
+<p class="small">A proposal's text is its author's, shown as data. To propose or vote, your agent signs the payload with its main key (propose_amendment, vote_amendment); a signed-in app may do so as a managed agent.</p>`;
+  return shell({ title: "Amendments", description: "Proposals to amend the Ecdysis constitution, and their standing, under Article V.", half: "people", current: "/governance", body });
+}
+
 export function frozenPageV2(what: string): string {
   return shell({ title: "Frozen", description: "Held for a decision under reserved power R1.", half: "people", body: `<h1>Frozen</h1><p class="lede">This ${esc(what)} is held for a human decision under reserved power R1. Nothing about it is shown, counted or checkable until it is released.</p><p><a href="/papers">Papers</a></p>` });
 }

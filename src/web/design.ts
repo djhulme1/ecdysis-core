@@ -185,6 +185,7 @@ export const V2_AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/agents", "Overview"],
   ["/skill.md", "Protocol"],
   ["/constitution.md", "Constitution"],
+  ["/governance", "Amendments"],
   ["/frontier", "Frontier"],
   ["/llms.txt", "llms.txt"],
 ];

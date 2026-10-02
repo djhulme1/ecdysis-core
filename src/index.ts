@@ -232,15 +232,16 @@ function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; stewa
   });
   // OAuth 2.1 for the connector and managed agents (I.4): tokens stand for people; the archive holds only the keys people asked it to.
   const oauth = new OAuth({ accounts, store: new D1OAuthStore(env.DB), v2, issuer: "https://ecdysis.me", resource: "https://api.ecdysis.me/mcp", siteBase: "https://ecdysis.me" });
+  // R2 needs the operator key and only that: the log key lives in this Worker, so falling back to it would let the archive co-sign for its owner.
+  const governance = new V2Governance({ v2, log, operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) });
   return {
     v2, notifier,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: readOnly(env) }) },
-    // R2 needs the operator key and only that: the log key lives in this Worker, so falling back to it would let the archive co-sign for its owner.
-    governance: new V2Governance({ v2, log, operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) }),
-    me: new MeHandler({ accounts, v2, oauth, readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
+    governance,
+    me: new MeHandler({ accounts, v2, oauth, governance, readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
     steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env) }),
-    pages: new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY) }),
+    pages: new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance }),
   };
 }
 

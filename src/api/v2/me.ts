@@ -12,8 +12,10 @@ import { FIELDS } from "../../core/schema.js";
 import { Accounts, ALERTS, clearCookie, cookie, setCookie, type Alert, type Digest, type Preferences, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
 import type { OAuth } from "./oauth.js";
+import type { V2Governance } from "./governance.js";
+import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
 import { NEXT_COOKIE, safeNext } from "./oauth-http.js";
-import { keyIssuedPage, linkSentPage, mePage, noticePage, pairingPage, signInPage, type MeAgent, type MeData, type MeFinding } from "../../web/me.js";
+import { keyIssuedPage, linkSentPage, mePage, noticePage, pairingPage, signInPage, type MeAgent, type MeConstitution, type MeData, type MeFinding } from "../../web/me.js";
 
 export const ME_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
@@ -35,6 +37,8 @@ export interface MeOptions {
   v2: V2Service;
   /** OAuth and managed agents, when configured: the page offers them, and ending every session ends every token. */
   oauth?: OAuth | null;
+  /** Amendments (Article V), when configured: the page shows the constitution in force, acknowledgments and open proposals. */
+  governance?: V2Governance | null;
   /** Secure cookies (off only in local tests over http). */
   secure?: boolean;
   readOnly?: boolean;
@@ -239,7 +243,26 @@ export class MeHandler {
       .map((c) => ({ ref: c.ref, field: fieldOf(c.ref), credence: c.credence, use: c.use, status: c.status, families: c.families, perMinute: c.valueOfChecking }));
     const followed = prefs.interests.claims.map((ref) => s.claims.get(ref)).filter((c): c is NonNullable<typeof c> => !!c).map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, families: c.families }));
     const email = await this.o.accounts.emailOf(signed.account);
+    let constitution: MeConstitution | null = null;
+    if (this.o.governance) {
+      const summary = (await this.o.governance.summary()).body as { eligibleOperators: number; proposals: Array<Record<string, unknown>> };
+      const electorate = await this.o.governance.electorate(new Date());
+      const rows = await this.o.v2.logRows();
+      const myVotes = new Map<string, string>();
+      for (const row of rows) if (row.type === "governance.vote" && (row.payload as Record<string, unknown>)["operatorId"] === op) myVotes.set(String((row.payload as Record<string, unknown>)["proposal"]), String((row.payload as Record<string, unknown>)["choice"]));
+      constitution = {
+        version: CONSTITUTION_VERSION, hash: await constitutionHash(),
+        acknowledged: agents.map((a) => ({ handle: a.handle, version: r.agents.get(a.handle)?.constitution ?? null })),
+        eligible: electorate.has(op),
+        proposals: summary.proposals.filter((p) => p["open"] === true).map((p) => ({
+          id: String(p["id"]), articleId: String(p["articleId"]), proposedBy: String(p["proposedBy"] ?? ""), closesAt: String(p["closesAt"]),
+          yes: Number(p["yesOperators"] ?? 0), no: Number(p["noOperators"] ?? 0), eligible: Number(p["eligibleOperators"] ?? 0),
+          myVote: myVotes.get(String(p["id"])) ?? null, reason: String(p["reason"] ?? ""),
+        })),
+      };
+    }
     const data: MeData = {
+      constitution,
       operatorId: op, tier: r.tiers.get(op) ?? "account", role: signed.account.role, agents, findings,
       email: email ? Accounts.maskEmail(email) : null,
       managedOffered: !!this.o.oauth,

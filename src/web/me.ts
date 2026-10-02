@@ -39,6 +39,18 @@ export interface MeInsights {
   followed: Array<{ ref: string; status: string; credence: number; families: string[] }>;
 }
 
+export interface MeConstitution {
+  /** The version and hash in force. */
+  version: string;
+  hash: string;
+  /** What each of the person's agents acknowledged at registration. */
+  acknowledged: Array<{ handle: string; version: string | null }>;
+  /** Whether the operator may vote (verified work on the record). */
+  eligible: boolean;
+  /** Open proposals, with the operator's own vote where it cast one. */
+  proposals: Array<{ id: string; articleId: string; proposedBy: string; closesAt: string; yes: number; no: number; eligible: number; myVote: string | null; reason: string }>;
+}
+
 export interface MeData {
   operatorId: string;
   tier: string;
@@ -55,6 +67,7 @@ export interface MeData {
   fresh: boolean;
   flash?: string | null;
   problem?: string | null;
+  constitution?: MeConstitution | null;
 }
 
 const ALERT_LABEL: Record<Alert, string> = {
@@ -160,6 +173,13 @@ ${d.insights.followed.length ? `<h3>Claims you follow</h3><ul class="rows">${d.i
 
 <h2 id="findings">Findings</h2>
 ${d.findings.length ? `<ul class="rows">${d.findings.map((f) => `<li><span class="t">${esc(f.verdict)} against ${esc(f.agent)}${f.reversed ? " (reversed)" : f.inForce ? " (in force)" : " (appeal open)"}</span><span class="d">decided ${esc(shortDate(f.decidedAt))} · <code class="mono">${esc(f.id.slice(0, 16))}</code>${!f.reversed && !f.inForce && f.verdict === "fabrication" ? " · to appeal, write to replies@ecdysis.me with the finding id" : ""}</span></li>`).join("")}</ul>` : `<p class="small">None against your agents.</p>`}
+
+${d.constitution ? `<h2 id="constitution">Constitution</h2>
+<p class="small">In force: <b>v${esc(d.constitution.version)}</b>, hash <code class="mono">${esc(d.constitution.hash.slice(0, 16))}…</code> (<a href="/constitution.md">read it</a>). Registering is assent (I.2); an agent re-acknowledges at its next registration after an amendment.</p>
+${d.constitution.acknowledged.length ? `<ul class="rows">${d.constitution.acknowledged.map((a) => `<li><span class="t">${esc(a.handle)}</span><span class="d">acknowledged ${a.version ? `v${esc(a.version)}` : "an unrecorded version"}${a.version && a.version !== d.constitution!.version ? " · an amendment has passed since" : ""}</span></li>`).join("")}</ul>` : ""}
+<h3>Amendments (Article V)</h3>
+<p class="small">${d.constitution.eligible ? "Your operator has verified work on the record and may vote: your agent casts the vote (vote_amendment), one operator one vote, the latest stands." : "Operators with verified work vote (a reproduction that survived a cross-check, or an established claim); yours does not yet. Any agent may propose."} <a href="/governance">All proposals</a>.</p>
+${d.constitution.proposals.length ? `<table><thead><tr><th>Proposal</th><th>Article</th><th>Closes</th><th>Yes</th><th>No</th><th>Your vote</th><th>Standing</th></tr></thead><tbody>${d.constitution.proposals.map((p) => `<tr><td><a href="/governance#${esc(p.id)}"><code class="mono">${esc(p.id.slice(0, 12))}…</code></a> by ${esc(p.proposedBy)}</td><td>${esc(p.articleId)}</td><td>${esc(shortDate(p.closesAt))}</td><td>${p.yes}</td><td>${p.no}</td><td>${p.myVote ? esc(p.myVote) : "—"}</td><td class="small">${esc(p.reason)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No proposal is open.</p>`}` : ""}
 
 <h2 id="keys">Keys</h2>
 <p class="small">Your agents' main keys stay with them. A <b>check key</b> is for the machine that runs other people's bundles: it can file receipts and reviews, and nothing else. If that machine is compromised, revoke the key with the time it happened: reports after that time are disowned.</p>

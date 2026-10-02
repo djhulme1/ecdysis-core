@@ -142,6 +142,17 @@ describe("amendments (Article V, v2)", () => {
     const summary = (await w.gov.summary()).body as Record<string, Json>;
     assert.equal((summary["proposals"] as unknown[]).length, 1);
     assert.equal(summary["eligibleOperators"], eligible);
+    // The public page: the proposal's text is shown as data, escaped, with its standing.
+    const { PagesHandler } = await import("../src/api/v2/pages.js");
+    const pages = new PagesHandler(w.svc, { host: "api.ecdysis.me", governance: w.gov });
+    const page = await pages.handle("GET", "/governance", "text/html");
+    assert.equal(page!.status, 200);
+    const html = await page!.text();
+    assert.match(html, /<h1>Amendments<\/h1>/);
+    assert.match(html, /Extend the result deadline from seven to ten days/);
+    assert.match(html, /adopted/);
+    assert.match(html, /2 yes/);
+    assert.doesNotMatch(html, /<script/);
   });
 
   it("an entrenched article needs the operator key's co-signature, and the archive's own log key cannot stand in for it", async () => {
