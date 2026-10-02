@@ -229,18 +229,81 @@ describe("credence/0.2", () => {
 
   it("use is never an input to credence, but raises the bar", () => {
     const base = computeCredenceV2([claim("u#C1", 1)], [], []).get("u#C1")!;
-    const used = computeCredenceV2([claim("u#C1", 1)], [], [1, 2, 3, 4, 5, 6].map((i) => ({ claim: "u#C1", paper: `p${i}`, operatorId: `op-p${i}` }))).get("u#C1")!;
+    const used = computeCredenceV2([claim("u#C1", 1)], [], [1, 2, 3, 4, 5, 6].map((i) => ({ claim: "u#C1", paper: `p${i}`, operatorId: `op-p${i}`, tier: "verified" as const }))).get("u#C1")!;
     near(used.credence, base.credence);
     near(used.use, 6);
     assert.ok(used.threshold > base.threshold);
-    const self = computeCredenceV2([claim("u#C1", 1)], [], [{ claim: "u#C1", paper: "mine", operatorId: "op-author" }]).get("u#C1")!;
+    const self = computeCredenceV2([claim("u#C1", 1)], [], [{ claim: "u#C1", paper: "mine", operatorId: "op-author", tier: "verified" }]).get("u#C1")!;
     assert.equal(self.use, 0, "the author's own papers add no use");
     // Use is weighed by the citing operator's tier: a crowd of free identities citing a claim cannot raise its threshold,
-    // hijack the queues or make it look load-bearing. A use without a tier is read as verified (older callers).
+    // hijack the queues or make it look load-bearing. A use without a tier is read as unverified (the safe default).
     const cheap = computeCredenceV2([claim("u#C1", 1)], [], [1, 2, 3, 4].map((i) => ({ claim: "u#C1", paper: `q${i}`, operatorId: `op-q${i}`, tier: "unverified" as const }))).get("u#C1")!;
     near(cheap.use, 1);
+    assert.equal(computeCredenceV2([claim("u#C1", 1)], [], [1, 2, 3, 4].map((i) => ({ claim: "u#C1", paper: `q${i}`, operatorId: `op-q${i}` }))).get("u#C1")!.use, 1, "no tier: unverified");
     const acc = computeCredenceV2([claim("u#C1", 1)], [], [{ claim: "u#C1", paper: "a", operatorId: "op-acc", tier: "account" as const }, { claim: "u#C1", paper: "b", operatorId: "op-ver", tier: "verified" as const }]).get("u#C1")!;
     near(acc.use, 1.5);
+  });
+});
+
+describe("credence/0.2: the maths review's defects, closed", () => {
+  it("cheap identities cannot poison the diversity discount: only verified items set the families that discount later ones", () => {
+    // Two verified replications on two families establish the claim.
+    const base = computeCredenceV2([claim("d#C1", 1)], [ev("d#C1", "replication", true, "op-v1", { families: ["claude"] }), ev("d#C1", "replication", true, "op-v2", { families: ["gpt"] })], [], full).get("d#C1")!;
+    assert.equal(base.status, "established");
+    // Eight unverified sybils each declaring every common family, filed FIRST, used to multiply each later verified replication by 2^-8.
+    const sybils = Array.from({ length: 8 }, (_, i) => ev("d#C1", "review", true, `op-s${i}`, { tier: "unverified", families: ["claude", "gpt", "gemini", "grok", "mistral", "llama", "deepseek", "qwen"], seq: 10 + i }));
+    const poisoned = computeCredenceV2([claim("d#C1", 1)], [...sybils, ev("d#C1", "replication", true, "op-v1", { families: ["claude"], seq: 50 }), ev("d#C1", "replication", true, "op-v2", { families: ["gpt"], seq: 51 })], [], full).get("d#C1")!;
+    assert.equal(poisoned.status, "established", "the verified replications keep their weight");
+    near(poisoned.s, 2);
+    assert.ok(poisoned.credence >= base.credence, "the sybils' capped agreement adds a little and takes nothing away");
+    // Failing sybils cannot pull it down either beyond their cap, and the status stands.
+    const against = computeCredenceV2([claim("d#C1", 1)], [...sybils.map((e) => ({ ...e, confirms: false })), ev("d#C1", "replication", true, "op-v1", { families: ["claude"], seq: 50 }), ev("d#C1", "replication", true, "op-v2", { families: ["gpt"], seq: 51 })], [], full).get("d#C1")!;
+    assert.equal(against.status, "established");
+    near(against.logOdds, base.logOdds - 8 * (Math.log(4) / 4) * P.tier.unverified, 1e-9);
+    // A verified item on the same family still discounts a later one (the design's shared blind spots).
+    const same = computeCredenceV2([claim("d#C1", 1)], [ev("d#C1", "replication", true, "op-v1", { families: ["claude"] }), ev("d#C1", "replication", true, "op-v2", { families: ["claude"] })], [], full).get("d#C1")!;
+    near(same.s, 1.5);
+  });
+
+  it("the statuses are tested against verified evidence alone, and established needs two distinct verified operators", () => {
+    // One verified operator declaring two models supplies two families but is one voice: not established.
+    const one = computeCredenceV2([claim("o#C1", 1, { stated: 1 })], [ev("o#C1", "replication", true, "op-v1", { families: ["claude", "gpt"] })], [], full).get("o#C1")!;
+    assert.equal(one.status, "supported");
+    assert.ok(one.credence >= one.threshold, "credence alone would have cleared the bar");
+    // Unverified reviews (capped at ln 3 all together) can lift the displayed credence over the bar, never the status.
+    const author = claim("m#C1", 1, { stated: 0.6 });
+    const partner = ev("m#C1", "replication", true, "op-v1", { families: ["claude"] });
+    const partner2 = ev("m#C1", "replication", true, "op-v2", { families: ["gpt"], seq: 300 });
+    const crowd = Array.from({ length: 10 }, (_, i) => ev("m#C1", "review", true, `op-c${i}`, { tier: "unverified", families: [] }));
+    const shaky = { reliability: (a: string) => (a === "op-v2-agent" ? 0.2 : 1) }; // the second operator's record is poor, so verified evidence alone falls just short of τ0
+    const verifiedOnly = computeCredenceV2([author], [partner, partner2], [], shaky).get("m#C1")!;
+    assert.ok(verifiedOnly.credenceVerified < verifiedOnly.threshold, `verified alone: ${verifiedOnly.credenceVerified}`);
+    assert.equal(verifiedOnly.status, "supported");
+    const withCrowd = computeCredenceV2([author], [partner, partner2, ...crowd], [], shaky).get("m#C1")!;
+    assert.ok(withCrowd.credence > withCrowd.credenceVerified, "the crowd shows in the displayed credence");
+    assert.ok(withCrowd.credence >= withCrowd.threshold, "and would have carried the claim over the bar on its own");
+    near(withCrowd.credenceVerified, verifiedOnly.credenceVerified);
+    assert.equal(withCrowd.status, "supported", "but only verified evidence resolves");
+    // Two verified operators linked by a vouch are not two independent voices on a third party's claim: the later weighs half.
+    const linked = { ...full, vouchLinked: (a: string, b: string) => (a === "op-v1" && b === "op-v2") || (a === "op-v2" && b === "op-v1") };
+    const pair = computeCredenceV2([claim("l#C1", 1, { stated: 1 })], [ev("l#C1", "replication", true, "op-v1", { families: ["claude"] }), ev("l#C1", "replication", true, "op-v2", { families: ["gpt"] })], [], linked).get("l#C1")!;
+    near(pair.s, 1.5);
+    const free = computeCredenceV2([claim("l#C1", 1, { stated: 1 })], [ev("l#C1", "replication", true, "op-v1", { families: ["claude"] }), ev("l#C1", "replication", true, "op-v2", { families: ["gpt"] })], [], full).get("l#C1")!;
+    near(free.s, 2);
+    assert.equal(free.status, "established");
+  });
+
+  it("the arithmetic never saturates: a prior of 1 or thirty confirmations leave room for the next failure to move the number", () => {
+    const sure = computeCredenceV2([claim("s#C1", 1, { stated: 1, calibration: 1 })], [ev("s#C1", "replication", false, "op-v1"), ev("s#C1", "replication", false, "op-v2")], [], full).get("s#C1")!;
+    assert.ok(Number.isFinite(sure.logOdds) && sure.credence < 1, `credence ${sure.credence}`);
+    assert.ok(sure.credence < sigma(logit(sure.prior)), "two failures lowered it");
+    const many = Array.from({ length: 30 }, (_, i) => ev("p#C1", "replication", true, `op-m${i}`, { families: [`f${i}`] }));
+    const high = computeCredenceV2([claim("p#C1", 1)], many, [], full).get("p#C1")!;
+    assert.ok(high.credence < 1 && high.logOdds < P.maxLogOdds && high.logOdds > P.softLogOdds);
+    near(computeCredenceV2([claim("p#C1", 1)], many.slice(0, 2), [], full).get("p#C1")!.logOdds, logit(priorOf(0.8, P.rho0, [])) + 2 * Math.log(4), 1e-9); // untouched in the ordinary range
+    assert.ok(high.valueOfChecking > 0, "still worth a look, however little");
+    const thenFail = computeCredenceV2([claim("p#C1", 1)], [...many, ev("p#C1", "replication", false, "op-x", { seq: 999 })], [], full).get("p#C1")!;
+    assert.ok(thenFail.credence < high.credence, "a failure after thirty confirmations still moves the number");
   });
 });
 
@@ -271,6 +334,36 @@ describe("track record (Theorem 2)", () => {
     assert.equal(claims.get("t#C1")!.status, "established");
     assert.equal(track.reports.length, 4);
     for (const r of track.reports) assert.equal(r.resolved, null, "without it, the claim isn't established");
+  });
+
+  it("leave-one-OPERATOR-out: a second report from the same operator cannot stand in for the first and resolve it", () => {
+    // The design case above, plus op-1 filing a second confirming replication. Before the fix both of op-1's reports resolved
+    // (each left out, the other stood in), earning credit the three honest operators were denied.
+    const items = [1, 2, 3, 4].map((i) => ev("t#C1", "replication", true, `op-${i}`));
+    items.push(ev("t#C1", "replication", true, "op-1", { seq: 900 }));
+    const { claims, track } = computeV2([claim("t#C1", 1, { stated: 0.45, calibration: 1 })], items, []);
+    assert.equal(claims.get("t#C1")!.status, "established");
+    assert.equal(track.reports.length, 5);
+    for (const r of track.reports) assert.equal(r.resolved, null, `${r.id} resolved itself through its operator's other report`);
+    assert.equal(track.reliability.get("op-1-agent") ?? 0.5, 0.5);
+  });
+
+  it("use never reaches credence, not even through the track record: reports resolve against the bar at zero use", () => {
+    // Five confirming replications on claim A resolve every report on it, so each reporter's ω rises above a half ...
+    const base: EvidenceInput[] = [1, 2, 3, 4, 5].map((i) => ev("A#C1", "replication", true, `op-${i}`));
+    const bClaim = claim("B#C1", 2, { stated: 0.7 });
+    const bItems = [ev("B#C1", "replication", true, "op-1", { seq: 500 })];
+    const quiet = computeV2([claim("A#C1", 1, { stated: 0.7 }), bClaim], [...base, ...bItems], []);
+    assert.equal(quiet.claims.get("A#C1")!.status, "established");
+    assert.ok((quiet.track.reliability.get("op-1-agent") ?? 0.5) > 0.5);
+    // ... and eight verified papers citing A raise its bar to 0.98. Before the fix A fell below τ(U), its reports became
+    // unresolved, every reporter's ω fell back to a half, and claim B's credence moved: a citation had moved credence.
+    const uses = Array.from({ length: 8 }, (_, i) => ({ claim: "A#C1", paper: `p${i}`, operatorId: `op-cite${i}`, tier: "verified" as const }));
+    const cited = computeV2([claim("A#C1", 1, { stated: 0.7 }), bClaim], [...base, ...bItems], uses);
+    assert.ok(cited.claims.get("A#C1")!.threshold > 0.97);
+    near(cited.track.reliability.get("op-1-agent")!, quiet.track.reliability.get("op-1-agent")!);
+    near(cited.claims.get("B#C1")!.credence, quiet.claims.get("B#C1")!.credence);
+    near(cited.claims.get("A#C1")!.credence, quiet.claims.get("A#C1")!.credence);
   });
 
   it("liars lose weight and honest reproducers gain it, as claims resolve", () => {
@@ -365,6 +458,14 @@ describe("receipts", () => {
     assert.deepEqual(settleRuns([honest, fourth, fifth, liar1], spec, true), { verdict: "fabrication", odd: "liar1" }, "one odd run against three agreeing, on a deterministic bundle");
     assert.deepEqual(settleRuns([honest, fourth, fifth, liar1], spec, false), { verdict: "irreproducible", odd: "liar1" }, "the same without observed determinism is irreproducible, no voiding");
     assert.deepEqual(settleRuns([honest, fourth], spec, true), { verdict: "agreed" });
+    // Agreement is pairwise, not "within tolerance of whoever filed first": with a tolerance of 0.01, runs at 4.080, 4.089 and
+    // 4.098 are a chain, not a group, and 4.170 is odd; the verdict must not depend on the order of filing.
+    const tol = [{ name: "alpha_c", tolerance: 0.01 }];
+    const a = { by: "a", outputs: { alpha_c: 4.08 } }, b = { by: "b", outputs: { alpha_c: 4.089 } }, c = { by: "c", outputs: { alpha_c: 4.098 } }, d = { by: "d", outputs: { alpha_c: 4.17 } };
+    for (const order of [[a, b, c, d], [b, a, c, d], [c, b, a, d], [d, c, b, a]]) assert.deepEqual(settleRuns(order, tol, true), { verdict: "unresolved" }, order.map((x) => x.by).join(""));
+    for (const order of [[a, b, c], [b, a, c], [c, a, b]]) assert.deepEqual(settleRuns(order, tol, true), { verdict: "open", need: 1 }, order.map((x) => x.by).join(""));
+    const e = { by: "e", outputs: { alpha_c: 4.085 } };
+    for (const order of [[a, b, e, d], [d, e, b, a], [e, d, a, b]]) assert.deepEqual(settleRuns(order, tol, true), { verdict: "fabrication", odd: "d" }, order.map((x) => x.by).join(""));
   });
 
   it("determinism is observed, never declared: a pinned image and two identical independent runs", () => {

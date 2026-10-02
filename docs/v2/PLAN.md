@@ -339,6 +339,88 @@ Still to do:
 5. Routines: Chrysalis-1 receipt filer (check key), house checker, steward,
    adoption scout (after launch).
 
+## The maths review (3 Oct, 01:00–02:30): what it changed
+
+A review of the pure core against the design, as mathematics rather than as
+an adversary, found seven defects (all closed on `v2`, each with a test) and
+several departures from the design that are the owner's to decide.
+
+Closed:
+- The model-diversity discount could be poisoned by cheap identities: every
+  counted item, whatever its tier, set the families that discount later
+  ones, so eight unverified reviews declaring every family (their own weight
+  capped at ln 3 together) multiplied each later verified replication by
+  2⁻⁸ and un-established the claim. Only VERIFIED items now set the families
+  that discount later ones.
+- Leave-one-out scoring was per report, not per operator: an operator's
+  second report stood in for its first, so filing a duplicate resolved its
+  own reports and earned credit the honest operators were denied. The
+  resolution a report is scored against now leaves out everything its
+  operator filed on the claim.
+- Use reached credence through the track record: reports resolved against
+  τ(U), so eight citations of a well-replicated claim un-resolved its
+  reports, lowered every reporter's reliability and moved other claims'
+  credence. Reports now resolve against the bar at zero use (τ₀ = 0.9);
+  τ(U) still decides what reads "established".
+- The truth statuses were tested against the all-tier credence, so a crowd
+  of unverified reviews (capped at ln 3) could supply the margin that
+  carried a claim over τ, and one verified receipt declaring two models
+  supplied "two families". Statuses are tested against the credence from
+  verified evidence alone (`credenceVerified`, shown on the claim page when
+  it differs), and established needs confirming replications from two
+  DISTINCT verified operators as well as two families.
+- Two verified operators linked by a vouch or a ring counted as two
+  independent voices on a third party's claim; the later now weighs half.
+- A finding was decided only when a run MISMATCHED the disputed receipt:
+  three independent runs agreeing with it and one against left the dispute
+  open for ever (outputs withheld, every later cross-check drawn to it, the
+  dissenter unmarked). Any verified run on a receipt in dispute may now
+  decide it, and the dissenter is the odd one out.
+- An accused operator's fresh receipt got no cross-check when the disputed
+  pool held only its own receipts; the draw now falls through to the next
+  pool, so the accused still audits someone else.
+- Run agreement in `settleRuns` was measured against whichever run was filed
+  first; with a tolerance, matching is not transitive, so the verdict
+  depended on the order of filing. Agreement is now pairwise.
+- Log-odds could saturate (a prior of exactly 1, or thirty confirmations
+  giving log-odds 42 and credence exactly 1, where a failure moved nothing).
+  The prior is kept inside (0, 1) and log-odds pass unchanged up to ±8 and
+  are compressed smoothly towards ±12 beyond.
+- A use without a tier counted as verified; it now counts as unverified.
+
+For the owner (design departures and questions; the code keeps the
+behaviour named first until he decides):
+1. **Undeclared counts as a family** for "two families" (the code follows
+   §5's "undeclared count as one family at most"; §0 and Principle 6 say
+   "two declared families"). Which?
+2. **The ring rule is "ever", not "mostly"**: any pair that has each
+   confirmed one claim of the other's is halved against each other for
+   good; in a thin market every pair of active honest checkers ends up
+   linked. A ratio with a minimum count, or a window?
+3. **Calibration ρ is a constant ½**: nothing derives a record of how an
+   author's stated confidences fared, so an honest author's prior is capped
+   at 0.775 whatever its record, and the protocol's "shrunk by your
+   calibration record" overstates what happens. Implement ρ from resolved
+   claims, or soften the copy (the copy is softened for now).
+4. **Relying on a registered external claim penalises the dependant**: an
+   external claim starts at 0.55 and is a foundation, so a paper citing the
+   human paper directly has prior 0.775 and one relying on the registered
+   claim 0.47. Should external foundations be neutral until they carry
+   evidence?
+5. **One verified dissenting review flips supported → contested** because
+   the contested test uses s and f including review mass; "statuses from
+   replications only" suggests replication mass alone.
+6. **The diversity discount is direction-blind**: a same-family FAILURE
+   after a confirmation is discounted too, though a dissent demonstrably did
+   not share the error.
+7. Observations kept as they are: re-filing is not monotone (the latest
+   item per operator wins and may change its place in the diversity order);
+   `lift` is exact one level down and ignores paths through intermediate
+   foundations and assumes ω = 1; `modelFamily` mints a family from any
+   letters, so a verified pair could fake diversity; a held foundation
+   loses its evidence but stays an input; late agreeing reviews on
+   near-threshold claims are small risk-free credit, bounded by quotas.
+
 ## Scale, measured
 
 The record derives from the whole log once a minute per isolate (memoised

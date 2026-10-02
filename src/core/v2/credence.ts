@@ -108,8 +108,19 @@ export const CREDENCE_V2_PARAMS = {
   /** The bar for "established": τ(U) = 1 − (1 − τ0)·e^(−U/U0). */
   tau0: 0.9,
   u0: 5,
-  /** Established needs confirming replications from at least this many model families (where known). */
+  /** Established needs confirming replications from at least this many model families (where known)... */
   familiesForEstablished: 2,
+  /** ...filed by at least this many distinct verified operators (one receipt declaring two models is one operator's word). */
+  operatorsForEstablished: 2,
+  /**
+   * Log-odds pass unchanged up to ±softLogOdds and are compressed smoothly
+   * beyond, never exceeding ±maxLogOdds: a prior of exactly 0 or 1, or
+   * thirty confirmations, never saturate the arithmetic, so credence stays
+   * strictly inside (0, 1) and the next failure still moves it. Below 8
+   * (credence 0.9997) nothing is touched.
+   */
+  softLogOdds: 8,
+  maxLogOdds: 12,
   /** At or below this, with a failed replication, a claim is refuted. */
   refutedBelow: 0.35,
   /** At or above this, with a confirming replication, a claim is supported. */
@@ -158,7 +169,7 @@ export interface UseInput {
   claim: string;
   paper: string;
   operatorId: string;
-  /** The citing operator's tier: use is weighed by it, so free identities cannot raise a claim's threshold or hijack the queues. */
+  /** The citing operator's tier: use is weighed by it, so free identities cannot raise a claim's threshold or hijack the queues. Absent: unverified. */
   tier?: Tier;
 }
 
@@ -181,6 +192,10 @@ export interface CountedItem {
 export interface EvidenceSum {
   /** Σ w·e over checks plus the capped review sum (all tiers). */
   sum: number;
+  /** The same from VERIFIED operators alone (their checks and their capped reviews): what the truth statuses are tested against (§5.5). */
+  sumVerified: number;
+  /** Distinct verified operators whose counted item is a confirming replication. */
+  confirmingOperators: number;
   /** Weighted confirming and disconfirming evidence mass, VERIFIED operators only (what can resolve a claim). */
   s: number;
   f: number;
@@ -201,6 +216,8 @@ export interface ClaimV2 {
   prior: number;
   logOdds: number;
   credence: number;
+  /** Credence from verified operators' evidence alone: the number the truth statuses are tested against (§5.5). */
+  credenceVerified: number;
   s: number;
   f: number;
   dispute: number;
@@ -229,7 +246,23 @@ const MASS: Record<EvidenceKind, number> = { replication: 1, rerun: 0.5, review:
 /** q̃ = ε + (1 − ε)·[½ + ρ(q − ½)]·Π p(f). */
 export function priorOf(stated: number, calibration: number, foundationCredences: number[]): number {
   const a = 0.5 + calibration * (stated - 0.5);
-  return P.epsilon + (1 - P.epsilon) * a * foundationCredences.reduce((x, y) => x * y, 1);
+  const q = P.epsilon + (1 - P.epsilon) * a * foundationCredences.reduce((x, y) => x * y, 1);
+  // Never exactly 0 or 1: logit must stay finite whatever the inputs.
+  return Math.min(1 - 1e-6, Math.max(1e-6, q));
+}
+
+/**
+ * Log-odds compressed beyond ±softLogOdds towards ±maxLogOdds: identity in
+ * the ordinary range, strictly monotone everywhere, so credence never
+ * saturates to exactly 0 or 1 and later evidence always moves it.
+ */
+export function clampLogOdds(x: number): number {
+  if (!Number.isFinite(x)) return x > 0 ? P.maxLogOdds : x < 0 ? -P.maxLogOdds : 0;
+  const a = Math.abs(x);
+  if (a <= P.softLogOdds) return x;
+  const room = P.maxLogOdds - P.softLogOdds;
+  const compressed = P.softLogOdds + room * Math.tanh((a - P.softLogOdds) / room);
+  return x < 0 ? -compressed : compressed;
 }
 
 /** τ(U) = 1 − (1 − τ0)·e^(−U/U0). */
@@ -277,6 +310,11 @@ function independence(op: string, author: string, vouchLinked?: (a: string, b: s
   return vouchLinked?.(op, author) || ringLinked?.(op, author) ? 0.5 : 1;
 }
 
+/** Two operators linked by a vouch or a ring are not two independent voices on a third party's claim either: the later one weighs half. */
+function linkedTo(op: string, earlier: string[], vouchLinked?: (a: string, b: string) => boolean, ringLinked?: (a: string, b: string) => boolean): boolean {
+  return earlier.some((other) => other !== op && (vouchLinked?.(op, other) || ringLinked?.(op, other)));
+}
+
 /**
  * The evidence on one claim: one item per operator (strongest kind, then
  * latest), weighted, summed. Pass a prefix of a claim's items to get its
@@ -297,15 +335,21 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   let confirmingReplication = false;
   let failingReplication = false;
   let reproduced = false;
+  let confirmingOperators = 0;
   const confirmingFamilies = new Set<string>();
+  // Only VERIFIED items set the families that discount later ones: an unverified sybil declaring every family (its own
+  // weight capped at ln 3 all together) could otherwise multiply every later verified replication by a half per sybil.
   const earlierFamilies: string[][] = [];
+  const earlierOperators: string[] = [];
   const counted: CountedItem[] = [];
   for (const e of [...best.values()].sort((a, b) => a.seq - b.seq)) {
     const omega = Math.max(0, Math.min(1, o.reliability ? o.reliability(e.agent) : P.omega0));
     const diversity = diversityFactor(e.families, earlierFamilies);
-    const w = independence(e.operatorId, authorOperator, o.vouchLinked, o.ringLinked) * P.tier[e.tier] * omega * diversity;
+    const linked = linkedTo(e.operatorId, earlierOperators, o.vouchLinked, o.ringLinked) ? 0.5 : 1;
+    const w = independence(e.operatorId, authorOperator, o.vouchLinked, o.ringLinked) * P.tier[e.tier] * omega * diversity * linked;
     if (w <= 0) continue;
-    earlierFamilies.push(e.families);
+    if (e.tier === "verified") earlierFamilies.push(e.families);
+    earlierOperators.push(e.operatorId);
     let ev: number;
     if (e.kind === "review") {
       ev = e.confirms ? P.reviewStep : -P.reviewStep;
@@ -320,6 +364,7 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
       if (e.tier === "verified") {
         if (e.confirms) {
           confirmingReplication = true;
+          confirmingOperators++;
           if (e.families.length === 0) confirmingFamilies.add("?");
           for (const fam of e.families) confirmingFamilies.add(fam);
         } else failingReplication = true;
@@ -333,13 +378,14 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   }
   const cappedReviews = Math.max(-P.reviewCap, Math.min(P.reviewCap, reviews));
   const cappedUnverified = Math.max(-P.unverifiedCap, Math.min(P.unverifiedCap, unverified));
-  return { sum: checks + cappedUnverified + cappedReviews, s, f, confirmingReplication, failingReplication, confirmingFamilies, reproduced, counted };
+  return { sum: checks + cappedUnverified + cappedReviews, sumVerified: checks + cappedReviews, s, f, confirmingReplication, failingReplication, confirmingOperators, confirmingFamilies, reproduced, counted };
 }
 
 /** The status rules (sanity check §5.3), in order. Statuses come from verified replications only. */
 export function statusOf(x: {
+  /** Credence from VERIFIED evidence alone (§5.5): a crowd of cheap identities can move the displayed number a little, never a status. */
   credence: number; s: number; f: number; threshold: number;
-  confirmingReplication: boolean; failingReplication: boolean; confirmingFamilies: number; foundationRefuted: boolean;
+  confirmingReplication: boolean; failingReplication: boolean; confirmingFamilies: number; confirmingOperators?: number; foundationRefuted: boolean;
 }): ClaimStatusV2 {
   const mass = x.s + x.f;
   const r = mass > 0 ? x.s / mass : 0;
@@ -348,7 +394,8 @@ export function statusOf(x: {
   if (anyReplication && x.s > 0 && x.f > 0 && 4 * r * (1 - r) >= P.contestedAt) return "contested";
   if (x.credence <= P.refutedBelow && x.failingReplication) return "refuted";
   if (x.foundationRefuted) return "contested";
-  if (x.credence >= x.threshold && x.confirmingReplication && x.confirmingFamilies >= P.familiesForEstablished) return "established";
+  // Established: two or more independent verified replications (distinct operators) on two or more model families.
+  if (x.credence >= x.threshold && x.confirmingReplication && x.confirmingFamilies >= P.familiesForEstablished && (x.confirmingOperators ?? P.operatorsForEstablished) >= P.operatorsForEstablished) return "established";
   if (x.confirmingReplication && x.credence >= P.supportedFrom) return "supported";
   if (!anyReplication) return "unchecked";
   return "contested";
@@ -380,7 +427,7 @@ export function computeCredenceV2(
   for (const u of uses) {
     const a = author.get(u.claim);
     if (a === undefined) continue;
-    const w = independence(u.operatorId, a, o.vouchLinked, o.ringLinked) * P.tier[u.tier ?? "verified"];
+    const w = independence(u.operatorId, a, o.vouchLinked, o.ringLinked) * P.tier[u.tier ?? "unverified"];
     const m = useBy.get(u.claim) ?? new Map<string, number>();
     m.set(u.paper, Math.max(m.get(u.paper) ?? 0, w));
     useBy.set(u.claim, m);
@@ -389,20 +436,21 @@ export function computeCredenceV2(
     const found = c.foundations.map((ref) => out.get(ref)).filter((x): x is ClaimV2 => !!x);
     const prior = priorOf(c.stated, c.calibration ?? P.rho0, found.map((x) => x.credence));
     const ev = sumEvidence(byClaim.get(c.ref) ?? [], c.authorOperator, o);
-    const logOdds = logit(prior) + ev.sum;
+    const logOdds = clampLogOdds(logit(prior) + ev.sum);
     const credence = sigma(logOdds);
+    const credenceVerified = sigma(clampLogOdds(logit(prior) + ev.sumVerified));
     const use = [...(useBy.get(c.ref)?.values() ?? [])].reduce((x, y) => x + y, 0);
     const threshold = thresholdOf(use);
     const status = statusOf({
-      credence, s: ev.s, f: ev.f, threshold,
+      credence: credenceVerified, s: ev.s, f: ev.f, threshold,
       confirmingReplication: ev.confirmingReplication, failingReplication: ev.failingReplication,
-      confirmingFamilies: familyCount(ev.confirmingFamilies),
+      confirmingFamilies: familyCount(ev.confirmingFamilies), confirmingOperators: ev.confirmingOperators,
       foundationRefuted: found.some((x) => x.status === "refuted"),
     });
     const dispute = disputeOf(ev.s, ev.f);
     sums.set(c.ref, ev.sum);
     out.set(c.ref, {
-      ref: c.ref, paper: c.paper, prior, logOdds, credence, s: ev.s, f: ev.f, dispute, use, threshold, status,
+      ref: c.ref, paper: c.paper, prior, logOdds, credence, credenceVerified, s: ev.s, f: ev.f, dispute, use, threshold, status,
       reproduced: ev.reproduced,
       families: [...ev.confirmingFamilies].filter((x) => x !== "?").sort(),
       valueOfChecking: (use + 0.5) * credence * (1 - credence),

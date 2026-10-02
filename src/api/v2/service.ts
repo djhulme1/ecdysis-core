@@ -316,7 +316,7 @@ export class V2Service {
     const r = await this.record();
     const s = await this.scoresFor(r);
     const claims = [...s.claims.values()].filter((c) => !isHeld(r, c.ref))
-      .map((c) => ({ ref: c.ref, paper: c.paper, credence: c.credence, status: c.status, use: c.use, dispute: c.dispute, reproduced: c.reproduced, families: c.families, foundations: c.foundations, lift: c.lift }));
+      .map((c) => ({ ref: c.ref, paper: c.paper, credence: c.credence, credenceVerified: c.credenceVerified, status: c.status, use: c.use, dispute: c.dispute, reproduced: c.reproduced, families: c.families, foundations: c.foundations, lift: c.lift }));
     return ok(200, { version: "credence/0.2", claims } as unknown as Json);
   }
 
@@ -745,8 +745,15 @@ export class V2Service {
     const unsettled = (r.tiers.get(operatorId) ?? "unverified") === "verified"
       ? earlier.filter((x) => { const ch = r.checks.get(x.id); return !!ch && ch.disputedBy.length === 0 && ch.verifiedBy.length === 0 && ch.otherCrossChecks.some((o) => !o.match) && !decided.has(`${ch.bundle}|${ch.seed}`); })
       : [];
-    const pool = disputed.length ? disputed : unsettled.length ? unsettled : earlier;
-    const cross = pickCrossCheck(seed, pool, operatorId, r.vouchLinked);
+    // Disputes first, then the unsettled, then anything earlier; a preferred pool with nothing this committer may re-run
+    // (only its own receipts, or a vouch-linked operator's) falls through to the next, so an accused operator's fresh
+    // receipt is still audited rather than excused.
+    let cross: string | null = null;
+    for (const pool of [disputed, unsettled, earlier]) {
+      if (!pool.length) continue;
+      cross = pickCrossCheck(seed, pool, operatorId, r.vouchLinked);
+      if (cross) break;
+    }
     await this.o.log.append("check.seal", { commit: id, seal, seed, crossCheck: cross });
     return { seal, seed, cross };
   }
@@ -845,7 +852,14 @@ export class V2Service {
     // non-verified one is recorded and shown, and the frontier asks a verified operator to settle it.
     const verifiedOperator = (r.tiers.get(operatorId) ?? "unverified") === "verified";
     let finding: Json = null;
-    if (check.crossCheck && crossMatch === false && verifiedOperator) finding = await this.decideFinding(check.crossCheck);
+    if (check.crossCheck && verifiedOperator) {
+      // A disagreement opens the question; ANY further verified run on a receipt still in dispute may close it, a match
+      // included: three independent runs agreeing with the receipt and one against decide for the receipt and mark the odd one.
+      // (This run's own verdict is not yet on the derived record: it is passed in.)
+      const crossed = r.checks.get(check.crossCheck);
+      const disputedAlready = !!crossed && crossed.disputedBy.length > 0;
+      if (crossMatch === false || disputedAlready) finding = await this.decideFinding(check.crossCheck, { commit: res.commit, by: operatorId, outputs: res.crossCheck?.outputs ?? null });
+    }
     return ok(201, {
       id: res.commit, outcome: res.outcome, crossMatch,
       ...(finding ? { finding } : {}),
@@ -864,7 +878,7 @@ export class V2Service {
    * allow (receipts.ts settleRuns), and log it. Returns the decision, or
    * what is still needed.
    */
-  private async decideFinding(receiptId: string): Promise<Json> {
+  private async decideFinding(receiptId: string, latest: { commit: string; by: string; outputs: Outputs | null } | null = null): Promise<Json> {
     const r = await this.record();
     const check = r.checks.get(receiptId);
     const bundle = await this.o.store.getBundle(receiptId);
@@ -884,6 +898,8 @@ export class V2Service {
       const by = r.checks.get(id)?.operatorId;
       if (o && by && independent(by)) runs.push({ by, outputs: o, commit: id });
     }
+    // The run just filed, whose result the derived record does not carry yet.
+    if (latest && latest.outputs && !runs.some((x) => x.commit === latest.commit) && independent(latest.by)) runs.push({ by: latest.by, outputs: latest.outputs, commit: latest.commit });
     // Determinism, observed: at least two independent runs under this seed with exactly identical outputs, on a pinned image.
     const deterministic = isDeterministic(bundle, largestIdenticalGroup(runs, bundle.outputs));
     const s = settleRuns(runs.map(({ by, outputs }) => ({ by, outputs })), bundle.outputs, deterministic);

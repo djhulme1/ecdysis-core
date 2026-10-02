@@ -169,6 +169,52 @@ describe("v2 service", () => {
     assert.equal(rec.voidedOperators.size, 0);
   });
 
+  it("a dispute is also closed by runs that AGREE with the receipt: three for and one against mark the dissenter, and the accused is still audited", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    await w.agent("Cat", "op-c", ["gemini"]);
+    await w.agent("Dog", "op-d", ["grok"]);
+    await w.agent("Emu", "op-e", ["mistral"]);
+    const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup", agent: { handle: "Ant", publicKey: w.keys.get("Ant")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    const ref = String((ext.body as Record<string, Json>)["ref"]);
+    const bee = await w.commit("Bee", ref, w.bundle(1));
+    const idB = String((bee.body as Record<string, Json>)["id"]);
+    await w.result("Bee", idB, "confirmed", { alpha: 28.4, solver: "x" }, null);
+    // Cat disagrees with Bee (Cat is the one who is wrong, as it turns out).
+    const cat = await w.commit("Cat", ref, w.bundle(2));
+    const rc = await w.result("Cat", String((cat.body as Record<string, Json>)["id"]), "failed", { alpha: 26.1, solver: "y" }, { receipt: idB, outputs: { alpha: 26.0, solver: "y" } });
+    assert.equal(((rc.body as Record<string, Json>)["finding"] as Record<string, Json>)["status"], "open");
+    // While Bee's receipt is in dispute, a fresh receipt from Bee cannot be drawn to its own: the disputed pool holds nothing
+    // Bee may re-run, so the draw falls through to everything earlier (Cat's receipt) instead of excusing Bee from audit duty.
+    const bee2 = await w.commit("Bee", ref, w.bundle(9));
+    assert.equal(bee2.status, 201, JSON.stringify(bee2.body));
+    assert.equal(((bee2.body as Record<string, Json>)["crossCheck"] as Record<string, Json> | null)?.["receipt"], String((cat.body as Record<string, Json>)["id"]), "the accused still audits someone else");
+    // Dog and Emu re-run Bee's receipt and MATCH it. Before the fix a matching run never asked for a decision, so Bee stayed
+    // "disputed" for ever: outputs withheld, every later cross-check drawn to it, Cat unmarked.
+    const dog = await w.commit("Dog", ref, w.bundle(3));
+    assert.equal(((dog.body as Record<string, Json>)["crossCheck"] as Record<string, Json>)["receipt"], idB, "disputes first");
+    const rd = await w.result("Dog", String((dog.body as Record<string, Json>)["id"]), "confirmed", { alpha: 28.4, solver: "x" }, { receipt: idB, outputs: { alpha: 28.4, solver: "x" } });
+    assert.equal((rd.body as Record<string, Json>)["crossMatch"], true);
+    let finding = (rd.body as Record<string, Json>)["finding"] as Record<string, Json>;
+    assert.equal(finding["status"], "open", "three runs: still open");
+    assert.equal(finding["need"], 1);
+    const emu = await w.commit("Emu", ref, w.bundle(4));
+    const re = await w.result("Emu", String((emu.body as Record<string, Json>)["id"]), "confirmed", { alpha: 28.4, solver: "x" }, { receipt: idB, outputs: { alpha: 28.4, solver: "x" } });
+    finding = (re.body as Record<string, Json>)["finding"] as Record<string, Json>;
+    assert.equal(finding["status"], "decided", "four independent runs: decided, though this one agreed");
+    assert.equal(finding["verdict"], "fabrication", "Bee, Dog and Emu match exactly on a pinned image: determinism observed; Cat is the odd one out");
+    assert.equal(finding["oddCommit"], String((cat.body as Record<string, Json>)["id"]));
+    const rec = await w.svc.record();
+    assert.equal(rec.findings.filter((f) => f.verdict !== "unresolved").length, 1);
+    assert.equal(rec.findings[0]!.oddOperator, "op-c");
+    // The decided receipt leaves the disputed pool: the next cross-check is an ordinary draw, not Bee's again.
+    // And an accused operator's fresh receipt is still cross-checked: with only its own receipt in dispute it falls through to the pool of everything earlier.
+    const cat2 = await w.commit("Cat", ref, w.bundle(5));
+    assert.equal(cat2.status, 201, JSON.stringify(cat2.body));
+    assert.ok(((cat2.body as Record<string, Json>)["crossCheck"] as Record<string, Json> | null)?.["receipt"], "Cat's new receipt is drawn a cross-check");
+  });
+
   it("without a pinned image the same disagreement is irreproducible, not fabrication", async () => {
     const w = await world();
     await w.agent("Ant", "op-a");

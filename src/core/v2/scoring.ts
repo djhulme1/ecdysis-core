@@ -28,12 +28,14 @@
  */
 
 import {
+  clampLogOdds,
   computeCredenceV2,
   familyCount,
   logit,
   sigma,
   statusOf,
   sumEvidence,
+  thresholdOf,
   type ClaimInput,
   type ClaimV2,
   type EvidenceInput,
@@ -130,13 +132,17 @@ export function scoreTrackRecord(
     const foundationRefuted = r.foundations.some((x) => x.status === "refuted");
     for (const [k, item] of items.entries()) {
       const prefix = items.slice(0, k);
-      const before = sigma(base + sumEvidence(prefix, c.authorOperator, opts).sum);
-      const after = sigma(base + sumEvidence([...prefix, item], c.authorOperator, opts).sum);
-      const without = sumEvidence(items.filter((e) => e !== item), c.authorOperator, opts);
+      const before = sigma(clampLogOdds(base + sumEvidence(prefix, c.authorOperator, opts).sum));
+      const after = sigma(clampLogOdds(base + sumEvidence([...prefix, item], c.authorOperator, opts).sum));
+      // Leave-one-OPERATOR-out: the resolution a report is scored against leaves out everything its operator filed on the
+      // claim, so an operator cannot resolve its own report by filing a second one that stands in for the first.
+      const without = sumEvidence(items.filter((e) => e.operatorId !== item.operatorId), c.authorOperator, opts);
+      // Resolved against the bar at zero use (τ0), never τ(U): use raises the bar a claim must clear to READ established,
+      // but a citation must not change what anyone's report is scored against (use never moves credence; §2).
       const status = statusOf({
-        credence: sigma(base + without.sum), s: without.s, f: without.f, threshold: r.threshold,
+        credence: sigma(clampLogOdds(base + without.sumVerified)), s: without.s, f: without.f, threshold: thresholdOf(0),
         confirmingReplication: without.confirmingReplication, failingReplication: without.failingReplication,
-        confirmingFamilies: familyCount(without.confirmingFamilies),
+        confirmingFamilies: familyCount(without.confirmingFamilies), confirmingOperators: without.confirmingOperators,
         foundationRefuted,
       });
       const anchor = o.anchors?.get(c.ref);

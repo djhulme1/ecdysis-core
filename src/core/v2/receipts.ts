@@ -222,14 +222,17 @@ export function settleRuns(
 ): Settlement {
   const m = (x: Outputs, y: Outputs) => compareOutputs(x, y, spec).match;
   const n = runs.length;
-  if (n >= 2 && runs.every((r) => m(r.outputs, runs[0]!.outputs))) return { verdict: "agreed" };
+  // Agreement is PAIRWISE: every run within tolerance of every other, not of whichever was filed first. Matching within a
+  // tolerance is not transitive (4.080, 4.089, 4.098 at 0.01), so a verdict anchored on the first run would depend on the
+  // order of filing rather than on the outputs.
+  const allAgree = (xs: Array<{ outputs: Outputs }>) => xs.every((a, i) => xs.every((b, j) => j <= i || m(a.outputs, b.outputs)));
+  if (n >= 2 && allAgree(runs)) return { verdict: "agreed" };
   if (n < FINDING_MIN_RUNS) return { verdict: "open", need: FINDING_MIN_RUNS - n };
-  // The odd one out: exactly one run that matches none of the others, while all the others match each other.
+  // The odd one out: exactly one run that matches none of the others, while all the others match each other, pairwise.
   for (let i = 0; i < n; i++) {
     const rest = runs.filter((_, j) => j !== i);
-    const restAgree = rest.every((r) => m(r.outputs, rest[0]!.outputs));
     const oddDiffers = rest.every((r) => !m(r.outputs, runs[i]!.outputs));
-    if (restAgree && oddDiffers) return deterministic ? { verdict: "fabrication", odd: runs[i]!.by } : { verdict: "irreproducible", odd: runs[i]!.by };
+    if (allAgree(rest) && oddDiffers) return deterministic ? { verdict: "fabrication", odd: runs[i]!.by } : { verdict: "irreproducible", odd: runs[i]!.by };
   }
   return { verdict: "unresolved" };
 }
