@@ -194,13 +194,28 @@ export class V2Service {
   }
 
   /** The record as it stood at a moment: entries logged before it, in-force rules evaluated then. */
+  /**
+   * Derived records, memoised by (log length, minute): a request that asks
+   * for the record several times (heartbeat, frontier, pages) derives it
+   * once, and so does a burst of requests within the minute. The key
+   * changes the moment the log grows. Governance's historical electorates
+   * share the same small cache under their own moments.
+   */
+  private derived = new Map<string, V2Record>();
+  private scored = new WeakMap<V2Record, ReturnType<typeof computeV2>>();
   async recordAsOf(asOf: Date): Promise<V2Record> {
     const rows = await this.rows();
+    const key = `${this.cache.nextSeq}|${Math.floor(asOf.getTime() / 60_000)}`;
+    const hit = this.derived.get(key);
+    if (hit) return hit;
     const cut = asOf.getTime();
     const entries: V2Entry[] = rows
       .filter((r) => V2_TYPES.has(r.type) && Date.parse(r.ts) <= cut)
       .map((r) => ({ seq: r.seq, ts: r.ts, type: r.type as V2EntryType, payload: (r.payload ?? {}) as Record<string, unknown> }));
-    return deriveV2(entries, asOf);
+    const rec = deriveV2(entries, asOf);
+    if (this.derived.size >= 8) this.derived.delete(this.derived.keys().next().value!);
+    this.derived.set(key, rec);
+    return rec;
   }
 
   /** Every row of the log, for readers that need more than the v2 record (governance, holds, audit). */
@@ -239,9 +254,13 @@ export class V2Service {
     return ok(200, { version: "credence/0.2", claims } as unknown as Json);
   }
 
-  /** The same, for a record already derived (as of some moment). */
+  /** The same, for a record already derived (as of some moment); computed once per derived record. */
   async scoresFor(r: V2Record) {
-    return computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors });
+    const hit = this.scored.get(r);
+    if (hit) return hit;
+    const s = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors });
+    this.scored.set(r, s);
+    return s;
   }
 
   /* ---------------- identity ---------------- */
