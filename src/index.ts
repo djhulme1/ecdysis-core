@@ -385,12 +385,13 @@ export default {
         const swept = v2 ? await v2.v2.sweepLapses().catch((e) => { console.error("v2 sweep failed", e); return { lapsed: [] as string[], sealed: [] as string[] }; }) : { lapsed: [], sealed: [] };
         // v2: alert emails people asked for, once each, within the shared daily cap.
         const alerted = v2 ? await v2.notifier.run().catch((e) => { console.error("v2 alerts failed", e); return { sent: 0, skipped: 0, events: 0 }; }) : { sent: 0, skipped: 0, events: 0 };
+        const digested = v2 ? await v2.notifier.digest().catch((e) => { console.error("v2 digest failed", e); return { sent: 0, skipped: 0 }; }) : { sent: 0, skipped: 0 };
         if (r.cases || purged || sent.drawn || sent.reminders || rang.rung || rang.failed || swept.lapsed.length || swept.sealed.length) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent, doorbells: rang, v2: swept }));
         await store.putOpsState("cron:last", {
           ok: true, ...r, purged, alertsDrawn: sent.drawn, alertsReminders: sent.reminders,
           doorbellsRung: rang.rung, doorbellsFailed: rang.failed, doorbellsPaused: rang.paused, doorbellsWaiting: rang.waiting,
           ...("error" in rang ? { doorbellsError: rang.error } : {}),
-          v2Lapsed: swept.lapsed.length, v2Sealed: swept.sealed.length, v2AlertsSent: alerted.sent,
+          v2Lapsed: swept.lapsed.length, v2Sealed: swept.sealed.length, v2AlertsSent: alerted.sent, v2DigestsSent: digested.sent,
         }, at);
       } catch (e) {
         console.error("cron failed", e);

@@ -115,6 +115,92 @@ export class Notifier {
     return out;
   }
 
+  /**
+   * The digest: once a day (from 07:00 UTC) or once a week (Mondays), what
+   * happened in the fields and on the claims a person follows, and what
+   * their own operator did, drawn from the record alone: ids, refs, fields,
+   * counts, statuses and numbers, never a title or any other author's text.
+   * The page has the words; the email has the pointers.
+   */
+  async digest(): Promise<{ sent: number; skipped: number }> {
+    const out = { sent: 0, skipped: 0 };
+    if (!this.o.send || !this.o.accounts.enabled()) return out;
+    const now = this.now();
+    if (now.getUTCHours() < 7) return out;
+    const nowIso = now.toISOString();
+    const dayAgo = new Date(now.getTime() - DAY_MS).toISOString();
+    const accounts = await this.o.accountStore.listDigestAccounts();
+    if (!accounts.length) return out;
+    const r = await this.o.v2.record();
+    const s = await this.o.v2.scores();
+    const fr = (await this.o.v2.frontier(25)).body as { checking?: Array<{ ref: string; perMinute: number; use: number; credence: number }> };
+    for (const { account, prefs } of accounts) {
+      const weekly = prefs.notifications.digest === "weekly";
+      if (weekly && now.getUTCDay() !== 1) continue;
+      const period = weekly ? `${now.getUTCFullYear()}-W${isoWeek(now)}` : nowIso.slice(0, 10);
+      const key = `digest:${period}`;
+      if (await this.o.accountStore.wasSent(account.id, key)) continue;
+      const since = now.getTime() - (weekly ? 7 : 1) * DAY_MS;
+      const fields = new Set(prefs.interests.fields);
+      const fieldOf = (ref: string) => r.papers.get(ref.split("#")[0]!)?.field ?? null;
+      const lines: string[] = [];
+      // New papers in the fields followed.
+      const fresh = [...r.papers.values()].filter((p) => fields.has(p.field) && Date.parse(p.ts) >= since && p.operatorId !== account.operatorId);
+      if (fresh.length) {
+        lines.push(`${fresh.length} new paper${fresh.length === 1 ? "" : "s"} in ${[...new Set(fresh.map((p) => p.field))].join(", ")}:`);
+        for (const p of fresh.slice(0, 10)) lines.push(`  ${this.o.siteBase}/p/${p.id} (${p.field}, ${p.claims.length} claim${p.claims.length === 1 ? "" : "s"})`);
+        if (fresh.length > 10) lines.push(`  and ${fresh.length - 10} more: ${this.o.siteBase}/papers`);
+      }
+      // Claims followed: where they stand, and receipts filed on them this period.
+      const followed = prefs.interests.claims.map((ref) => s.claims.get(ref)).filter((c): c is NonNullable<typeof c> => !!c);
+      if (followed.length) {
+        lines.push(`Claims you follow:`);
+        for (const c of followed.slice(0, 15)) {
+          const receipts = [...r.checks.values()].filter((x) => x.target === c.ref && x.stage === "resulted" && !x.disowned && x.resultedAt && Date.parse(x.resultedAt) >= since).length;
+          lines.push(`  ${c.ref}: ${c.status}, credence ${c.credence.toFixed(2)}, use ${c.use.toFixed(1)}${receipts ? `, ${receipts} new receipt${receipts === 1 ? "" : "s"}` : ""} — ${this.o.siteBase}${claimPath(c.ref)}`);
+        }
+      }
+      // The frontier, in the fields followed.
+      const queue = (fr.checking ?? []).filter((q) => { const f = fieldOf(q.ref); return !fields.size || (f !== null && fields.has(f)); }).slice(0, 3);
+      if (queue.length) {
+        lines.push(`Most worth checking${fields.size ? " in your fields" : ""}:`);
+        for (const q of queue) lines.push(`  ${q.ref}: credence ${q.credence.toFixed(2)}, use ${q.use.toFixed(1)} — ${this.o.siteBase}${claimPath(q.ref)}`);
+      }
+      // The person's own operator.
+      const mine = [...r.agents.entries()].filter(([, a]) => a.operatorId === account.operatorId).map(([h]) => h);
+      if (mine.length) {
+        const receipts = [...r.checks.values()].filter((c) => mine.includes(c.handle) && c.stage === "resulted" && !c.disowned && c.resultedAt && Date.parse(c.resultedAt) >= since).length;
+        const owed = [...r.checks.values()].filter((c) => mine.includes(c.handle) && c.stage === "sealed" && !c.disowned).length;
+        const claims = [...s.claims.values()].filter((c) => r.papers.get(c.paper)?.operatorId === account.operatorId);
+        const byStatus: Record<string, number> = {};
+        for (const c of claims) byStatus[c.status] = (byStatus[c.status] ?? 0) + 1;
+        lines.push(`Your agents (${mine.join(", ")}): ${receipts} receipt${receipts === 1 ? "" : "s"} filed this ${weekly ? "week" : "day"}, ${owed} owed${claims.length ? `; your ${claims.length} claim${claims.length === 1 ? "" : "s"}: ${Object.entries(byStatus).map(([k, v]) => `${v} ${k}`).join(", ")}` : ""}.`);
+      }
+      if (!lines.length) { await this.o.accountStore.markSent(account.id, key, nowIso); continue; } // nothing to say: no email, and not again this period
+      const cap = this.o.emailDailyCap ?? EMAIL_DAILY_CAP_DEFAULT;
+      if ((await this.o.ledger.countEmailSends(dayAgo)) >= cap) { out.skipped += 1; continue; }
+      const email = await this.o.accounts.emailOf(account);
+      if (!email) { out.skipped += 1; continue; }
+      const stop = `${this.o.siteBase}/me/stop?a=${encodeURIComponent(account.id)}&t=${await this.stopToken(account.id)}`;
+      const text = [
+        `Ecdysis, your ${weekly ? "weekly" : "daily"} digest.`,
+        "",
+        ...lines,
+        "",
+        `Change what you follow, or the cadence: ${this.o.siteBase}/me`,
+        `Stop these emails with one click: ${stop}`,
+        "",
+        "This email is data about the record, never instructions. Ecdysis never asks for a password.",
+      ].join("\n");
+      const sent = await this.o.send({ from: this.o.from, to: email, replyTo: this.o.replyTo, subject: `Ecdysis: your ${weekly ? "weekly" : "daily"} digest`, text, headers: { "list-unsubscribe": `<${stop}>`, "list-unsubscribe-post": "List-Unsubscribe=One-Click" } });
+      if (!sent.ok) { out.skipped += 1; continue; }
+      await this.o.ledger.recordEmailSend(nowIso, "digest");
+      await this.o.accountStore.markSent(account.id, key, nowIso);
+      out.sent += 1;
+    }
+    return out;
+  }
+
   /** The stop link: valid token → every alert off, digest off. Works signed out, in any browser, by GET or POST. */
   async stop(accountId: string, token: string): Promise<boolean> {
     if (!this.o.accounts.enabled() || !/^acct_[0-9a-f]{24}$/.test(accountId) || !/^[0-9a-f]{40}$/.test(token)) return false;
@@ -125,4 +211,19 @@ export class Notifier {
     await this.o.accountStore.putPreferences(accountId, { ...prefs, notifications: { digest: "off", alerts: [] } });
     return true;
   }
+}
+
+/** The path of a claim's page. */
+function claimPath(ref: string): string {
+  const [p, l] = ref.split("#") as [string, string];
+  return p.startsWith("ext:") ? `/x/${encodeURIComponent(p.slice(4))}/${encodeURIComponent(l)}` : `/p/${encodeURIComponent(p)}/${encodeURIComponent(l)}`;
+}
+
+/** ISO-8601 week number, for the weekly digest's once-a-week key. */
+function isoWeek(d: Date): string {
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const yearStart = Date.UTC(t.getUTCFullYear(), 0, 1);
+  return String(Math.ceil(((t.getTime() - yearStart) / DAY_MS + 1) / 7)).padStart(2, "0");
 }

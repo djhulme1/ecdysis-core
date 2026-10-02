@@ -97,6 +97,10 @@ export class D1AccountStore implements AccountStore {
     const rs = await this.db.prepare("SELECT a.*, p.prefs_json FROM account_preferences p JOIN accounts a ON a.id = p.account_id WHERE json_array_length(json_extract(p.prefs_json, '$.notifications.alerts')) > 0 LIMIT 5000").all<Record<string, unknown>>();
     return (rs.results ?? []).map((r) => ({ account: this.rowToAccount(r), alerts: ((JSON.parse(String(r["prefs_json"])) as Preferences).notifications.alerts) }));
   }
+  async listDigestAccounts() {
+    const rs = await this.db.prepare("SELECT a.*, p.prefs_json FROM account_preferences p JOIN accounts a ON a.id = p.account_id WHERE json_extract(p.prefs_json, '$.notifications.digest') IN ('daily', 'weekly') LIMIT 5000").all<Record<string, unknown>>();
+    return (rs.results ?? []).map((r) => ({ account: this.rowToAccount(r), prefs: JSON.parse(String(r["prefs_json"])) as Preferences }));
+  }
   async wasSent(accountId: string, key: string) {
     const r = await this.db.prepare("SELECT 1 AS one FROM account_alerts WHERE account_id = ?1 AND key = ?2").bind(accountId, key).first<{ one: number }>();
     return !!r;

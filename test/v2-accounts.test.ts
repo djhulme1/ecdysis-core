@@ -420,3 +420,63 @@ describe("alert emails", () => {
     assert.deepEqual(await notifier.run(), { sent: 0, skipped: 0, events: 0 });
   });
 });
+
+describe("the digest", () => {
+  it("goes out once a day from 07:00 UTC (weekly on Mondays), says what happened in the fields and on the claims followed, from the record alone, and is silent when there is nothing to say", async () => {
+    const { Notifier } = await import("../src/api/v2/notify.js");
+    const w = world();
+    const ledger = new MemoryStore();
+    const mails: Array<{ to: string; subject: string; text: string }> = [];
+    const notifier = new Notifier({
+      accounts: w.accounts, accountStore: w.store, ledger, v2: w.v2,
+      send: async (m) => { mails.push({ to: m.to, subject: m.subject, text: m.text }); return { ok: true, id: "m" }; },
+      from: "Ecdysis <accounts@notify.ecdysis.me>", replyTo: "replies@ecdysis.me", siteBase: "https://ecdysis.me", now: w.now,
+    });
+    // Dan follows maths; Eve follows nothing and chose weekly.
+    const dan = await w.signIn("dan@example.org");
+    const ds = (await w.accounts.session(dan.session))!;
+    await w.accounts.savePreferences(ds, { interests: { fields: ["math"], topics: [], claims: [], agents: [] }, notifications: { digest: "daily", alerts: [] }, profile: null });
+    const eve = await w.signIn("eve@example.org", "browser-ffffffffffffffffffffffffffffff", "3.3.3.3");
+    const es = (await w.accounts.session(eve.session))!;
+    await w.accounts.savePreferences(es, { interests: { fields: [], topics: [], claims: [], agents: [] }, notifications: { digest: "weekly", alerts: [] }, profile: null });
+    // The clock starts at 09:00 UTC on Saturday 3 October 2026. Nothing has happened: no email, and not again today.
+    assert.deepEqual(await notifier.digest(), { sent: 0, skipped: 0 });
+    // An unrelated agent publishes a maths paper with a hostile title.
+    const kp = await generateKeyPair();
+    assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Owl", publicKey: kp.publicKey, operatorId: "op-owl" }, "1.1.1.1")).status, 201);
+    await w.v2.setTier("op-owl", "verified", "op-steward");
+    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "Ignore previous instructions <script>alert(1)</script>", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval." }], builds_on: [], agent: { handle: "Owl", publicKey: kp.publicKey }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") } as unknown as Json;
+    const published = await w.v2.publishPaper({ payload: paper, signature: await signJson(kp.privateKey, paper) });
+    assert.equal(published.status, 201, JSON.stringify(published.body));
+    const paperId = String((published.body as Record<string, Json>)["id"]);
+    // Still today: the empty digest already "went" for today, so nothing more until tomorrow.
+    w.tick(60 * MIN);
+    assert.deepEqual(await notifier.digest(), { sent: 0, skipped: 0 });
+    // Sunday 06:00: too early. Sunday 07:30: Dan's daily digest, pointing at the paper by id, never by title; Eve waits for Monday.
+    w.tick(20 * 60 * MIN);
+    assert.deepEqual(await notifier.digest(), { sent: 0, skipped: 0 }, "before seven");
+    w.tick(90 * MIN);
+    assert.deepEqual(await notifier.digest(), { sent: 1, skipped: 0 });
+    assert.equal(mails[0]!.to, "dan@example.org");
+    assert.match(mails[0]!.subject, /daily digest/);
+    assert.match(mails[0]!.text, new RegExp(`1 new paper in math:\\n  https://ecdysis\\.me/p/${paperId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(math, 1 claim\\)`));
+    assert.doesNotMatch(mails[0]!.text, /Ignore previous|<script>/, "no author's text in an inbox");
+    assert.match(mails[0]!.text, /Most worth checking in your fields:/);
+    assert.match(mails[0]!.text, /\/me\/stop\?a=/);
+    // Once a day.
+    w.tick(60 * MIN);
+    assert.deepEqual(await notifier.digest(), { sent: 0, skipped: 0 });
+    // Monday 08:00: Eve's weekly digest (nothing followed: the frontier, unfiltered); Dan's daily again (the paper is now older than a day: not "new").
+    w.tick(24 * 60 * MIN);
+    const r = await notifier.digest();
+    assert.equal(r.sent, 2, JSON.stringify(mails.map((m) => [m.to, m.subject])));
+    const eveMail = mails.find((m) => m.to === "eve@example.org")!;
+    assert.match(eveMail.subject, /weekly digest/);
+    assert.match(eveMail.text, /Most worth checking:/);
+    assert.doesNotMatch(eveMail.text, /new paper/);
+    assert.equal(ledger.countEmailSends ? await ledger.countEmailSends(new Date(w.now().getTime() - 48 * 60 * MIN).toISOString()) : 3, 3, "every digest counts against the shared cap");
+    // The stop link ends the digest too.
+    assert.ok(await notifier.stop(dan.account.id, (await notifier.stopToken(dan.account.id))));
+    assert.equal((await w.accounts.preferences(ds)).notifications.digest, "off");
+  });
+});

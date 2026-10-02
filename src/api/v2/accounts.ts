@@ -97,6 +97,8 @@ export interface AccountStore {
   recordEvent(bucket: string, atIso: string): Promise<void>;
   /** Alert emails: accounts with any alert ticked, and the durable record of what was sent to whom. */
   listAlertAccounts(): Promise<Array<{ account: AccountRow; alerts: Alert[] }>>;
+  /** Accounts that chose a digest, with their preferences. */
+  listDigestAccounts(): Promise<Array<{ account: AccountRow; prefs: Preferences }>>;
   wasSent(accountId: string, key: string): Promise<boolean>;
   markSent(accountId: string, key: string, atIso: string): Promise<void>;
 }
@@ -144,6 +146,11 @@ export class MemoryAccountStore implements AccountStore {
   async listAlertAccounts() {
     const out: Array<{ account: AccountRow; alerts: Alert[] }> = [];
     for (const [id, p] of this.prefs) { const a = this.accounts.get(id); if (a && p.notifications.alerts.length) out.push({ account: a, alerts: p.notifications.alerts }); }
+    return out;
+  }
+  async listDigestAccounts() {
+    const out: Array<{ account: AccountRow; prefs: Preferences }> = [];
+    for (const [id, p] of this.prefs) { const a = this.accounts.get(id); if (a && p.notifications.digest !== "off") out.push({ account: a, prefs: structuredClone(p) }); }
     return out;
   }
   async wasSent(accountId: string, key: string) { return this.sent.has(`${accountId}|${key}`); }
