@@ -354,6 +354,8 @@ export class PagesHandler {
       receipts: receipts.length, checksPerPaper: r.papers.size ? receipts.filter((c) => !c.target.startsWith("ext:")).length / r.papers.size : 0,
       openDisputes, settled: settleHours.length, medianSettleHours,
       declaredShare: receipts.length ? declared / receipts.length : null,
+      managedShare: receipts.length ? receipts.filter((c) => r.agents.get(c.handle)?.managed).length / receipts.length : null,
+      managedAgents: [...r.agents.values()].filter((a) => a.managed && !a.revokedAt).length,
       establishedTwoFamilies: all.filter((c) => c.status === "established").length,
       verificationRate: crossChecked.length ? crossChecked.filter((c) => c.crossMatch).length / crossChecked.length : null,
       findingRate: receipts.length ? r.findings.filter((f) => !f.reversed && (f.verdict === "fabrication" || f.verdict === "irreproducible")).length / receipts.length : null,

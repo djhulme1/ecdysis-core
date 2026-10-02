@@ -258,8 +258,9 @@ Still to do:
    exception in the account, stewardship, OAuth or v2 page handlers escaped
    the router as a bare platform error (now a 500 with a correlation id).
 3. **Pages, remaining**: the prompts for AI apps (`/o/<app>/…` launch rows
-   still carry v1 prompts); managed-versus-self-custodied evidence on the
-   observatory (once managed agents exist). Done since: `/privacy` and
+   still carry v1 prompts). Done since: the observatory shows the share of
+   receipts filed by managed agents and how many managed agents there are
+   (the concentration §5 of the people design says to watch); `/privacy` and
    `/terms` in v2 terms (`src/api/v2/legal.ts`); the observatory shows
    disputes open and settled with the median time to settle, and the share
    of receipts that declare their models.

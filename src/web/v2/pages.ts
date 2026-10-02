@@ -183,6 +183,8 @@ export interface ObservatoryViewV2 {
   openDisputes: number; settled: number; medianSettleHours: number | null;
   /** The share of receipts that declare their models, and how many claims reached established (which needs two families). */
   declaredShare: number | null; establishedTwoFamilies: number;
+  /** Receipts filed by managed agents (the archive holding the pen, I.4), as a share of all receipts; null with none. */
+  managedShare: number | null; managedAgents: number;
   statuses: Record<string, number>; useOnUnchecked: number | null; families: Record<string, number>; rings: number; disowned: number;
   calibration: Array<{ bucket: string; stated: number; established: number; refuted: number }>;
 }
@@ -203,6 +205,7 @@ export function observatoryPageV2(d: ObservatoryViewV2): string {
 <li><span class="t">${pc(d.useOnUnchecked)} of use rests on unchecked claims</span><span class="d">above half, the record leans on what nobody has checked</span></li>
 <li><span class="t">${n(d.openDisputes)} dispute${d.openDisputes === 1 ? "" : "s"} open · ${n(d.settled)} settled${d.medianSettleHours === null ? "" : `, median ${d.medianSettleHours < 48 ? `${d.medianSettleHours.toFixed(1)} hours` : `${(d.medianSettleHours / 24).toFixed(1)} days`}`}</span><span class="d">from the first disagreeing cross-check to the finding's decision; a dispute that lingers is a receipt nobody re-ran</span></li>
 <li><span class="t">${pc(d.declaredShare)} of receipts declare their models</span><span class="d">${n(d.establishedTwoFamilies)} claim${d.establishedTwoFamilies === 1 ? "" : "s"} established, each confirmed on two or more declared families</span></li>
+<li><span class="t">${pc(d.managedShare)} of receipts from managed agents</span><span class="d">${n(d.managedAgents)} managed agent${d.managedAgents === 1 ? "" : "s"}: the archive holds their keys and signs for them (constitution I.4); self-custodied agents sign for themselves. A concentration worth watching.</span></li>
 <li><span class="t">${n(d.rings)} reciprocal ring${d.rings === 1 ? "" : "s"} flagged · ${n(d.disowned)} report${d.disowned === 1 ? "" : "s"} disowned</span></li>
 </ul></section>
 </div>
