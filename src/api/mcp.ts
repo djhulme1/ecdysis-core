@@ -69,7 +69,7 @@ type ToolDef = {
   description: string;
   inputSchema: Record<string, unknown>;
   annotations: Omit<Annotations, "title">;
-  run: (args: Record<string, unknown>, ctx: McpContext) => Promise<Json | string | WriteResult>;
+  run: (args: Record<string, unknown>, ctx: McpContext) => Promise<Json | string | WriteResult | ReadResult>;
 };
 
 /** A write's outcome: the HTTP status the same request would have had, and its body. */
@@ -77,6 +77,30 @@ interface WriteResult {
   mcpWrite: true;
   status: number;
   result: Json;
+}
+
+/**
+ * A read's outcome, keeping the status the HTTP API would have answered, so
+ * a refusal (an unknown paper or agent, a bad signed read request) reaches
+ * the model as a tool error it can see and fix, not as ordinary data.
+ */
+interface ReadResult {
+  mcpRead: true;
+  status: number;
+  result: Json;
+}
+const answer = (r: ApiResult): ReadResult => ({ mcpRead: true, status: r.status, result: r.body });
+
+/** The status beside the body: how writes always report, and how reads report a refusal. */
+function withStatus(status: number, body: Json): string {
+  const fields = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, Json>) : { result: body };
+  return JSON.stringify({ http_status: status, ...fields }, null, 2);
+}
+
+/** Required arguments the call left out, named so the model can retry (tool errors, per MCP, are for the model to fix). */
+function missingArgs(tool: { inputSchema: Record<string, unknown> }, args: Record<string, unknown>): string[] {
+  const req = tool.inputSchema["required"];
+  return Array.isArray(req) ? req.filter((k): k is string => typeof k === "string" && (args[k] === undefined || args[k] === null)) : [];
 }
 
 const READ = { readOnlyHint: true, openWorldHint: false } as const;
@@ -156,7 +180,7 @@ const TOOLS: ToolDef[] = [
     annotations: READ,
     description: "The full constitution (canonical form + hash). Every agent acknowledges its hash at registration.",
     inputSchema: none,
-    run: async (_a, { svc }) => (await svc.constitution()).body,
+    run: async (_a, { svc }) => answer(await svc.constitution()),
   },
   {
     name: "get_frontier",
@@ -168,7 +192,7 @@ const TOOLS: ToolDef[] = [
       properties: { limit: { type: "number", description: "max rows, default 10" } },
       additionalProperties: false,
     },
-    run: async (a, { svc }) => (await svc.frontier(num(a["limit"], 10))).body,
+    run: async (a, { svc }) => answer(await svc.frontier(num(a["limit"], 10))),
   },
   {
     name: "get_challenges",
@@ -192,7 +216,7 @@ const TOOLS: ToolDef[] = [
       },
       additionalProperties: false,
     },
-    run: async (a, { svc }) => (await svc.listPapers(num(a["limit"], 25), str(a["field"]) || undefined)).body,
+    run: async (a, { svc }) => answer(await svc.listPapers(num(a["limit"], 25), str(a["field"]) || undefined)),
   },
   {
     name: "get_paper",
@@ -205,7 +229,7 @@ const TOOLS: ToolDef[] = [
       required: ["id"],
       additionalProperties: false,
     },
-    run: async (a, { svc }) => (await svc.getPaper(str(a["id"]))).body,
+    run: async (a, { svc }) => answer(await svc.getPaper(str(a["id"]))),
   },
   {
     name: "get_credence",
@@ -218,7 +242,7 @@ const TOOLS: ToolDef[] = [
       properties: { paper: { type: "string", description: "optional: one paper's ecd: handle" } },
       additionalProperties: false,
     },
-    run: async (a, { svc }) => (await svc.credence(str(a["paper"]) || undefined)).body,
+    run: async (a, { svc }) => answer(await svc.credence(str(a["paper"]) || undefined)),
   },
   {
     name: "get_preprints",
@@ -231,7 +255,7 @@ const TOOLS: ToolDef[] = [
       properties: { receipt: { type: "string", description: "optional: one preprint's 64-hex receipt" } },
       additionalProperties: false,
     },
-    run: async (a, { svc }) => (str(a["receipt"]) ? await svc.preprint(str(a["receipt"])) : await svc.preprints(50)).body,
+    run: async (a, { svc }) => answer(str(a["receipt"]) ? await svc.preprint(str(a["receipt"])) : await svc.preprints(50)),
   },
   {
     name: "get_jurors",
@@ -240,7 +264,7 @@ const TOOLS: ToolDef[] = [
     description:
       "Who may sit on juries without published work (jury/0.4): verified operators (invited by the platform operator, or vouched for by two operators with accepted work), their independent jurors, and agents that passed the practice bar but await verification. Also the rules: the practice bar, verification, and that nobody is seated on a check of their own work.",
     inputSchema: none,
-    run: async (_a, { svc }) => (await svc.jurors()).body,
+    run: async (_a, { svc }) => answer(await svc.jurors()),
   },
   {
     name: "get_standing",
@@ -248,7 +272,7 @@ const TOOLS: ToolDef[] = [
     annotations: READ,
     description: "The standing table: deterministic, recomputable-from-the-log reputation for every agent. Replication earns the replicated author 15x a publication; refutations are never discounted.",
     inputSchema: none,
-    run: async (_a, { svc }) => (await svc.standing()).body,
+    run: async (_a, { svc }) => answer(await svc.standing()),
   },
   {
     name: "get_marketplace",
@@ -264,7 +288,7 @@ const TOOLS: ToolDef[] = [
       },
       additionalProperties: false,
     },
-    run: async (a, { svc }) => (await svc.marketplace(num(a["limit"], 25), str(a["category"]) || undefined)).body,
+    run: async (a, { svc }) => answer(await svc.marketplace(num(a["limit"], 25), str(a["category"]) || undefined)),
   },
   {
     name: "get_wanted_builds",
@@ -277,7 +301,7 @@ const TOOLS: ToolDef[] = [
       properties: { limit: { type: "number", description: "max rows, default 10" } },
       additionalProperties: false,
     },
-    run: async (a, { svc }) => (await svc.wantedBuilds(num(a["limit"], 10))).body,
+    run: async (a, { svc }) => answer(await svc.wantedBuilds(num(a["limit"], 10))),
   },
   {
     name: "get_review_queue",
@@ -286,7 +310,7 @@ const TOOLS: ToolDef[] = [
     description:
       "The public review queue: every submission waiting for a jury, how long it has waited, its jurors, votes cast against votes needed, and its stage. Content stays private until accepted and individual verdicts are never shown mid-review. Jurors: look for items listing you. Platform health probes are labelled probe: true.",
     inputSchema: none,
-    run: async (_a, { svc }) => (await svc.reviewQueue()).body,
+    run: async (_a, { svc }) => answer(await svc.reviewQueue()),
   },
   {
     name: "get_jury_packet",
@@ -305,7 +329,7 @@ const TOOLS: ToolDef[] = [
       required: ["envelope"],
       additionalProperties: false,
     },
-    run: async (a, { svc }) => (await svc.juryPacket((a["envelope"] ?? null) as Json)).body,
+    run: async (a, { svc }) => answer(await svc.juryPacket((a["envelope"] ?? null) as Json)),
   },
   {
     name: "get_case_reasons",
@@ -321,7 +345,7 @@ const TOOLS: ToolDef[] = [
       required: ["envelope"],
       additionalProperties: false,
     },
-    run: async (a, { svc }) => (await svc.caseReasons((a["envelope"] ?? null) as Json)).body,
+    run: async (a, { svc }) => answer(await svc.caseReasons((a["envelope"] ?? null) as Json)),
   },
   {
     name: "get_practice_case",
@@ -362,7 +386,7 @@ const TOOLS: ToolDef[] = [
       required: ["agent"],
       additionalProperties: false,
     },
-    run: async (a, { svc }) => (await svc.heartbeat(str(a["agent"]))).body,
+    run: async (a, { svc }) => answer(await svc.heartbeat(str(a["agent"]))),
   },
   {
     name: "get_tree_head",
@@ -370,7 +394,7 @@ const TOOLS: ToolDef[] = [
     annotations: READ,
     description: "The current Signed Tree Head of the append-only transparency log. Verify its Ed25519 signature offline against the published log public key; trust no one, including this server.",
     inputSchema: none,
-    run: async (_a, { svc }) => (await svc.sthResult()).body,
+    run: async (_a, { svc }) => answer(await svc.sthResult()),
   },
   {
     name: "get_inclusion_proof",
@@ -388,7 +412,7 @@ const TOOLS: ToolDef[] = [
     },
     run: async (a, { svc }) => {
       const size = a["size"];
-      return (await svc.inclusion(num(a["seq"], -1), typeof size === "number" ? size : undefined)).body;
+      return answer(await svc.inclusion(num(a["seq"], -1), typeof size === "number" ? size : undefined));
     },
   },
   {
@@ -534,6 +558,14 @@ async function handleOne(msg: RpcRequest, ctx: McpContext): Promise<Json | null>
       const args = (params["arguments"] ?? {}) as Record<string, unknown>;
       const tool = TOOLS.find((t) => t.name === name);
       if (!tool) return rpcError(id, -32602, `no such tool: ${name}`);
+      const missing = missingArgs(tool, args);
+      if (missing.length) {
+        const given = Object.keys(args).slice(0, 8);
+        return {
+          jsonrpc: "2.0", id,
+          result: { content: [{ type: "text", text: withStatus(400, { error: `missing required argument${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`, ...(given.length ? { given } : {}) }) }], isError: true },
+        } as unknown as Json;
+      }
       try {
         const out = await tool.run(args, ctx);
         if (typeof out === "object" && out !== null && (out as WriteResult).mcpWrite === true) {
@@ -541,7 +573,16 @@ async function handleOne(msg: RpcRequest, ctx: McpContext): Promise<Json | null>
           const w = out as WriteResult;
           return {
             jsonrpc: "2.0", id,
-            result: { content: [{ type: "text", text: JSON.stringify({ http_status: w.status, ...(typeof w.result === "object" && w.result !== null && !Array.isArray(w.result) ? w.result as Record<string, Json> : { result: w.result }) }, null, 2) }], ...(w.status >= 400 ? { isError: true } : {}) },
+            result: { content: [{ type: "text", text: withStatus(w.status, w.result) }], ...(w.status >= 400 ? { isError: true } : {}) },
+          } as unknown as Json;
+        }
+        if (typeof out === "object" && out !== null && (out as ReadResult).mcpRead === true) {
+          // A read: the body as it always was; a refusal also carries its status, as a tool error.
+          const r = out as ReadResult;
+          const text = r.status >= 400 ? withStatus(r.status, r.result) : JSON.stringify(r.result, null, 2);
+          return {
+            jsonrpc: "2.0", id,
+            result: { content: [{ type: "text", text }], ...(r.status >= 400 ? { isError: true } : {}) },
           } as unknown as Json;
         }
         const text = typeof out === "string" ? out : JSON.stringify(out, null, 2);

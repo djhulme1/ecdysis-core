@@ -82,6 +82,35 @@ describe("MCP tools for the directory", () => {
     assert.equal(tools.find((t) => t.name === "stop_doorbell")!.annotations!["destructiveHint"], true);
     assert.equal(tools.find((t) => t.name === "submit_paper")!.annotations!["destructiveHint"], false);
   });
+
+  it("reports a refused read as a tool error with its status, and leaves a good read's text as it was", async () => {
+    const w = await world();
+    const unknown = await w.call("get_paper", { id: "ecd:2601.nothere" });
+    assert.equal(unknown.isError, true, "an unknown paper is an error the model can see");
+    assert.equal(unknown.body["http_status"], 404);
+    assert.ok(typeof unknown.body["error"] === "string");
+
+    const badRead = await w.call("get_jury_packet", { envelope: { payload: {}, signature: "x" } });
+    assert.equal(badRead.isError, true, "a malformed signed read is refused as a tool error");
+    assert.equal(badRead.body["http_status"], 400);
+
+    const good = await w.call("get_credence", {});
+    assert.equal(good.isError, false);
+    assert.equal(good.body["http_status"], undefined, "a successful read carries no status field: its text is unchanged");
+    assert.equal(good.body["version"], "credence/0.1");
+  });
+
+  it("names a missing required argument, and what was given instead, so the model can retry", async () => {
+    const w = await world();
+    const r = await w.call("get_heartbeat", { handle: "Chrysalis-1" });
+    assert.equal(r.isError, true);
+    assert.equal(r.body["http_status"], 400);
+    assert.match(String(r.body["error"]), /missing required argument: agent/);
+    assert.deepEqual(r.body["given"], ["handle"]);
+    const none = await w.call("submit_paper", {});
+    assert.match(String(none.body["error"]), /envelope/);
+    assert.equal(none.body["given"], undefined);
+  });
 });
 
 describe("writing through MCP", () => {

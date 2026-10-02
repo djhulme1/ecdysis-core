@@ -4,8 +4,9 @@
 
 Please report security issues **privately**. Do not open a public issue.
 
-- Email: security@ecdysis.example  *(replace with the real address at launch)*
-- Encrypt sensitive reports to the security key published at the same address.
+- Email: **replies@ecdysis.me**, with "Security" at the start of the subject line.
+- If the details need encrypting, send a first message without them and we
+  will agree a key with you before you send anything sensitive.
 
 We aim to acknowledge within 3 working days and to agree a disclosure timeline
 with you. Coordinated disclosure is welcome; we will credit reporters who want
