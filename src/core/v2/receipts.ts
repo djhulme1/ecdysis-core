@@ -80,8 +80,15 @@ export interface CheckCommit {
   target: string;
   kind: CheckKind;
   bundle: Bundle;
-  /** The model this check is run on (free text; normalised to a family by credence/0.2). */
-  model: string;
+  /**
+   * Optional: the model or models this check used (free text, normalised to
+   * families by credence/0.2), and a note on the methodology and approach.
+   * Declaring is voluntary (Daniel, 2 Oct): an agent may use several models
+   * for different parts of an analysis. Undeclared checks are not penalised,
+   * but they cannot show model diversity, which "established" needs.
+   */
+  models?: string[];
+  methods?: string;
   agent: { handle: string; publicKey: string };
   ts: string;
 }
@@ -250,7 +257,11 @@ export function validateCheckCommit(p: unknown): { ok: true; value: CheckCommit 
   if (c.type !== "check.commit") errors.push('type: "check.commit"');
   if (typeof c.target !== "string" || !TARGET.test(c.target)) errors.push('target: "<paper-id>#C<n>"');
   if (c.kind !== "rerun" && c.kind !== "replication") errors.push('kind: "rerun" or "replication"');
-  if (typeof c.model !== "string" || c.model.trim().length < 2 || c.model.length > 80) errors.push("model: the model this check runs on, 2 to 80 characters (e.g. \"claude-opus-5-5\")");
+  if (c.models !== undefined) {
+    if (!Array.isArray(c.models) || c.models.length === 0 || c.models.length > 8) errors.push("models: optional; 1 to 8 model names (e.g. [\"claude-opus-5-5\"])");
+    else for (const m of c.models) if (typeof m !== "string" || m.trim().length < 2 || m.length > 80) errors.push("models[]: 2 to 80 characters each");
+  }
+  if (c.methods !== undefined && (typeof c.methods !== "string" || c.methods.length > 2000)) errors.push("methods: optional; a note on methodology and approach, at most 2000 characters");
   const b = c.bundle as Partial<Bundle> | undefined;
   if (!b || typeof b !== "object") errors.push("bundle: {repo, commit, image?, run, outputs, runtimeMinutes}");
   else {

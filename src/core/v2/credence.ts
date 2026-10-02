@@ -24,10 +24,17 @@
  *   independence   0 for the claim author's own operator, ½ if vouch-linked, else 1
  *   tier           ¼ unverified, ½ account, 1 verified (sanity check §5.4)
  *   reliability ω  the reporting agent's track record (scoring.ts; ½ for a newcomer)
- *   diversity      ½^(k−1) for the k-th counted item from the same MODEL FAMILY:
- *                  agents on one model make the same mistakes (ten same-model
+ *   diversity      agents on one model make the same mistakes (ten same-model
  *                  agents were worth about 1.4 independent forecasters), so a
- *                  monoculture must not pass as a crowd (§5.2)
+ *                  monoculture must not pass as a crowd (§5.2). Declaring the
+ *                  MODEL FAMILIES used is optional (Daniel, 2 Oct 13:35: some
+ *                  agents use several models for different parts of an
+ *                  analysis). An item declaring families S is multiplied, for
+ *                  each earlier counted item with families T, by
+ *                  1 − ½·|S∩T|/|S|: a second Claude-only check after a Claude
+ *                  check weighs ½; a three-model check after a Claude check
+ *                  weighs 5/6; undeclared items are not discounted against each
+ *                  other, but count as at most one family towards "established".
  * Items under a fabrication finding weigh nothing.
  *
  * Three numbers per claim, never blended:
@@ -76,7 +83,7 @@ export const CREDENCE_V2_PARAMS = {
   rho0: 0.5,
   /** Evidence weight by tier. */
   tier: { unverified: 0.25, account: 0.5, verified: 1 } as Record<Tier, number>,
-  /** The k-th counted item from the same model family weighs this^(k−1). */
+  /** An item is multiplied by (1 − this × overlap) for each earlier counted item it shares model families with. */
   familyDiscount: 0.5,
   /** Reliability of an agent with no record. */
   omega0: 0.5,
@@ -123,8 +130,8 @@ export interface EvidenceInput {
   operatorId: string;
   /** The reporting operator's tier. */
   tier: Tier;
-  /** The model family the check was run on (normalised, e.g. "claude", "gpt", "gemini"); null when unknown. */
-  family: string | null;
+  /** The model families the check was run on (normalised, e.g. ["claude"], ["claude", "gpt"]); empty when undeclared. */
+  families: string[];
   seq: number;
 }
 
@@ -158,7 +165,7 @@ export interface EvidenceSum {
   /** Verified confirming / failing replications exist. */
   confirmingReplication: boolean;
   failingReplication: boolean;
-  /** Model families among verified confirming replications (unknown families count once as "?"). */
+  /** Model families declared by verified confirming replications; "?" stands for all undeclared ones together. */
   confirmingFamilies: Set<string>;
   /** Any re-run of the claim's own bundle (any tier) matched. */
   reproduced: boolean;
@@ -226,6 +233,23 @@ export function modelFamily(model: string | null | undefined): string | null {
   return head.length >= 2 ? head : null;
 }
 
+/** The distinct families of a declaration: one model, several, or none. */
+export function modelFamilies(models: string | string[] | null | undefined): string[] {
+  const list = models == null ? [] : Array.isArray(models) ? models : [models];
+  return [...new Set(list.map(modelFamily).filter((x): x is string => !!x))].sort();
+}
+
+/** The diversity factor of an item declaring families s, given the families of the items counted before it. */
+export function diversityFactor(s: string[], earlier: string[][]): number {
+  if (s.length === 0) return 1;
+  let f = 1;
+  for (const t of earlier) {
+    const overlap = s.filter((x) => t.includes(x)).length / s.length;
+    f *= 1 - P.familyDiscount * overlap;
+  }
+  return f;
+}
+
 function independence(op: string, author: string, vouchLinked?: (a: string, b: string) => boolean): number {
   if (op === author) return 0;
   return vouchLinked?.(op, author) ? 0.5 : 1;
@@ -251,16 +275,14 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   let failingReplication = false;
   let reproduced = false;
   const confirmingFamilies = new Set<string>();
-  const seenFamily = new Map<string, number>();
+  const earlierFamilies: string[][] = [];
   const counted: CountedItem[] = [];
   for (const e of [...best.values()].sort((a, b) => a.seq - b.seq)) {
     const omega = Math.max(0, Math.min(1, o.reliability ? o.reliability(e.agent) : P.omega0));
-    const fam = e.family ?? "?";
-    const k = seenFamily.get(fam) ?? 0;
-    seenFamily.set(fam, k + 1);
-    const diversity = e.family === null ? 1 : Math.pow(P.familyDiscount, k);
+    const diversity = diversityFactor(e.families, earlierFamilies);
     const w = independence(e.operatorId, authorOperator, o.vouchLinked) * P.tier[e.tier] * omega * diversity;
     if (w <= 0) continue;
+    earlierFamilies.push(e.families);
     let ev: number;
     if (e.kind === "review") {
       ev = e.confirms ? P.reviewStep : -P.reviewStep;
@@ -273,8 +295,11 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
       ev = e.confirms ? P.confirm : -P.refute;
       checks += w * ev;
       if (e.tier === "verified") {
-        if (e.confirms) { confirmingReplication = true; confirmingFamilies.add(fam); }
-        else failingReplication = true;
+        if (e.confirms) {
+          confirmingReplication = true;
+          if (e.families.length === 0) confirmingFamilies.add("?");
+          for (const fam of e.families) confirmingFamilies.add(fam);
+        } else failingReplication = true;
       }
     }
     if (e.tier === "verified") {

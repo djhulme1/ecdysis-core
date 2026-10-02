@@ -10,7 +10,9 @@ import {
   CREDENCE_V2_PARAMS as P,
   computeCredenceV2,
   disputeOf,
+  diversityFactor,
   logit,
+  modelFamilies,
   modelFamily,
   priorOf,
   sigma,
@@ -43,7 +45,7 @@ const claim = (ref: string, seq: number, o: Partial<ClaimInput> = {}): ClaimInpu
 let n = 0;
 /** A verified operator on a distinct model family per operator, unless said otherwise. */
 const ev = (claimRef: string, kind: EvidenceInput["kind"], confirms: boolean, op: string, o: Partial<EvidenceInput> = {}): EvidenceInput => ({
-  id: `e${++n}`, claim: claimRef, kind, confirms, agent: `${op}-agent`, operatorId: op, tier: "verified", family: `fam-${op}`, seq: 100 + n, ...o,
+  id: `e${++n}`, claim: claimRef, kind, confirms, agent: `${op}-agent`, operatorId: op, tier: "verified", families: [`fam-${op}`], seq: 100 + n, ...o,
 });
 /** Everyone fully reliable, so a check's weight is just independence × tier × diversity. */
 const full = { reliability: () => 1 };
@@ -127,20 +129,39 @@ describe("credence/0.2", () => {
   });
 
   it("a monoculture is not a crowd: same-family confirmations count ½, ¼, …, and established needs two families", () => {
-    const same = [1, 2, 3].map((i) => ev("m#C1", "replication", true, `op-c${i}`, { family: "claude" }));
+    const same = [1, 2, 3].map((i) => ev("m#C1", "replication", true, `op-c${i}`, { families: ["claude"] }));
     const r = computeCredenceV2([claim("m#C1", 1)], same, [], full).get("m#C1")!;
     near(r.logOdds - logit(r.prior), Math.log(4) * (1 + 0.5 + 0.25));
     near(r.s, 1.75);
     assert.equal(r.status, "supported", "credence is high, but one family never establishes");
-    const mixed = computeCredenceV2([claim("m#C1", 1)], [...same, ev("m#C1", "replication", true, "op-g", { family: "gemini" })], [], full).get("m#C1")!;
+    const mixed = computeCredenceV2([claim("m#C1", 1)], [...same, ev("m#C1", "replication", true, "op-g", { families: ["gemini"] })], [], full).get("m#C1")!;
     assert.deepEqual(mixed.families, ["claude", "gemini"]);
     assert.equal(mixed.status, "established");
-    const unknown = computeCredenceV2([claim("m#C1", 1)], [1, 2].map((i) => ev("m#C1", "replication", true, `op-u${i}`, { family: null })), [], full).get("m#C1")!;
-    near(unknown.s, 2); // unknown families are not discounted against each other
-    assert.equal(unknown.status, "supported", "but unknown counts as one family at most");
+    const unknown = computeCredenceV2([claim("m#C1", 1)], [1, 2].map((i) => ev("m#C1", "replication", true, `op-u${i}`, { families: [] })), [], full).get("m#C1")!;
+    near(unknown.s, 2); // undeclared items are not discounted against each other
+    assert.equal(unknown.status, "supported", "but undeclared counts as one family at most");
   });
 
-  it("modelFamily normalises declared models", () => {
+  it("declaring models is optional, and an agent may declare several: the discount follows the overlap", () => {
+    // After a Claude-only check: another Claude-only check weighs ½; a three-model check that includes Claude weighs 5/6; a Gemini-only check weighs 1.
+    near(diversityFactor(["claude"], [["claude"]]), 0.5);
+    near(diversityFactor(["claude", "gpt", "gemini"], [["claude"]]), 5 / 6);
+    near(diversityFactor(["gemini"], [["claude"]]), 1);
+    near(diversityFactor(["claude"], [["claude", "gpt"]]), 0.5, 1e-9); // fully covered by an earlier mixed check
+    near(diversityFactor([], [["claude"], ["gpt"]]), 1); // undeclared: no discount, and no diversity credit either
+    const items = [
+      ev("d2#C1", "replication", true, "op-a", { families: ["claude"] }),
+      ev("d2#C1", "replication", true, "op-b", { families: ["claude", "gpt", "gemini"] }),
+    ];
+    const r = computeCredenceV2([claim("d2#C1", 1)], items, [], full).get("d2#C1")!;
+    near(r.s, 1 + 5 / 6);
+    assert.deepEqual(r.families, ["claude", "gemini", "gpt"]);
+    assert.equal(r.status, "established", "the union of declared families spans two or more");
+    const undeclaredOnly = computeCredenceV2([claim("d2#C1", 1)], [ev("d2#C1", "replication", true, "op-a", { families: [] }), ev("d2#C1", "replication", true, "op-b", { families: [] })], [], full).get("d2#C1")!;
+    assert.equal(undeclaredOnly.status, "supported", "the incentive to declare: undeclared checks cannot show diversity");
+  });
+
+  it("modelFamily and modelFamilies normalise declared models", () => {
     assert.equal(modelFamily("claude-opus-5-5"), "claude");
     assert.equal(modelFamily("Anthropic/Claude Sonnet 5.5"), "claude");
     assert.equal(modelFamily("gpt-5.2"), "gpt");
@@ -150,6 +171,9 @@ describe("credence/0.2", () => {
     assert.equal(modelFamily("grok-4"), "grok");
     assert.equal(modelFamily(""), null);
     assert.equal(modelFamily(null), null);
+    assert.deepEqual(modelFamilies(["gpt-5.2", "o3-pro", "Claude Opus 5.5"]), ["claude", "gpt"]);
+    assert.deepEqual(modelFamilies("grok-4"), ["grok"]);
+    assert.deepEqual(modelFamilies(null), []);
   });
 
   it("resolution needs verified evidence: cheap identities move credence a little and never a status", () => {
@@ -330,14 +354,15 @@ describe("receipts", () => {
     assert.equal(isDeterministic({ ...bundle, image: "sha256:" + "b".repeat(64) }, 2), true);
   });
 
-  it("validates commits and results; a commit names its model and expected runtime", () => {
+  it("validates commits and results; models and methods are optional, the expected runtime is not", () => {
     const commit = {
-      protocol: "ecdysis/0.2", type: "check.commit", target: "ecd:2610.3qjqtw#C1", kind: "replication", model: "claude-opus-5-5",
+      protocol: "ecdysis/0.2", type: "check.commit", target: "ecd:2610.3qjqtw#C1", kind: "replication", models: ["claude-opus-5-5", "gpt-5.2"], methods: "Re-implemented the solver loop in Python; GPT drafted the analysis, Claude checked it.",
       bundle: { repo: "https://github.com/example/ks94", commit: "a".repeat(40), run: "python run.py", outputs: [{ name: "alpha_c", tolerance: 0.01 }], runtimeMinutes: 30 },
       agent: { handle: "Moth-1", publicKey: "MCowBQYDK2VwAyEA" }, ts: "2026-10-02T12:00:00Z",
     };
     assert.equal(validateCheckCommit(commit).ok, true);
-    assert.equal(validateCheckCommit({ ...commit, model: undefined }).ok, false, "the model is required");
+    assert.equal(validateCheckCommit({ ...commit, models: undefined, methods: undefined }).ok, true, "declaring models and methods is optional");
+    assert.equal(validateCheckCommit({ ...commit, models: [] }).ok, false, "but an empty list is not a declaration");
     assert.equal(validateCheckCommit({ ...commit, bundle: { ...commit.bundle, runtimeMinutes: 0 } }).ok, false);
     assert.equal(validateCheckCommit({ ...commit, bundle: { ...commit.bundle, deterministic: true } }).ok, true, "an unknown extra field is ignored, not trusted");
     const result = {
