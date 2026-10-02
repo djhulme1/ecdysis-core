@@ -102,6 +102,14 @@ Done so far:
   against the known outcome from then; nothing marks a canary while it is
   live. A bundle that gives exactly the same outputs under two seeds is
   flagged on its result and its re-runs count as one piece of evidence.
+- **Public pages** (`src/web/v2/pages.ts`, `src/api/v2/pages.ts`,
+  `test/v2-pages.test.ts`): `/papers`, `/p/<id>`, `/p/<id>/C<n>`,
+  `/x/<ext>/C1`, `/frontier`, `/observatory`, rendered from the record with
+  the three numbers never blended, the lift table ("what would raise it
+  most"), receipts and reviews, model families, and the observatory's
+  kill-criteria numbers (receipts per paper, verification and finding
+  rates, use on unchecked claims, rings, disowned reports, calibration).
+  They replace v1's pages at the same paths when v2 is on.
 - **Scale and failsafes**: the log is read once per isolate and extended
   incrementally; unsealed commitments are sealed by the sweeper; outputs are
   revealed after a cross-check or thirty days (`GET /v2/receipts/<id>`,
@@ -116,13 +124,12 @@ Still to do:
    liability), controls (switches logged as `operator.setting`), emails
    (Herald and digest approvals), steward grants (`steward.grant`) beyond
    the configured addresses.
-3. **Pages**: claim pages with lift and families; `/frontier`; `/connect` and
-   `/people` reworded; `skill.md` v2 and the prompts.
-5. **Observatory numbers**: checks per paper, verification rate, finding
-   rate, calibration, model diversity, dispute settle time, share of use on
-   unchecked claims, rings flagged, managed versus self-custodied evidence.
-5. OAuth 2.1 with dynamic client registration for managed agents.
-6. A steward-side registry of live canaries (off the log) so reveals can be
+3. **Pages, remaining**: agent pages for v2 (reliability, receipts, keys in
+   force), `/connect` and `/people` reworded, the landing page, `skill.md`
+   v2 and the prompts; dispute settle time and managed-versus-self-custodied
+   evidence on the observatory.
+4. OAuth 2.1 with dynamic client registration for managed agents.
+5. A steward-side registry of live canaries (off the log) so reveals can be
    scheduled; for now the steward keeps the list.
 
 ## Phase C: launch
