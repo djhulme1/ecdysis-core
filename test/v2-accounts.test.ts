@@ -244,6 +244,16 @@ describe("accounts (v2)", () => {
     res = await get("/me", cookies);
     html = await res.text();
     assert.match(html, /Moth/);
+    assert.match(html, /No claims published under your operator id yet/);
+    // Publish a paper as Moth: the insights section shows the claim and what would raise it most.
+    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "Moth's first result", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval." }], builds_on: [], agent: { handle: "Moth", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" } as unknown as Json;
+    const { signJson: sj } = await import("../src/core/crypto.js");
+    const published = await w.v2.publishPaper({ payload: paper, signature: await sj(kp.privateKey, paper) });
+    assert.equal(published.status, 201, JSON.stringify(published.body));
+    html = await (await get("/me", cookies)).text();
+    assert.match(html, /Moth&#39;s first result/);
+    assert.match(html, /an independent replication of this claim itself/);
+    assert.match(html, /1 claim/);
     res = await post("/me/keys/issue", { csrf, handle: "Moth", label: "lab box" }, cookies);
     html = await res.text();
     assert.equal(res.status, 200, html);

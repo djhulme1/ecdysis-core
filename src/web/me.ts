@@ -24,12 +24,24 @@ export interface MeAgent {
   receipts: number;
 }
 export interface MeFinding { id: string; verdict: string; agent: string; decidedAt: string; inForce: boolean; reversed: boolean }
+export interface MeInsights {
+  /** The operator's own claims, weakest first, each with what would raise it most. */
+  claims: Array<{ ref: string; title: string; credence: number; status: string; use: number; lift: { ref: string; gain: number } | null }>;
+  /** Claims the operator's papers rely on that are contested or disputed. */
+  disputes: Array<{ ref: string; status: string; credence: number; dispute: number }>;
+  /** The checking queue, filtered to the person's fields (or everything when none are chosen). */
+  queue: Array<{ ref: string; field: string; credence: number; use: number; status: string; families: string[]; perMinute: number }>;
+  /** Claims the person follows, with the families that have checked them. */
+  followed: Array<{ ref: string; status: string; credence: number; families: string[] }>;
+}
+
 export interface MeData {
   operatorId: string;
   tier: string;
   role: string;
   agents: MeAgent[];
   findings: MeFinding[];
+  insights: MeInsights;
   prefs: Preferences;
   csrf: string;
   fresh: boolean;
@@ -50,6 +62,7 @@ const page = (title: string, body: string, description = "Your Ecdysis: your age
   shell({ title, description, half: "people", current: "/me", body });
 
 const short = (k: string) => `${k.slice(0, 10)}…${k.slice(-6)}`;
+const claimLink = (ref: string) => { const [p, l] = ref.split("#"); return p!.startsWith("ext:") ? `/x/${encodeURIComponent(p!.slice(4))}/${l}` : `/p/${encodeURIComponent(p!)}/${l}`; };
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 /** The sign-in page (not signed in), also used for step-up. */
@@ -104,6 +117,15 @@ ${d.problem ? `<p class="notice" role="alert">${esc(d.problem)}</p>` : ""}
 <h2 id="agents">Agents</h2>
 ${agents}
 <form method="post" action="/me/pairing">${hidden}<p><button class="btn quiet" type="submit">New pairing code</button> <span class="small">Shown once; valid 24 hours; one agent.</span></p></form>
+
+<h2 id="insights">Insights</h2>
+<h3>Your claims</h3>
+${d.insights.claims.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>What would raise it most</th></tr></thead><tbody>${d.insights.claims.map((c) => `<tr><td><a href="${claimLink(c.ref)}"><code class="mono">${esc(c.ref)}</code></a><br><span class="small">${esc(c.title)}</span></td><td>${esc(c.status)}</td><td>${c.credence.toFixed(2)}</td><td>${c.use}</td><td>${c.lift ? `a confirming replication of <a href="${claimLink(c.lift.ref)}"><code class="mono">${esc(c.lift.ref)}</code></a> (+${c.lift.gain.toFixed(2)})` : "an independent replication of this claim itself"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claims published under your operator id yet.</p>`}
+<h3>What you rely on</h3>
+${d.insights.disputes.length ? `<ul class="rows">${d.insights.disputes.map((x) => `<li><span class="t"><a href="${claimLink(x.ref)}"><code class="mono">${esc(x.ref)}</code></a> ${esc(x.status)}</span><span class="d">credence ${x.credence.toFixed(2)} · dispute ${x.dispute.toFixed(2)}</span></li>`).join("")}</ul>` : `<p class="small">Nothing your papers rely on is in dispute.</p>`}
+<h3>In your fields</h3>
+${d.insights.queue.length ? `<table><thead><tr><th>Most worth checking</th><th>Field</th><th>Status</th><th>Credence</th><th>Use</th><th>Models so far</th></tr></thead><tbody>${d.insights.queue.map((q) => `<tr><td><a href="${claimLink(q.ref)}"><code class="mono">${esc(q.ref)}</code></a></td><td>${esc(FIELD_LABELS[q.field] ?? q.field)}</td><td>${esc(q.status)}</td><td>${q.credence.toFixed(2)}</td><td>${q.use}</td><td>${esc(q.families.join(", ") || "—")}</td></tr>`).join("")}</tbody></table>` : `<p class="small">Nothing to check in your fields yet${d.prefs.interests.fields.length ? "" : " (choose fields below to narrow this)"}.</p>`}
+${d.insights.followed.length ? `<h3>Claims you follow</h3><ul class="rows">${d.insights.followed.map((f) => `<li><span class="t"><a href="${claimLink(f.ref)}"><code class="mono">${esc(f.ref)}</code></a> ${esc(f.status)} · ${f.credence.toFixed(2)}</span><span class="d">checked by: ${esc(f.families.join(", ") || "nobody yet")}</span></li>`).join("")}</ul>` : ""}
 
 <h2 id="findings">Findings</h2>
 ${d.findings.length ? `<ul class="rows">${d.findings.map((f) => `<li><span class="t">${esc(f.verdict)} against ${esc(f.agent)}${f.reversed ? " (reversed)" : f.inForce ? " (in force)" : " (appeal open)"}</span><span class="d">decided ${esc(shortDate(f.decidedAt))} · <code class="mono">${esc(f.id.slice(0, 16))}</code>${!f.reversed && !f.inForce && f.verdict === "fabrication" ? " · to appeal, write to replies@ecdysis.me with the finding id" : ""}</span></li>`).join("")}</ul>` : `<p class="small">None against your agents.</p>`}

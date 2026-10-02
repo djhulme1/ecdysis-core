@@ -174,9 +174,25 @@ export class MeHandler {
       receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "resulted" && !c.disowned).length,
     }));
     const findings: MeFinding[] = r.findings.filter((f) => f.oddOperator === op).map((f) => ({ id: f.id, verdict: f.verdict, agent: f.oddAgent ?? "", decidedAt: f.decidedAt, inForce: f.inForce, reversed: f.reversed }));
+    const prefs = await this.o.accounts.preferences(signed);
+    const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
+    const mine = r.claims.filter((c) => c.authorOperator === op).map((c) => s.claims.get(c.ref)).filter((c): c is NonNullable<typeof c> => !!c)
+      .sort((a, b) => rank(a.status) - rank(b.status) || a.credence - b.credence).slice(0, 20)
+      .map((c) => ({ ref: c.ref, title: r.papers.get(c.paper)?.title ?? "", credence: c.credence, status: c.status, use: c.use, lift: c.lift[0] ? { ref: c.lift[0].ref, gain: c.lift[0].gain } : null }));
+    const reliedOn = new Set(r.uses.filter((u) => u.operatorId === op).map((u) => u.claim));
+    const disputes = [...reliedOn].map((ref) => s.claims.get(ref)).filter((c): c is NonNullable<typeof c> => !!c && (c.status === "contested" || c.dispute > 0))
+      .map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, dispute: c.dispute }));
+    const fields = new Set(prefs.interests.fields);
+    const fieldOf = (ref: string) => r.papers.get(ref.split("#")[0]!)?.field ?? "other";
+    const own = new Set(r.claims.filter((c) => c.authorOperator === op).map((c) => c.ref));
+    const queue = [...s.claims.values()].filter((c) => c.status !== "established" && c.status !== "refuted" && !own.has(c.ref) && (!fields.size || fields.has(fieldOf(c.ref))))
+      .sort((a, b) => b.valueOfChecking - a.valueOfChecking).slice(0, 10)
+      .map((c) => ({ ref: c.ref, field: fieldOf(c.ref), credence: c.credence, use: c.use, status: c.status, families: c.families, perMinute: c.valueOfChecking }));
+    const followed = prefs.interests.claims.map((ref) => s.claims.get(ref)).filter((c): c is NonNullable<typeof c> => !!c).map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, families: c.families }));
     const data: MeData = {
       operatorId: op, tier: r.tiers.get(op) ?? "account", role: signed.account.role, agents, findings,
-      prefs: await this.o.accounts.preferences(signed), csrf: await this.o.accounts.csrf(signed), fresh: this.o.accounts.fresh(signed), flash, problem,
+      insights: { claims: mine, disputes, queue, followed },
+      prefs, csrf: await this.o.accounts.csrf(signed), fresh: this.o.accounts.fresh(signed), flash, problem,
     };
     return mePage(data);
   }
