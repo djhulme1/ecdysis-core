@@ -235,6 +235,8 @@ export interface V2Record {
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown, d = 0): number => (typeof v === "number" && Number.isFinite(v) ? v : d);
+/** The objects in a list field; anything that is not an object is dropped. */
+const objects = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x)) : []);
 
 /** Derive the whole v2 record from log entries, as of `now`. Pure and deterministic. */
 /**
@@ -274,7 +276,8 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
 
   const sorted = [...entries].sort((a, b) => a.seq - b.seq);
   for (const e of sorted) {
-    const p = e.payload;
+    // A payload that is not an object (a corrupted or hostile entry) is an entry with no fields: skipped by every case below.
+    const p: Record<string, unknown> = e.payload && typeof e.payload === "object" && !Array.isArray(e.payload) ? e.payload : {};
     switch (e.type) {
       case "operator.tier": {
         const t = str(p["tier"]);
@@ -322,7 +325,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         const id = str(p["id"]);
         const op = str(p["operatorId"]);
         paperFamilies.set(id, modelFamilies(p["models"] as string[] | undefined));
-        const builds = Array.isArray(p["builds_on"]) ? (p["builds_on"] as Array<Record<string, unknown>>) : [];
+        const builds = objects(p["builds_on"]);
         const foundations: string[] = [];
         for (const b of builds) {
           const rel = str(b["rel"]);
@@ -337,7 +340,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
             }
           }
         }
-        const cl = Array.isArray(p["claims"]) ? (p["claims"] as Array<Record<string, unknown>>) : [];
+        const cl = objects(p["claims"]);
         const refs: string[] = [];
         for (const [i, c] of cl.entries()) {
           const label = str(c["label"]) || `C${i + 1}`;

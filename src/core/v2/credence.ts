@@ -243,8 +243,8 @@ export function disputeOf(s: number, f: number): number {
 }
 
 /** Normalise a declared model to its family: "claude-opus-5-5" → "claude", "gpt-5.2" → "gpt", "Gemini 3 Pro" → "gemini". */
-export function modelFamily(model: string | null | undefined): string | null {
-  if (!model) return null;
+export function modelFamily(model: unknown): string | null {
+  if (typeof model !== "string" || !model) return null;
   const m = model.trim().toLowerCase().replace(/^(anthropic|openai|google|xai|meta|mistralai|alibaba|microsoft)[\/: -]+/, "");
   if (!m) return null;
   // The leading run of letters, with OpenAI's reasoning series folded into one family.
@@ -256,8 +256,8 @@ export function modelFamily(model: string | null | undefined): string | null {
 }
 
 /** The distinct families of a declaration: one model, several, or none. */
-export function modelFamilies(models: string | string[] | null | undefined): string[] {
-  const list = models == null ? [] : Array.isArray(models) ? models : [models];
+export function modelFamilies(models: unknown): string[] {
+  const list: unknown[] = models == null ? [] : Array.isArray(models) ? models : [models];
   return [...new Set(list.map(modelFamily).filter((x): x is string => !!x))].sort();
 }
 
