@@ -258,6 +258,60 @@ describe("the stewardship area", () => {
     assert.equal((await bare.handle(new Request("https://ecdysis.me/steward/canaries", { headers: { cookie: `ecd_s=${d2.session}` } }), "/steward/canaries")).status, 404);
   });
 
+  it("controls: a switch is read from the log, pauses one surface with a clear reason, and is on the audit trail", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    const d = await w.signIn("daniel@example.org");
+    let html = await (await w.get("/steward/controls", d.session)).text();
+    assert.match(html, /<code class="mono">v2\.publishing<\/code>/);
+    assert.match(html, /never \(default\)/);
+    assert.equal((html.match(/<span class="status sound">open<\/span>/g) ?? []).length, 5, "five switches, all open");
+    const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    assert.match(await (await w.post("/steward/controls/set", { csrf, setting: "v2.nonsense", value: "paused" }, d.session)).text(), /no such switch/);
+    assert.match(await (await w.post("/steward/controls/set", { csrf, setting: "v2.publishing", value: "closed" }, d.session)).text(), /is one of: open, paused/);
+    let res = await w.post("/steward/controls/set", { csrf, setting: "v2.publishing", value: "paused" }, d.session);
+    assert.equal(res.status, 303, await res.text());
+    assert.match(res.headers.get("location")!, /on%20the%20log/);
+    // Publishing is refused with a reason that names the switch; everything else carries on.
+    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "A paper during the pause", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval." }], builds_on: [] };
+    const pub = await w.svc.publishPaper(await w.sign("Ant", paper as unknown as Record<string, Json>));
+    assert.equal(pub.status, 503);
+    assert.match(String((pub.body as Record<string, Json>)["error"]), /publishing is paused by the steward/);
+    assert.equal((pub.body as Record<string, Json>)["setting"], "v2.publishing");
+    const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1000/x", quote: "a quoted result from the human literature", test: "a fresh run disagrees" }));
+    assert.equal(ext.status, 201, "external claims are a separate switch");
+    assert.equal((await w.svc.registerAgent({ constitution: ACK, handle: "Bee", publicKey: (await generateKeyPair()).publicKey, operatorId: "op-b" })).status, 201, "registration too");
+    html = await (await w.get("/steward/controls", d.session)).text();
+    assert.match(html, /<span class="status risk">paused<\/span>/);
+    assert.match(html, new RegExp(`by <code class="mono">${d.account.operatorId}</code>`));
+    const acts = await w.svc.audit();
+    assert.equal(acts[0]!.type, "operator.setting");
+    assert.equal(acts[0]!.steward, d.account.operatorId);
+    assert.match(acts[0]!.summary, /setting=v2\.publishing value=paused/);
+    assert.match(await (await w.get("/steward/audit", d.session)).text(), /operator\.setting/);
+    // Setting the same value again changes nothing; reopening takes effect at once, and a second service over the same log agrees.
+    res = await w.post("/steward/controls/set", { csrf, setting: "v2.publishing", value: "paused" }, d.session);
+    assert.match(res.headers.get("location")!, /was%20already%20paused/);
+    assert.equal((await w.svc.audit()).filter((a) => a.type === "operator.setting").length, 1);
+    res = await w.post("/steward/controls/set", { csrf, setting: "v2.publishing", value: "open" }, d.session);
+    assert.equal(res.status, 303);
+    assert.equal((await w.svc.publishPaper(await w.sign("Ant", paper as unknown as Record<string, Json>))).status, 201);
+    assert.equal(await w.svc.setting("v2.publishing"), "open");
+    // Pausing checks refuses new commitments only: a result on a commitment already sealed is still taken, so nobody lapses for the pause.
+    const ref = String((ext.body as Record<string, Json>)["ref"]);
+    await w.svc.setTier("op-b", "verified");
+    w.keys.set("Bee", w.keys.get("Bee") ?? (await generateKeyPair()));
+    await w.svc.setTier("op-a", "verified");
+    const c = await w.commit("Ant", ref, w.bundle(1));
+    assert.equal(c.status, 201, JSON.stringify(c.body));
+    assert.equal((await w.post("/steward/controls/set", { csrf, setting: "v2.checks", value: "paused" }, d.session)).status, 303);
+    assert.equal((await w.commit("Ant", ref, w.bundle(2))).status, 503);
+    assert.equal((await w.result("Ant", w.idOf(c), "confirmed", { alpha: 1, solver: "x" }, null)).status, 201, "the result on the earlier commitment is taken");
+    // A member cannot reach the switches; the page needs a steward.
+    const m = await w.signIn("member@example.org");
+    assert.equal((await w.get("/steward/controls", m.session)).status, 403);
+  });
+
   it("content: lists hazard holds from escalations, and offers no way to release them", async () => {
     const w = await world();
     await w.agent("Ant", "op-a", ["claude"]);

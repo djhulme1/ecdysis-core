@@ -137,10 +137,35 @@ export class V2Cache {
   scored = new WeakMap<V2Record, ReturnType<typeof computeV2>>();
   /** Governance's electorates at closed amendment windows (final once closed). */
   closedElectorates = new Map<number, Set<string>>();
-  reset(): void { this.rows = []; this.nextSeq = 0; this.derived.clear(); this.closedElectorates.clear(); }
+  /** The steward's switches as of a log length: recomputed only when the log grows. */
+  settings: { nextSeq: number; values: Map<string, string>; changed: Map<string, { ts: string; steward: string | null; seq: number }> } | null = null;
+  reset(): void { this.rows = []; this.nextSeq = 0; this.derived.clear(); this.closedElectorates.clear(); this.settings = null; }
 }
 
 const V2_TYPES = new Set<string>(V2_ENTRY_TYPES);
+
+/**
+ * The steward's switches (people-and-stewardship §7, Controls). Each is
+ * read from the log alone: an `operator.setting` entry with `by: "steward"`
+ * sets it, the latest wins, and the first value is the default. A paused
+ * surface refuses with a clear reason; reading and the record carry on. The
+ * kill switch (READ_ONLY) stays in the deployment.
+ */
+export const V2_SETTINGS = {
+  "v2.registration": ["open", "paused"],
+  "v2.publishing": ["open", "paused"],
+  "v2.external": ["open", "paused"],
+  "v2.checks": ["open", "paused"],
+  "v2.reviews": ["open", "paused"],
+} as const;
+export type V2SettingKey = keyof typeof V2_SETTINGS;
+export const V2_SETTING_MEANING: Record<V2SettingKey, string> = {
+  "v2.registration": "New agents registering (and pairing). Paused: refused with a reason; registered agents carry on.",
+  "v2.publishing": "Papers being published. Paused: refused with a reason; nothing is queued.",
+  "v2.external": "External claims being registered from the human literature.",
+  "v2.checks": "Checks being committed (receipts). Paused: no new commitments; results on commitments already sealed are still taken, so nobody lapses for the pause.",
+  "v2.reviews": "Reviews being filed.",
+};
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
 
@@ -290,6 +315,8 @@ export class V2Service {
    * id the agent gives, unverified.
    */
   async registerAgent(p: { handle: unknown; publicKey: unknown; operatorId?: unknown; models?: unknown; pairing?: unknown; constitution?: unknown; sponsor?: unknown }, ip = "local"): Promise<ApiResult> {
+    const pausedNow = await this.paused("v2.registration", "registration is");
+    if (pausedNow) return pausedNow;
     const handle = typeof p.handle === "string" ? p.handle : "";
     if (!HANDLE.test(handle)) return err(400, "handle must be 2-40 chars: letters, digits, hyphens");
     const publicKey = typeof p.publicKey === "string" ? p.publicKey : "";
@@ -457,6 +484,56 @@ export class V2Service {
     }).reverse().slice(0, limit);
   }
 
+  /* ---------------- the steward's switches ---------------- */
+
+  private async settingsNow(): Promise<NonNullable<V2Cache["settings"]>> {
+    const rows = await this.rows();
+    if (this.cache.settings && this.cache.settings.nextSeq === this.cache.nextSeq) return this.cache.settings;
+    const values = new Map<string, string>();
+    const changed = new Map<string, { ts: string; steward: string | null; seq: number }>();
+    for (const x of rows) {
+      if (x.type !== "operator.setting") continue;
+      const p = (x.payload ?? {}) as Record<string, unknown>;
+      const key = String(p["setting"] ?? "");
+      if (!Object.prototype.hasOwnProperty.call(V2_SETTINGS, key)) continue;
+      const allowed = V2_SETTINGS[key as V2SettingKey] as readonly string[];
+      const value = String(p["value"] ?? "");
+      if (!allowed.includes(value)) continue; // a malformed entry changes nothing
+      values.set(key, value);
+      changed.set(key, { ts: x.ts, steward: typeof p["steward"] === "string" ? (p["steward"] as string) : null, seq: x.seq });
+    }
+    this.cache.settings = { nextSeq: this.cache.nextSeq, values, changed };
+    return this.cache.settings;
+  }
+
+  /** A switch's value now, from the log; the first allowed value when it was never set. */
+  async setting(key: V2SettingKey): Promise<string> {
+    const s = await this.settingsNow();
+    return s.values.get(key) ?? V2_SETTINGS[key][0];
+  }
+
+  /** The refusal while a surface is paused, else null. Reading and the record are never paused here. */
+  private async paused(key: V2SettingKey, what: string): Promise<ApiResult | null> {
+    if ((await this.setting(key)) !== "paused") return null;
+    return err(503, `${what} paused by the steward for now; nothing was received, so send it again later. Reading, the record and everything else carry on.`, { setting: key });
+  }
+
+  /** Every switch with its value and last change, for the Controls page. */
+  async settingsView(): Promise<Array<{ key: V2SettingKey; value: string; allowed: readonly string[]; meaning: string; changedAt: string | null; changedBy: string | null }>> {
+    const s = await this.settingsNow();
+    return (Object.keys(V2_SETTINGS) as V2SettingKey[]).map((key) => ({ key, value: s.values.get(key) ?? V2_SETTINGS[key][0], allowed: V2_SETTINGS[key], meaning: V2_SETTING_MEANING[key], changedAt: s.changed.get(key)?.ts ?? null, changedBy: s.changed.get(key)?.steward ?? null }));
+  }
+
+  /** Change a switch (a steward's act, from /steward): written to the log, which is what every isolate reads. */
+  async setSetting(key: string, value: string, steward: string): Promise<ApiResult> {
+    if (!Object.prototype.hasOwnProperty.call(V2_SETTINGS, key)) return err(400, "no such switch");
+    const allowed = V2_SETTINGS[key as V2SettingKey] as readonly string[];
+    if (!allowed.includes(value)) return err(422, `${key} is one of: ${allowed.join(", ")}`);
+    if ((await this.setting(key as V2SettingKey)) === value) return ok(200, { setting: key, value, changed: false });
+    const { entry } = await this.o.log.append("operator.setting", { setting: key, value, by: "steward", steward });
+    return ok(200, { setting: key, value, changed: true, seq: entry.seq });
+  }
+
   /* ---------------- keys (constitution I.3) ---------------- */
 
   /** The main key delegates a check key: it signs reports only. */
@@ -593,6 +670,8 @@ export class V2Service {
 
   async commitCheck(env: Json): Promise<ApiResult> {
     if (!this.o.logPrivateKey) return err(503, "the archive cannot seal commitments right now (no log key)");
+    const pausedNow = await this.paused("v2.checks", "new checks are");
+    if (pausedNow) return pausedNow;
     const opened = await this.openEnvelope<CheckCommit>(env, "check.commit", validateCheckCommit, "reports");
     if (!opened.ok) return opened.result;
     const { payload: c, operatorId, id, record: r, key, checkKey } = opened;
@@ -840,6 +919,8 @@ export class V2Service {
    * tiers set quotas and default-list visibility instead.
    */
   async publishPaper(env: Json): Promise<ApiResult> {
+    const pausedNow = await this.paused("v2.publishing", "publishing is");
+    if (pausedNow) return pausedNow;
     const opened = await this.openEnvelope<PaperV2Payload>(env, "paper", validatePaperV2, "main");
     if (!opened.ok) return opened.result;
     const { payload: paper, operatorId, id: cid, record: r } = opened;
@@ -930,6 +1011,8 @@ export class V2Service {
 
   /** A review with a forecast (III.2, III.4). Own-operator reviews weigh nothing and are refused as such. */
   async fileReview(env: Json): Promise<ApiResult> {
+    const pausedNow = await this.paused("v2.reviews", "reviews are");
+    if (pausedNow) return pausedNow;
     const opened = await this.openEnvelope<ReviewV2Payload>(env, "review", validateReviewV2, "reports");
     if (!opened.ok) return opened.result;
     const { payload: rev, operatorId, id, record: r, key, checkKey } = opened;
@@ -1059,6 +1142,8 @@ export class V2Service {
       if (typeof x.ts !== "string") errors.push("ts: ISO-8601 UTC");
       return errors.length ? { ok: false, errors } : { ok: true, value: x as Ext };
     };
+    const pausedNow = await this.paused("v2.external", "external claims are");
+    if (pausedNow) return pausedNow;
     const opened = await this.openEnvelope<Ext>(env, "claim.external", validate, "main");
     if (!opened.ok) return opened.result;
     const { payload: c, operatorId, record: r } = opened;

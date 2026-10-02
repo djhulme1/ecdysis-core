@@ -11,7 +11,7 @@ import type { CanaryView } from "../api/v2/canaries.js";
 
 export interface StewardNav { current: string }
 const NAV: ReadonlyArray<readonly [string, string]> = [
-  ["/steward", "Overview"], ["/steward/people", "People"], ["/steward/evidence", "Evidence"], ["/steward/canaries", "Canaries"], ["/steward/content", "Content"], ["/steward/audit", "Audit"],
+  ["/steward", "Overview"], ["/steward/people", "People"], ["/steward/evidence", "Evidence"], ["/steward/canaries", "Canaries"], ["/steward/content", "Content"], ["/steward/controls", "Controls"], ["/steward/audit", "Audit"],
 ];
 
 function frame(title: string, current: string, body: string, flash: string | null, problem: string | null): string {
@@ -126,6 +126,23 @@ ${o.rows.length ? `<table><thead><tr><th>Claim</th><th>Label</th><th>Known outco
 </fieldset></form>
 ${o.fresh ? "" : `<p class="small">Registering, revealing or forgetting needs a sign-in from the last ten minutes.</p>`}`;
   return frame("Canaries", "/steward/canaries", body, flash, problem);
+}
+
+export interface SwitchRow { key: string; value: string; allowed: readonly string[]; meaning: string; changedAt: string | null; changedBy: string | null }
+/** Controls: the steward's switches, each read from the log and changed by an entry on it. The kill switch is not here. */
+export function controlsPage(o: { switches: SwitchRow[]; csrf: string; fresh: boolean; readOnly: boolean }, flash: string | null, problem: string | null): string {
+  const body = `<h1>Controls</h1>
+<p class="lede">Switches for what the archive is taking right now. Each is read from the public log and changed by an entry on it (<code>operator.setting</code>, with your operator id), so every isolate sees the same value and anyone can see when it changed. Reading and the record are never switched off here.</p>
+<p class="small">The kill switch (<code>READ_ONLY</code>) and the email pause (<code>HERALD_PAUSED</code>) stay in the deployment's configuration, set by the operator${o.readOnly ? ": <b>the archive is read-only right now</b>, so these switches cannot be changed until it is lifted" : ""}.</p>
+<table><thead><tr><th>Switch</th><th>Now</th><th>What it does</th><th>Last change</th><th>Set</th></tr></thead><tbody>${o.switches.map((w) => `<tr>
+<td><code class="mono">${esc(w.key)}</code></td>
+<td><span class="status ${w.value === w.allowed[0] ? "sound" : "risk"}">${esc(w.value)}</span></td>
+<td class="small">${esc(w.meaning)}</td>
+<td class="small">${w.changedAt ? `${esc(shortDate(w.changedAt))}${w.changedBy ? ` by <code class="mono">${esc(w.changedBy)}</code>` : ""}` : "never (default)"}</td>
+<td><form method="post" action="/steward/controls/set"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="setting" value="${esc(w.key)}"><select name="value" aria-label="value for ${esc(w.key)}">${w.allowed.map((v) => `<option value="${esc(v)}"${v === w.value ? " selected" : ""}>${esc(v)}</option>`).join("")}</select> <button class="btn quiet" type="submit">Set</button></form></td>
+</tr>`).join("")}</tbody></table>
+${o.fresh ? "" : `<p class="small">Changing a switch needs a sign-in from the last ten minutes.</p>`}`;
+  return frame("Controls", "/steward/controls", body, flash, problem);
 }
 
 export interface HoldRow { seq: number; ts: string; type: string; subject: string; reason: string; by: string | null; open: boolean }

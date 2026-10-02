@@ -13,7 +13,7 @@ import { ME_HEADERS, sameOrigin } from "./me.js";
 import { cookie, type Accounts, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
 import type { CanaryRegistry } from "./canaries.js";
-import { auditPage, canariesPage, contentPage, evidencePage, overviewPage, peoplePage, refusedPage, type PersonRow } from "../../web/steward.js";
+import { auditPage, canariesPage, contentPage, controlsPage, evidencePage, overviewPage, peoplePage, refusedPage, type PersonRow } from "../../web/steward.js";
 
 export interface StewardOptions {
   accounts: Accounts;
@@ -89,6 +89,13 @@ export class StewardHandler {
         const r = await this.o.v2.reverseFinding(f.get("id") ?? "", steward);
         if (r.status !== 200) return this.page("/steward/evidence", signed, url, null, `Couldn't reverse: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
         return this.redirect("/steward/evidence?ok=Finding+reversed.+Everything+it+voided+is+restored.");
+      }
+      case "/steward/controls/set": {
+        const key = f.get("setting") ?? "";
+        const value = f.get("value") ?? "";
+        const r = await this.o.v2.setSetting(key, value, steward);
+        if (r.status !== 200) return this.page("/steward/controls", signed, url, null, `Couldn't change the switch: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
+        return this.redirect(`/steward/controls?ok=${encodeURIComponent((r.body as Record<string, unknown>)["changed"] ? `${key} is now ${value}; the change is on the log.` : `${key} was already ${value}.`)}`);
       }
       case "/steward/canaries/register": {
         if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
@@ -168,6 +175,8 @@ export class StewardHandler {
         if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
         return this.html(200, canariesPage({ rows: await this.o.canaries.list(), csrf, fresh, now: this.now().toISOString() }, flash, problem));
       }
+      case "/steward/controls":
+        return this.html(200, controlsPage({ switches: await this.o.v2.settingsView(), csrf, fresh, readOnly: !!this.o.readOnly }, flash, problem));
       case "/steward/content":
         return this.html(200, contentPage({ holds: await this.o.v2.holds(100) }, flash, problem));
       case "/steward/audit":

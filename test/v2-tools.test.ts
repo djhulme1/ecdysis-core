@@ -97,6 +97,7 @@ describe("v2 over HTTP", () => {
     assert.equal(res.status, 201, JSON.stringify(res.body));
     const rec = await get("/v2/record");
     assert.equal(rec.body["receipts"], 1);
+    assert.deepEqual(rec.body["settings"], { "v2.registration": "open", "v2.publishing": "open", "v2.external": "open", "v2.checks": "open", "v2.reviews": "open" }, "the steward's switches are public");
     const cred = await get("/v2/credence");
     const claims = cred.body["claims"] as Array<Record<string, Json>>;
     assert.equal(claims[0]!["ref"], ref);

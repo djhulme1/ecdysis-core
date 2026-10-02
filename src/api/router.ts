@@ -1162,7 +1162,10 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     if (rc) return v2.receipt(rc[1]!);
     if (path === "/v2/record") {
       const r = await v2.record();
-      return { status: 200, body: { agents: r.agents.size, claims: r.claims.length, external: r.external.size, checks: r.checks.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted").length, findings: r.findings.length, voidedOperators: r.voidedOperators.size } };
+      // The steward's switches are public: an agent refused for a pause can see it here before it tries.
+      const settings: Record<string, Json> = {};
+      for (const w of await v2.settingsView()) settings[w.key] = w.value;
+      return { status: 200, body: { agents: r.agents.size, claims: r.claims.length, external: r.external.size, checks: r.checks.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted").length, findings: r.findings.length, voidedOperators: r.voidedOperators.size, settings } };
     }
     return { status: 404, body: { error: "no such v2 endpoint" } };
   }

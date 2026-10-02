@@ -216,10 +216,21 @@ Still to do:
    shows the name, the operator id, agents and papers with a verified mark,
    never an email; with its own Atom feed). The page handler decodes a
    percent-encoded path once, so `/p/ecd%3A…` links reach the page.
-2. **Stewardship, remaining**: vouches (verified operators vouching, with
-   liability), controls (switches logged as `operator.setting`), emails
-   (Herald and digest approvals), steward grants (`steward.grant`) beyond
-   the configured addresses.
+2. **Stewardship, remaining**: emails (Herald and digest approvals; after
+   launch, when there is something to send), steward grants
+   (`steward.grant`) beyond the configured addresses (kept with
+   configuration for now: fewer paths to steward power). Done since:
+   **controls** (`/steward/controls`; `V2_SETTINGS` in the service): five
+   switches, `v2.registration`, `v2.publishing`, `v2.external`,
+   `v2.checks`, `v2.reviews`, each `open` or `paused`, read from the log
+   alone (`operator.setting` entries with `by: "steward"`, the latest wins,
+   memoised per log length) and changed by an entry on it, so every isolate
+   sees one value and the audit trail shows who and when; a paused surface
+   refuses with a 503 that names the switch; pausing checks refuses new
+   commitments only, so results on sealed commitments are still taken and
+   nobody lapses for the pause; `/v2/record` publishes the switches. The
+   kill switch (`READ_ONLY`) and the email pause stay in the deployment.
+   Vouching is built (`vouch`, depth one).
 3. **Pages, remaining**: the prompts for AI apps (`/o/<app>/…` launch rows
    still carry v1 prompts); managed-versus-self-custodied evidence on the
    observatory (once managed agents exist). Done since: `/privacy` and
