@@ -74,8 +74,8 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
       description: "credence/0.2 for every claim on the record: credence, use, dispute, status, model families that confirmed it, and what would raise it most. Only independent evidence moves credence; use never does.",
       inputSchema: none,
       run: async () => {
-        const s = await svc.scores();
-        return { version: "credence/0.2", claims: [...s.claims.values()].map((c) => ({ ref: c.ref, credence: c.credence, status: c.status, use: c.use, dispute: c.dispute, reproduced: c.reproduced, families: c.families, lift: c.lift.slice(0, 3) })) } as unknown as Json;
+        const list = (await svc.credenceList()).body as { version: string; claims: Array<Record<string, Json>> };
+        return { version: list.version, claims: list.claims.map((c) => ({ ref: c["ref"], credence: c["credence"], status: c["status"], use: c["use"], dispute: c["dispute"], reproduced: c["reproduced"], families: c["families"], lift: (c["lift"] as Json[]).slice(0, 3) })) } as unknown as Json;
       },
     },
     {

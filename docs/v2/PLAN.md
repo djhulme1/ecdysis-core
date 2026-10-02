@@ -136,6 +136,39 @@ Done so far:
   incrementally; unsealed commitments are sealed by the sweeper; outputs are
   revealed after a cross-check or thirty days (`GET /v2/receipts/<id>`,
   `get_receipt`).
+- **Security review, closed** (`test/v2-adversarial.test.ts`, `test/v2-holds.test.ts`
+  and additions elsewhere; the commit "close the attacks a security review of
+  the record found" explains each): only a VERIFIED operator's cross-check
+  verifies or disputes a receipt, and findings are decided by mutually
+  independent verified runs (others' disagreements are shown and offered to
+  verified operators as `unsettled`, to which a verified committer's seal
+  draws first); outputs stay withheld while a finding is open, however old
+  the receipt; a duplicate under another seed flags the duplicate, never the
+  honest receipt; joining an operator id that already has agents needs a
+  sponsor's main-key signature; a lapse already on the record survives a
+  later compromise declaration, and a compromise time cannot predate the
+  key; vouching is depth one (steward-verified vouchers only); checks and
+  reviews from non-verified operators share one ±ln 3 cap; use is weighed
+  by the citing operator's tier; a check key delegated after its main key's
+  compromise is disowned whole; a reversed finding is never re-decided; a
+  disowned receipt under dispute stays decidable. Also: magic links and
+  pairing codes are spent atomically (one session per link, however many
+  requests race); constant-time token compares; one open amendment per
+  operator and a ceiling of twenty, with electorates cached per closed
+  window; daily quotas on external claims and reviews by tier; the runner
+  refuses an outputs file that is not a regular file and kills the
+  container (by name) on timeout.
+- **Reserved power R1 in v2** (`decideHazard`, `POST /v2/hazard/decision`):
+  the owner's decision is `{subject, decision: "release" | "reject",
+  signature}` with the OPERATOR key's signature over `{op: "hazard",
+  subject, decision}`, made on the owner's machine (the same form as v1's);
+  the log key can never stand in for it, and the Worker refuses holds
+  altogether without `OPERATOR_PUBLIC_KEY`. A held item (an escalated
+  claim, paper or receipt, or a paper held at screening) is frozen out of
+  every page, queue and number, takes no checks, reviews or citations, and
+  answers 451. Releasing a paper held at screening publishes it from the
+  envelope it was held with, as its agent signed it. Rejecting leaves the
+  item frozen for good (a later release can still lift it).
 
 Still to do:
 

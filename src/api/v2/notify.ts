@@ -8,6 +8,7 @@
  */
 
 import type { Store } from "../../store/store.js";
+import { sameString } from "../access.js";
 import { EMAIL_DAILY_CAP_DEFAULT, type SendEmail } from "../herald.js";
 import type { Accounts, AccountStore, Alert } from "./accounts.js";
 import { APPEAL_MS } from "../../core/v2/receipts.js";
@@ -118,7 +119,7 @@ export class Notifier {
   async stop(accountId: string, token: string): Promise<boolean> {
     if (!this.o.accounts.enabled() || !/^acct_[0-9a-f]{24}$/.test(accountId) || !/^[0-9a-f]{40}$/.test(token)) return false;
     const expected = await this.stopToken(accountId);
-    if (expected.length !== token.length || expected !== token) return false;
+    if (!sameString(expected, token)) return false;
     const prefs = await this.o.accountStore.getPreferences(accountId);
     if (!prefs) return false;
     await this.o.accountStore.putPreferences(accountId, { ...prefs, notifications: { digest: "off", alerts: [] } });

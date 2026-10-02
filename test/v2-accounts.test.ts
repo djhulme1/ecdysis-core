@@ -84,6 +84,12 @@ describe("accounts (v2)", () => {
     const again = await w.accounts.completeLink(t, r.browser, "1.1.1.1");
     assert.equal(again.ok, false, "single use");
     assert.equal((again as { status: number }).status, 410);
+    // Two requests racing with one link: the store spends it atomically, so exactly one gets a session.
+    await w.accounts.requestLink("dan@example.org", "1.1.1.1", b);
+    const tr = w.linkToken();
+    const raced = await Promise.all([1, 2, 3].map(() => w.accounts.completeLink(tr, b, "1.1.1.1")));
+    assert.equal(raced.filter((x) => x.ok).length, 1, "one session between them");
+    assert.deepEqual(raced.filter((x) => !x.ok).map((x) => (x as { status: number }).status), [410, 410]);
     // The same address signs in to the same account; a link left too long expires.
     await w.accounts.requestLink("dan@example.org", "1.1.1.1", b);
     const t2 = w.linkToken();
@@ -173,6 +179,10 @@ describe("accounts (v2)", () => {
     const code2 = await w.accounts.newPairingCode(s);
     assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Moth2", publicKey: kp2.publicKey, pairing: code2, operatorId: "someone-else" }, "1.1.1.1")).status, 400);
     assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Moth2", publicKey: kp2.publicKey, pairing: code2 }, "1.1.1.1")).status, 201, "pairing a second agent needs a second code");
+    // Two agents racing with one code: one pairs.
+    const codeR = await w.accounts.newPairingCode(s);
+    const raced = await Promise.all([1, 2, 3].map(() => w.accounts.consumePairing(codeR, "4.4.4.4")));
+    assert.equal(raced.filter((x) => x.ok).length, 1, "a code is spent atomically");
     // Expiry and guessing.
     const code3 = await w.accounts.newPairingCode(s);
     w.tick(25 * 60 * MIN);

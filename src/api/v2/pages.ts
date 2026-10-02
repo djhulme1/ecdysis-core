@@ -5,6 +5,7 @@
  */
 
 import type { V2Service } from "./service.js";
+import { isHeld } from "../../core/v2/flow.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
 import { skillMdV2 } from "./skill.js";
@@ -12,7 +13,7 @@ import { agentsPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js"
 import { connectPage } from "../../web/connect.js";
 import { mcpUrlFor } from "../../web/launch.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
-import { agentPageV2, claimPageV2, frontierPageV2, missingPageV2, observatoryPageV2, papersPageV2, paperPageV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2 } from "../../web/v2/pages.js";
+import { agentPageV2, claimPageV2, frontierPageV2, frozenPageV2, missingPageV2, observatoryPageV2, papersPageV2, paperPageV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2 } from "../../web/v2/pages.js";
 
 export const PAGE_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
@@ -41,10 +42,12 @@ export class PagesHandler {
     if (path === "/connect") return html(200, connectPage({ host: site, mcpUrl: mcpUrlFor(host), v2: true }));
     if (path === "/skill.md") return new Response(method === "HEAD" ? null : skillMdV2(this.o.host ?? "api.ecdysis.me", this.o.logPublicKey ?? null), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/papers") return html(200, papersPageV2(await this.papers()));
+    const frozen = async (subject: string) => isHeld(await this.v2.record(), subject);
     if (path === "/frontier") return html(200, frontierPageV2((await this.v2.frontier(25)).body as unknown as FrontierViewV2));
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
     const pm = path.match(PAPER);
     if (pm) {
+      if (await frozen(pm[2] ? `${pm[1]}#${pm[2]}` : pm[1]!)) return html(451, frozenPageV2(pm[2] ? "claim" : "paper"));
       if (pm[2]) { const c = await this.claim(`${pm[1]}#${pm[2]}`); return c ? html(200, claimPageV2(c)) : html(404, missingPageV2("claim")); }
       const p = await this.paper(pm[1]!);
       return p ? html(200, paperPageV2(p)) : html(404, missingPageV2("paper"));
@@ -53,6 +56,7 @@ export class PagesHandler {
     if (am) { const a = await this.agent(am[1]!); return a ? html(200, agentPageV2(a)) : html(404, missingPageV2("agent")); }
     const xm = path.match(EXTERNAL);
     if (xm) {
+      if (await frozen(`ext:${xm[1]}#C1`)) return html(451, frozenPageV2("claim"));
       const c = await this.claim(`ext:${xm[1]}#C1`);
       return c ? html(200, claimPageV2(c)) : html(404, missingPageV2("claim"));
     }
@@ -61,7 +65,7 @@ export class PagesHandler {
 
   private async landing(site: string) {
     const r = await this.v2.record();
-    const latest = [...r.papers.values()].sort((a, b) => b.seq - a.seq)[0] ?? null;
+    const latest = [...r.papers.values()].filter((p) => !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq)[0] ?? null;
     return {
       host: site,
       constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() },
@@ -75,11 +79,11 @@ export class PagesHandler {
     const r = await this.v2.record();
     const s = await this.v2.scores();
     const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
-    const papers = [...r.papers.values()].sort((a, b) => b.seq - a.seq).map((p) => {
+    const papers = [...r.papers.values()].filter((p) => !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq).map((p) => {
       const statuses = p.claims.map((ref) => s.claims.get(ref)?.status).filter((x): x is NonNullable<typeof x> => !!x);
       return { id: p.id, title: p.title, agent: p.handle, field: p.field, ts: p.ts, claims: p.claims.length, worst: statuses.length ? statuses.reduce((a, b) => (rank(a) < rank(b) ? a : b)) : null };
     });
-    const external = [...r.external.entries()].map(([id, x]) => { const sc = s.claims.get(`${id}#C1`); return { id, quote: x.quote, source: x.source, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5 }; });
+    const external = [...r.external.entries()].filter(([id]) => !isHeld(r, `${id}#C1`)).map(([id, x]) => { const sc = s.claims.get(`${id}#C1`); return { id, quote: x.quote, source: x.source, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5 }; });
     return { papers, external };
   }
 
@@ -94,8 +98,8 @@ export class PagesHandler {
     const refs = new Set(p.claims);
     return {
       id, cid: p.cid, ts: p.ts, payload, operatorId: p.operatorId, tier: r.tiers.get(p.operatorId) ?? "unverified",
-      scores: p.claims.map((ref) => s.claims.get(ref)!).filter(Boolean),
-      receipts: [...r.checks.values()].filter((c) => refs.has(c.target) && c.stage !== "committed").sort((a, b) => a.seq - b.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, agent: c.handle, families: c.families, stage: c.stage, disowned: c.disowned })),
+      scores: p.claims.filter((ref) => !isHeld(r, ref)).map((ref) => s.claims.get(ref)!).filter(Boolean),
+      receipts: [...r.checks.values()].filter((c) => refs.has(c.target) && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, agent: c.handle, families: c.families, stage: c.stage, disowned: c.disowned })),
       reviews: r.evidence.filter((e) => e.kind === "review" && refs.has(e.claim)).map((e) => ({ claim: e.claim, agent: e.agent, forecast: r.forecasts.get(`${e.claim}|${e.agent}`) ?? 0.5 })),
       citedBy: [...r.papers.values()].filter((q) => q.id !== id && r.uses.some((u) => u.paper === q.id && refs.has(u.claim))).map((q) => ({ paper: q.id, title: q.title, agent: q.handle, rel: "relies on", claims: r.uses.filter((u) => u.paper === q.id && refs.has(u.claim)).map((u) => u.claim.split("#")[1]!) })),
     };
@@ -123,7 +127,7 @@ export class PagesHandler {
       text = c.text; test = c.test; author = p.handle; paperTitle = p.title;
     }
     const evidence = r.evidence.filter((e) => e.claim === ref).map((e) => ({ id: e.id, kind: e.kind, confirms: e.confirms, agent: e.agent, operatorId: e.operatorId, tier: e.tier, families: e.families, weight: null }));
-    const receipts = [...r.checks.values()].filter((c) => c.target === ref && c.stage !== "committed").sort((a, b) => a.seq - b.seq)
+    const receipts = [...r.checks.values()].filter((c) => c.target === ref && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq)
       .map((c) => ({ id: c.id, kind: c.kind, outcome: c.outcome, agent: c.handle, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, verifiedBy: c.verifiedBy.length, disputedBy: c.disputedBy.length }));
     const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref).map((u) => u.paper))].map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
     return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy };
@@ -140,11 +144,11 @@ export class PagesHandler {
       reliability: s.track.reliability.get(handle) ?? 0.5, credit: s.track.credit.get(handle) ?? 0,
       reports: s.track.reports.filter((x) => x.agent === handle && x.resolved !== null).length,
       lapses: r.lapses.get(handle) ?? 0, checkKeys: a.checkKeys.length, retired: a.revokedAt !== null, voided: r.voidedOperators.has(a.operatorId),
-      papers: [...r.papers.values()].filter((p) => p.handle === handle).sort((x, y) => y.seq - x.seq).map((p) => {
+      papers: [...r.papers.values()].filter((p) => p.handle === handle && !isHeld(r, p.id)).sort((x, y) => y.seq - x.seq).map((p) => {
         const st = p.claims.map((ref) => s.claims.get(ref)?.status).filter((x): x is NonNullable<typeof x> => !!x);
         return { id: p.id, title: p.title, field: p.field, ts: p.ts, worst: st.length ? st.reduce((x, y) => (rank(x) < rank(y) ? x : y)) : null };
       }),
-      receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed").sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned })),
+      receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed" && !isHeld(r, c.id)).sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned })),
       reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle).map((e) => ({ claim: e.claim, forecast: r.forecasts.get(`${e.claim}|${handle}`) ?? 0.5 })),
       findings: r.findings.filter((f) => f.oddAgent === handle).map((f) => ({ id: f.id, verdict: f.verdict, inForce: f.inForce, reversed: f.reversed, decidedAt: f.decidedAt })),
     };

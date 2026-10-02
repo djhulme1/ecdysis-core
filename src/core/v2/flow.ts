@@ -235,6 +235,19 @@ const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown, d = 0): number => (typeof v === "number" && Number.isFinite(v) ? v : d);
 
 /** Derive the whole v2 record from log entries, as of `now`. Pure and deterministic. */
+/**
+ * Whether an item is frozen under reserved power R1: itself, or (for a claim)
+ * its paper, or (for a receipt) the receipt or the claim it checks. A frozen
+ * item appears on no page and in no queue and takes no new reports.
+ */
+export function isHeld(r: Pick<V2Record, "held" | "checks">, subject: string): boolean {
+  if (r.held.has(subject)) return true;
+  const hash = subject.indexOf("#");
+  if (hash > 0 && r.held.has(subject.slice(0, hash))) return true; // a claim of a held paper
+  const c = r.checks.get(subject);
+  return !!c && (r.held.has(c.target) || (c.target.indexOf("#") > 0 && r.held.has(c.target.slice(0, c.target.indexOf("#")))));
+}
+
 export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const tiers = new Map<string, Tier>();
   const tierSeq = new Map<string, number>();
@@ -391,7 +404,8 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         break;
       }
       case "hazard.release": {
-        held.delete(str(p["subject"]));
+        // A decision closes the hold; only a release lets the item back in. A rejected item stays frozen for good.
+        if (str(p["decision"]) !== "reject") held.delete(str(p["subject"]));
         break;
       }
       case "finding.decide": {
@@ -492,6 +506,8 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
     else earlier.otherCrossChecks.push({ id: later.id, match: !!later.crossMatch });
   }
 
+  // Frozen under R1: the item itself, or the paper a claim belongs to. Evidence on a frozen claim feeds no number while it is frozen.
+  const frozen = (ref: string) => held.has(ref) || (ref.indexOf("#") > 0 && held.has(ref.slice(0, ref.indexOf("#"))));
   const evidence: EvidenceInput[] = [];
   const receiptsByClaim = new Map<string, Array<{ id: string; operatorId: string; seq: number }>>();
   for (const c of [...checks.values()].sort((a, b) => a.seq - b.seq)) {
@@ -503,10 +519,10 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
     if (c.disowned || c.outcome === "inconclusive") continue;
     // A receipt whose outputs duplicate an earlier one's under a different seed adds nothing: the bundle ignored its seed.
     if (c.seedInsensitive) continue;
-    if (held.has(c.id)) continue;
+    if (held.has(c.id) || frozen(c.target)) continue;
     evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq });
   }
-  for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
+  for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts) && !frozen(r.claim)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
   evidence.sort((a, b) => a.seq - b.seq);
 
   // Rings: X confirmed a claim of Y's and Y confirmed a claim of X's.

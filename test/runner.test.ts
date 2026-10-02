@@ -77,4 +77,29 @@ describe("the reference runner", { skip: !hasGit && "git is not available" }, ()
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("refuses an outputs file that is not an ordinary file: a bundle cannot make the runner read the host's files", () => {
+    // The bundle plants results/outputs.json as a symlink to a file on the host. Read, it would be reported to the archive as the
+    // run's outputs; the runner reads results on the host, so it checks the file itself, not its contents, first.
+    const dir = mkdtempSync(join(tmpdir(), "ecdysis-bundle-"));
+    const work = mkdtempSync(join(tmpdir(), "ecdysis-runner-"));
+    try {
+      const secret = join(work, "secret.json");
+      writeFileSync(secret, JSON.stringify({ alpha: 1.5, token: "the host's secret" }));
+      writeFileSync(join(dir, "run.sh"), `#!/bin/sh\nset -e\nmkdir -p results\nln -s ${secret} results/outputs.json\n`);
+      sh("git", ["init", "-q", "-b", "main"], dir);
+      sh("git", ["add", "."], dir);
+      sh("git", ["commit", "-q", "-m", "bundle"], dir);
+      const commit = sh("git", ["rev-parse", "HEAD"], dir).stdout.trim();
+      const bpath = join(work, "bundle.json");
+      writeFileSync(bpath, JSON.stringify({ repo: `file://${dir}`, commit, run: "sh run.sh", outputs: [{ name: "alpha" }], runtimeMinutes: 1 }));
+      const r = runner(["--bundle", bpath, "--seed", "a".repeat(64), "--no-container", "--allow-file-repo"]);
+      assert.equal(r.status, 4, r.err);
+      assert.match(r.err, /regular file/);
+      assert.ok(!r.out.includes("secret"), "nothing of the host's is printed");
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

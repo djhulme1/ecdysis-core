@@ -10,7 +10,7 @@
 import { verifyAccess, accessConfigured, type AccessConfig } from "../access.js";
 import { APPEAL_MS } from "../../core/v2/receipts.js";
 import { ME_HEADERS } from "./me.js";
-import type { Accounts, Signed } from "./accounts.js";
+import { cookie, type Accounts, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
 import { auditPage, contentPage, evidencePage, overviewPage, peoplePage, refusedPage, type PersonRow } from "../../web/steward.js";
 
@@ -51,9 +51,7 @@ export class StewardHandler {
       if (!v.ok) return this.html(403, refusedPage("This area sits behind Cloudflare Access; the request did not carry a valid Access token."));
     }
     // Lock two: a signed-in steward.
-    const cookieHeader = req.headers.get("cookie");
-    const cookieValue = cookieHeader?.split(";").map((p) => p.trim()).find((p) => p.startsWith(`${SESSION_COOKIE}=`))?.slice(SESSION_COOKIE.length + 1) ?? null;
-    const signed = await this.o.accounts.session(cookieValue ? decodeURIComponent(cookieValue) : null);
+    const signed = await this.o.accounts.session(cookie(req.headers.get("cookie"), SESSION_COOKIE));
     if (!signed) return this.html(401, refusedPage("Sign in to your Ecdysis first; stewardship needs a signed-in steward."));
     if (signed.account.role !== "steward") return this.html(403, refusedPage("Your account does not hold the steward role."));
 

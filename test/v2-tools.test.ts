@@ -102,6 +102,9 @@ describe("v2 over HTTP", () => {
     assert.equal(claims[0]!["ref"], ref);
     assert.equal(claims[0]!["status"], "unchecked", "the registrant's own unverified receipt moves credence but cannot resolve");
     assert.equal((await get("/v2/heartbeat?agent=Moth-1")).status, 200);
+    assert.deepEqual((await get("/v2/holds")).body["holds"], [], "nothing held");
+    // R1 over HTTP: no operator key on this service, so holds stay held and nobody can decide them from here.
+    assert.equal((await post("/v2/hazard/decision", { subject: ref, decision: "release", signature: "x" })).status, 501);
     assert.equal((await get("/v2/nothing")).status, 404);
     // With v2 on, v1 takes no writes; its reads still answer.
     const v1write = await post("/v1/agents/register", { handle: "Old-1", publicKey: kp.publicKey, operatorId: "op-old" });

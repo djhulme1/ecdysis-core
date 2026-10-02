@@ -19,9 +19,13 @@ import { hashJson } from "../../core/canonical.js";
 import { verifyJson } from "../../core/crypto.js";
 import type { TransparencyLog } from "../../core/log.js";
 import { ENACTED, REVIEW_WINDOW_DAYS, tallyAmendment } from "../../core/constitution.js";
-import type { ApiResult, V2Service } from "./service.js";
+import type { ApiResult, LogRow, V2Service } from "./service.js";
 
 /** Articles of constitution v2.0.0 (docs/v2/constitution-v2.0.0-draft.md). Entrenched: Article 0 and, by 0.6, the amendment rules in Article V. */
+/** One proposal open at a time per operator, and a ceiling on open proposals altogether: each one costs every reader a tally. */
+export const OPEN_PROPOSALS_PER_OPERATOR = 1;
+export const OPEN_PROPOSALS_MAX = 20;
+
 export const V2_ARTICLES: ReadonlyArray<{ id: string; title: string; entrenched: boolean }> = [
   { id: "0", title: "Entrenched core", entrenched: true },
   { id: "I", title: "Identity and assent", entrenched: false },
@@ -80,6 +84,8 @@ export interface GovernanceOptions {
 
 export class V2Governance {
   private now: () => Date;
+  /** Electorates at closed windows are final: computed once, kept (bounded). The open-window electorate is computed once per call that needs it. */
+  private closedElectorates = new Map<number, Set<string>>();
   constructor(private o: GovernanceOptions) { this.now = o.now ?? (() => new Date()); }
 
   /**
@@ -107,6 +113,13 @@ export class V2Governance {
     const { payload: p, operatorId, id } = opened;
     const rows = await this.o.v2.logRows();
     if (rows.some((r) => r.type === "governance.proposal" && (r.payload as Record<string, unknown>)["id"] === id)) return err(409, "already proposed");
+    // One open proposal per operator at a time: proposing is open to every agent (V.1), but each proposal costs every reader a
+    // tally, and a flood of them would be a lever on the archive rather than on the constitution.
+    const windowMs = REVIEW_WINDOW_DAYS * 86_400_000;
+    const openByOperator = rows.filter((r) => r.type === "governance.proposal" && (r.payload as Record<string, unknown>)["operatorId"] === operatorId && this.now().getTime() < Date.parse(r.ts) + windowMs);
+    if (openByOperator.length >= OPEN_PROPOSALS_PER_OPERATOR) return err(429, `one proposal open at a time per operator; yours closes on ${new Date(Date.parse(openByOperator[0]!.ts) + windowMs).toISOString().slice(0, 10)}`, { open: openByOperator.map((r) => String((r.payload as Record<string, unknown>)["id"])) });
+    const openAll = rows.filter((r) => r.type === "governance.proposal" && this.now().getTime() < Date.parse(r.ts) + windowMs).length;
+    if (openAll >= OPEN_PROPOSALS_MAX) return err(429, `${OPEN_PROPOSALS_MAX} proposals are already open; wait for a window to close`);
     const article = V2_ARTICLES.find((a) => a.id === p.articleId)!;
     await this.o.v2.keepEnvelope(id, env);
     await this.o.log.append("governance.proposal", { id, articleId: p.articleId, change: p.change, agent: { handle: p.agent.handle }, operatorId });
@@ -153,16 +166,25 @@ export class V2Governance {
     return this.status(proposal);
   }
 
+  /** The electorate at a closed window, computed once. */
+  private async electorateAtClose(closesMs: number): Promise<Set<string>> {
+    const hit = this.closedElectorates.get(closesMs);
+    if (hit) return hit;
+    const e = await this.electorate(new Date(closesMs));
+    if (this.closedElectorates.size >= 256) this.closedElectorates.delete(this.closedElectorates.keys().next().value!);
+    this.closedElectorates.set(closesMs, e);
+    return e;
+  }
+
   /** A proposal's standing: votes in the window, the electorate as it stood when the window closed (or stands now), the tally. */
-  async status(id: string): Promise<ApiResult> {
-    const rows = await this.o.v2.logRows();
+  async status(id: string, ctx: { rows?: LogRow[]; nowElectorate?: Set<string> } = {}): Promise<ApiResult> {
+    const rows = ctx.rows ?? await this.o.v2.logRows();
     const prop = rows.find((r) => r.type === "governance.proposal" && (r.payload as Record<string, unknown>)["id"] === id);
     if (!prop) return err(404, "no such proposal");
     const p = prop.payload as Record<string, unknown>;
     const closesMs = Date.parse(prop.ts) + REVIEW_WINDOW_DAYS * 86_400_000;
     const open = this.now().getTime() < closesMs;
-    const asOf = open ? this.now() : new Date(closesMs);
-    const electorate = await this.electorate(asOf);
+    const electorate = open ? (ctx.nowElectorate ?? await this.electorate(this.now())) : await this.electorateAtClose(closesMs);
     const votes: Array<{ voterHandle: string; choice: "yes" | "no" }> = [];
     const operatorOf = new Map<string, string>();
     let cosigned = false;
@@ -192,8 +214,10 @@ export class V2Governance {
   async summary(): Promise<ApiResult> {
     const rows = await this.o.v2.logRows();
     const ids = rows.filter((r) => r.type === "governance.proposal").map((r) => String((r.payload as Record<string, unknown>)["id"]));
+    // One derivation for every open proposal, one (cached) per closed window: the summary costs the same whatever the count.
+    const nowElectorate = await this.electorate(this.now());
     const proposals: Json[] = [];
-    for (const id of ids.reverse().slice(0, 50)) proposals.push((await this.status(id)).body);
+    for (const id of ids.reverse().slice(0, 50)) proposals.push((await this.status(id, { rows, nowElectorate })).body);
     return ok(200, {
       version: "governance/0.2",
       articles: V2_ARTICLES as unknown as Json,
@@ -204,7 +228,7 @@ export class V2Governance {
         entrenched: "Article 0 and Article V additionally need the operator key's co-signature (R2, V.3)",
         enact: "a passed amendment is enacted as a new version of the constitution, which agents acknowledge on their next registration or submission (V.4)",
       },
-      eligibleOperators: (await this.electorate(this.now())).size,
+      eligibleOperators: nowElectorate.size,
       proposals,
     } as unknown as Json);
   }

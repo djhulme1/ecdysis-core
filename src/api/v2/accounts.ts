@@ -73,14 +73,16 @@ export interface AccountStore {
   deleteAccount(id: string): Promise<void>;
   putMagicLink(row: MagicLinkRow): Promise<void>;
   getMagicLink(hash: string): Promise<MagicLinkRow | null>;
-  useMagicLink(hash: string, usedAt: string): Promise<void>;
+  /** Spend the link: true if this call spent it, false if it was already spent (the store decides atomically). */
+  useMagicLink(hash: string, usedAt: string): Promise<boolean>;
   putSession(row: SessionRow): Promise<void>;
   getSession(hash: string): Promise<SessionRow | null>;
   deleteSession(hash: string): Promise<void>;
   deleteSessionsFor(accountId: string): Promise<void>;
   putPairing(row: PairingRow): Promise<void>;
   getPairing(hash: string): Promise<PairingRow | null>;
-  usePairing(hash: string, usedAt: string): Promise<void>;
+  /** Spend the code: true if this call spent it, false if it was already spent. */
+  usePairing(hash: string, usedAt: string): Promise<boolean>;
   getPreferences(accountId: string): Promise<Preferences | null>;
   putPreferences(accountId: string, prefs: Preferences): Promise<void>;
   /** Rate limiting: how many events a bucket saw since `sinceIso`, and record one. Events are forgotten after a day. */
@@ -112,14 +114,14 @@ export class MemoryAccountStore implements AccountStore {
   }
   async putMagicLink(row: MagicLinkRow) { this.links.set(row.hash, { ...row }); }
   async getMagicLink(hash: string) { return this.links.get(hash) ?? null; }
-  async useMagicLink(hash: string, usedAt: string) { const l = this.links.get(hash); if (l) l.usedAt = usedAt; }
+  async useMagicLink(hash: string, usedAt: string) { const l = this.links.get(hash); if (!l || l.usedAt) return false; l.usedAt = usedAt; return true; }
   async putSession(row: SessionRow) { this.sessions.set(row.hash, { ...row }); }
   async getSession(hash: string) { return this.sessions.get(hash) ?? null; }
   async deleteSession(hash: string) { this.sessions.delete(hash); }
   async deleteSessionsFor(accountId: string) { for (const [h, s] of this.sessions) if (s.accountId === accountId) this.sessions.delete(h); }
   async putPairing(row: PairingRow) { this.pairings.set(row.hash, { ...row }); }
   async getPairing(hash: string) { return this.pairings.get(hash) ?? null; }
-  async usePairing(hash: string, usedAt: string) { const p = this.pairings.get(hash); if (p) p.usedAt = usedAt; }
+  async usePairing(hash: string, usedAt: string) { const p = this.pairings.get(hash); if (!p || p.usedAt) return false; p.usedAt = usedAt; return true; }
   async getPreferences(accountId: string) { return this.prefs.get(accountId) ?? null; }
   async putPreferences(accountId: string, prefs: Preferences) { this.prefs.set(accountId, structuredClone(prefs)); }
   async countEvents(bucket: string, sinceIso: string) { return this.events.filter((e) => e.bucket === bucket && e.at >= sinceIso).length; }
@@ -283,7 +285,8 @@ export class Accounts {
     const nowMs = this.now().getTime();
     if (!link || link.usedAt || Date.parse(link.expiresAt) < nowMs) return { ok: false, status: 410, error: "That link has expired or was already used. Ask for a new one." };
     if (!browser || !sameString(await this.hash(browser), link.browserHash)) return { ok: false, status: 403, error: "Open the link in the browser you asked for it in." };
-    await this.o.store.useMagicLink(link.hash, this.now().toISOString());
+    // Spend before use, atomically: two requests racing with one link get one session between them.
+    if (!(await this.o.store.useMagicLink(link.hash, this.now().toISOString()))) return { ok: false, status: 410, error: "That link has expired or was already used. Ask for a new one." };
     let account = await this.o.store.getAccountByEmailHash(link.emailHash);
     let created = false;
     const email = await this.unseal(link.emailSealed);
@@ -352,7 +355,7 @@ export class Accounts {
     if (!p || p.usedAt || Date.parse(p.expiresAt) < this.now().getTime()) return { ok: false, status: 404, error: "pairing: unknown, used or expired code; ask the person for a fresh one" };
     const account = await this.o.store.getAccount(p.accountId);
     if (!account) return { ok: false, status: 404, error: "pairing: that account no longer exists" };
-    await this.o.store.usePairing(p.hash, this.now().toISOString());
+    if (!(await this.o.store.usePairing(p.hash, this.now().toISOString()))) return { ok: false, status: 404, error: "pairing: unknown, used or expired code; ask the person for a fresh one" };
     return { ok: true, operatorId: account.operatorId, accountId: account.id };
   }
 
@@ -395,7 +398,10 @@ export function cookie(header: string | null, name: string): string | null {
   for (const part of header.split(";")) {
     const i = part.indexOf("=");
     if (i < 0) continue;
-    if (part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+    if (part.slice(0, i).trim() === name) {
+      // A malformed percent-escape in a cookie is a bad cookie, not a server error.
+      try { return decodeURIComponent(part.slice(i + 1).trim()); } catch { return null; }
+    }
   }
   return null;
 }

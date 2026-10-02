@@ -23,11 +23,13 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync, lstatSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const MAX_OUTPUTS = 20;
+const MAX_OUTPUTS_BYTES = 64 * 1024;
 const NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
 const HEX = /^[0-9a-f]{64}$/;
 
@@ -43,8 +45,9 @@ function fail(code, msg) {
 }
 function sh(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...opts });
-  if (r.error) return { ok: false, out: "", err: String(r.error.message) };
-  return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", status: r.status };
+  const timedOut = r.error?.code === "ETIMEDOUT" || (!!opts.timeout && r.signal === "SIGTERM" && r.status === null);
+  if (r.error && !timedOut) return { ok: false, out: "", err: String(r.error.message), timedOut: false };
+  return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", status: r.status, timedOut };
 }
 
 /** The bundle, checked the way the archive checks it. */
@@ -99,8 +102,10 @@ function run(b, dir, seed, noContainer, timeoutMs, imageOverride) {
     const ref = imageOverride || b.imageRef;
     if (!ref) fail(3, `the bundle pins ${b.image} but names no registry to pull it from; pass --image <registry/name>@${b.image}`);
     if (!ref.endsWith(`@${b.image}`)) fail(3, `--image must end in the pinned digest @${b.image}`);
+    // The container is named so that a timeout kills the CONTAINER, not just the client that started it.
+    const name = `ecdysis-${randomBytes(6).toString("hex")}`;
     const r = sh(tool, [
-      "run", "--rm",
+      "run", "--rm", "--name", name,
       "--network", "none",            // no network: nothing leaks, nothing is fetched
       "--read-only",                  // read-only root; the checkout is mounted read-only too
       "--tmpfs", "/tmp:rw,size=1g",
@@ -115,6 +120,10 @@ function run(b, dir, seed, noContainer, timeoutMs, imageOverride) {
       ref,
       "sh", "-c", b.run,
     ], { timeout: timeoutMs });
+    if (r.timedOut) {
+      sh(tool, ["rm", "-f", name]);
+      return { ...r, ok: false, err: `${r.err}\necdysis-run: the run exceeded ${Math.round(timeoutMs / 60000)} minutes (three times the declared runtime); the container was removed` };
+    }
     return r;
   }
   if (!noContainer) fail(3, "the bundle pins no image: pass --no-container to run it on this host with a cleared environment (only on a machine that holds no key)");
@@ -124,7 +133,12 @@ function run(b, dir, seed, noContainer, timeoutMs, imageOverride) {
 
 function readOutputs(dir) {
   const p = join(dir, "results", "outputs.json");
-  if (!existsSync(p)) fail(4, "the run produced no results/outputs.json");
+  // The bundle's code wrote this file and the runner reads it on the HOST: it must be an ordinary file, not a symlink the code
+  // planted to make the runner read (and report to the archive) something of the host's, and not large.
+  let st = null;
+  try { st = lstatSync(p); } catch { fail(4, "the run produced no results/outputs.json"); }
+  if (!st.isFile()) fail(4, "results/outputs.json must be a regular file, not a symlink or a directory");
+  if (st.size > MAX_OUTPUTS_BYTES) fail(4, `results/outputs.json is larger than ${MAX_OUTPUTS_BYTES} bytes`);
   let o;
   try { o = JSON.parse(readFileSync(p, "utf8")); } catch (e) { fail(4, `results/outputs.json is not JSON: ${e.message}`); }
   if (!o || typeof o !== "object" || Array.isArray(o)) fail(4, "results/outputs.json must be a flat object");

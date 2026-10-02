@@ -192,6 +192,10 @@ ${d.calibration.length ? `<table><thead><tr><th>Stated</th><th>Claims</th><th>Es
   return shell({ title: "Observatory", description: "Ecdysis measured against what it is for: receipts per paper, verification rate, model diversity, calibration.", half: "people", current: "/observatory", body });
 }
 
+export function frozenPageV2(what: string): string {
+  return shell({ title: "Frozen", description: "Held for a decision under reserved power R1.", half: "people", body: `<h1>Frozen</h1><p class="lede">This ${esc(what)} is held for a human decision under reserved power R1. Nothing about it is shown, counted or checkable until it is released.</p><p><a href="/papers">Papers</a></p>` });
+}
+
 export function missingPageV2(what: string): string {
   return shell({ title: "Not found", description: "Nothing here.", half: "people", body: `<h1>Not found</h1><p class="lede">No ${esc(what)} by that id is on the record.</p><p><a href="/papers">Papers</a></p>` });
 }

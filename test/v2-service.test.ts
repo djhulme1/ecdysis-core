@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
-import { MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "../src/api/v2/service.js";
+import { EXTERNAL_PER_DAY, MemoryV2Store, RESULT_DEADLINE_MS, REVIEWS_PER_DAY, V2Service } from "../src/api/v2/service.js";
 import { seedFromSeal, verifySeal, type Bundle, type Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
@@ -53,6 +53,15 @@ describe("v2 service", () => {
     const ref = String((ext.body as Record<string, Json>)["ref"]);
     assert.match(ref, /^ext:[0-9a-f]{16}#C1$/);
     const again = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", source: "DOI:10.1126/science.264.5163.1297", quote: "the 3-SAT threshold is alpha_c = 4.17 +/- 0.05", test: "a different test, same claim", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    const wrongProtocol = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.1", type: "claim.external", source: "arxiv:2001.08361", quote: "test loss follows a power law in compute over seven orders of magnitude", test: "the fitted exponent changes sign", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    assert.equal(wrongProtocol.status, 400, "the protocol is checked like every other payload's");
+    // Rationed by tier, like papers: each is a new target in the queues.
+    for (let i = 0; i < EXTERNAL_PER_DAY.verified; i++) {
+      const r = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", source: `arxiv:2001.0${8361 + i}`, quote: `claim number ${i} as the paper states it`, test: "the stated result fails to appear with the stated setup", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+    }
+    const over = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:2001.09999", quote: "one claim too many for today", test: "the stated result fails to appear with the stated setup", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    assert.equal(over.status, 429);
     assert.equal(again.status, 200, "the same source and quote is the same claim");
 
     const c1 = await w.commit("Bee", ref, w.bundle(1));
@@ -259,6 +268,11 @@ describe("v2 publication, reviews, escalation and steering", () => {
     const scores = await w.svc.scores();
     assert.equal(scores.claims.get(ref)!.status, "unchecked", "a review moves credence a little and sets no status");
     assert.ok(scores.claims.get(ref)!.credence > scores.claims.get(ref)!.prior);
+    // Reviews are rationed by tier: a flood would earn nothing (one item per operator counts) but would fill the log.
+    for (let i = 1; i < REVIEWS_PER_DAY.verified; i++) assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.8))).status, 201);
+    assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.8))).status, 429, `${REVIEWS_PER_DAY.verified} reviews a day verified`);
+    for (let i = 0; i < REVIEWS_PER_DAY.account; i++) assert.equal((await w.svc.fileReview(await review("Cat", ref, 0.6))).status, 201);
+    assert.equal((await w.svc.fileReview(await review("Cat", ref, 0.6))).status, 429, `${REVIEWS_PER_DAY.account} with an account`);
     const esc = (handle: string) => w.sign(handle, { protocol: "ecdysis/0.2", type: "hazard.escalate", subject: ref, reason: "The abstract appears to give operational uplift that screening missed; a human should look.", agent: { handle, publicKey: w.keys.get(handle)!.publicKey }, ts: "2026-10-03T10:00:00Z" });
     assert.equal((await w.svc.escalate(await esc("Cat"))).status, 403, "account tier cannot escalate");
     for (let i = 0; i < 3; i++) assert.equal((await w.svc.escalate(await esc("Bee"))).status, 202);

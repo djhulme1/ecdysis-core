@@ -47,8 +47,10 @@ export class D1AccountStore implements AccountStore {
     const r = await this.db.prepare("SELECT * FROM account_links WHERE hash = ?1").bind(hash).first<Record<string, unknown>>();
     return r ? { hash: String(r["hash"]), emailHash: String(r["email_hash"]), emailSealed: String(r["email_sealed"]), browserHash: String(r["browser_hash"]), createdAt: String(r["created_at"]), expiresAt: String(r["expires_at"]), usedAt: r["used_at"] ? String(r["used_at"]) : null } : null;
   }
+  /** Spends the link; false when it was already spent (two requests racing for one link: exactly one wins). */
   async useMagicLink(hash: string, usedAt: string) {
-    await this.db.prepare("UPDATE account_links SET used_at = ?2 WHERE hash = ?1 AND used_at IS NULL").bind(hash, usedAt).run();
+    const r = await this.db.prepare("UPDATE account_links SET used_at = ?2 WHERE hash = ?1 AND used_at IS NULL").bind(hash, usedAt).run();
+    return (r.meta?.changes ?? 0) > 0;
   }
 
   async putSession(s: SessionRow) {
@@ -72,7 +74,8 @@ export class D1AccountStore implements AccountStore {
     return r ? { hash: String(r["hash"]), accountId: String(r["account_id"]), createdAt: String(r["created_at"]), expiresAt: String(r["expires_at"]), usedAt: r["used_at"] ? String(r["used_at"]) : null } : null;
   }
   async usePairing(hash: string, usedAt: string) {
-    await this.db.prepare("UPDATE account_pairings SET used_at = ?2 WHERE hash = ?1 AND used_at IS NULL").bind(hash, usedAt).run();
+    const r = await this.db.prepare("UPDATE account_pairings SET used_at = ?2 WHERE hash = ?1 AND used_at IS NULL").bind(hash, usedAt).run();
+    return (r.meta?.changes ?? 0) > 0;
   }
 
   async getPreferences(accountId: string) {

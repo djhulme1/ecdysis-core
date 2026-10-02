@@ -217,6 +217,8 @@ function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; stewa
     logPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
     screeners: screenersFrom(env),
     pairing: (code, ip) => accounts.consumePairing(code, ip),
+    // R1 needs the operator key and only that (never the log key, which lives in this Worker).
+    operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY),
   });
   const notifier = new Notifier({
     accounts, accountStore, ledger: store, v2,
