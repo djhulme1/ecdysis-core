@@ -1,0 +1,92 @@
+{
+ "repo": "https://github.com/djhulme1/ecdysis-core",
+ "commit": "<filled in at ready>",
+ "run": "cd projects/2026-10-01-ks94-3sat-threshold && pip install --break-system-packages -r requirements.txt && python3 run.py",
+ "outputs": [
+  {
+   "name": "instances_per_arm"
+  },
+  {
+   "name": "alpha_c_small_dup",
+   "tolerance": 0.05
+  },
+  {
+   "name": "nu_small_dup",
+   "tolerance": 0.14
+  },
+  {
+   "name": "phi_small_dup",
+   "tolerance": 1.3
+  },
+  {
+   "name": "alpha_c_large_dup",
+   "tolerance": 0.045
+  },
+  {
+   "name": "nu_eff_dup",
+   "tolerance": 0.25
+  },
+  {
+   "name": "ks_law_miss_150_dup",
+   "tolerance": 0.025
+  },
+  {
+   "name": "ks_law_miss_200_dup",
+   "tolerance": 0.025
+  },
+  {
+   "name": "alpha_c_small_nodup",
+   "tolerance": 0.05
+  },
+  {
+   "name": "nu_small_nodup",
+   "tolerance": 0.14
+  },
+  {
+   "name": "phi_small_nodup",
+   "tolerance": 1.3
+  },
+  {
+   "name": "alpha_c_large_nodup",
+   "tolerance": 0.045
+  },
+  {
+   "name": "nu_eff_nodup",
+   "tolerance": 0.25
+  },
+  {
+   "name": "ks_law_miss_150_nodup",
+   "tolerance": 0.025
+  },
+  {
+   "name": "ks_law_miss_200_nodup",
+   "tolerance": 0.025
+  },
+  {
+   "name": "se_alpha_c_small",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "se_nu_small",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "se_alpha_c_large",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "se_nu_eff",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "se_alpha50_large",
+   "tolerance": 0.5,
+   "relative": true
+  }
+ ],
+ "runtimeMinutes": 20
+}

@@ -1,0 +1,22 @@
+{
+ "instances_per_arm": 82800,
+ "alpha_c_small_dup": 4.0975,
+ "nu_small_dup": 1.4713,
+ "phi_small_dup": 3.5252,
+ "alpha_c_large_dup": 4.201,
+ "nu_eff_dup": 1.4378,
+ "ks_law_miss_150_dup": 0.0068,
+ "ks_law_miss_200_dup": 0.0173,
+ "alpha_c_small_nodup": 4.1264,
+ "nu_small_nodup": 1.4888,
+ "phi_small_nodup": 3.132,
+ "alpha_c_large_nodup": 4.2025,
+ "nu_eff_nodup": 1.5027,
+ "ks_law_miss_150_nodup": 0.0005,
+ "ks_law_miss_200_nodup": 0.0166,
+ "se_alpha_c_small": 0.0089,
+ "se_nu_small": 0.0284,
+ "se_alpha_c_large": 0.0092,
+ "se_nu_eff": 0.0538,
+ "se_alpha50_large": 0.0051
+}
