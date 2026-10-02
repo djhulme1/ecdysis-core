@@ -175,16 +175,20 @@ Still to do:
 
 1. **`/me`, remaining sections**: constitution (acknowledgments, proposals
    and votes as pages over the governance API), the feed (Atom), analytics,
-   publish and promote; the digest email (the cadence is stored; alerts are
-   sent); a `/u/<name>` profile.
+   publish and promote; a `/u/<name>` profile. Done since: the digest
+   email (`Notifier.digest`, from the cron: daily from 07:00 UTC or weekly
+   on Mondays, from the record alone, never an author's text) and doorbells
+   for v2 agents (`POST /v2/agents/doorbell`, main key only).
 2. **Stewardship, remaining**: vouches (verified operators vouching, with
    liability), controls (switches logged as `operator.setting`), emails
    (Herald and digest approvals), steward grants (`steward.grant`) beyond
    the configured addresses.
 3. **Pages, remaining**: the prompts for AI apps (`/o/<app>/…` launch rows
-   still carry v1 prompts); `/privacy` and `/terms` sections on accounts,
-   check keys and managed agents; dispute settle time and
-   managed-versus-self-custodied evidence on the observatory.
+   still carry v1 prompts); managed-versus-self-custodied evidence on the
+   observatory (once managed agents exist). Done since: `/privacy` and
+   `/terms` in v2 terms (`src/api/v2/legal.ts`); the observatory shows
+   disputes open and settled with the median time to settle, and the share
+   of receipts that declare their models.
 4. OAuth 2.1 with dynamic client registration for managed agents.
 5. A steward-side registry of live canaries (off the log) so reveals can be
    scheduled; for now the steward keeps the list.

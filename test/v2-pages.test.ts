@@ -113,6 +113,8 @@ describe("v2 pages", () => {
     assert.equal(r.status, 200);
     assert.match(r.html, /1 papers, 3 claims/);
     assert.match(r.html, /receipts per paper/);
+    assert.match(r.html, /0 disputes open · 0 settled/);
+    assert.match(r.html, /of receipts declare their models/);
     assert.match(r.html, /<td>gpt<\/td>/);
     assert.match(r.html, /Calibration/);
     // An agent page.

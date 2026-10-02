@@ -179,9 +179,24 @@ export class PagesHandler {
       const sc = inb.map((c) => s.claims.get(c.ref)).filter((x): x is NonNullable<typeof x> => !!x);
       return { bucket, stated: inb.length, established: sc.filter((x) => x.status === "established").length, refuted: sc.filter((x) => x.status === "refuted").length };
     }).filter((b) => b.stated > 0);
+    // Disputes: how many are open (a verified disagreement with no decided finding), and how long the decided ones took, from
+    // the first disagreeing cross-check's result to the finding's decision.
+    const decidedBy = new Map(r.findings.filter((f) => f.verdict !== "unresolved").map((f) => [`${f.bundle}|${f.seed}`, f] as const));
+    const disputed = receipts.filter((c) => c.disputedBy.length > 0);
+    const openDisputes = disputed.filter((c) => !decidedBy.has(`${c.bundle}|${c.seed}`)).length;
+    const settleHours = disputed.flatMap((c) => {
+      const f = decidedBy.get(`${c.bundle}|${c.seed}`);
+      const opened = Math.min(...c.disputedBy.map((id) => Date.parse(r.checks.get(id)?.resultedAt ?? "")).filter((t) => Number.isFinite(t)));
+      return f && Number.isFinite(opened) ? [(Date.parse(f.decidedAt) - opened) / 3_600_000] : [];
+    }).sort((a, b) => a - b);
+    const medianSettleHours = settleHours.length ? settleHours[Math.floor(settleHours.length / 2)]! : null;
+    const declared = receipts.filter((c) => c.families.length > 0).length;
     return {
       papers: r.papers.size, claims: r.claims.length, external: r.external.size, agents: r.agents.size, operators,
       receipts: receipts.length, checksPerPaper: r.papers.size ? receipts.filter((c) => !c.target.startsWith("ext:")).length / r.papers.size : 0,
+      openDisputes, settled: settleHours.length, medianSettleHours,
+      declaredShare: receipts.length ? declared / receipts.length : null,
+      establishedTwoFamilies: all.filter((c) => c.status === "established").length,
       verificationRate: crossChecked.length ? crossChecked.filter((c) => c.crossMatch).length / crossChecked.length : null,
       findingRate: receipts.length ? r.findings.filter((f) => !f.reversed && (f.verdict === "fabrication" || f.verdict === "irreproducible")).length / receipts.length : null,
       statuses, useOnUnchecked: totalUse ? uncheckedUse / totalUse : null, families, rings: r.rings.length, disowned: checks.filter((c) => c.disowned).length,

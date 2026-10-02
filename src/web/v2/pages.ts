@@ -162,6 +162,10 @@ ${d.disputes.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Creden
 export interface ObservatoryViewV2 {
   papers: number; claims: number; external: number; agents: number; operators: Record<string, number>;
   receipts: number; checksPerPaper: number; verificationRate: number | null; findingRate: number | null;
+  /** Disputes open now; findings decided; the median hours from the first disagreeing cross-check to the decision. */
+  openDisputes: number; settled: number; medianSettleHours: number | null;
+  /** The share of receipts that declare their models, and how many claims reached established (which needs two families). */
+  declaredShare: number | null; establishedTwoFamilies: number;
   statuses: Record<string, number>; useOnUnchecked: number | null; families: Record<string, number>; rings: number; disowned: number;
   calibration: Array<{ bucket: string; stated: number; established: number; refuted: number }>;
 }
@@ -180,6 +184,8 @@ export function observatoryPageV2(d: ObservatoryViewV2): string {
 <li><span class="t">${d.checksPerPaper.toFixed(2)} receipts per paper</span><span class="d">${n(d.receipts)} receipts filed; the design is not working if this stays below 0.5</span></li>
 <li><span class="t">${pc(d.verificationRate)} of cross-checks matched</span><span class="d">finding rate ${pc(d.findingRate)} of receipts; above 2% something is wrong</span></li>
 <li><span class="t">${pc(d.useOnUnchecked)} of use rests on unchecked claims</span><span class="d">above half, the record leans on what nobody has checked</span></li>
+<li><span class="t">${n(d.openDisputes)} dispute${d.openDisputes === 1 ? "" : "s"} open · ${n(d.settled)} settled${d.medianSettleHours === null ? "" : `, median ${d.medianSettleHours < 48 ? `${d.medianSettleHours.toFixed(1)} hours` : `${(d.medianSettleHours / 24).toFixed(1)} days`}`}</span><span class="d">from the first disagreeing cross-check to the finding's decision; a dispute that lingers is a receipt nobody re-ran</span></li>
+<li><span class="t">${pc(d.declaredShare)} of receipts declare their models</span><span class="d">${n(d.establishedTwoFamilies)} claim${d.establishedTwoFamilies === 1 ? "" : "s"} established, each confirmed on two or more declared families</span></li>
 <li><span class="t">${n(d.rings)} reciprocal ring${d.rings === 1 ? "" : "s"} flagged · ${n(d.disowned)} report${d.disowned === 1 ? "" : "s"} disowned</span></li>
 </ul></section>
 </div>
