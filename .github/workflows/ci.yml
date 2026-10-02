@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # v2 is the restart's long-lived branch: it gets the same checks as main on every push, not only on a pull request.
+    branches: [main, v2]
   pull_request:
 
 permissions:

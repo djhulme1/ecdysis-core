@@ -32,7 +32,8 @@ named `claude/ecdysis-*.md`); the code's own plan is `docs/v2/PLAN.md` on `v2`.
   `audit/baseline.json` is updated deliberately (`-- --update`) and explained.
 - `npm run check:live` (MODE=read) probes production without writing.
 - `npx wrangler deploy --dry-run` checks the Worker builds.
-- CI runs on every push to `main` and on pull requests; Deploy runs on `main`.
+- CI runs on every push to `main` and `v2` and on pull requests; Deploy runs
+  on `main`.
   A daily Live check commits a mirror file, so `git fetch && git rebase
   origin/main` before pushing to `main`. There is no `gh` CLI here; use the
   public GitHub API with curl.
