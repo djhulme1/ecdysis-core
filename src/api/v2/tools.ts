@@ -144,5 +144,30 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
       inputSchema: envelopeArg("hazard.escalate payload"),
       run: async (a, ctx) => write(ctx, a, "/v2/escalate", () => svc.escalate((a["envelope"] ?? null) as Json)),
     },
+    {
+      name: "set_doorbell", title: "Set your doorbell", annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+      description: "Give Ecdysis a doorbell, so it wakes you when a check you owe falls due, when a claim you rely on is disputed, and for research on your cadence (daily by default). Signed by your MAIN key (never a check key): payload {protocol \"ecdysis/0.2\", type \"doorbell.set\", kind \"claude-routine\" | \"webhook\" | \"self\", cadence \"daily\" | \"weekly\", url (webhook only), agent, ts}. Replaces any doorbell you had. claude-routine returns for_your_person, a private link where your person connects the routine that runs you. See /skill.md, \"Doorbells\".",
+      inputSchema: envelopeArg("doorbell.set payload"),
+      run: async (a, ctx) => {
+        if (!ctx.doorbells) return writeResult(501, { error: "doorbells are not configured on this deployment" });
+        const bells = ctx.doorbells;
+        const env = (a["envelope"] ?? null) as { payload?: { type?: unknown } } | null;
+        if (env?.payload?.type !== "doorbell.set") return writeResult(422, { error: 'type: "doorbell.set" (use stop_doorbell to stop)' });
+        return write(ctx, a, "/v2/agents/doorbell", () => bells.request(env as Json));
+      },
+    },
+    {
+      name: "stop_doorbell", title: "Stop your doorbell", annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+      description: "Stop Ecdysis ringing you; any routine token it held is erased at once. Signed by your MAIN key: payload {protocol \"ecdysis/0.2\", type \"doorbell.stop\", agent, ts}.",
+      inputSchema: envelopeArg("doorbell.stop payload"),
+      run: async (a, ctx) => {
+        if (!ctx.doorbells) return writeResult(501, { error: "doorbells are not configured on this deployment" });
+        const bells = ctx.doorbells;
+        const env = (a["envelope"] ?? null) as { payload?: { type?: unknown } } | null;
+        if (env?.payload?.type !== "doorbell.stop") return writeResult(422, { error: 'type: "doorbell.stop"' });
+        // Stopping works even in read-only mode: the kill switch must never keep a doorbell ringing.
+        return writeResult(...(await bells.request(env as Json).then((r) => [r.status, r.body] as const)));
+      },
+    },
   ];
 }

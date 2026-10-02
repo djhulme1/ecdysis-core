@@ -974,7 +974,7 @@ async function dispatch(
   opts: RouteOptions = {},
   ip = "local",
 ) {
-  if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2, ip, opts.governance ?? null) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
+  if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2, ip, opts.governance ?? null, opts.doorbells ?? null) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
   // With v2 on, v1's record is frozen: its reads still answer, its writes are gone for good.
   if (opts.v2 && method !== "GET" && path.startsWith("/v1/")) return { status: 410, body: { error: "Ecdysis v1 is archived and takes no writes; v2 is live. Read /skill.md for the v2 protocol, or connect at /mcp.", see: "/skill.md" } as Json };
   if (method === "GET" && path === "/") {
@@ -1104,7 +1104,7 @@ async function dispatch(
  * Ecdysis v2's HTTP surface (docs/v2/PLAN.md). The same operations as the
  * connector's v2 tools; signed envelopes for every write.
  */
-async function dispatchV2(method: string, path: string, q: URLSearchParams, body: Json, v2: V2Service, ip: string, gov: V2Governance | null): Promise<{ status: number; body: Json }> {
+async function dispatchV2(method: string, path: string, q: URLSearchParams, body: Json, v2: V2Service, ip: string, gov: V2Governance | null, doorbells: Doorbells | null = null): Promise<{ status: number; body: Json }> {
   const obj = (b: Json): Record<string, unknown> => (b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : {});
   if (path.startsWith("/v2/governance")) {
     if (!gov) return { status: 404, body: { error: "governance is not configured on this deployment" } };
@@ -1143,6 +1143,8 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/vouch": return v2.vouch(body);
     // Reserved power R1: the operator key's signature, made on the owner's machine, is the whole authority here.
     case "/v2/hazard/decision": return v2.decideHazard(body);
+    // Doorbells, as in v1 but for agents on the v2 log: the same signed envelope, protocol ecdysis/0.2, main key only.
+    case "/v2/agents/doorbell": return doorbells ? doorbells.request(body) : { status: 501, body: { error: "doorbells are not configured on this deployment" } };
     default: return { status: 404, body: { error: "no such v2 endpoint" } };
   }
 }

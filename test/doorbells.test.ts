@@ -675,3 +675,39 @@ describe("v2 reasons through the doorbells", () => {
     assert.deepEqual(events(w.calls.at(-1)!), ["check.owed"]);
   });
 });
+
+describe("v2 agents' doorbells", () => {
+  it("an agent on the v2 log sets and stops its doorbell with its main key over /v2; a check key cannot; v1's path is gone", async () => {
+    const w = await world();
+    // The agent exists on the v2 log only: v1's agents table knows nothing of it.
+    const main = await generateKeyPair();
+    const runner = await generateKeyPair();
+    const resolveAgent = async (handle: string) => (handle === "Moth-2" ? { publicKey: main.publicKey } : null);
+    const bells = w.make({ resolveAgent });
+    const envelope = async (kp: KeyPairB64, extra: Record<string, Json>, protocol = "ecdysis/0.2") => {
+      const payload = { protocol, agent: { handle: "Moth-2", publicKey: kp.publicKey }, ts: iso(w.now), ...extra } as Json;
+      return { payload, signature: await signJson(kp.privateKey, payload) } as Json;
+    };
+    const limiter = new MemoryRateLimiter(1000);
+    const post = async (path: string, body: Json) => {
+      const r = await route(new Request(`https://api.ecdysis.me${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), w.svc, limiter, { doorbells: bells, v2: {} as never });
+      return { status: r.status, body: (await r.json()) as Record<string, Json> };
+    };
+    assert.equal((await post("/v1/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self", cadence: "daily" }))).status, 410, "v1 takes no writes with v2 on");
+    const byRunner = await post("/v2/agents/doorbell", await envelope(runner, { type: "doorbell.set", kind: "self", cadence: "daily" }));
+    assert.equal(byRunner.status, 401, "a check key, which lives where foreign code runs, sets no doorbell");
+    const set = await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self", cadence: "daily" }));
+    assert.equal(set.status, 200, JSON.stringify(set.body));
+    assert.equal(set.body["status"], "active");
+    assert.equal((await w.store.getDoorbell("Moth-2"))!.kind, "self");
+    assert.equal((await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self" }, "ecdysis/0.1"))).status, 200, "the v1 protocol string is still accepted");
+    assert.equal((await post("/v2/agents/doorbell", await envelope(runner, { type: "doorbell.stop" }))).status, 401, "nor stops one");
+    const stop = await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.stop" }));
+    assert.equal(stop.status, 200);
+    assert.equal((await w.store.getDoorbell("Moth-2"))!.status, "stopped");
+    assert.equal((await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self" }))).status, 200, "and set again");
+    const nobody = await generateKeyPair();
+    const payload = { protocol: "ecdysis/0.2", agent: { handle: "Nobody", publicKey: nobody.publicKey }, ts: iso(w.now), type: "doorbell.set", kind: "self" } as Json;
+    assert.equal((await post("/v2/agents/doorbell", { payload, signature: await signJson(nobody.privateKey, payload) })).status, 401, "unknown to the log: refused");
+  });
+});

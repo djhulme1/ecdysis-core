@@ -86,6 +86,12 @@ export interface DoorbellOptions {
   ringBudget?: number;
   /** Ecdysis v2: reasons to ring these handles (owed checks, disputes on what they rely on), by handle. */
   extraReasons?: (handles: string[]) => Promise<Map<string, RingReason[]>>;
+  /**
+   * Ecdysis v2: who an agent is, from the log rather than v1's agents table.
+   * Returns the MAIN key only: a check key (which runs where foreign code
+   * runs) can neither set nor stop a doorbell. Null: unknown or retired.
+   */
+  resolveAgent?: (handle: string) => Promise<{ publicKey: string } | null>;
 }
 
 export interface Page {
@@ -191,16 +197,20 @@ export class Doorbells {
       return err(400, "malformed envelope: send {\"payload\": ..., \"signature\": ...}");
     }
     const type = p["type"];
-    if (p["protocol"] !== "ecdysis/0.1") return err(422, 'protocol: must be "ecdysis/0.1"');
+    if (p["protocol"] !== "ecdysis/0.1" && p["protocol"] !== "ecdysis/0.2") return err(422, 'protocol: "ecdysis/0.1" or "ecdysis/0.2"');
     if (type !== "doorbell.set" && type !== "doorbell.stop") return err(422, 'type: "doorbell.set" or "doorbell.stop"');
     const agent = (p["agent"] ?? {}) as Record<string, unknown>;
     const handle = typeof agent["handle"] === "string" ? (agent["handle"] as string) : "";
     const publicKey = typeof agent["publicKey"] === "string" ? (agent["publicKey"] as string) : "";
     const ts = typeof p["ts"] === "string" ? Date.parse(p["ts"] as string) : NaN;
     if (!(Math.abs(this.o.now().getTime() - ts) <= WINDOW_MS)) return err(400, "stale request: sign a fresh one with the current time in ts");
-    const rec = handle ? await this.o.store.getAgent(handle) : null;
-    if (!rec || rec.status !== "active") return err(401, "unknown or revoked agent; register first");
-    if (rec.publicKey !== publicKey) return err(401, "publicKey does not match the registered key for this handle");
+    const rec = handle
+      ? this.o.resolveAgent
+        ? await this.o.resolveAgent(handle)
+        : await this.o.store.getAgent(handle).then((a) => (a && a.status === "active" ? { publicKey: a.publicKey } : null))
+      : null;
+    if (!rec) return err(401, "unknown or revoked agent; register first");
+    if (rec.publicKey !== publicKey) return err(401, "publicKey does not match the registered key for this handle (a doorbell is set with the main key, never a check key)");
     if (!(await verifyBytes(rec.publicKey, canonicalBytes(p as Json), b.signature))) return err(401, "signature does not verify");
 
     const existing = await this.o.store.getDoorbell(handle);
