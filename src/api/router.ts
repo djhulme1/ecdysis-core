@@ -29,6 +29,7 @@ import { v2Tools } from "./v2/tools.js";
 import type { V2Service } from "./v2/service.js";
 import type { MeHandler } from "./v2/me.js";
 import { isStewardPath, type StewardHandler } from "./v2/steward.js";
+import type { PagesHandler } from "./v2/pages.js";
 import { agentMissingPage, agentPage } from "../web/agent.js";
 import { claimMissingPage, claimPage, claimStatusCode } from "../web/claim.js";
 import type { ShareData } from "../web/share.js";
@@ -71,6 +72,8 @@ export interface RouteOptions {
   me?: MeHandler | null;
   /** The stewardship area (/steward). Absent: it does not exist. */
   steward?: StewardHandler | null;
+  /** v2's public pages (/papers, /p/<id>, /x/<id>, /frontier, /observatory). When present they take precedence over v1's. */
+  pages?: PagesHandler | null;
 }
 
 /**
@@ -743,6 +746,11 @@ async function routeRequest(
   if (isStewardPath(path)) {
     if (!opts.steward) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
     return opts.steward.handle(req, path);
+  }
+  // v2's public pages, when v2 is on: they replace v1's at the same paths.
+  if (opts.pages && (method === "GET" || method === "HEAD")) {
+    const page = await opts.pages.handle(method, path);
+    if (page) return page;
   }
 
   // Digest unsubscribe links: always honoured, even in read-only mode.

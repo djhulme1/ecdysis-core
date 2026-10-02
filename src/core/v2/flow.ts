@@ -138,6 +138,8 @@ export interface KeyState {
 
 export interface PaperState {
   id: string;
+  /** The content id: the hash of the signed envelope, under which the store keeps it. */
+  cid: string;
   handle: string;
   operatorId: string;
   title: string;
@@ -202,6 +204,8 @@ export interface V2Record {
   vouchLinked: (a: string, b: string) => boolean;
   /** Revealed canaries: claim ref → true if its known outcome confirms it. */
   anchors: Map<string, boolean>;
+  /** Review forecasts, by "<claim>|<agent>" (the latest). */
+  forecasts: Map<string, number>;
   /** Bundle hashes seen to ignore their seed. */
   seedInsensitiveBundles: Set<string>;
 }
@@ -227,6 +231,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const reviews: Array<EvidenceInput & { key: string; ts: string }> = [];
   const anchors = new Map<string, boolean>();
   const seedInsensitiveBundles = new Set<string>();
+  const forecasts = new Map<string, number>();
 
   const sorted = [...entries].sort((a, b) => a.seq - b.seq);
   for (const e of sorted) {
@@ -301,7 +306,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
           refs.push(ref);
           claims.push({ ref, paper: id, authorOperator: op, stated: Math.min(1, Math.max(0, num(c["confidence"], 0.5))), foundations: [...foundations], seq: e.seq });
         }
-        papers.set(id, { id, handle: str(p["handle"]), operatorId: op, title: str(p["title"]), field: str(p["field"]), claims: refs, families: paperFamilies.get(id) ?? [], seq: e.seq, ts: e.ts });
+        papers.set(id, { id, cid: str(p["cid"]), handle: str(p["handle"]), operatorId: op, title: str(p["title"]), field: str(p["field"]), claims: refs, families: paperFamilies.get(id) ?? [], seq: e.seq, ts: e.ts });
         break;
       }
       case "claim.external": {
@@ -380,6 +385,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
       case "review.file": {
         const handle = str(p["handle"]);
         const declared = modelFamilies(p["models"] as string[] | undefined);
+        forecasts.set(`${str(p["claim"])}|${handle}`, Math.min(1, Math.max(0, num(p["forecast"], 0.5))));
         reviews.push({
           id: `review:${e.seq}`, claim: str(p["claim"]), kind: "review", confirms: num(p["forecast"], 0.5) >= 0.5,
           agent: handle, operatorId: str(p["operatorId"]), tier: "unverified", // tier is filled in below, once all tier entries are known
@@ -464,5 +470,5 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, rings, ringLinked, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, seedInsensitiveBundles };
+  return { tiers, vouches, suspendedVouchers, rings, ringLinked, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles };
 }

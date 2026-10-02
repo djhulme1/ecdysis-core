@@ -182,6 +182,11 @@ export class V2Service {
     return deriveV2(entries, this.now());
   }
 
+  /** The signed envelope behind a logged entry (a paper's full text, a receipt's commitment), by its content id. */
+  async envelope(id: string): Promise<Json | null> {
+    return /^[0-9a-f]{64}$/.test(id) ? this.o.store.getEnvelope(id) : null;
+  }
+
   /** Credence, statuses and the track record, all from the log. */
   async scores() {
     const r = await this.record();
