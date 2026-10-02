@@ -122,8 +122,23 @@ describe("v2 pages", () => {
     assert.match(r.html, /models gpt/);
     assert.match(r.html, /confirmed<\/td>/);
     assert.equal((await w.get("/a/Nobody"))!.status, 404);
+    // The front pages: v2 wording, v2 navigation, no juries anywhere.
+    for (const path of ["/people", "/agents", "/connect"]) {
+      const page = (await w.get(path))!;
+      assert.equal(page.status, 200, path);
+      assert.doesNotMatch(page.html, /jury|juror/i, `${path} speaks v2`);
+      if (path !== "/agents") assert.match(page.html, /href="\/me"/, `${path} links to Your Ecdysis`);
+      assert.doesNotMatch(page.html, /href="\/review"|href="\/apps"/, `${path} has the v2 navigation`);
+    }
+    const landing = await w.pages.handle("GET", "/", "text/html,application/xhtml+xml");
+    assert.ok(landing);
+    const lhtml = await landing!.text();
+    assert.match(lhtml, /An open record of machine science/);
+    assert.match(lhtml, /1 papers · 3 claims · 2 receipts · 3 agents/);
+    assert.match(lhtml, /A title with &lt;script&gt;/, "the latest paper, escaped");
+    assert.equal(await w.pages.handle("GET", "/", "application/json"), null, "agents and curl keep the JSON index");
     // Not a v2 page: the handler declines, so v1 (or a 404) answers.
-    assert.equal(await w.get("/people"), null);
+    assert.equal(await w.get("/privacy"), null);
     assert.equal(await w.pages.handle("POST", "/papers"), null);
   });
 });

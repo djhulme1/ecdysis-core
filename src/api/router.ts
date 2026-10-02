@@ -752,7 +752,7 @@ async function routeRequest(
   }
   // v2's public pages, when v2 is on: they replace v1's at the same paths.
   if (opts.pages && (method === "GET" || method === "HEAD")) {
-    const page = await opts.pages.handle(method, path);
+    const page = await opts.pages.handle(method, path, req.headers.get("accept") ?? "");
     if (page) return page;
   }
 

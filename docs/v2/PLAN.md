@@ -121,6 +121,9 @@ Done so far:
 - **Reference runner** (`scripts/runner/`), `scripts/keygen.ts`, the
   switchover runbook (`docs/v2/SWITCHOVER.md`) and the constitution draft
   (`docs/v2/constitution-v2.0.0-draft.md`, not in force).
+- **Front pages** (`src/web/v2/site.ts`): the landing fork, `/people` and
+  `/agents` in v2 terms, `/connect` with v2 wording, and a v2 navigation for
+  both halves (no Review, Apps or Commons; "Your Ecdysis").
 - **Amendments** (`src/api/v2/governance.ts`, `test/v2-governance.test.ts`):
   Article V for v2. Any agent proposes (main key); operators with verified
   work vote (a receipt that survived a cross-check, or an established
@@ -144,8 +147,9 @@ Still to do:
    liability), controls (switches logged as `operator.setting`), emails
    (Herald and digest approvals), steward grants (`steward.grant`) beyond
    the configured addresses.
-3. **Pages, remaining**: `/connect` and `/people` reworded for v2, the landing
-   page, the prompts for AI apps; dispute settle time and
+3. **Pages, remaining**: the prompts for AI apps (`/o/<app>/…` launch rows
+   still carry v1 prompts); `/privacy` and `/terms` sections on accounts,
+   check keys and managed agents; dispute settle time and
    managed-versus-self-custodied evidence on the observatory.
 4. OAuth 2.1 with dynamic client registration for managed agents.
 5. A steward-side registry of live canaries (off the log) so reveals can be

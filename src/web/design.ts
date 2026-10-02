@@ -172,6 +172,23 @@ const PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/commons", "Commons"],
 ];
 
+/** v2's halves: no juries, no apps; a place of one's own. */
+export const V2_PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
+  ["/people", "Start"],
+  ["/connect", "Connect"],
+  ["/papers", "Papers"],
+  ["/frontier", "Frontier"],
+  ["/observatory", "Observatory"],
+  ["/me", "Your Ecdysis"],
+];
+export const V2_AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
+  ["/agents", "Overview"],
+  ["/skill.md", "Protocol"],
+  ["/constitution.md", "Constitution"],
+  ["/frontier", "Frontier"],
+  ["/llms.txt", "llms.txt"],
+];
+
 const AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/agents", "Overview"],
   ["/skill.md", "Protocol"],
@@ -194,12 +211,14 @@ export interface ShellOptions {
   script?: string;
   /** Extra footer HTML. Must be trusted or escaped by the caller. */
   footerExtra?: string;
+  /** The half's navigation, when not the default (v2 pages pass their own). */
+  nav?: ReadonlyArray<readonly [string, string]> | null;
 }
 
 /** One document frame for every human page. */
 export function shell(o: ShellOptions): string {
   const cur = (half: Half) => (o.half === half ? ' aria-current="true"' : "");
-  const nav = o.half === "people" ? PEOPLE_NAV : o.half === "agents" ? AGENT_NAV : null;
+  const nav = o.nav !== undefined ? o.nav : o.half === "people" ? PEOPLE_NAV : o.half === "agents" ? AGENT_NAV : null;
   const sub = nav
     ? `<nav class="sub" aria-label="${o.half === "people" ? "For people" : "For agents"}">${nav
         .map(([href, label]) => `<a href="${href}"${o.current === href ? ' aria-current="page"' : ""}>${label}</a>`)

@@ -8,6 +8,10 @@ import type { V2Service } from "./service.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
 import { skillMdV2 } from "./skill.js";
+import { agentsPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js";
+import { connectPage } from "../../web/connect.js";
+import { mcpUrlFor } from "../../web/launch.js";
+import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
 import { agentPageV2, claimPageV2, frontierPageV2, missingPageV2, observatoryPageV2, papersPageV2, paperPageV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2 } from "../../web/v2/pages.js";
 
 export const PAGE_HEADERS: Record<string, string> = {
@@ -25,10 +29,16 @@ const AGENT = /^\/a\/([A-Za-z0-9][A-Za-z0-9-]{1,39})$/;
 export class PagesHandler {
   constructor(private v2: V2Service, private o: { host?: string; logPublicKey?: string | null } = {}) {}
 
-  /** Serve a v2 page, or null when the path is not one. */
-  async handle(method: string, path: string): Promise<Response | null> {
+  /** Serve a v2 page, or null when the path is not one. `accept` decides whether "/" is a page (browsers) or the JSON index (agents, curl). */
+  async handle(method: string, path: string, accept = ""): Promise<Response | null> {
     if (method !== "GET" && method !== "HEAD") return null;
     const html = (status: number, body: string) => new Response(method === "HEAD" ? null : body, { status, headers: PAGE_HEADERS });
+    const host = this.o.host ?? "api.ecdysis.me";
+    const site = host.replace(/^api\./, "");
+    if (path === "/" && accept.includes("text/html")) return html(200, landingPageV2(await this.landing(site)));
+    if (path === "/people" || path === "/start" || path === "/join") return html(200, peoplePageV2({ host: site, mcpUrl: mcpUrlFor(host) }));
+    if (path === "/agents") return html(200, agentsPageV2({ host, mcpUrl: mcpUrlFor(host) }));
+    if (path === "/connect") return html(200, connectPage({ host: site, mcpUrl: mcpUrlFor(host), v2: true }));
     if (path === "/skill.md") return new Response(method === "HEAD" ? null : skillMdV2(this.o.host ?? "api.ecdysis.me", this.o.logPublicKey ?? null), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/papers") return html(200, papersPageV2(await this.papers()));
     if (path === "/frontier") return html(200, frontierPageV2((await this.v2.frontier(25)).body as unknown as FrontierViewV2));
@@ -47,6 +57,18 @@ export class PagesHandler {
       return c ? html(200, claimPageV2(c)) : html(404, missingPageV2("claim"));
     }
     return null;
+  }
+
+  private async landing(site: string) {
+    const r = await this.v2.record();
+    const latest = [...r.papers.values()].sort((a, b) => b.seq - a.seq)[0] ?? null;
+    return {
+      host: site,
+      constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() },
+      logPublicKey: this.o.logPublicKey ?? null,
+      counts: { papers: r.papers.size, claims: r.claims.length, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted" && !c.disowned).length, agents: r.agents.size },
+      latest: latest ? { id: latest.id, title: latest.title, agent: latest.handle, field: latest.field, ts: latest.ts } : null,
+    };
   }
 
   private async papers() {

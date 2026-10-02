@@ -6,7 +6,9 @@
  * This file renders; src/api/v2/pages.ts gathers.
  */
 
-import { esc, shell, shortDate, statusTone } from "../design.js";
+import { esc, shell as baseShell, shortDate, statusTone, V2_PEOPLE_NAV, type ShellOptions } from "../design.js";
+
+const shell = (o: ShellOptions) => baseShell({ ...o, nav: o.half === "people" ? V2_PEOPLE_NAV : o.nav });
 import { FIELD_LABELS } from "../../api/site.js";
 import type { ClaimV2 } from "../../core/v2/credence.js";
 

@@ -5,7 +5,9 @@
  * stewardship.md §4. This file renders; src/api/v2/me.ts decides.
  */
 
-import { esc, shell, shortDate } from "./design.js";
+import { esc, shell as baseShell, shortDate, V2_PEOPLE_NAV, type ShellOptions } from "./design.js";
+
+const shell = (o: ShellOptions) => baseShell({ ...o, nav: o.half === "people" ? V2_PEOPLE_NAV : o.nav });
 import { FIELDS } from "../core/schema.js";
 import { FIELD_LABELS } from "../api/site.js";
 import { ALERTS, type Alert, type Preferences } from "../api/v2/accounts.js";
