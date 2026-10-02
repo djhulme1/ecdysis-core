@@ -8,7 +8,9 @@
  *    and preferences live here, off the log, and can be deleted.
  *  - No passwords. Sign-in is an email magic link: single-use, 15 minutes,
  *    stored as a hash, bound to the browser that asked for it. Sessions are
- *    30-day HttpOnly cookies, stored as hashes, rotated on every sign-in.
+ *    30-day HttpOnly cookies, stored as hashes; each sign-in mints a new one
+ *    (earlier sessions on other devices stay until they expire or "sign out
+ *    everywhere" ends them).
  *  - Sensitive actions (revoking a key, deleting the account, steward acts)
  *    need a sign-in within the last STEP_UP_MS.
  *  - Email is kept two ways, neither readable from the database alone: an
@@ -28,6 +30,8 @@ export const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 export const STEP_UP_MS = 10 * 60 * 1000;
 export const PAIRING_TTL_MS = 24 * 3600 * 1000;
 export const LINKS_PER_HOUR = 5;
+/** Sign-in links the whole deployment sends in an hour: a ceiling on what an attacker can make Ecdysis mail out. */
+export const LINKS_GLOBAL_PER_HOUR = 300;
 export const SIGNUPS_PER_HOUR = 3;
 /**
  * Pairing-code guesses per connection and hour. The code's 75 bits are the
@@ -70,7 +74,10 @@ export interface AccountStore {
   getAccountByEmailHash(emailHash: string): Promise<AccountRow | null>;
   getAccountByOperator(operatorId: string): Promise<AccountRow | null>;
   putAccount(row: AccountRow): Promise<void>;
-  deleteAccount(id: string): Promise<void>;
+  /** Create an account; false (and nothing written) when one with that email hash already exists. */
+  createAccount(row: AccountRow): Promise<boolean>;
+  /** Remove the account and everything that could identify its address: sessions, pairings, preferences, sent alerts, its links and its rate-limit events. */
+  deleteAccount(id: string, emailHash: string): Promise<void>;
   putMagicLink(row: MagicLinkRow): Promise<void>;
   getMagicLink(hash: string): Promise<MagicLinkRow | null>;
   /** Spend the link: true if this call spent it, false if it was already spent (the store decides atomically). */
@@ -105,12 +112,19 @@ export class MemoryAccountStore implements AccountStore {
   async getAccountByEmailHash(h: string) { return [...this.accounts.values()].find((a) => a.emailHash === h) ?? null; }
   async getAccountByOperator(op: string) { return [...this.accounts.values()].find((a) => a.operatorId === op) ?? null; }
   async putAccount(row: AccountRow) { this.accounts.set(row.id, { ...row }); }
-  async deleteAccount(id: string) {
+  async createAccount(row: AccountRow) {
+    for (const a of this.accounts.values()) if (a.emailHash === row.emailHash) return false;
+    this.accounts.set(row.id, { ...row });
+    return true;
+  }
+  async deleteAccount(id: string, emailHash: string) {
     this.accounts.delete(id);
     this.prefs.delete(id);
     for (const k of this.sent) if (k.startsWith(`${id}|`)) this.sent.delete(k);
     for (const [h, s] of this.sessions) if (s.accountId === id) this.sessions.delete(h);
     for (const [h, p] of this.pairings) if (p.accountId === id) this.pairings.delete(h);
+    for (const [h, l] of this.links) if (l.emailHash === emailHash) this.links.delete(h);
+    this.events = this.events.filter((e) => e.bucket !== `link:e:${emailHash}`);
   }
   async putMagicLink(row: MagicLinkRow) { this.links.set(row.hash, { ...row }); }
   async getMagicLink(hash: string) { return this.links.get(hash) ?? null; }
@@ -163,7 +177,7 @@ export const PAIRING_CODE = /^[a-z2-9]{5}-[a-z2-9]{5}-[a-z2-9]{5}$/;
 export class Accounts {
   private now: () => Date;
   private rnd: (n: number) => Uint8Array;
-  private keys: Promise<{ hmac: CryptoKey; aes: CryptoKey } | null> | null = null;
+  private keys: Promise<{ hmac: CryptoKey; aes: CryptoKey; tokens: CryptoKey } | null> | null = null;
 
   constructor(private o: AccountsOptions) {
     this.now = o.now ?? (() => new Date());
@@ -175,7 +189,7 @@ export class Accounts {
     return !!this.o.key && HEX64.test(this.o.key.trim());
   }
 
-  private async material(): Promise<{ hmac: CryptoKey; aes: CryptoKey } | null> {
+  private async material(): Promise<{ hmac: CryptoKey; aes: CryptoKey; tokens: CryptoKey } | null> {
     if (!this.enabled()) return null;
     if (!this.keys) {
       this.keys = (async () => {
@@ -186,6 +200,7 @@ export class Accounts {
         return {
           hmac: await derive("email-hash/1", { name: "HMAC", hash: "SHA-256" }, ["sign"]),
           aes: await derive("email-seal/1", { name: "AES-GCM", length: 256 }, ["encrypt", "decrypt"]),
+          tokens: await derive("tokens/1", { name: "HMAC", hash: "SHA-256" }, ["sign"]),
         };
       })();
     }
@@ -204,6 +219,27 @@ export class Accounts {
     const m = await this.material();
     if (!m) throw new Error("accounts closed");
     return toHex(new Uint8Array(await crypto.subtle.sign("HMAC", m.hmac, bufferSource(te.encode(email)))));
+  }
+
+  /** A keyed token over `purpose|subject` (one-click stop links, say), under its own derived key: never a hash of an address. */
+  async token_(purpose: string, subject: string): Promise<string> {
+    const m = await this.material();
+    if (!m) throw new Error("accounts closed");
+    return toHex(new Uint8Array(await crypto.subtle.sign("HMAC", m.tokens, bufferSource(te.encode(`${purpose}|${subject}`)))));
+  }
+
+  /** Whether an account's address is on the configured steward list, read now (a steward removed from the list stops being one at once). */
+  async isSteward(account: AccountRow): Promise<boolean> {
+    if (!this.o.stewardEmailHashes.length) return false;
+    const email = await this.unseal(account.emailSealed);
+    return !!email && this.o.stewardEmailHashes.includes(await sha256Hex(email));
+  }
+
+  /** The address, masked for display: enough to recognise, not enough to copy. */
+  static maskEmail(email: string): string {
+    const at = email.indexOf("@");
+    if (at <= 0) return "…";
+    return `${email[0]}…@${email.slice(at + 1)}`;
   }
 
   async seal(text: string): Promise<string> {
@@ -226,15 +262,17 @@ export class Accounts {
   }
 
   private token(bytes = 32): string { return b64urlEncode(this.rnd(bytes)); }
+  /** A fresh browser token, for the sign-in page to set before any link is asked for. */
+  newBrowserToken(): string { return this.token(); }
   private id(prefix: string): string { return `${prefix}_${toHex(this.rnd(12))}`; }
   private async hash(secret: string): Promise<string> { return sha256Hex(`ecdysis-accounts|${secret}`); }
   private async ipHash(ip: string): Promise<string> { return (await sha256Hex(`ecdysis-accounts-ip|${ip}`)).slice(0, 32); }
 
+  /** Record the attempt, THEN count: concurrent attempts over-count rather than slip under the limit. */
   private async limited(bucket: string, perHour: number): Promise<boolean> {
     const since = new Date(this.now().getTime() - HOUR_MS).toISOString();
-    if ((await this.o.store.countEvents(bucket, since)) >= perHour) return true;
     await this.o.store.recordEvent(bucket, this.now().toISOString());
-    return false;
+    return (await this.o.store.countEvents(bucket, since)) > perHour;
   }
 
   /* ---------------- sign-in ---------------- */
@@ -250,8 +288,11 @@ export class Accounts {
     const email = Accounts.normaliseEmail(emailIn);
     if (!email) return { ok: false, status: 400, error: "That doesn't look like an email address." };
     const eh = await this.emailHash(email);
-    if (await this.limited(`link:e:${eh}`, LINKS_PER_HOUR)) return { ok: false, status: 429, error: "Too many sign-in links for that address in the last hour. Check your inbox, or try later." };
+    // The connection's limit first (an attacker's connection runs dry whatever addresses it names), then the deployment's
+    // ceiling on sign-in mail, then the address's, so that one connection cannot lock an address out by itself.
     if (await this.limited(`link:ip:${await this.ipHash(ip)}`, LINKS_PER_HOUR)) return { ok: false, status: 429, error: "Too many sign-in links from this connection in the last hour. Try later." };
+    if (await this.limited("link:all", LINKS_GLOBAL_PER_HOUR)) return { ok: false, status: 429, error: "Ecdysis is sending a lot of sign-in links right now. Try again in a little while." };
+    if (await this.limited(`link:e:${eh}`, LINKS_PER_HOUR)) return { ok: false, status: 429, error: "Too many sign-in links for that address in the last hour. Check your inbox, or try later." };
     const b = browser && /^[A-Za-z0-9_-]{32,64}$/.test(browser) ? browser : this.token();
     const t = this.token();
     const nowIso = this.now().toISOString();
@@ -293,10 +334,13 @@ export class Accounts {
     const steward = email ? this.o.stewardEmailHashes.includes(await sha256Hex(email)) : false;
     if (!account) {
       if (await this.limited(`signup:ip:${await this.ipHash(ip)}`, SIGNUPS_PER_HOUR)) return { ok: false, status: 429, error: "Too many new accounts from this connection in the last hour. Try later." };
-      account = { id: this.id("acct"), emailHash: link.emailHash, emailSealed: link.emailSealed, operatorId: this.id("op"), role: steward ? "steward" : "member", createdAt: this.now().toISOString() };
-      await this.o.store.putAccount(account);
-      created = true;
-    } else if ((account.role === "steward") !== steward) {
+      const fresh: AccountRow = { id: this.id("acct"), emailHash: link.emailHash, emailSealed: link.emailSealed, operatorId: this.id("op"), role: steward ? "steward" : "member", createdAt: this.now().toISOString() };
+      // Two first sign-ins racing for one address: the store keeps whichever landed first; the other joins it.
+      created = await this.o.store.createAccount(fresh);
+      account = created ? fresh : await this.o.store.getAccountByEmailHash(link.emailHash);
+      if (!account) return { ok: false, status: 500, error: "The account could not be created. Try again." };
+    }
+    if ((account.role === "steward") !== steward) {
       account = { ...account, role: steward ? "steward" : "member" };
       await this.o.store.putAccount(account);
     }
@@ -375,7 +419,7 @@ export class Accounts {
 
   /** Delete the account: email, sessions, pairings, preferences. The operator id and everything signed under it stay on the log. */
   async deleteAccount(s: Signed): Promise<void> {
-    await this.o.store.deleteAccount(s.account.id);
+    await this.o.store.deleteAccount(s.account.id, s.account.emailHash);
   }
 
   /** For the steward's people page: find the account behind an operator id (never by email). */

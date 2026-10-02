@@ -9,7 +9,7 @@
 
 import { verifyAccess, accessConfigured, type AccessConfig } from "../access.js";
 import { APPEAL_MS } from "../../core/v2/receipts.js";
-import { ME_HEADERS } from "./me.js";
+import { ME_HEADERS, sameOrigin } from "./me.js";
 import { cookie, type Accounts, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
 import { auditPage, contentPage, evidencePage, overviewPage, peoplePage, refusedPage, type PersonRow } from "../../web/steward.js";
@@ -45,15 +45,18 @@ export class StewardHandler {
   async handle(req: Request, path: string): Promise<Response> {
     const method = req.method.toUpperCase();
     if (method !== "GET" && method !== "HEAD" && method !== "POST") return new Response("Method not allowed", { status: 405, headers: { ...ME_HEADERS, allow: "GET, HEAD, POST" } });
-    // Lock one: Cloudflare Access, when configured.
-    if (this.o.access && accessConfigured(this.o.access)) {
+    // Lock one: Cloudflare Access. Configured in production; a configuration that is present but incomplete fails closed,
+    // as the operator console's does. (Tests pass access: null to run without it.)
+    if (this.o.access) {
+      if (!accessConfigured(this.o.access)) return this.html(503, refusedPage("This area sits behind Cloudflare Access, which is not fully configured on this deployment; nothing is served until it is."));
       const v = await verifyAccess(req, this.o.access, this.o.fetchImpl ?? fetch, this.now().getTime());
       if (!v.ok) return this.html(403, refusedPage("This area sits behind Cloudflare Access; the request did not carry a valid Access token."));
     }
-    // Lock two: a signed-in steward.
+    // Lock two: a signed-in steward, by the list as it stands now (not as it stood when they signed in).
     const signed = await this.o.accounts.session(cookie(req.headers.get("cookie"), SESSION_COOKIE));
     if (!signed) return this.html(401, refusedPage("Sign in to your Ecdysis first; stewardship needs a signed-in steward."));
-    if (signed.account.role !== "steward") return this.html(403, refusedPage("Your account does not hold the steward role."));
+    if (signed.account.role !== "steward" || !(await this.o.accounts.isSteward(signed.account))) return this.html(403, refusedPage("Your account does not hold the steward role."));
+    if (method === "POST" && !sameOrigin(req)) return this.html(403, refusedPage("That request did not come from this site, so nothing was done."));
 
     const url = new URL(req.url);
     const flash = url.searchParams.get("ok");

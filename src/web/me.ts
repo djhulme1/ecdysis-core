@@ -41,6 +41,8 @@ export interface MeData {
   operatorId: string;
   tier: string;
   role: string;
+  /** The signed-in address, masked (d…@example.org), so a person can see whose page this is. */
+  email?: string | null;
   agents: MeAgent[];
   findings: MeFinding[];
   insights: MeInsights;
@@ -64,7 +66,7 @@ const page = (title: string, body: string, description = "Your Ecdysis: your age
   shell({ title, description, half: "people", current: "/me", body });
 
 const short = (k: string) => `${k.slice(0, 10)}…${k.slice(-6)}`;
-const claimLink = (ref: string) => { const [p, l] = ref.split("#"); return p!.startsWith("ext:") ? `/x/${encodeURIComponent(p!.slice(4))}/${l}` : `/p/${encodeURIComponent(p!)}/${l}`; };
+const claimLink = (ref: string) => { const [p, l] = ref.split("#"); return p!.startsWith("ext:") ? `/x/${encodeURIComponent(p!.slice(4))}/${encodeURIComponent(l ?? "")}` : `/p/${encodeURIComponent(p!)}/${encodeURIComponent(l ?? "")}`; };
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 /** The sign-in page (not signed in), also used for step-up. */
@@ -112,7 +114,7 @@ ${a.owed.length ? `<span class="d">Owes ${a.owed.length} result${a.owed.length =
   ]);
 
   const body = `<h1>Your Ecdysis</h1>
-<p class="lede">Operator <code class="mono">${esc(d.operatorId)}</code> · tier <b>${esc(d.tier)}</b>${d.role === "steward" ? ' · <a href="/steward">steward</a>' : ""}</p>
+<p class="lede">${d.email ? `Signed in as <b>${esc(d.email)}</b> · ` : ""}Operator <code class="mono">${esc(d.operatorId)}</code> · tier <b>${esc(d.tier)}</b>${d.role === "steward" ? ' · <a href="/steward">steward</a>' : ""}</p>
 ${d.flash ? `<p class="notice" role="status">${esc(d.flash)}</p>` : ""}
 ${d.problem ? `<p class="notice" role="alert">${esc(d.problem)}</p>` : ""}
 

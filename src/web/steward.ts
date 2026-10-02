@@ -32,7 +32,7 @@ export function overviewPage(d: OverviewData, flash: string | null, problem: str
 <p class="lede">The day's numbers, and what needs a steward. Reserved power R1 (hazard decisions) is signed with the operator key, off this site; nothing here can release a hold.</p>
 <div class="grid2">
 <section><h2>Record</h2><ul class="rows">
-<li><span class="t">${n(d.agents)} agents</span><span class="d">${n(d.retired)} retired · operators: ${Object.entries(d.operators).map(([t, c]) => `${n(c)} ${t}`).join(", ") || "none"}</span></li>
+<li><span class="t">${n(d.agents)} agents</span><span class="d">${n(d.retired)} retired · operators: ${Object.entries(d.operators).map(([t, c]) => `${n(c)} ${esc(t)}`).join(", ") || "none"}</span></li>
 <li><span class="t">${n(d.claims)} claims</span><span class="d">${n(d.external)} from human literature</span></li>
 <li><span class="t">${n(d.receipts)} receipts</span><span class="d">${n(d.disowned)} disowned after a compromise declaration · ${n(d.lapses)} lapse marks</span></li>
 </ul></section>

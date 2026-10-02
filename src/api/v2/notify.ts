@@ -76,7 +76,7 @@ export class Notifier {
 
   /** The one-click stop token for an account: deterministic, unguessable without the key, nothing stored. */
   async stopToken(accountId: string): Promise<string> {
-    return (await this.o.accounts.emailHash(`stop|${accountId}`)).slice(0, 40);
+    return (await this.o.accounts.token_("stop", accountId)).slice(0, 40);
   }
 
   /** Send every account its new alerts, once each. Returns counts. */

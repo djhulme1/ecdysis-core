@@ -198,7 +198,8 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
   return new Accounts({
     store,
     key: env.ACCOUNTS_KEY ?? null,
-    send: env.HERALD_API_KEY ? resendSender(env.HERALD_API_KEY) : null,
+    // The email pause switch covers sign-in links too: paused, accounts can still be used but not entered.
+    send: env.HERALD_API_KEY && !emailPaused(env) ? resendSender(env.HERALD_API_KEY) : null,
     from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>",
     replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
     siteBase: "https://ecdysis.me",

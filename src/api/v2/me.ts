@@ -38,6 +38,21 @@ export interface MeOptions {
   stop?: (accountId: string, token: string) => Promise<boolean>;
 }
 
+/**
+ * A POST must come from this site: browsers send Origin (and Sec-Fetch-Site) on
+ * every POST, so a missing or foreign one is a cross-site form or a script.
+ * The anti-forgery token guards the signed-in forms; this guards the one
+ * form that has no session yet (sign-in), and everything else twice.
+ */
+export function sameOrigin(req: Request): boolean {
+  const url = new URL(req.url);
+  const origin = req.headers.get("origin");
+  const site = req.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return false;
+  if (!origin) return site === "same-origin";
+  return origin === `${url.protocol}//${url.host}`;
+}
+
 export class MeHandler {
   constructor(private o: MeOptions) {}
 
@@ -68,6 +83,9 @@ export class MeHandler {
     const url = new URL(req.url);
     const browser = cookie(req.headers.get("cookie"), BROWSER_COOKIE);
     const signed = await this.o.accounts.session(cookie(req.headers.get("cookie"), SESSION_COOKIE));
+    // Every POST here must come from this site. A cross-site POST to /me/login would otherwise sign the victim's browser
+    // into the attacker's account (login CSRF): the browser cookie is minted on the sign-in page and must already be here.
+    if (method === "POST" && path !== "/me/stop" && !sameOrigin(req)) return this.html(403, noticePage("Not from here", "That request did not come from this site, so nothing was done. Open your Ecdysis page and try again."));
 
     // One-click stop from an alert email: no session needed, GET or POST, always honoured (even read-only).
     if (path === "/me/stop") {
@@ -82,6 +100,8 @@ export class MeHandler {
     if (path === "/me/login") {
       if (method === "POST") {
         if (this.o.readOnly) return this.html(503, noticePage("Not right now", "Ecdysis isn't taking changes at the moment. Please try again later."));
+        // The browser cookie is issued by the sign-in page; a request without it did not come through that page.
+        if (!browser || !/^[A-Za-z0-9_-]{32,64}$/.test(browser)) return this.html(403, signInPage({ problem: "Open the sign-in page first, then ask for your link from there." }), [setCookie(BROWSER_COOKIE, this.o.accounts.newBrowserToken(), YEAR_S, secure)]);
         const f = await this.form(req);
         const r = await this.o.accounts.requestLink(f?.get("email") ?? "", ip, browser);
         if (!r.ok) return this.html(r.status, signInPage({ problem: r.error }));
@@ -95,8 +115,10 @@ export class MeHandler {
     }
 
     if (!signed) {
-      if (path === "/me" && method !== "POST") return this.html(200, signInPage({}));
-      return this.html(401, signInPage({ problem: path === "/me" ? null : "Sign in first." }));
+      // The sign-in page names this browser, so the link it asks for can be bound to it.
+      const named = browser && /^[A-Za-z0-9_-]{32,64}$/.test(browser) ? [] : [setCookie(BROWSER_COOKIE, this.o.accounts.newBrowserToken(), YEAR_S, secure)];
+      if (path === "/me" && method !== "POST") return this.html(200, signInPage({}), named);
+      return this.html(401, signInPage({ problem: path === "/me" ? null : "Sign in first." }), named);
     }
 
     if (method !== "POST") {
@@ -108,7 +130,8 @@ export class MeHandler {
     const f = await this.form(req);
     if (!f || !(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.html(403, await this.dashboard(signed, null, "That form had expired. Please try again."));
     if (this.o.readOnly && path !== "/me/signout" && path !== "/me/signout-all") return this.html(503, noticePage("Not right now", "Ecdysis isn't taking changes at the moment. Please try again later."));
-    const needsStepUp = path === "/me/keys/issue" || path === "/me/keys/revoke" || path === "/me/delete";
+    // Keys, deletion and pairing (which lets whoever holds the code register agents under this operator) need a recent sign-in.
+    const needsStepUp = path === "/me/keys/issue" || path === "/me/keys/revoke" || path === "/me/delete" || path === "/me/pairing";
     if (needsStepUp && !this.o.accounts.fresh(signed)) return this.html(401, signInPage({ stepUp: true }));
 
     switch (path) {
@@ -189,8 +212,10 @@ export class MeHandler {
       .sort((a, b) => b.valueOfChecking - a.valueOfChecking).slice(0, 10)
       .map((c) => ({ ref: c.ref, field: fieldOf(c.ref), credence: c.credence, use: c.use, status: c.status, families: c.families, perMinute: c.valueOfChecking }));
     const followed = prefs.interests.claims.map((ref) => s.claims.get(ref)).filter((c): c is NonNullable<typeof c> => !!c).map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, families: c.families }));
+    const email = await this.o.accounts.emailOf(signed.account);
     const data: MeData = {
       operatorId: op, tier: r.tiers.get(op) ?? "account", role: signed.account.role, agents, findings,
+      email: email ? Accounts.maskEmail(email) : null,
       insights: { claims: mine, disputes, queue, followed },
       prefs, csrf: await this.o.accounts.csrf(signed), fresh: this.o.accounts.fresh(signed), flash, problem,
     };

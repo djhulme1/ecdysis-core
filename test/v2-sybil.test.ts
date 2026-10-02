@@ -209,7 +209,11 @@ describe("canaries and seed-insensitive bundles", () => {
     // The steward reveals the canary: it is known to fail (the 2016 multi-site replication found no effect).
     assert.equal((await w.svc.revealCanary(ref, "refuted", "op-steward")).status, 200);
     assert.equal((await w.svc.revealCanary(ref, "refuted", "op-steward")).status, 409);
-    assert.equal((await w.svc.revealCanary("ecd:nothere#C1", "refuted", "op-steward")).status, 404);
+    assert.equal((await w.svc.revealCanary("ext:0123456789abcdef#C1", "refuted", "op-steward")).status, 404);
+    // An Ecdysis claim is never a canary: its truth is decided by evidence, and no steward may anchor it.
+    const native = await w.paper("Ant", "A native result");
+    assert.equal((await w.svc.revealCanary(native, "refuted", "op-steward")).status, 400, "a steward cannot rewrite the record's reports by declaring a native claim's outcome");
+    assert.equal((await w.svc.record()).anchors.has(native), false);
     s = await w.svc.scores();
     const scored = s.track.reports.filter((x) => x.claim === ref);
     assert.ok(scored.length === 2 && scored.every((x) => x.resolved === 0), "both reports are scored against the known outcome");

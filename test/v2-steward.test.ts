@@ -63,7 +63,7 @@ async function world() {
   const get = (path: string, session: string | null) => steward.handle(new Request(`https://ecdysis.me${path}`, { headers: session ? { cookie: `ecd_s=${session}` } : {} }), path.split("?")[0]!);
   const post = (path: string, form: Record<string, string>, session: string) => {
     const p = new URLSearchParams(form).toString();
-    return steward.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${session}` } }), path);
+    return steward.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${session}`, origin: "https://ecdysis.me" } }), path);
   };
   const idOf = (r: { body: Json }) => String((r.body as Record<string, Json>)["id"]);
   return { svc, accounts, steward, agent, sign, commit, result, bundle, signIn, get, post, idOf, tick: (ms: number) => { clock.t += ms; }, keys, log };
@@ -82,6 +82,20 @@ describe("the stewardship area", () => {
     const r = await locked.handle(new Request("https://ecdysis.me/steward", { headers: { cookie: `ecd_s=${d.session}` } }), "/steward");
     assert.equal(r.status, 403);
     assert.match(await r.text(), /Cloudflare Access/);
+    // Access present but half-configured (no audience, say) fails closed rather than silently dropping the lock.
+    const half = new StewardHandler({ accounts: w.accounts, v2: w.svc, access: { teamDomain: "team.cloudflareaccess.com", aud: "", emailHashes: [], host: "ecdysis.me" } });
+    const h = await half.handle(new Request("https://ecdysis.me/steward", { headers: { cookie: `ecd_s=${d.session}` } }), "/steward");
+    assert.equal(h.status, 503);
+    assert.match(await h.text(), /not fully configured/);
+    // A cross-site POST is refused before anything is read.
+    const csrf = (await (await w.get("/steward/evidence", d.session)).text()).match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    const p = new URLSearchParams({ csrf, operatorId: "op-x", tier: "verified" }).toString();
+    const cross = await w.steward.handle(new Request("https://ecdysis.me/steward/people/tier", { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${d.session}`, origin: "https://evil.example" } }), "/steward/people/tier");
+    assert.equal(cross.status, 403);
+    assert.match(await cross.text(), /did not come from this site/);
+    // The role is read from the list as it stands: struck off, a steward's open session stops working at once.
+    const struck = new StewardHandler({ accounts: new Accounts({ store: w.accounts["o"].store, key: "ab".repeat(32), send: null, from: "a@notify.ecdysis.me", replyTo: "r@ecdysis.me", siteBase: "https://ecdysis.me", stewardEmailHashes: [], now: () => new Date() }), v2: w.svc, access: null });
+    assert.equal((await struck.handle(new Request("https://ecdysis.me/steward", { headers: { cookie: `ecd_s=${d.session}` } }), "/steward")).status, 403);
   });
 
   it("people: lists operators by id and handle, sets tiers with step-up, and the act is on the log under the steward's operator id", async () => {
@@ -110,6 +124,9 @@ describe("the stewardship area", () => {
     assert.equal((await w.post("/steward/people/tier", { csrf, operatorId: "op-a", tier: "verified" }, d.session)).status, 200, "already at that tier: shown as a problem");
     assert.equal((await w.post("/steward/people/tier", { csrf, operatorId: "op-a", tier: "king" }, d.session)).status, 200);
     assert.equal((await w.svc.record()).tiers.get("op-a"), "verified");
+    // Not their own operator: a steward cannot verify themselves.
+    assert.equal((await w.post("/steward/people/tier", { csrf, operatorId: d.account.operatorId, tier: "verified" }, d.session)).status, 200, "shown as a problem");
+    assert.notEqual((await w.svc.record()).tiers.get(d.account.operatorId), "verified");
     w.tick(11 * MIN);
     res = await w.post("/steward/people/tier", { csrf, operatorId: "op-a", tier: "account" }, d.session);
     assert.equal(res.status, 401, "step-up");

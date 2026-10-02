@@ -331,6 +331,7 @@ export class V2Service {
   async setTier(operatorId: string, tier: "unverified" | "account" | "verified", steward?: string): Promise<ApiResult> {
     if (!operatorId || operatorId.length > 80) return err(400, "operatorId");
     if (tier !== "unverified" && tier !== "account" && tier !== "verified") return err(400, "tier: unverified, account or verified");
+    if (steward && operatorId === steward) return err(403, "a steward does not set their own operator's tier");
     const r = await this.record();
     if ((r.tiers.get(operatorId) ?? "unverified") === tier) return err(409, `already at tier "${tier}"`);
     await this.o.log.append("operator.tier", { operatorId, tier, ...(steward ? { by: "steward", steward } : {}) });
@@ -382,6 +383,9 @@ export class V2Service {
    */
   async revealCanary(claim: string, outcome: string, steward: string): Promise<ApiResult> {
     if (outcome !== "confirmed" && outcome !== "refuted") return err(400, "outcome: confirmed or refuted");
+    // A canary is a claim from human literature whose outcome was known before it was planted. An Ecdysis claim's truth is
+    // decided by evidence and nothing else: no steward may anchor one, however sure they are.
+    if (!/^ext:[0-9a-f]{16}#C1$/.test(claim)) return err(400, "canaries are external claims (ext:…#C1): a native claim's outcome is decided by evidence, never declared");
     const r = await this.record();
     if (!r.claims.some((c) => c.ref === claim)) return err(404, "no such claim on the record");
     if (r.anchors.has(claim)) return err(409, "already revealed");
@@ -752,6 +756,7 @@ export class V2Service {
     const f = r.findings.find((x) => x.id === id);
     if (!f) return err(404, "no such finding");
     if (f.reversed) return err(409, "already reversed");
+    if (steward && f.oddOperator === steward) return err(403, "a steward does not reverse a finding against their own operator; another steward must");
     await this.o.log.append("finding.reverse", { id, ...(steward ? { by: "steward", steward } : {}) });
     return ok(200, { id, reversed: true });
   }
@@ -859,8 +864,11 @@ export class V2Service {
     const subject = String(b["subject"] ?? "");
     const decision = String(b["decision"] ?? "");
     const signature = String(b["signature"] ?? "");
-    if (!subject || subject.length > 120 || (decision !== "release" && decision !== "reject") || !signature) return err(400, "need subject, decision (release|reject), signature");
-    if (!(await verifyJson(this.o.operatorPublicKey, { op: "hazard", subject, decision }, signature))) return err(401, "signature does not verify against the operator key");
+    const ts = String(b["ts"] ?? "");
+    if (!subject || subject.length > 120 || (decision !== "release" && decision !== "reject") || !signature) return err(400, "need subject, decision (release|reject), ts (ISO-8601 UTC, within the hour) and signature over {op: \"hazard\", subject, decision, ts}");
+    // The signed object carries the time, so a decision captured once cannot be replayed if the same subject is held again.
+    if (!ISO.test(ts) || Math.abs(Date.parse(ts) - this.now().getTime()) > 3600_000) return err(400, "ts: ISO-8601 UTC within an hour of now");
+    if (!(await verifyJson(this.o.operatorPublicKey, { op: "hazard", subject, decision, ts }, signature))) return err(401, "signature does not verify against the operator key");
     const r = await this.record();
     if (!r.held.has(subject)) return err(404, "nothing is held under that subject");
     await this.o.log.append("hazard.release", { subject, decision });

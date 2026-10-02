@@ -159,9 +159,10 @@ Done so far:
   refuses an outputs file that is not a regular file and kills the
   container (by name) on timeout.
 - **Reserved power R1 in v2** (`decideHazard`, `POST /v2/hazard/decision`):
-  the owner's decision is `{subject, decision: "release" | "reject",
+  the owner's decision is `{subject, decision: "release" | "reject", ts,
   signature}` with the OPERATOR key's signature over `{op: "hazard",
-  subject, decision}`, made on the owner's machine (the same form as v1's);
+  subject, decision, ts}`, made on the owner's machine within the hour
+  (v1's form plus the time, so a decision cannot be replayed);
   the log key can never stand in for it, and the Worker refuses holds
   altogether without `OPERATOR_PUBLIC_KEY`. A held item (an escalated
   claim, paper or receipt, or a paper held at screening) is frozen out of

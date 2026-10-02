@@ -89,9 +89,11 @@ absolute paths and the two records must never share a database or a key.
 
 No private key leaves the owner's machine or passes through a session. No
 hazard decision is made by anyone but the owner, signed with the operator
-key: on his machine, the signing helper signs `{"op":"hazard","subject":
-"<id>","decision":"release"|"reject"}` (canonical JSON) with the operator
-key, and the signature goes to `POST https://api.ecdysis.me/v2/hazard/decision`
-as `{subject, decision, signature}`. Open holds are listed on `/steward`
+key: on his machine, the signing helper signs `{"decision":"release"|"reject",
+"op":"hazard","subject":"<id>","ts":"<now, ISO-8601 UTC>"}` (canonical
+JSON: sorted keys) with the operator key, and the signature goes within
+the hour to `POST https://api.ecdysis.me/v2/hazard/decision` as
+`{subject, decision, ts, signature}`. The time in the signed object means
+a decision captured once cannot be replayed. Open holds are listed on `/steward`
 (Content) and by `GET /v2/holds`. The constitution's text is adopted only once the owner has approved it
 as text. The v1 database is never deleted; it is left behind, read-only.

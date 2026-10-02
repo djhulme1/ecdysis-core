@@ -120,6 +120,20 @@ describe("accounts (v2)", () => {
     assert.equal(((await w.accounts.requestLink("q@example.org", "5.5.5.5", null)) as { status: number }).status, 429, "per connection");
     w.tick(61 * MIN);
     assert.ok((await w.accounts.requestLink("q@example.org", "5.5.5.5", null)).ok, "an hour later");
+    // A burst from many connections at one address: the limiter records before it counts, so the burst cannot slip under
+    // the limit and mail-bomb the address.
+    const before = w.sent.length;
+    const burst = await Promise.all(Array.from({ length: 12 }, (_, i) => w.accounts.requestLink("burst@example.org", `6.6.6.${i}`, null)));
+    assert.ok(w.sent.length - before <= LINKS_PER_HOUR, `at most ${LINKS_PER_HOUR} emails, sent ${w.sent.length - before}`);
+    assert.ok(burst.some((r) => !r.ok));
+    // The connection's limit is checked first: a hostile connection hammering one address runs dry at five, and its refused
+    // attempts are not charged to the address. (Those five still fill the address's hour: the price of not mail-bombing it.)
+    w.tick(61 * MIN);
+    const sentBefore = w.sent.length;
+    for (let i = 0; i < LINKS_PER_HOUR + 3; i++) await w.accounts.requestLink("old@example.org", "8.8.8.8", null);
+    assert.equal(w.sent.length - sentBefore, LINKS_PER_HOUR, "five emails at most, however many attempts");
+    w.tick(61 * MIN);
+    assert.ok((await w.accounts.requestLink("old@example.org", "4.4.4.4", null)).ok, "and the address is free again an hour later");
     // Sign-ups per connection.
     const w2 = world();
     for (let i = 0; i < SIGNUPS_PER_HOUR; i++) await w2.signIn(`s${i}@example.org`, "browser-cccccccccccccccccccccccccccccc", "7.7.7.7");
@@ -209,24 +223,34 @@ describe("accounts (v2)", () => {
     const w = world();
     const ip = "1.1.1.1";
     const get = (path: string, cookies: Record<string, string> = {}) => w.me.handle(new Request(`https://ecdysis.me${path}`, { headers: { cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join("; ") } }), path.split("?")[0]!, ip);
-    const post = (path: string, form: Record<string, string | string[]>, cookies: Record<string, string> = {}) => {
+    const post = (path: string, form: Record<string, string | string[]>, cookies: Record<string, string> = {}, origin: string | null = "https://ecdysis.me") => {
       const p = new URLSearchParams();
       for (const [k, v] of Object.entries(form)) for (const x of Array.isArray(v) ? v : [v]) p.append(k, x);
-      return w.me.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p.toString(), headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.toString().length), cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join("; ") } }), path, ip);
+      return w.me.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p.toString(), headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.toString().length), cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join("; "), ...(origin ? { origin } : {}) } }), path, ip);
     };
     const cookieOf = (res: Response, name: string) => { const c = res.headers.getSetCookie().find((x) => x.startsWith(`${name}=`)); return c ? decodeURIComponent(c.split(";")[0]!.slice(name.length + 1)) : null; };
 
     let res = await get("/me");
     assert.equal(res.status, 200);
     assert.match(await res.text(), /Email me a sign-in link/);
+    const b = cookieOf(res, "ecd_b")!;
+    assert.ok(b, "the sign-in page names the browser before any link is asked for");
+    assert.match(res.headers.getSetCookie()[0]!, /HttpOnly; SameSite=Lax/);
     assert.equal((await get("/me/pairing")).status, 401, "nothing personal without a session");
 
-    res = await post("/me/login", { email: "dan@example.org" });
+    // Login CSRF: a form posted from another site, or without the browser cookie, asks for nothing and signs nobody in.
+    res = await post("/me/login", { email: "attacker@example.org" }, { ecd_b: b }, "https://evil.example");
+    assert.equal(res.status, 403, "a cross-site POST is refused");
+    assert.equal(res.headers.getSetCookie().length, 0, "and sets no cookie");
+    assert.equal((await post("/me/login", { email: "attacker@example.org" }, { ecd_b: b }, null)).status, 403, "no Origin: refused");
+    res = await post("/me/login", { email: "attacker@example.org" });
+    assert.equal(res.status, 403, "without the browser cookie: refused");
+    assert.equal(w.sent.length, 0, "no link was sent for any of them");
+
+    res = await post("/me/login", { email: "dan@example.org" }, { ecd_b: b });
     assert.equal(res.status, 200);
     assert.match(await res.text(), /Check your email/);
-    const b = cookieOf(res, "ecd_b")!;
-    assert.ok(b, "the browser cookie is set with the request");
-    assert.match(res.headers.getSetCookie()[0]!, /HttpOnly; SameSite=Lax/);
+    assert.equal(res.headers.getSetCookie().length, 0, "the browser already has its cookie");
     res = await get(`/me/login?t=${w.linkToken()}`);
     assert.equal(res.status, 403, "the link needs the browser cookie");
     res = await get(`/me/login?t=${w.linkToken()}`, { ecd_b: b });
@@ -240,6 +264,7 @@ describe("accounts (v2)", () => {
     assert.equal(res.status, 200);
     let html = await res.text();
     assert.match(html, /Operator <code class="mono">op_/);
+    assert.match(html, /Signed in as <b>d…@example.org<\/b>/, "a person can see whose page this is");
     assert.equal(res.headers.get("cache-control"), "no-store");
     assert.match(res.headers.get("x-robots-tag")!, /noindex/);
     const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
@@ -285,11 +310,12 @@ describe("accounts (v2)", () => {
     assert.equal(res.status, 303);
     assert.deepEqual((await w.store.getPreferences(prefs === null ? "" : (await w.accounts.session(s))!.account.id))!.notifications, { digest: "weekly", alerts: ["check.owed"] });
 
-    // Step-up: eleven minutes on, revoking asks for a fresh sign-in; interests do not.
+    // Step-up: eleven minutes on, revoking (and minting a pairing code) asks for a fresh sign-in; interests do not.
     w.tick(11 * MIN);
     res = await post("/me/keys/revoke", { csrf, key: pub, compromisedAt: "2026-10-03T09:05:00Z" }, cookies);
     assert.equal(res.status, 401);
     assert.match(await res.text(), /Sign in again/);
+    assert.equal((await post("/me/pairing", { csrf }, cookies)).status, 401, "a stolen 30-day cookie alone cannot pair agents to the operator");
     assert.equal((await post("/me/interests", { csrf, topics: "x" }, cookies)).status, 303);
     // Sign in again (same browser), then revoke.
     await post("/me/login", { email: "dan@example.org" }, cookies);
@@ -320,6 +346,8 @@ describe("accounts (v2)", () => {
     assert.match(res.headers.getSetCookie()[0]!, /ecd_s=; .*Max-Age=0/);
     assert.equal(await w.accounts.session(s2), null);
     assert.equal(w.store.accounts.size, 1, "only the other account remains");
+    const danHash = await w.accounts.emailHash("dan@example.org");
+    assert.equal([...w.store.links.values()].filter((l) => l.emailHash === danHash).length, 0, "the sign-in links carrying the sealed address are gone too");
     rec = await w.v2.record();
     assert.equal(rec.agents.get("Moth")!.operatorId, operatorId, "the record is untouched");
   });
@@ -332,7 +360,7 @@ describe("accounts (v2)", () => {
     const csrf = await w.accounts.csrf(s);
     const post = (path: string, form: Record<string, string>) => {
       const p = new URLSearchParams(form).toString();
-      return ro.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${c.session}` } }), path, "1.1.1.1");
+      return ro.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${c.session}; ecd_b=browser-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, origin: "https://ecdysis.me" } }), path, "1.1.1.1");
     };
     assert.equal((await post("/me/pairing", { csrf })).status, 503);
     assert.equal((await post("/me/login", { email: "x@example.org" })).status, 503);

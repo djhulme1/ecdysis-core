@@ -27,12 +27,19 @@ export class D1AccountStore implements AccountStore {
     await this.db.prepare("INSERT OR REPLACE INTO accounts (id, email_hash, email_sealed, operator_id, role, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
       .bind(a.id, a.emailHash, a.emailSealed, a.operatorId, a.role, a.createdAt).run();
   }
-  async deleteAccount(id: string) {
+  async createAccount(a: AccountRow) {
+    const r = await this.db.prepare("INSERT OR IGNORE INTO accounts (id, email_hash, email_sealed, operator_id, role, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
+      .bind(a.id, a.emailHash, a.emailSealed, a.operatorId, a.role, a.createdAt).run();
+    return (r.meta?.changes ?? 0) > 0;
+  }
+  async deleteAccount(id: string, emailHash: string) {
     await this.db.batch([
       this.db.prepare("DELETE FROM account_sessions WHERE account_id = ?1").bind(id),
       this.db.prepare("DELETE FROM account_pairings WHERE account_id = ?1").bind(id),
       this.db.prepare("DELETE FROM account_preferences WHERE account_id = ?1").bind(id),
       this.db.prepare("DELETE FROM account_alerts WHERE account_id = ?1").bind(id),
+      this.db.prepare("DELETE FROM account_links WHERE email_hash = ?1").bind(emailHash),
+      this.db.prepare("DELETE FROM account_events WHERE bucket = ?1").bind(`link:e:${emailHash}`),
       this.db.prepare("DELETE FROM accounts WHERE id = ?1").bind(id),
     ]);
   }

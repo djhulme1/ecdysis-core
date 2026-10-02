@@ -63,11 +63,11 @@ async function world(o: { operatorKey?: boolean } = {}) {
   const review = (handle: string, claim: string) => sign(handle, { protocol: "ecdysis/0.2", type: "review", claim, forecast: 0.6, rationale: "The method is sound and the solver settings match the paper; I expect it to replicate." });
   const escalate = async (handle: string, subject: string) => svc.escalate(await sign(handle, { protocol: "ecdysis/0.2", type: "hazard.escalate", subject, reason: "The quoted claim links to material a person should look at before it spreads further." }));
   /** The owner's decision, signed on the owner's machine with the operator key (here: the test's). */
-  const decide = async (subject: string, decision: "release" | "reject", key: KeyPairB64 = operatorKey) =>
-    svc.decideHazard({ subject, decision, signature: await signJson(key.privateKey, { op: "hazard", subject, decision }) });
+  const decide = async (subject: string, decision: "release" | "reject", key: KeyPairB64 = operatorKey, at: string = ts()) =>
+    svc.decideHazard({ subject, decision, ts: at, signature: await signJson(key.privateKey, { op: "hazard", subject, decision, ts: at }) });
   const page = async (path: string) => { const res = await pages.handle("GET", path, "text/html"); return { status: res?.status ?? 0, html: res ? await res.text() : "" }; };
   const idOf = (r: { body: Json }) => String((r.body as R)["id"]);
-  return { svc, pages, agent, sign, bundle, commit, result, paper, review, escalate, decide, page, idOf, logKey, operatorKey, tick: (ms: number) => { clock.t += ms; } };
+  return { svc, pages, agent, sign, bundle, commit, result, paper, review, escalate, decide, page, idOf, logKey, operatorKey, ts, now, tick: (ms: number) => { clock.t += ms; } };
 }
 
 describe("reserved power R1 (holds)", () => {
@@ -106,7 +106,10 @@ describe("reserved power R1 (holds)", () => {
     assert.equal(dep.status, 451, "no building on it");
     // Who may decide: not the log key, not a wrong signature, not nobody.
     assert.equal((await w.decide(ref, "release", w.logKey)).status, 401, "the log key cannot stand in for the operator key");
-    assert.equal((await w.svc.decideHazard({ subject: ref, decision: "release", signature: "nope" })).status, 401);
+    assert.equal((await w.svc.decideHazard({ subject: ref, decision: "release", ts: w.ts(), signature: "nope" })).status, 401);
+    assert.equal((await w.svc.decideHazard({ subject: ref, decision: "release", signature: "nope" })).status, 400, "the signed object carries the time");
+    const stale = new Date(w.now().getTime() - 2 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    assert.equal((await w.decide(ref, "release", w.operatorKey, stale)).status, 400, "a decision signed two hours ago is not accepted: no replays");
     assert.equal((await w.decide("ecd:nothere#C1", "release")).status, 404);
     const keyless = await world({ operatorKey: false });
     assert.equal((await keyless.decide("anything", "release")).status, 501, "without an operator key, holds stay held");
