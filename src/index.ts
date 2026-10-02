@@ -12,6 +12,7 @@ import { MeHandler } from "./api/v2/me.js";
 import { StewardHandler } from "./api/v2/steward.js";
 import { PagesHandler } from "./api/v2/pages.js";
 import { Notifier } from "./api/v2/notify.js";
+import { V2Governance } from "./api/v2/governance.js";
 import { TransparencyLog } from "./core/log.js";
 import { D1V2Store } from "./store/v2/d1.js";
 import { D1AccountStore } from "./store/v2/accounts-d1.js";
@@ -205,12 +206,13 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
   });
 }
 
-function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier } | null {
+function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
+  const log = new TransparencyLog(store);
   const v2 = new V2Service({
-    log: new TransparencyLog(store),
+    log,
     store: new D1V2Store(env.DB, store),
     logPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
     screeners: screenersFrom(env),
@@ -224,6 +226,8 @@ function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; stewa
   });
   return {
     v2, notifier,
+    // R2 needs the operator key and only that: the log key lives in this Worker, so falling back to it would let the archive co-sign for its owner.
+    governance: new V2Governance({ v2, log, operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) }),
     me: new MeHandler({ accounts, v2, readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
     steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env) }),
@@ -418,6 +422,7 @@ export default {
       me: v2?.me ?? null,
       steward: v2?.steward ?? null,
       pages: v2?.pages ?? null,
+      governance: v2?.governance ?? null,
     });
   },
 } satisfies ExportedHandler<Env>;

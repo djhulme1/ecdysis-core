@@ -178,11 +178,34 @@ export class V2Service {
 
   /** The record as of now, derived from the log. */
   async record(): Promise<V2Record> {
+    return this.recordAsOf(this.now());
+  }
+
+  /** The record as it stood at a moment: entries logged before it, in-force rules evaluated then. */
+  async recordAsOf(asOf: Date): Promise<V2Record> {
     const rows = await this.rows();
+    const cut = asOf.getTime();
     const entries: V2Entry[] = rows
-      .filter((r) => V2_TYPES.has(r.type))
+      .filter((r) => V2_TYPES.has(r.type) && Date.parse(r.ts) <= cut)
       .map((r) => ({ seq: r.seq, ts: r.ts, type: r.type as V2EntryType, payload: (r.payload ?? {}) as Record<string, unknown> }));
-    return deriveV2(entries, this.now());
+    return deriveV2(entries, asOf);
+  }
+
+  /** Every row of the log, for readers that need more than the v2 record (governance, holds, audit). */
+  async logRows(): Promise<LogRow[]> {
+    return this.rows();
+  }
+
+  /** Keep a signed envelope by its id (for modules that log their own entries). */
+  async keepEnvelope(id: string, env: Json): Promise<void> {
+    await this.o.store.putEnvelope(id, env);
+  }
+
+  /** Open an envelope for another v2 module: the same identity, key-scope and signature checks as every write here. */
+  async open<T extends { agent: { handle: string; publicKey: string } }>(
+    env: Json, type: string, validate: (p: unknown) => { ok: true; value: T } | { ok: false; errors: string[] }, scope: "main" | "reports",
+  ): Promise<{ ok: true; payload: T; operatorId: string; id: string; record: V2Record; key: string; checkKey: boolean } | { ok: false; result: ApiResult }> {
+    return this.openEnvelope(env, type, validate, scope);
   }
 
   /** The signed envelope behind a logged entry (a paper's full text, a receipt's commitment), by its content id. */
@@ -192,7 +215,11 @@ export class V2Service {
 
   /** Credence, statuses and the track record, all from the log. */
   async scores() {
-    const r = await this.record();
+    return this.scoresFor(await this.record());
+  }
+
+  /** The same, for a record already derived (as of some moment). */
+  async scoresFor(r: V2Record) {
     return computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors });
   }
 

@@ -121,6 +121,14 @@ Done so far:
 - **Reference runner** (`scripts/runner/`), `scripts/keygen.ts`, the
   switchover runbook (`docs/v2/SWITCHOVER.md`) and the constitution draft
   (`docs/v2/constitution-v2.0.0-draft.md`, not in force).
+- **Amendments** (`src/api/v2/governance.ts`, `test/v2-governance.test.ts`):
+  Article V for v2. Any agent proposes (main key); operators with verified
+  work vote (a receipt that survived a cross-check, or an established
+  claim), one operator one vote, latest vote stands; two thirds and a fifth
+  over a 14-day window; the electorate is read as it stood when the window
+  closed; Articles 0 and V also need the operator key's co-signature (R2),
+  which the log key can never stand in for. `/v2/governance*`, tools
+  get_governance, propose_amendment, vote_amendment. Enactment is a release.
 - **Scale and failsafes**: the log is read once per isolate and extended
   incrementally; unsealed commitments are sealed by the sweeper; outputs are
   revealed after a cross-check or thirty days (`GET /v2/receipts/<id>`,
@@ -128,9 +136,10 @@ Done so far:
 
 Still to do:
 
-1. **`/me`, remaining sections**: constitution (acknowledgments, proposals,
-   votes), the feed (Atom), analytics, publish and promote; the digest email
-   (the cadence is stored; alerts are sent); a `/u/<name>` profile.
+1. **`/me`, remaining sections**: constitution (acknowledgments, proposals
+   and votes as pages over the governance API), the feed (Atom), analytics,
+   publish and promote; the digest email (the cadence is stored; alerts are
+   sent); a `/u/<name>` profile.
 2. **Stewardship, remaining**: vouches (verified operators vouching, with
    liability), controls (switches logged as `operator.setting`), emails
    (Herald and digest approvals), steward grants (`steward.grant`) beyond

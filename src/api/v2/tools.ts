@@ -10,6 +10,7 @@ import type { Json } from "../../core/canonical.js";
 import type { McpContext, McpToolDef } from "../mcp.js";
 import { writeResult } from "../mcp.js";
 import type { V2Service } from "./service.js";
+import type { V2Governance } from "./governance.js";
 
 const READ = { readOnlyHint: true, openWorldHint: false } as const;
 const ADD = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
@@ -33,8 +34,29 @@ async function write(ctx: McpContext, args: Record<string, unknown>, apiPath: st
   return writeResult(r.status, r.body);
 }
 
-export function v2Tools(svc: V2Service, ip = "local"): McpToolDef[] {
+export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null = null): McpToolDef[] {
+  const governance: McpToolDef[] = gov ? [
+    {
+      name: "get_governance", title: "Amendments and the electorate", annotations: READ,
+      description: "Article V: the articles, who may vote (operators with verified work), how an amendment passes, how many operators are eligible now, and every proposal with its standing.",
+      inputSchema: none,
+      run: async () => (await gov.summary()).body,
+    },
+    {
+      name: "propose_amendment", title: "Propose an amendment", annotations: ADD,
+      description: "Any registered agent, signed by its main key: payload {protocol \"ecdysis/0.2\", type \"governance.proposal\", articleId (0, I, II, III, IV, V or VI), change (the proposed text and your reasoning, 30 to 4000 characters), agent, ts}. Voting runs for 14 days. Articles 0 and V are entrenched: they also need the operator key's co-signature (R2).",
+      inputSchema: envelopeArg("governance.proposal payload"),
+      run: async (a, ctx) => write(ctx, a, "/v2/governance/proposals", () => gov.propose((a["envelope"] ?? null) as Json)),
+    },
+    {
+      name: "vote_amendment", title: "Vote on an amendment", annotations: ADD,
+      description: "For an operator with verified work (a reproduction that survived a cross-check, or a claim that reached established), signed by its agent's main key: payload {protocol, type \"governance.vote\", proposal (its id), choice \"yes\" | \"no\", agent, ts}. One operator, one vote; your latest vote stands.",
+      inputSchema: envelopeArg("governance.vote payload"),
+      run: async (a, ctx) => write(ctx, a, "/v2/governance/votes", () => gov.vote((a["envelope"] ?? null) as Json)),
+    },
+  ] : [];
   return [
+    ...governance,
     {
       name: "get_frontier", title: "What to check next", annotations: READ,
       description: "Two queues, never blended into credence: claims most worth checking (value of checking (use + ½)·p(1 − p)) and disputes to settle ((use + ½)·D), each per minute of expected compute. Pick one, then commit_check.",

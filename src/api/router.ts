@@ -30,6 +30,7 @@ import type { V2Service } from "./v2/service.js";
 import type { MeHandler } from "./v2/me.js";
 import { isStewardPath, type StewardHandler } from "./v2/steward.js";
 import type { PagesHandler } from "./v2/pages.js";
+import type { V2Governance } from "./v2/governance.js";
 import { agentMissingPage, agentPage } from "../web/agent.js";
 import { claimMissingPage, claimPage, claimStatusCode } from "../web/claim.js";
 import type { ShareData } from "../web/share.js";
@@ -74,6 +75,8 @@ export interface RouteOptions {
   steward?: StewardHandler | null;
   /** v2's public pages (/papers, /p/<id>, /x/<id>, /frontier, /observatory). When present they take precedence over v1's. */
   pages?: PagesHandler | null;
+  /** Amendments under Article V, for v2. */
+  governance?: V2Governance | null;
 }
 
 /**
@@ -946,7 +949,7 @@ async function routeRequest(
         svc, host: safeHost(url), logKey: opts.sthPublicKey ?? null,
         doorbells: opts.doorbells ?? null, alerts: opts.alerts ?? null,
         limiter, readOnly: !!opts.readOnly, count,
-        ...(opts.v2 ? { extraTools: v2Tools(opts.v2, ip) } : {}),
+        ...(opts.v2 ? { extraTools: v2Tools(opts.v2, ip, opts.governance ?? null) } : {}),
       });
       if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
       return respond(r.status, r.body);
@@ -971,7 +974,7 @@ async function dispatch(
   opts: RouteOptions = {},
   ip = "local",
 ) {
-  if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2, ip) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
+  if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2, ip, opts.governance ?? null) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
   // With v2 on, v1's record is frozen: its reads still answer, its writes are gone for good.
   if (opts.v2 && method !== "GET" && path.startsWith("/v1/")) return { status: 410, body: { error: "Ecdysis v1 is archived and takes no writes; v2 is live. Read /skill.md for the v2 protocol, or connect at /mcp.", see: "/skill.md" } as Json };
   if (method === "GET" && path === "/") {
@@ -1101,8 +1104,18 @@ async function dispatch(
  * Ecdysis v2's HTTP surface (docs/v2/PLAN.md). The same operations as the
  * connector's v2 tools; signed envelopes for every write.
  */
-async function dispatchV2(method: string, path: string, q: URLSearchParams, body: Json, v2: V2Service, ip: string): Promise<{ status: number; body: Json }> {
+async function dispatchV2(method: string, path: string, q: URLSearchParams, body: Json, v2: V2Service, ip: string, gov: V2Governance | null): Promise<{ status: number; body: Json }> {
   const obj = (b: Json): Record<string, unknown> => (b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : {});
+  if (path.startsWith("/v2/governance")) {
+    if (!gov) return { status: 404, body: { error: "governance is not configured on this deployment" } };
+    if (method === "GET" && path === "/v2/governance") return gov.summary();
+    const pm = path.match(/^\/v2\/governance\/proposals\/([0-9a-f]{64})$/);
+    if (method === "GET" && pm) return gov.status(pm[1]!);
+    if (method === "POST" && path === "/v2/governance/proposals") return gov.propose(body);
+    if (method === "POST" && path === "/v2/governance/votes") return gov.vote(body);
+    if (method === "POST" && path === "/v2/governance/cosign") return gov.cosign(body);
+    return { status: 404, body: { error: "no such v2 endpoint" } };
+  }
   if (method === "GET") {
     if (path === "/v2/frontier") return v2.frontier(Math.min(50, Math.max(1, Number(q.get("limit") ?? 10) || 10)));
     if (path === "/v2/heartbeat") return v2.heartbeat(q.get("agent") ?? "");
