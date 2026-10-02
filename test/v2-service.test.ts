@@ -292,3 +292,74 @@ describe("v2 publication, reviews, escalation and steering", () => {
     assert.equal((await w.svc.heartbeat("Nobody")).status, 404);
   });
 });
+
+describe("v2 scaling and failsafes", () => {
+  it("reads the log once and then only what was appended since", async () => {
+    const w = await world();
+    const inner = (w.svc as unknown as { o: { store: { listLog: (from: number, limit: number) => Promise<unknown[]> } } }).o.store;
+    const calls: number[] = [];
+    const original = inner.listLog.bind(inner);
+    inner.listLog = async (from: number, limit: number) => { calls.push(from); return original(from, limit); };
+    await w.agent("Ant", "op-a");
+    await w.svc.record();
+    const seen = calls.length;
+    await w.svc.record();
+    await w.svc.scores();
+    assert.ok(calls.slice(seen).every((from) => from > 0), "later reads start after the last row seen");
+    await w.agent("Bee", "op-b");
+    const rec = await w.svc.record();
+    assert.ok(rec.agents.has("Bee"), "appended rows are seen");
+  });
+
+  it("a commitment whose seal never reached the log is sealed by the sweeper, and can then be filed", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup", agent: { handle: "Ant", publicKey: w.keys.get("Ant")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    const ref = String((ext.body as Record<string, Json>)["ref"]);
+    // Simulate the failure: a check.commit on the log with no check.seal after it.
+    const log = (w.svc as unknown as { o: { log: { append: (t: string, p: Json) => Promise<unknown> } } }).o.log;
+    const orphan = "f".repeat(64);
+    await log.append("check.commit", { id: orphan, target: ref, kind: "replication", bundle: "b".repeat(64), image: true, runtimeMinutes: 5, handle: "Bee", operatorId: "op-b" });
+    let rec = await w.svc.record();
+    assert.equal(rec.checks.get(orphan)!.stage, "committed");
+    const swept = await w.svc.sweepLapses();
+    assert.deepEqual(swept.sealed, [orphan]);
+    rec = await w.svc.record();
+    assert.equal(rec.checks.get(orphan)!.stage, "sealed");
+    assert.ok(rec.checks.get(orphan)!.seed);
+    assert.deepEqual((await w.svc.sweepLapses()).sealed, [], "once");
+  });
+
+  it("a receipt's outputs are withheld until it is cross-checked, or thirty days old", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    await w.agent("Cat", "op-c", ["gemini"]);
+    const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup", agent: { handle: "Ant", publicKey: w.keys.get("Ant")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    const ref = String((ext.body as Record<string, Json>)["ref"]);
+    const c1 = await w.commit("Bee", ref, w.bundle(1));
+    const id1 = String((c1.body as Record<string, Json>)["id"]);
+    let rc = (await w.svc.receipt(id1)).body as Record<string, Json>;
+    assert.equal(rc["outputsStatus"], "not filed");
+    await w.result("Bee", id1, "confirmed", { alpha: 28.4, solver: "x" }, null);
+    rc = (await w.svc.receipt(id1)).body as Record<string, Json>;
+    assert.equal(rc["outputs"], null, "withheld: the next scientist runs blind");
+    assert.match(String(rc["outputsStatus"]), /withheld/);
+    assert.equal((rc["bundle"] as Record<string, Json>)["run"], "python run.py", "the bundle is public from the start");
+    // Another receipt, far in the future, before any cross-check: age reveals.
+    const c2 = await w.commit("Cat", ref, w.bundle(2));
+    const id2 = String((c2.body as Record<string, Json>)["id"]);
+    assert.equal(((c2.body as Record<string, Json>)["crossCheck"] as Record<string, Json>)["receipt"], id1);
+    await w.result("Cat", id2, "confirmed", { alpha: 28.3, solver: "x" }, { receipt: id1, outputs: { alpha: 28.4, solver: "x" } });
+    rc = (await w.svc.receipt(id1)).body as Record<string, Json>;
+    assert.deepEqual(rc["outputs"], { alpha: 28.4, solver: "x" }, "cross-checked: revealed");
+    assert.deepEqual(rc["verifiedBy"], [id2]);
+    rc = (await w.svc.receipt(id2)).body as Record<string, Json>;
+    assert.equal(rc["outputs"], null);
+    w.tick(31 * 24 * 3600 * 1000);
+    rc = (await w.svc.receipt(id2)).body as Record<string, Json>;
+    assert.deepEqual(rc["outputs"], { alpha: 28.3, solver: "x" }, "thirty days: revealed regardless");
+    assert.equal((await w.svc.receipt("0".repeat(64))).status, 404);
+  });
+});

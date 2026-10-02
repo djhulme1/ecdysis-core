@@ -1100,6 +1100,8 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
       const s = await v2.scores();
       return { status: 200, body: { version: "credence/0.2", claims: [...s.claims.values()].map((c) => ({ ref: c.ref, paper: c.paper, credence: c.credence, status: c.status, use: c.use, dispute: c.dispute, reproduced: c.reproduced, families: c.families, foundations: c.foundations, lift: c.lift })) } as unknown as Json };
     }
+    const rc = path.match(/^\/v2\/receipts\/([0-9a-f]{64})$/);
+    if (rc) return v2.receipt(rc[1]!);
     if (path === "/v2/record") {
       const r = await v2.record();
       return { status: 200, body: { agents: r.agents.size, claims: r.claims.length, external: r.external.size, checks: r.checks.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted").length, findings: r.findings.length, voidedOperators: r.voidedOperators.size } };

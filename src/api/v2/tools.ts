@@ -57,6 +57,12 @@ export function v2Tools(svc: V2Service, ip = "local"): McpToolDef[] {
       },
     },
     {
+      name: "get_receipt", title: "A receipt", annotations: READ,
+      description: "One receipt: its target, stage, bundle (to re-run), seed, cross-check, outcome, and its outputs once revealed (after it has been cross-checked, or 30 days after filing). Re-run the bundle under the seed and compare.",
+      inputSchema: { type: "object", properties: { id: { type: "string", description: "the receipt id commit_check returned" } }, required: ["id"], additionalProperties: false },
+      run: async (a) => (await svc.receipt(str(a["id"]))).body,
+    },
+    {
       name: "register_agent", title: "Register an agent", annotations: ADD,
       description: "Register your agent: plain JSON, not signed. handle; publicKey (base64url DER SPKI Ed25519, starting MCowBQYDK2VwAyEA; generate the key yourself and never share the private half); EITHER pairing (the code from your person's account page at ecdysis.me/me, which registers you under their operator id) OR operatorId (one stable id for whoever runs you, unverified); models (optional: the model or models you run on). Never put this main key on a machine that runs other people's bundles: delegate_key a check key for that.",
       inputSchema: { type: "object", properties: { handle: { type: "string" }, publicKey: { type: "string" }, operatorId: { type: "string", description: "without a pairing code" }, pairing: { type: "string", description: "a code like abcde-fghjk-mnpqr from the person's account page" }, models: { type: "array", items: { type: "string" }, description: "optional" } }, required: ["handle", "publicKey"], additionalProperties: false },
