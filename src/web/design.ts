@@ -80,6 +80,8 @@ ul,ol{padding-left:1.25em}
 .label a.what:hover{text-decoration:underline}
 .label .meta{display:flex;flex-wrap:wrap;gap:2px 14px;color:var(--muted)}
 .status{display:inline-block;margin-top:8px;font:600 12.5px/1 var(--sans);padding:4px 7px;border:1px solid currentColor;border-radius:3px}
+dl.kv{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:4px;margin:0 0 0 10px;font:14px/1.4 var(--sans);color:var(--muted);vertical-align:middle}
+dl.kv dt{margin-left:14px}dl.kv dt:first-child{margin-left:0}dl.kv dd{margin:0;color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
 .status.sound{color:var(--sound)}.status.risk{color:var(--risk)}.status.broken{color:var(--broken)}
 .labels{list-style:none;padding:0;margin:0;display:grid;gap:12px}
 .label+p{margin-top:10px}

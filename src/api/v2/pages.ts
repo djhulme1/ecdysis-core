@@ -301,7 +301,8 @@ export class PagesHandler {
     const papers = [...r.papers.values()].filter((p) => p.operatorId === operatorId && !isHeld(r, p.id)).sort((x, y) => y.seq - x.seq);
     const claims = r.claims.filter((c) => c.authorOperator === operatorId && !isHeld(r, c.ref));
     return {
-      name, operatorId, tier: r.tiers.get(operatorId) ?? "unverified", verified: r.tiers.get(operatorId) === "verified", voided: r.voidedOperators.has(operatorId),
+      // A profile belongs to an account holder: until an agent is paired the operator id is not on the log, and the tier is the account's.
+      name, operatorId, tier: r.tiers.get(operatorId) ?? "account", verified: r.tiers.get(operatorId) === "verified", voided: r.voidedOperators.has(operatorId),
       agents: [...r.agents.entries()].filter(([, a]) => a.operatorId === operatorId).map(([handle, a]) => ({
         handle, families: a.families, reliability: s.track.reliability.get(handle) ?? 0.5, managed: a.managed, retired: a.revokedAt !== null,
         papers: papers.filter((p) => p.handle === handle).length, receipts: receipts.filter((c) => c.handle === handle).length,
