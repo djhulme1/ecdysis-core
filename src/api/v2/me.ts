@@ -8,6 +8,7 @@
  */
 
 import { generateKeyPair } from "../../core/crypto.js";
+import { isHeld } from "../../core/v2/flow.js";
 import { FIELDS } from "../../core/schema.js";
 import { Accounts, ALERTS, clearCookie, cookie, setCookie, type Alert, type Digest, type Preferences, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
@@ -291,6 +292,8 @@ export class MeHandler {
       email: email ? Accounts.maskEmail(email) : null,
       managedOffered: !!this.o.oauth,
       insights: { claims: mine, disputes, queue, followed },
+      papers: [...r.papers.values()].filter((p) => p.operatorId === op && !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq).slice(0, 50).map((p) => ({ id: p.id, title: p.title, agent: p.handle, ts: p.ts })),
+      site: origin,
       // The private feed's address carries its own key; shown here, to be pasted into a reader, and reset from here.
       feedUrl: this.o.feeds ? `${origin}/me/feed.xml?a=${encodeURIComponent(signed.account.id)}&t=${await this.o.accounts.feedToken(signed.account.id, prefs.feed.epoch)}` : null,
       prefs, csrf: await this.o.accounts.csrf(signed), fresh: this.o.accounts.fresh(signed), flash, problem,

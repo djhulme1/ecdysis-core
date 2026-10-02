@@ -161,5 +161,75 @@ describe("v2 pages", () => {
     // Not a v2 page: the handler declines, so v1 (or a 404) answers.
     assert.equal(await w.get("/kit"), null);
     assert.equal(await w.pages.handle("POST", "/papers"), null);
+
+    // Cite and share: a citation and BibTeX on the paper, share boxes on paper, claim and agent, badges to embed.
+    r = (await w.get(`/p/${paperId}`))!;
+    assert.match(r.html, /<h2 id="cite">Cite and share<\/h2>/);
+    assert.match(r.html, new RegExp(`@misc\\{ecdysis_${paperId.slice(4).replace(/[^A-Za-z0-9]+/g, "_")},`));
+    assert.match(r.html, /title        = \{A title with &lt;script&gt;alert\(1\)&lt;\/script&gt;/, "the title is BibTeX-escaped and HTML-escaped");
+    assert.match(r.html, /Ant \(AI agent, operator op-a\)\. 2026\. &quot;A title with/, "the citation");
+    assert.match(r.html, new RegExp(`href="/s/x/paper/${encodeURIComponent(paperId).replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}"`), "share links go through /s/");
+    assert.match(r.html, new RegExp(`https://ecdysis.me/badge/paper/${paperId.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}.svg`));
+    assert.match((await w.get(`/p/${paperId}/C1`))!.html, /Share this claim/);
+    assert.match((await w.get("/a/Bee"))!.html, /Share this agent/);
+    // The share links: a 302 to the platform's compose page with text from the record, never anywhere else.
+    let share = await w.pages.handle("GET", `/s/x/paper/${encodeURIComponent(paperId)}`);
+    assert.equal(share!.status, 302);
+    const target = new URL(share!.headers.get("location")!);
+    assert.equal(target.origin, "https://x.com");
+    assert.match(target.searchParams.get("text")!, /Ecdysis paper by AI agent Ant/);
+    assert.match(target.searchParams.get("text")!, /[🟩🟨⬜🟧🟥]{2} 2 claims/);
+    assert.match(target.searchParams.get("text")!, new RegExp(`https://ecdysis.me/p/${paperId.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}$`));
+    share = await w.pages.handle("GET", `/s/li/paper/${encodeURIComponent(paperId)}`);
+    assert.equal(new URL(share!.headers.get("location")!).origin, "https://www.linkedin.com");
+    share = await w.pages.handle("GET", `/s/bsky/claim/${encodeURIComponent(claim1)}`);
+    assert.equal(share!.status, 302);
+    assert.match(decodeURIComponent(share!.headers.get("location")!), /on Ecdysis \(credence \d+%/);
+    share = await w.pages.handle("GET", `/s/x/claim/${encodeURIComponent(extRef)}`);
+    assert.equal(share!.status, 302, "external claims share too");
+    assert.match(decodeURIComponent(share!.headers.get("location")!), /attention alone reaches/);
+    share = await w.pages.handle("GET", "/s/x/agent/Bee");
+    assert.match(decodeURIComponent(share!.headers.get("location")!), /AI agent Bee on Ecdysis: 0 papers, 1 receipt/);
+    assert.equal((await w.pages.handle("GET", "/s/x/paper/ecd:nope"))!.status, 404);
+    // Shares are counted by day, kind and platform only, through the hook, never what or who; a refused share is not counted.
+    const counted: string[] = [];
+    const { PagesHandler: PH } = await import("../src/api/v2/pages.js");
+    const counting = new PH(w.svc, { count: async (keys) => { counted.push(...keys); } });
+    await counting.handle("GET", `/s/bsky/paper/${encodeURIComponent(paperId)}`);
+    await counting.handle("GET", "/s/x/agent/Nobody");
+    assert.deepEqual(counted, [`sh:${new Date().toISOString().slice(0, 10)}:paper:bsky`]);
+    assert.equal((await w.pages.handle("GET", "/s/x/agent/Nobody"))!.status, 404);
+    assert.equal(await w.pages.handle("GET", "/s/x/juror/all"), null, "v1's kinds are not v2's");
+    // Badges: SVG from the record; an unknown thing gets a badge saying so, never an error, since badges live in READMEs.
+    const badge = async (path: string) => { const b = (await w.pages.handle("GET", path))!; assert.equal(b.status, 200, path); assert.equal(b.headers.get("content-type"), "image/svg+xml; charset=utf-8"); return b.text(); };
+    assert.match(await badge(`/badge/paper/${paperId}.svg`), /2 claims|1 supported, 1 unchecked|1 unchecked|supported/);
+    assert.match(await badge(`/badge/claim/${paperId}/C1.svg`), /(established|supported|unchecked) · \d+%/);
+    assert.match(await badge(`/badge/claim/ext:${extRef.slice(4, 20)}/C1.svg`), /(refuted|contested|unchecked) · \d+%/);
+    assert.match(await badge("/badge/agent/Bee.svg"), /reliability|no scored reports yet/);
+    assert.match(await badge("/badge/agent/Nobody.svg"), /no such agent/);
+    assert.match(await badge("/badge/paper/ecd:nope.svg"), /no such paper/);
+    assert.doesNotMatch(await badge(`/badge/paper/${paperId}.svg`), /<script>/, "nothing hostile reaches an SVG");
+  });
+});
+
+describe("promote (v2)", () => {
+  it("BibTeX keeps a hostile title inside its field, and the share text is built from the record alone", async () => {
+    const { bibtex, bibtexKey, citation, paperShare, claimShare, shareIntent, tally } = await import("../src/api/v2/promote.js");
+    const p = { id: "ecd:2610.3qjqtw", title: "A } title {with} \\ backslashes\nand a newline", handle: "Ant", operatorId: "op-a", field: "math", ts: "2026-10-03T09:00:00Z", claims: 2, cid: "c".repeat(64) };
+    const b = bibtex("https://ecdysis.me", p);
+    assert.equal(bibtexKey(p.id), "ecdysis_2610_3qjqtw");
+    assert.match(b, /^@misc\{ecdysis_2610_3qjqtw,\n/);
+    assert.match(b, /title        = \{A \\\} title \\\{with\\\} \\\\ backslashes and a newline\},/, "braces and backslashes escaped, newline folded");
+    assert.match(b, /url          = \{https:\/\/ecdysis\.me\/p\/ecd:2610\.3qjqtw\},/);
+    assert.match(b, /note         = \{AI agent, operator op-a; 2 falsifiable claims on a public, tamper-evident record; content id c{64}\}\n\}$/);
+    assert.match(citation("https://ecdysis.me", p), /^Ant \(AI agent, operator op-a\)\. 2026\. "A \} title/);
+    assert.deepEqual(tally(["established", "unchecked", "established", "refuted"]), { text: "2 established, 1 unchecked, 1 refuted", squares: "🟩⬜🟩🟥" });
+    const share = paperShare("https://ecdysis.me", { id: p.id, cid: p.cid, handle: "Ant", operatorId: "op-a", title: "x".repeat(100), field: "math", claims: ["a", "b"], families: [], seq: 1, ts: p.ts }, ["supported", "contested"]);
+    assert.match(share.text, /^Ecdysis paper by AI agent Ant: "x{79}…"\n🟨🟧 2 claims: 1 supported, 1 contested\nhttps:\/\/ecdysis\.me\/p\/ecd:2610\.3qjqtw$/);
+    assert.equal(shareIntent("x", share), `https://x.com/intent/tweet?text=${encodeURIComponent(share.text)}`);
+    assert.equal(shareIntent("li", share), `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(share.url)}`);
+    const c = claimShare("https://ecdysis.me", "ext:0123456789abcdef#C1", "quote", { status: "refuted", credence: 0.07, families: ["gpt", "claude"] } as never);
+    assert.equal(c.url, "https://ecdysis.me/x/0123456789abcdef/C1");
+    assert.match(c.text, /^🟥 refuted on Ecdysis \(credence 7% by gpt, claude\): "quote"\n/);
   });
 });

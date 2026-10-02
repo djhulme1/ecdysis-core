@@ -8,6 +8,7 @@ import type { V2Service } from "./service.js";
 import type { V2Governance } from "./governance.js";
 import type { Accounts } from "./accounts.js";
 import { V2Feeds } from "./feed.js";
+import { agentBadge, agentShare, bibtex, citation, claimBadge, claimShare, missingBadge, paperBadge, paperShare, shareIntent, shareLinks, type SharePlatform } from "./promote.js";
 import { isHeld } from "../../core/v2/flow.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
@@ -33,6 +34,11 @@ const AGENT = /^\/a\/([A-Za-z0-9][A-Za-z0-9-]{1,39})$/;
 /** A person's public profile and its feed. Names are 3 to 30 characters, so v1's /u/n/… and /u/j/… stop links never collide. */
 const PROFILE = /^\/u\/([A-Za-z0-9][A-Za-z0-9-]{1,28}[A-Za-z0-9])(\/feed\.xml)?$/;
 const FIELD_FEED = /^\/feeds\/([a-z]{2,10})\.atom$/;
+/** Share links (a 302 to the platform's compose page) and live badges, by kind. */
+const SHARE = /^\/s\/(x|bsky|li)\/(paper|claim|agent)\/(.{1,120})$/;
+const BADGE = /^\/badge\/(paper|claim|agent)\/(.{1,120})\.svg$/;
+const SVG_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-type": "image/svg+xml; charset=utf-8", "cache-control": "public, max-age=300", "content-security-policy": "default-src 'none'" };
+const TEXT_404: Record<string, string> = { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" };
 const FEED_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-type": "application/atom+xml; charset=utf-8", "cache-control": "public, max-age=300" };
 
 export interface PagesOptions {
@@ -41,6 +47,10 @@ export interface PagesOptions {
   governance?: V2Governance | null;
   /** Accounts, when configured: public profiles (/u/<name>) look the name up here. Without them, no profile page exists. */
   accounts?: Accounts | null;
+  /** Operational counters (share links followed, by day, kind and platform only; never who). Best effort. */
+  count?: (keys: string[]) => Promise<void>;
+  /** Lets counting outlive the response (the Worker's waitUntil); otherwise it is awaited. */
+  waitUntil?: (p: Promise<unknown>) => void;
 }
 
 export class PagesHandler {
@@ -62,6 +72,19 @@ export class PagesHandler {
     const site = host.replace(/^api\./, "");
     const ff = path.match(FIELD_FEED);
     if (ff) { const feed = await this.feeds.field(ff[1]!); return feed ? xml(feed) : null; }
+    const sm = path.match(SHARE);
+    if (sm) {
+      // The target is one of three fixed hosts with text built here from the record: never an open redirect.
+      const target = await this.share(sm[1] as SharePlatform, sm[2] as "paper" | "claim" | "agent", sm[3]!, `https://${site}`);
+      if (target && method === "GET" && this.o.count) {
+        // Counted by day, kind and platform only, as v1 did (sh:<day>:<kind>:<platform>); never the thing shared or who shared it.
+        const counting = this.o.count([`sh:${new Date().toISOString().slice(0, 10)}:${sm[2]}:${sm[1]}`]).catch(() => {});
+        if (this.o.waitUntil) this.o.waitUntil(counting); else await counting;
+      }
+      return target ? new Response(null, { status: 302, headers: { ...TEXT_404, "x-robots-tag": "noindex, nofollow", location: target } }) : new Response(method === "HEAD" ? null : "Nothing to share at this address.", { status: 404, headers: TEXT_404 });
+    }
+    const bm = path.match(BADGE);
+    if (bm) return new Response(method === "HEAD" ? null : await this.badge(bm[1] as "paper" | "claim" | "agent", bm[2]!), { status: 200, headers: SVG_HEADERS });
     const um = path.match(PROFILE);
     if (um) {
       // The name is looked up in lower case (names are stored so); a name nobody holds, or no accounts at all, is a plain 404.
@@ -146,8 +169,12 @@ export class PagesHandler {
     if (!payload) return null;
     const s = await this.v2.scores();
     const refs = new Set(p.claims);
+    const site = `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
+    const statuses = p.claims.map((c) => s.claims.get(c)?.status ?? "unchecked");
+    const citable = { id, title: p.title, handle: p.handle, operatorId: p.operatorId, field: p.field, ts: p.ts, claims: p.claims.length, cid: p.cid };
     return {
       id, cid: p.cid, ts: p.ts, payload, operatorId: p.operatorId, tier: r.tiers.get(p.operatorId) ?? "unverified",
+      promote: { citation: citation(site, citable), bibtex: bibtex(site, citable), share: { text: paperShare(site, p, statuses).text, links: shareLinks("paper", id) }, badge: `${site}/badge/paper/${id}.svg`, page: `${site}/p/${id}` },
       scores: p.claims.filter((ref) => !isHeld(r, ref)).map((ref) => s.claims.get(ref)!).filter(Boolean),
       receipts: [...r.checks.values()].filter((c) => refs.has(c.target) && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, agent: c.handle, families: c.families, stage: c.stage, disowned: c.disowned })),
       reviews: r.evidence.filter((e) => e.kind === "review" && refs.has(e.claim)).map((e) => ({ claim: e.claim, agent: e.agent, forecast: r.forecasts.get(`${e.claim}|${e.agent}`) ?? 0.5 })),
@@ -180,7 +207,9 @@ export class PagesHandler {
     const receipts = [...r.checks.values()].filter((c) => c.target === ref && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq)
       .map((c) => ({ id: c.id, kind: c.kind, outcome: c.outcome, agent: c.handle, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, verifiedBy: c.verifiedBy.length, disputedBy: c.disputedBy.length }));
     const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref).map((u) => u.paper))].map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy };
+    const site = `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
+    const promote = { share: { text: claimShare(site, ref, text, score).text, links: shareLinks("claim", ref) }, badge: `${site}/badge/claim/${paperId}/${label}.svg`, page: paperId.startsWith("ext:") ? `${site}/x/${paperId.slice(4)}/${label}` : `${site}/p/${paperId}/${label}` };
+    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote };
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {
@@ -189,7 +218,14 @@ export class PagesHandler {
     if (!a) return null;
     const s = await this.v2.scores();
     const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
+    const site = `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
+    const counts = {
+      papers: [...r.papers.values()].filter((p) => p.handle === handle && !isHeld(r, p.id)).length,
+      receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "resulted" && !c.disowned).length,
+      reliability: s.track.reliability.get(handle) ?? 0.5,
+    };
     return {
+      promote: { share: { text: agentShare(site, handle, counts).text, links: shareLinks("agent", handle) }, badge: `${site}/badge/agent/${handle}.svg`, page: `${site}/a/${handle}` },
       handle, operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", families: a.families,
       reliability: s.track.reliability.get(handle) ?? 0.5, credit: s.track.credit.get(handle) ?? 0,
       reports: s.track.reports.filter((x) => x.agent === handle && x.resolved !== null).length,
@@ -202,6 +238,55 @@ export class PagesHandler {
       reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle).map((e) => ({ claim: e.claim, forecast: r.forecasts.get(`${e.claim}|${handle}`) ?? 0.5 })),
       findings: r.findings.filter((f) => f.oddAgent === handle).map((f) => ({ id: f.id, verdict: f.verdict, inForce: f.inForce, reversed: f.reversed, decidedAt: f.decidedAt })),
     };
+  }
+
+  /** Where a share link sends a person, or null when there is nothing public to share. */
+  private async share(platform: SharePlatform, kind: "paper" | "claim" | "agent", ref: string, site: string): Promise<string | null> {
+    const r = await this.v2.record();
+    const s = await this.v2.scores();
+    if (kind === "paper") {
+      const p = r.papers.get(ref);
+      if (!p || isHeld(r, p.id)) return null;
+      return shareIntent(platform, paperShare(site, p, p.claims.map((c) => s.claims.get(c)?.status ?? "unchecked")));
+    }
+    if (kind === "claim") {
+      const c = r.claims.find((x) => x.ref === ref);
+      const score = s.claims.get(ref);
+      if (!c || !score || isHeld(r, ref)) return null;
+      const [paperId, label] = ref.split("#") as [string, string];
+      let text: string | null = null;
+      if (paperId.startsWith("ext:")) text = r.external.get(paperId)?.quote ?? null;
+      else {
+        const env = (await this.v2.envelope(r.papers.get(paperId)?.cid ?? "")) as { payload?: PaperV2Payload } | null;
+        text = env?.payload?.claims[Number(label.slice(1)) - 1]?.text ?? null;
+      }
+      return text === null ? null : shareIntent(platform, claimShare(site, ref, text, score));
+    }
+    const a = r.agents.get(ref);
+    if (!a) return null;
+    return shareIntent(platform, agentShare(site, ref, {
+      papers: [...r.papers.values()].filter((p) => p.handle === ref && !isHeld(r, p.id)).length,
+      receipts: [...r.checks.values()].filter((c) => c.handle === ref && c.stage === "resulted" && !c.disowned).length,
+      reliability: s.track.reliability.get(ref) ?? 0.5,
+    }));
+  }
+
+  /** A live badge, from the record. Unknown things get a badge saying so, never an error (badges are embedded in READMEs). */
+  private async badge(kind: "paper" | "claim" | "agent", ref: string): Promise<string> {
+    const r = await this.v2.record();
+    const s = await this.v2.scores();
+    if (kind === "paper") {
+      const p = r.papers.get(ref);
+      return p && !isHeld(r, p.id) ? paperBadge(p.id, p.claims.map((c) => s.claims.get(c)?.status ?? "unchecked")) : missingBadge("no such paper");
+    }
+    if (kind === "claim") {
+      // The claim's ref is written with a slash in the path: /badge/claim/<paper>/C1.svg.
+      const refHash = ref.replace(/\/(C[1-9][0-9]?)$/, "#$1");
+      const score = s.claims.get(refHash);
+      return score && !isHeld(r, refHash) ? claimBadge(refHash, score) : missingBadge("no such claim");
+    }
+    const a = r.agents.get(ref);
+    return a ? agentBadge(ref, s.track.reliability.get(ref) ?? 0.5, s.track.reports.filter((x) => x.agent === ref && x.resolved !== null).length) : missingBadge("no such agent");
   }
 
   /** A person's public page: the agents under their operator id and those agents' papers, from the record. */

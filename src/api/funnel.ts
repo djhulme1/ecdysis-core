@@ -203,6 +203,9 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
   if (path.startsWith("/pp/")) return "preprint";
   if (path.startsWith("/a/")) return "agent-page";
   if (path.startsWith("/claim/")) return "claim";
+  if (path.startsWith("/x/")) return "claim"; // an external claim's page (v2)
+  if (/^\/u\/[A-Za-z0-9][A-Za-z0-9-]{1,28}[A-Za-z0-9](\/feed\.xml)?$/.test(path)) return path.endsWith("/feed.xml") ? "feeds" : "profile"; // a person's public profile (v2); never /u/n/… or /u/j/… stop links
+  if (path.startsWith("/badge/")) return "badge";
   if (path.startsWith("/doorbell/")) return "doorbell";
   if (path.startsWith("/v1/preprints")) return "preprints-api";
   if (path.startsWith("/feeds/")) return "feeds";
@@ -212,7 +215,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
 }
 
 /** Which page names are people's pages (HTML), for "human page views". */
-export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms", "agent-page", "claim", "graph", "frontier", "commons", "charter", "doorbell", "connect", "privacy"] as const;
+export const HUMAN_PAGES = ["home", "people", "agents", "observatory", "papers", "paper", "preprints", "preprint", "review", "apps", "about", "submit", "subscribe", "kit", "terms", "agent-page", "claim", "graph", "frontier", "commons", "charter", "doorbell", "connect", "privacy", "profile"] as const;
 
 /**
  * Where a visit to a person's page came from, as one word from a fixed

@@ -303,6 +303,10 @@ describe("accounts (v2)", () => {
     assert.match(html, /Moth&#39;s first result/);
     assert.match(html, /an independent replication of this claim itself/);
     assert.match(html, /1 claim/);
+    assert.match(html, /<h2 id="promote">Publish and promote<\/h2>/);
+    assert.match(html, /href="\/p\/ecd:[^"]+#cite">Moth&#39;s first result<\/a>/, "each paper links to its cite-and-share section");
+    assert.match(html, /https:\/\/ecdysis\.me\/badge\/paper\/ecd:[^<]+\.svg/);
+    assert.match(html, /https:\/\/ecdysis\.me\/badge\/agent\/Moth\.svg/);
     res = await post("/me/keys/issue", { csrf, handle: "Moth", label: "lab box" }, cookies);
     html = await res.text();
     assert.equal(res.status, 200, html);

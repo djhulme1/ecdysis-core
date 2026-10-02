@@ -119,6 +119,25 @@ export interface V2ServiceOptions {
   /** The OPERATOR key's public half: the only key that decides a hazard hold (R1). Absent: holds stay held. Never the log key. */
   operatorPublicKey?: string | null;
   now?: () => Date;
+  /**
+   * The log cache and the derived records, shared across services. The Worker
+   * builds a service per request but keeps ONE cache per isolate (index.ts),
+   * so the log is read once and extended, not read again on every request.
+   * Tests, which build many worlds, let each service have its own.
+   */
+  cache?: V2Cache;
+}
+
+/** What one isolate keeps between requests: the log's rows, and the records derived from them. */
+export class V2Cache {
+  rows: LogRow[] = [];
+  nextSeq = 0;
+  /** Derived records by (log length, minute): see recordAsOf. */
+  derived = new Map<string, V2Record>();
+  scored = new WeakMap<V2Record, ReturnType<typeof computeV2>>();
+  /** Governance's electorates at closed amendment windows (final once closed). */
+  closedElectorates = new Map<number, Set<string>>();
+  reset(): void { this.rows = []; this.nextSeq = 0; this.derived.clear(); this.closedElectorates.clear(); }
 }
 
 const V2_TYPES = new Set<string>(V2_ENTRY_TYPES);
@@ -164,12 +183,13 @@ export class V2Service {
   /**
    * The log's rows, read once and extended incrementally: the log is
    * append-only, so rows already seen never change, and each call fetches
-   * only what was appended since. One Worker isolate serves many requests
-   * with one full read instead of one per request.
+   * only what was appended since. The cache lives as long as the isolate
+   * (V2Cache, passed in by the Worker), so one full read serves many requests.
    */
-  private cache: { rows: LogRow[]; nextSeq: number } = { rows: [], nextSeq: 0 };
+  private cache: V2Cache;
   constructor(private o: V2ServiceOptions) {
     this.now = o.now ?? (() => new Date());
+    this.cache = o.cache ?? new V2Cache();
   }
 
   /** Every row of the log, oldest first. */
@@ -178,7 +198,7 @@ export class V2Service {
       const more = await this.o.store.listLog(this.cache.nextSeq, 10_000);
       for (const r of more) {
         if (r.seq !== this.cache.nextSeq) { // a gap or a replay: start again from nothing rather than trust a partial view
-          this.cache = { rows: [], nextSeq: 0 };
+          this.cache.reset();
           return this.rows();
         }
         this.cache.rows.push(r);
@@ -201,20 +221,18 @@ export class V2Service {
    * changes the moment the log grows. Governance's historical electorates
    * share the same small cache under their own moments.
    */
-  private derived = new Map<string, V2Record>();
-  private scored = new WeakMap<V2Record, ReturnType<typeof computeV2>>();
   async recordAsOf(asOf: Date): Promise<V2Record> {
     const rows = await this.rows();
     const key = `${this.cache.nextSeq}|${Math.floor(asOf.getTime() / 60_000)}`;
-    const hit = this.derived.get(key);
+    const hit = this.cache.derived.get(key);
     if (hit) return hit;
     const cut = asOf.getTime();
     const entries: V2Entry[] = rows
       .filter((r) => V2_TYPES.has(r.type) && Date.parse(r.ts) <= cut)
       .map((r) => ({ seq: r.seq, ts: r.ts, type: r.type as V2EntryType, payload: (r.payload ?? {}) as Record<string, unknown> }));
     const rec = deriveV2(entries, asOf);
-    if (this.derived.size >= 8) this.derived.delete(this.derived.keys().next().value!);
-    this.derived.set(key, rec);
+    if (this.cache.derived.size >= 8) this.cache.derived.delete(this.cache.derived.keys().next().value!);
+    this.cache.derived.set(key, rec);
     return rec;
   }
 
@@ -256,10 +274,10 @@ export class V2Service {
 
   /** The same, for a record already derived (as of some moment); computed once per derived record. */
   async scoresFor(r: V2Record) {
-    const hit = this.scored.get(r);
+    const hit = this.cache.scored.get(r);
     if (hit) return hit;
     const s = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors });
-    this.scored.set(r, s);
+    this.cache.scored.set(r, s);
     return s;
   }
 

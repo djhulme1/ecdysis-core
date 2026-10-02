@@ -6,7 +6,7 @@
 
 import { EcdysisService, PREPRINT_DAILY_CAP } from "./api/service.js";
 import { BUCKET_LIMITS, MemoryRateLimiter, route, type RateLimiter } from "./api/router.js";
-import { V2Service } from "./api/v2/service.js";
+import { V2Cache, V2Service } from "./api/v2/service.js";
 import { Accounts } from "./api/v2/accounts.js";
 import { MeHandler } from "./api/v2/me.js";
 import { StewardHandler } from "./api/v2/steward.js";
@@ -211,13 +211,22 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
   });
 }
 
-function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler } } | null {
+/**
+ * One per isolate: the v2 log's rows and the records derived from them. The
+ * handlers below are built per request (they are cheap); the cache is not, so
+ * the log is read once and extended, and a burst of requests derives the
+ * record once a minute rather than once a request.
+ */
+const V2_CACHE = new V2Cache();
+
+function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler } } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
   const log = new TransparencyLog(store);
   const v2 = new V2Service({
     log,
+    cache: V2_CACHE,
     store: new D1V2Store(env.DB, store),
     logPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
     screeners: screenersFrom(env),
@@ -234,7 +243,7 @@ function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; stewa
   // OAuth 2.1 for the connector and managed agents (I.4): tokens stand for people; the archive holds only the keys people asked it to.
   const oauth = new OAuth({ accounts, store: new D1OAuthStore(env.DB), v2, issuer: "https://ecdysis.me", resource: "https://api.ecdysis.me/mcp", siteBase: "https://ecdysis.me" });
   // R2 needs the operator key and only that: the log key lives in this Worker, so falling back to it would let the archive co-sign for its owner.
-  const governance = new V2Governance({ v2, log, operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) });
+  const governance = new V2Governance({ v2, log, operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY), closedElectorates: V2_CACHE.closedElectorates });
   return {
     v2, notifier,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: readOnly(env) }) },
@@ -242,7 +251,11 @@ function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; stewa
     me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
     steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env) }),
-    pages: new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts }),
+    pages: new PagesHandler(v2, {
+      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts,
+      count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
+      ...(waitUntil ? { waitUntil } : {}),
+    }),
   };
 }
 
@@ -411,7 +424,7 @@ export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const store = new D1Store(env.DB);
     const svc = serviceFrom(env, store);
-    const v2 = v2From(env, store);
+    const v2 = v2From(env, store, (p) => ctx.waitUntil(p));
     const herald = heraldFrom(env, store);
     const newsletter = newsletterFrom(env, store);
     const alerts = alertsFrom(env, store);

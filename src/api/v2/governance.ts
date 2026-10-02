@@ -80,13 +80,15 @@ export interface GovernanceOptions {
   /** The operator key's public half, for R2 co-signatures. Null: entrenched amendments cannot pass. */
   operatorPublicKey: string | null;
   now?: () => Date;
+  /** Electorates at closed windows, kept across requests when the Worker passes its isolate's map (closed windows are final). */
+  closedElectorates?: Map<number, Set<string>>;
 }
 
 export class V2Governance {
   private now: () => Date;
   /** Electorates at closed windows are final: computed once, kept (bounded). The open-window electorate is computed once per call that needs it. */
-  private closedElectorates = new Map<number, Set<string>>();
-  constructor(private o: GovernanceOptions) { this.now = o.now ?? (() => new Date()); }
+  private closedElectorates: Map<number, Set<string>>;
+  constructor(private o: GovernanceOptions) { this.now = o.now ?? (() => new Date()); this.closedElectorates = o.closedElectorates ?? new Map(); }
 
   /**
    * The electorate as of a moment (V.2): operators with verified work on the

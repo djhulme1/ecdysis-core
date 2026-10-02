@@ -40,7 +40,7 @@ async function world() {
     svc.commitCheck(await sign(handle, { protocol: "ecdysis/0.2", type: "check.commit", target, kind: "replication", bundle: b as unknown as Json, agent: { handle, publicKey: keys.get(handle)!.publicKey }, ts: now().toISOString().replace(/\.\d{3}Z$/, "Z"), ...extra }));
   const result = async (handle: string, id: string, outcome: string, outputs: Outputs, cross: { receipt: string; outputs: Outputs } | null) =>
     svc.fileResult(await sign(handle, { protocol: "ecdysis/0.2", type: "check.result", commit: id, outcome, outputs, crossCheck: cross as unknown as Json, agent: { handle, publicKey: keys.get(handle)!.publicKey }, ts: now().toISOString().replace(/\.\d{3}Z$/, "Z") }));
-  return { svc, agent, sign, tick, now, bundle, commit, result, logKey, keys };
+  return { svc, agent, sign, tick, now, bundle, commit, result, logKey, keys, log };
 }
 
 describe("v2 service", () => {
@@ -325,6 +325,18 @@ describe("v2 scaling and failsafes", () => {
     await w.agent("Bee", "op-b");
     const rec = await w.svc.record();
     assert.ok(rec.agents.has("Bee"), "appended rows are seen");
+    // The Worker builds a service per request and passes one cache per isolate: a second service over the same cache reads
+    // nothing it already has, and shares the derived record (the same object) rather than deriving again.
+    const { V2Cache, V2Service: Svc } = await import("../src/api/v2/service.js");
+    const cache = new V2Cache();
+    const first = new Svc({ log: w.log, store: inner as never, logPrivateKey: null, now: w.now, cache });
+    const r1 = await first.record();
+    const before = calls.length;
+    const second = new Svc({ log: w.log, store: inner as never, logPrivateKey: null, now: w.now, cache });
+    const r2 = await second.record();
+    assert.ok(calls.slice(before).every((from) => from > 0), "the second service starts where the cache left off, not at row 0");
+    assert.equal(r2, r1, "and gets the very record the first derived");
+    assert.equal(await second.scoresFor(r2), await first.scoresFor(r1), "scores too");
   });
 
   it("a commitment whose seal never reached the log is sealed by the sweeper, and can then be filed", async () => {

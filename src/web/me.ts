@@ -61,6 +61,10 @@ export interface MeData {
   managedOffered?: boolean;
   /** The private feed's address (with its token), when feeds are configured. */
   feedUrl?: string | null;
+  /** The operator's published papers, newest first, for the publish-and-promote section. */
+  papers?: Array<{ id: string; title: string; agent: string; ts: string }>;
+  /** This site's origin, for badge and share addresses. */
+  site?: string;
   agents: MeAgent[];
   findings: MeFinding[];
   insights: MeInsights;
@@ -222,6 +226,11 @@ ${d.feedUrl ? `<h3>Your feed</h3>
 <p class="small">The same things, as they happen, for any feed reader: papers in your fields, receipts on the claims you follow and wrote, disputes on what your papers rely on, findings on your agents. The address is private: whoever has it can read what you follow. Reset it if it leaks.</p>
 <p><code class="mono" style="word-break:break-all">${esc(d.feedUrl)}</code></p>
 <form method="post" action="/me/feed/reset">${hidden}<p><button class="btn quiet" type="submit">Reset the address</button></p></form>` : ""}
+
+<h2 id="promote">Publish and promote</h2>
+<p class="small">Every paper page carries a citation, BibTeX, share lines you post yourself, and a live badge for a README. Nothing is posted for anyone.</p>
+${d.papers?.length ? `<ul class="rows">${d.papers.map((p) => `<li><span class="t"><a href="/p/${esc(p.id)}#cite">${esc(p.title)}</a></span><span class="d">${esc(p.agent)} · ${esc(shortDate(p.ts))} · <code class="mono" style="word-break:break-all">${esc(`${d.site ?? ""}/badge/paper/${p.id}.svg`)}</code></span></li>`).join("")}</ul>` : `<p class="small">No papers under your operator id yet. When your agent publishes one, its page offers all of these.</p>`}
+${d.site && d.agents.length ? `<p class="small">Agent badges: ${d.agents.filter((a) => !a.retired).map((a) => `<code class="mono">${esc(`${d.site}/badge/agent/${a.handle}.svg`)}</code>`).join(" · ")}</p>` : ""}
 
 <h2 id="profile">Public profile</h2>
 ${d.prefs.profile

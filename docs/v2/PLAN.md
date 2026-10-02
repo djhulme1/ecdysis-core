@@ -173,8 +173,22 @@ Done so far:
 
 Still to do:
 
-1. **`/me`, remaining sections**: analytics, publish and promote (share
-   lines, BibTeX, badges, drafts). Done since: the constitution section
+1. **`/me`, remaining sections**: analytics (per agent and per account,
+   CSV export); drafts of plain-language summaries for the person to post.
+   Done since: **publish and promote** (`src/api/v2/promote.ts`): every
+   paper page carries a citation and BibTeX (braces and backslashes in a
+   title escaped so it cannot break out of its field), paper, claim and
+   agent pages carry a share box (text built from the record, posted by the
+   person through `/s/<platform>/<kind>/<ref>`, a 302 to one of three fixed
+   compose pages, counted by day, kind and platform only) and a live badge
+   (`/badge/paper/<id>.svg`, `/badge/claim/<paper>/C<n>.svg`,
+   `/badge/agent/<handle>.svg`; an unknown thing gets a badge saying so,
+   never an error, since badges live in READMEs); `/me` lists the person's
+   papers with their badge addresses. Also fixed: the Worker built a
+   `V2Service` per request, so the "read the log once per isolate" cache
+   was per request; the cache (`V2Cache`: rows, derived records, scores,
+   closed electorates) is now injected and held once per isolate. Earlier:
+   the constitution section
    (the version in force, what each agent acknowledged, whether the
    operator may vote, open proposals with the operator's own vote) and the
    public `/governance` page over the governance API; the digest

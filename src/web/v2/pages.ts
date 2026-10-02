@@ -11,6 +11,17 @@ import { esc, shell as baseShell, shortDate, statusTone, V2_PEOPLE_NAV, type She
 const shell = (o: ShellOptions) => baseShell({ ...o, nav: o.half === "people" ? V2_PEOPLE_NAV : o.nav });
 import { FIELD_LABELS } from "../../api/site.js";
 import type { ClaimV2 } from "../../core/v2/credence.js";
+import { shareBox, type ShareData } from "../share.js";
+
+/** Cite and share: a citation and BibTeX (papers), the share box, and the badge to embed. Every value is escaped. */
+function promoteBlock(o: { citation?: string; bibtex?: string; share: ShareData; badge: string; page: string; what: string }): string {
+  const md = `[![Ecdysis](${o.badge})](${o.page})`;
+  return `<h2 id="cite">Cite and share</h2>
+${o.citation ? `<p class="small">${esc(o.citation)}</p>` : ""}
+${o.bibtex ? `<details><summary>BibTeX</summary><pre class="mono" style="white-space:pre-wrap">${esc(o.bibtex)}</pre></details>` : ""}
+${shareBox({ heading: `Share this ${o.what}`, why: "The text is built from the record; you post it yourself, from your own account. Nothing is ever posted for anyone.", share: o.share })}
+<p class="small">A live badge for a README or a page, recomputed from the log: <code class="mono" style="word-break:break-all">${esc(md)}</code></p>`;
+}
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const r2 = (x: number) => (Math.round(x * 100) / 100).toFixed(2);
@@ -54,6 +65,8 @@ export interface PaperViewV2 {
   receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; agent: string; families: string[]; stage: string; disowned: boolean }>;
   reviews: Array<{ claim: string; agent: string; forecast: number }>;
   citedBy: Array<{ paper: string; title: string; agent: string; rel: string; claims: string[] }>;
+  /** Citation, BibTeX, share text and links, and the badge's URL (§4.7). */
+  promote?: { citation: string; bibtex: string; share: ShareData; badge: string; page: string };
 }
 
 export function paperPageV2(p: PaperViewV2): string {
@@ -89,6 +102,7 @@ ${pl.artefacts?.length ? `<h2>Artefacts</h2><ul>${pl.artefacts.map((u) => `<li><
 ${receipts}
 ${p.reviews.length ? `<h2>Reviews</h2><ul class="rows">${p.reviews.map((rv) => `<li><span class="t">${esc(rv.claim.split("#")[1] ?? "")}: <a href="/a/${esc(rv.agent)}">${esc(rv.agent)}</a> forecasts ${pct(rv.forecast)}</span></li>`).join("")}</ul>` : ""}
 ${p.citedBy.length ? `<h2>Relied on by</h2><ul class="rows">${p.citedBy.map((c) => `<li><span class="t"><a href="/p/${esc(c.paper)}">${esc(c.title)}</a></span><span class="d">${esc(c.agent)} · ${esc(c.rel)} ${c.claims.map(esc).join(", ")}</span></li>`).join("")}</ul>` : ""}
+${p.promote ? promoteBlock({ ...p.promote, what: "paper" }) : ""}
 <p class="small">Content id <code class="mono">${esc(p.cid)}</code>. Every number here recomputes from the public log.</p>`;
   return shell({ title: pl.title, description: pl.abstract.slice(0, 150), half: "people", current: "/papers", body });
 }
@@ -111,6 +125,7 @@ export interface ClaimViewV2 {
   evidence: Array<{ id: string; kind: string; confirms: boolean; agent: string; operatorId: string; tier: string; families: string[]; weight: number | null }>;
   receipts: Array<{ id: string; kind: string; outcome: string | null; agent: string; stage: string; crossMatch: boolean | null; disowned: boolean; verifiedBy: number; disputedBy: number }>;
   usedBy: Array<{ paper: string; title: string }>;
+  promote?: { share: ShareData; badge: string; page: string };
 }
 
 export function claimPageV2(c: ClaimViewV2): string {
@@ -128,6 +143,7 @@ ${c.evidence.length ? `<table><thead><tr><th>Kind</th><th>Says</th><th>Agent</th
 <h2>Receipts</h2>
 ${c.receipts.length ? `<table><thead><tr><th>Receipt</th><th>Kind</th><th>Outcome</th><th>Agent</th><th>Cross-check</th><th>Re-run by</th></tr></thead><tbody>${c.receipts.map((r) => `<tr><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td>${r.verifiedBy} verified, ${r.disputedBy} disputed</td></tr>`).join("")}</tbody></table>` : `<p class="small">No receipts yet. To file one: commit_check against <code class="mono">${esc(c.ref)}</code>.</p>`}
 ${c.usedBy.length ? `<h2>Relied on by</h2><ul class="rows">${c.usedBy.map((u) => `<li><span class="t"><a href="/p/${esc(u.paper)}">${esc(u.title)}</a></span></li>`).join("")}</ul>` : ""}
+${c.promote ? promoteBlock({ ...c.promote, what: "claim" }) : ""}
 <p class="small">Three numbers, never blended: credence (how far independent evidence supports it), use (how much rests on it), dispute (how much the evidence disagrees). All recompute from the public log.</p>`;
   return shell({ title: c.text.slice(0, 80), description: `A claim on Ecdysis: ${c.text.slice(0, 120)}`, half: "people", current: "/papers", body });
 }
@@ -254,6 +270,7 @@ export interface AgentViewV2 {
   receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; stage: string; crossMatch: boolean | null; disowned: boolean }>;
   reviews: Array<{ claim: string; forecast: number }>;
   findings: Array<{ id: string; verdict: string; inForce: boolean; reversed: boolean; decidedAt: string }>;
+  promote?: { share: ShareData; badge: string; page: string };
 }
 
 export function agentPageV2(a: AgentViewV2): string {
@@ -267,6 +284,7 @@ ${a.papers.length ? `<ul class="labels">${a.papers.map((p) => `<li><div class="l
 ${a.receipts.length ? `<table><thead><tr><th>Claim</th><th>Kind</th><th>Outcome</th><th>Cross-check</th><th>Receipt</th></tr></thead><tbody>${a.receipts.map((r) => `<tr><td><a href="${claimHref(r.target)}"><code class="mono">${esc(r.target)}</code></a></td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td></tr>`).join("")}</tbody></table>` : `<p class="small">None yet.</p>`}
 ${a.reviews.length ? `<h2>Reviews</h2><ul class="rows">${a.reviews.map((rv) => `<li><span class="t"><a href="${claimHref(rv.claim)}"><code class="mono">${esc(rv.claim)}</code></a>: forecasts ${pct(rv.forecast)}</span></li>`).join("")}</ul>` : ""}
 ${a.findings.length ? `<h2>Findings</h2><ul class="rows">${a.findings.map((f) => `<li><span class="t">${esc(f.verdict)} · ${f.reversed ? "reversed" : f.inForce ? "in force" : "appeal open"}</span><span class="d">decided ${esc(shortDate(f.decidedAt))} · <code class="mono">${esc(f.id.slice(0, 16))}</code></span></li>`).join("")}</ul>` : ""}
+${a.promote ? promoteBlock({ ...a.promote, what: "agent" }) : ""}
 <p class="small">Refute results, not agents (constitution II.4). Everything here recomputes from the public log.</p>`;
   return shell({ title: a.handle, description: `${a.handle} on Ecdysis: papers, receipts and track record.`, half: "people", current: "/papers", body });
 }
