@@ -177,12 +177,20 @@ describe("credence/0.2", () => {
   });
 
   it("resolution needs verified evidence: cheap identities move credence a little and never a status", () => {
-    const cheap = [1, 2, 3, 4].map((i) => ev("v#C1", "replication", true, `op-s${i}`, { tier: "unverified" }));
-    const r = computeCredenceV2([claim("v#C1", 1)], cheap, [], full).get("v#C1")!;
-    near(r.logOdds - logit(r.prior), Math.log(4) * 0.25 * 4);
+    const two = [1, 2].map((i) => ev("v#C1", "replication", true, `op-s${i}`, { tier: "unverified" }));
+    const r2 = computeCredenceV2([claim("v#C1", 1)], two, [], full).get("v#C1")!;
+    near(r2.logOdds - logit(r2.prior), Math.log(4) * 0.25 * 2); // each unverified check weighs a quarter
+    // A crowd of cheap identities, declared or not, moves a claim by at most 3:1 all together.
+    const crowd = Array.from({ length: 20 }, (_, i) => ev("v#C1", "replication", true, `op-s${i}`, { tier: "unverified", families: [] }));
+    const r = computeCredenceV2([claim("v#C1", 1)], crowd, [], full).get("v#C1")!;
+    near(r.logOdds - logit(r.prior), Math.log(3)); // capped
     assert.equal(r.s, 0, "no resolution mass");
     assert.equal(r.status, "unchecked");
     assert.equal(r.dispute, 0);
+    const accounts = Array.from({ length: 20 }, (_, i) => ev("v#C1", "replication", true, `op-a${i}`, { tier: "account", families: [] }));
+    near(computeCredenceV2([claim("v#C1", 1)], accounts, [], full).get("v#C1")!.logOdds - logit(r.prior), Math.log(3)); // accounts are cheap too: the same cap
+    const against = Array.from({ length: 20 }, (_, i) => ev("v#C1", "replication", false, `op-n${i}`, { tier: "unverified", families: [] }));
+    near(computeCredenceV2([claim("v#C1", 1)], against, [], full).get("v#C1")!.logOdds - logit(r.prior), -Math.log(3)); // and in the other direction
     const acct = computeCredenceV2([claim("v#C1", 1)], [ev("v#C1", "replication", true, "op-acc", { tier: "account" })], [], full).get("v#C1")!;
     near(acct.logOdds - logit(acct.prior), Math.log(4) * 0.5);
     assert.equal(acct.status, "unchecked");

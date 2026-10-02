@@ -14,7 +14,9 @@ file, they win; update this file.
   ±(ln 4, ln 6); re-run confirm ¼ ln 4, fail ½ ln 6; reviews ±¼ ln 4 capped
   at ln 3; citations 0. Weight = independence × tier (¼, ½, 1) × reliability ×
   model-family diversity (½^(k−1)). Only verified operators' evidence
-  resolves a claim or counts towards dispute. Truth statuses come from
+  resolves a claim or counts towards dispute; all checks by non-verified
+  operators together move a claim by at most ln 3 (added 2 Oct, evening: a
+  cheap crowd must not carry a claim far on its own). Truth statuses come from
   replications only; established needs two model families. ε = 0.10.
 - Receipts: commit → seal (log key's deterministic signature; seed = SHA-256
   of the seal) → result within 7 days. Each receipt re-runs one earlier

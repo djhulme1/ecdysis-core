@@ -37,7 +37,10 @@
  *                  check weighs ½; a three-model check after a Claude check
  *                  weighs 5/6; undeclared items are not discounted against each
  *                  other, but count as at most one family towards "established".
- * Items under a fabrication finding weigh nothing.
+ * Items under a fabrication finding weigh nothing. Checks by operators who
+ * are not verified together move a claim by at most ln 3, like reviews:
+ * verified operators are the trust anchor, and a cheap crowd must not be
+ * able to carry a claim far on its own.
  *
  * Three numbers per claim, never blended:
  *   credence p   what to believe;
@@ -79,6 +82,15 @@ export const CREDENCE_V2_PARAMS = {
   reviewStep: Math.log(4) / 4,
   /** All reviews together never move the odds by more than 3:1. */
   reviewCap: Math.log(3),
+  /**
+   * All checks by operators who are not verified (unverified and account
+   * tiers together) never move the odds by more than 3:1 either. Accounts
+   * cost an email and unverified operator ids cost nothing, so a crowd of
+   * them is cheap to assemble; verified operators are the trust anchor.
+   * Without this cap ten undeclared unverified sybils could carry a false
+   * claim from a half to 0.85 while its status still read "unchecked".
+   */
+  unverifiedCap: Math.log(3),
   /** Chance a claim holds even though a foundation fails (0.10: deep chains of good work should not start near zero). */
   epsilon: 0.1,
   /** Calibration prior for an author with no record. */
@@ -272,6 +284,7 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
     if (!cur || RANK[e.kind] > RANK[cur.kind] || (RANK[e.kind] === RANK[cur.kind] && e.seq > cur.seq)) best.set(e.operatorId, e);
   }
   let checks = 0;
+  let unverifiedChecks = 0;
   let reviews = 0;
   let s = 0;
   let f = 0;
@@ -293,11 +306,11 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
       reviews += w * ev;
     } else if (e.kind === "rerun") {
       ev = e.confirms ? P.confirm * P.rerunConfirmShare : -P.refute * P.rerunFailShare;
-      checks += w * ev;
+      if (e.tier === "verified") checks += w * ev; else unverifiedChecks += w * ev;
       if (e.confirms) reproduced = true;
     } else {
       ev = e.confirms ? P.confirm : -P.refute;
-      checks += w * ev;
+      if (e.tier === "verified") checks += w * ev; else unverifiedChecks += w * ev;
       if (e.tier === "verified") {
         if (e.confirms) {
           confirmingReplication = true;
@@ -312,8 +325,9 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
     }
     counted.push({ item: e, weight: w, e: ev });
   }
-  const capped = Math.max(-P.reviewCap, Math.min(P.reviewCap, reviews));
-  return { sum: checks + capped, s, f, confirmingReplication, failingReplication, confirmingFamilies, reproduced, counted };
+  const cappedReviews = Math.max(-P.reviewCap, Math.min(P.reviewCap, reviews));
+  const cappedUnverified = Math.max(-P.unverifiedCap, Math.min(P.unverifiedCap, unverifiedChecks));
+  return { sum: checks + cappedUnverified + cappedReviews, s, f, confirmingReplication, failingReplication, confirmingFamilies, reproduced, counted };
 }
 
 /** The status rules (sanity check §5.3), in order. Statuses come from verified replications only. */
