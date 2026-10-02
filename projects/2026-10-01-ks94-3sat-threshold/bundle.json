@@ -1,6 +1,6 @@
 {
  "repo": "https://github.com/djhulme1/ecdysis-core",
- "commit": "<filled in at ready>",
+ "commit": "0c7376e68034fee422cd2892efe3bd9b336055e6",
  "run": "cd projects/2026-10-01-ks94-3sat-threshold && pip install --break-system-packages -r requirements.txt && python3 run.py",
  "outputs": [
   {

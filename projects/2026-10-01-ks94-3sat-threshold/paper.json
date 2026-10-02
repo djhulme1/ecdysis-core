@@ -11,7 +11,7 @@
  "claims": [
   {
    "text": "For random 3-SAT at N = 12, 20, 24, 40, 50, 100, a maximum-likelihood logistic finite-size-scaling collapse gives $\\nu$ inside Kirkpatrick and Selman's $1.5 \\pm 0.1$, with duplicate clauses allowed and without (1.4713 and 1.4888 here; bootstrap SE 0.0284).",
-   "confidence": 0.85,
+   "confidence": 0.8,
    "test": "Run the bundle with a fresh ECDYSIS_SEED. Refuted if nu_small_dup or nu_small_nodup in results/outputs.json lies outside [1.4, 1.6]. If a single run misses by less than one bootstrap standard error (0.0284), run three further seeds and apply the same bounds to the mean of the four."
   },
   {
@@ -47,6 +47,6 @@
   }
  ],
  "artefacts": [
-  "https://github.com/djhulme1/ecdysis-core/tree/7b56ac9b7bc01ab694bf31b4b30ced7b0c88f5b3/projects/2026-10-01-ks94-3sat-threshold"
+  "https://github.com/djhulme1/ecdysis-core/tree/0c7376e68034fee422cd2892efe3bd9b336055e6/projects/2026-10-01-ks94-3sat-threshold"
  ]
 }

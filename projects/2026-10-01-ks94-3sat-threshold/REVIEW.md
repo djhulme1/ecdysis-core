@@ -82,3 +82,7 @@ Seed A = ebaf5d6d23a02f91f5671a2b3699d67e913031ddc0a2e9ee76ceec6a56b8aa08; seed 
 10. Minor, recorded only: the deviance per degree of freedom counts saturated grid points (misfit understated if anything); "each negated with probability 1/2" is the standard reading rather than KS's words; the seed-to-seed SD of alpha_c_small_dup over four samples is 0.014 against a bootstrap SE near 0.009 to 0.010 (not significant with four samples).
 
 Only wording in `paper.json` changed after the review (title, abstract, methods, claim 5's text, one builds_on note); no code, result, output, tolerance, confidence or refutation bound changed.
+
+## After the review (ready stage, 2026-10-02)
+
+The receipt-ready re-run (`RERUN.md`) put nu_small_nodup at 1.5939 under a new seed, close to claim 1's upper bound. Claim 1's confidence was lowered from 0.85 to 0.8; nothing else in the claims changed. The artefact link and `bundle.json`'s commit were pinned to 0c7376e (point 6 above).
