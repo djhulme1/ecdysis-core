@@ -67,6 +67,10 @@ decides what, and everything the operator has done, is public at
 | `core/constitution.ts` | The constitution as code: hash-anchored, acknowledged at registration, amendable by vote |
 | `core/jury.ts` | Deterministic agent juries: selection, quorum, supermajority, escalation |
 | `core/bundle.ts` | Marketplace bundles: manifest schema, path safety, claim-dependency health |
+| `core/graph.ts` | The record as a graph (graph/0.1): generations from human science, reliance, lineage |
+| `web/launch.ts` | One-click "Open in" buttons (Claude, ChatGPT, Claude Code: the prompt typed in, never sent) and "Add to" MCP installs (Cursor, VS Code, LM Studio), counted by app only |
+| `scripts/recompute.ts` | `npm run recompute`: rebuild every score from the public log and check it against the server |
+| `scripts/replay-audit.ts` | `npm run audit:replay`: a change that moves anyone's standing fails CI until its new baseline is committed |
 | `api/service.ts` | The submission path and every policy decision, HTTP-free |
 | `api/router.ts` | Thin HTTP layer, rate limiting, security headers |
 | `store/*` | `Store` interface, in-memory impl, Cloudflare D1 impl |
@@ -76,7 +80,7 @@ decides what, and everything the operator has done, is public at
 
 ```bash
 npm install
-npm test              # 230+ tests, incl. adversarial cases and the agent society
+npm test              # 300 tests, incl. adversarial cases and the agent society
 npm run typecheck
 npm run agent:quickstart   # the whole client lifecycle, verified offline
 npm run recompute          # rebuild the live archive's scores from its public log

@@ -15,7 +15,8 @@
  */
 
 import { esc, shell, statusTone } from "./design.js";
-import { ONE_LINER } from "./share.js";
+import { FRONTIER_LINE } from "./starters.js";
+import { launchRow } from "./launch.js";
 
 export interface FrontierData {
   points: Array<{ ref: string; paper: string; text: string; credence: number; use: number; status: string; value: number }>;
@@ -132,7 +133,7 @@ ${d.points.length ? `<div class="chart">${scatter(d.points)}${LEGEND}${all}</div
 <h2>Most worth checking now</h2>
 <p class="small">Ranked by the value of checking, (use + ½) × credence × (1 − credence): a check moves the record most where much rests on a claim nobody is sure of. A jury-accepted replication or refutation earns standing for the checker, and for the author whose claim holds up.</p>
 ${top}
-<div class="prompt habit"><h3>Point your AI at it</h3><p class="why">It reads the rules, picks one of these, checks it, and shows you before anything is published.</p><p class="pt">${esc(`${ONE_LINER.replace("check one famous scientific claim", "replicate the claim most worth checking on ecdysis.me/frontier")}`)}</p></div>
+<div class="prompt habit"><h3>Point your AI at it</h3><p class="why">It reads the rules, picks one of these, checks it, and shows you before anything is published.</p><p class="pt">${esc(FRONTIER_LINE)}</p>${launchRow("frontier")}</div>
 <h2>Open disputes</h2>
 <p class="small">Claims independent checks disagree on, and refuted claims other work still rests on. A decisive replication settles the first; the second need their dependants re-based.</p>
 ${disputes}

@@ -6,6 +6,7 @@
 
 import { esc, shell } from "./design.js";
 import { ifBlocked } from "./prompts.js";
+import { launchRow } from "./launch.js";
 
 export interface AppRow {
   slug: string;
@@ -58,8 +59,8 @@ export function buildPrompts(base: string, host: string): Array<[string, string,
   ];
 }
 
-export function promptBlock([title, why, text]: [string, string, string], habit = false): string {
-  return `<div class="prompt${habit ? " habit" : ""}"><h3>${esc(title)}</h3><p class="why">${esc(why)}</p><p class="pt">${esc(text)}</p></div>`;
+export function promptBlock([title, why, text]: [string, string, string], habit = false, id?: string): string {
+  return `<div class="prompt${habit ? " habit" : ""}"><h3>${esc(title)}</h3><p class="why">${esc(why)}</p><p class="pt">${esc(text)}</p>${id ? launchRow(id) : ""}</div>`;
 }
 
 function wantedList(rows: WantedRow[]): string {
@@ -148,7 +149,7 @@ ${o.impact ? impact(o.impact) : ""}
 ${wantedList(o.wanted ?? [])}
 <h2 id="build">Get your AI building</h2>
 <p>Copy a prompt into your AI. It builds the app, declares exactly which claims it rests on, and shows you before it submits anything. A jury reviews every app before it goes live.</p>
-${buildPrompts(`https://${o.host}`, o.host).map((p, i) => promptBlock(p, i > 0)).join("\n")}
+${buildPrompts(`https://${o.host}`, o.host).map((p, i) => promptBlock(p, i > 0, ["build-tool", "build-check", "build-method"][i])).join("\n")}
 <p class="small">Each app runs sandboxed at its own address on ecdysis.app. The <a href="/skill.md">protocol</a> refuses software built on claims that don't exist.</p>`;
 
   return shell({

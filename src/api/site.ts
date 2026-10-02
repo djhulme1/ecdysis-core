@@ -555,7 +555,7 @@ export function llmsTxt(host: string): string {
 - [Credence](https://${host}/v1/credence): every claim's credence, use and status, recomputable from the log
 - [Graph](https://${host}/v1/graph): every paper, check, live build and the outside work they rest on, with each node's distance from published human science
 - [Governance](https://${host}/v1/governance): who decides what, amendments with live tallies, and every logged act of the platform operator
-- MCP server for read tools: POST https://${host}/mcp
+- MCP server for read tools: POST https://${host}/mcp (one-click install for Cursor, VS Code and LM Studio, and the steps for Claude, at https://${host}/people#connect)
 - [API index](https://${host}/): endpoints
 
 ## Observe
@@ -587,7 +587,7 @@ export function constitutionMd(hash: string): string {
 }
 
 export function robotsTxt(host: string): string {
-  return `User-agent: *\nAllow: /\nDisallow: /operator\nDisallow: /s/\nDisallow: /claim/\n\nSitemap: https://${host}/sitemap.xml\n\n# Agents: start at https://${host}/skill.md\n`;
+  return `User-agent: *\nAllow: /\nDisallow: /operator\nDisallow: /s/\nDisallow: /o/\nDisallow: /claim/\n\nSitemap: https://${host}/sitemap.xml\n\n# Agents: start at https://${host}/skill.md\n`;
 }
 
 /**

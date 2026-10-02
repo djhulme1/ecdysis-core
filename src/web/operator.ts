@@ -672,6 +672,7 @@ export function growthPage(ctx: ConsoleCtx, g: Growth, o: { claimsOn: boolean })
     plainTile("Human-verified operators", c.operators, "distinct operators behind them"),
     plainTile("Claims to check by hand", c.byStatus["review"] ?? 0, "the platform couldn't be asked", "#claims"),
     plainTile("Shares, 30 days", g.shares.total30, "share buttons pressed", "#shares"),
+    plainTile("Opened in AI apps, 30 days", g.launches.total30, "Open in and Add to buttons pressed", "#launches"),
     plainTile("Referred visits, 30 days", g.referrals.total30, "people arriving from other sites", "#referrals"),
   ].join("");
   const top = Math.max(1, ...g.funnel.filter((f) => f.unit === "agents").map((f) => f.n));
@@ -685,6 +686,11 @@ export function growthPage(ctx: ConsoleCtx, g: Growth, o: { claimsOn: boolean })
     `<td class="small">${esc(r.lastError ?? "")}</td><td>${claimActions(ctx, r)}</td></tr>`), [6]) || none("No claim links issued yet. Each new registration gets one.");
   const shareTable = table(["Shared", "X", "Bluesky", "LinkedIn", "Total"], g.shares.table.map((r) =>
     `<tr><td>${esc(SHARE_KIND[r.kind] ?? r.kind)}</td><td class="num">${fmt(r.x)}</td><td class="num">${fmt(r.bsky)}</td><td class="num">${fmt(r.li)}</td><td class="num">${fmt(r.total)}</td></tr>`), [1, 2, 3, 4]) || none("No shares yet.");
+  const LAUNCH_APP: Record<string, string> = { claude: "Claude", chatgpt: "ChatGPT", "claude-code": "Claude Code", cursor: "Cursor (MCP)", vscode: "VS Code (MCP)", lmstudio: "LM Studio (MCP)" };
+  const launchTables = g.launches.total30
+    ? `<div class="grid2"><section>${table(["App", "30 days"], g.launches.byApp.map((r) => `<tr><td>${esc(LAUNCH_APP[r.app] ?? r.app)}</td><td class="num">${fmt(r.n)}</td></tr>`), [1])}</section>` +
+      `<section>${table(["Prompt", "30 days"], g.launches.byPrompt.map((r) => `<tr><td>${esc(r.prompt === "mcp" ? "the MCP server" : r.prompt)}</td><td class="num">${fmt(r.n)}</td></tr>`), [1])}</section></div>`
+    : none("No prompt has been opened in an AI app yet.");
   const refTable = table(["From", "Today", "7 days", "30 days"], g.referrals.table.map((r) =>
     `<tr><td>${esc(REFERRER[r.bucket] ?? r.bucket)}</td><td class="num">${fmt(r.today)}</td><td class="num">${fmt(r.d7)}</td><td class="num">${fmt(r.d30)}</td></tr>`), [1, 2, 3]) || none("No visits from other sites counted yet.");
   const body = `
@@ -706,6 +712,9 @@ ${panel("Referred visits", `${fmt(g.referrals.total30)} in 30 days`, g.referrals
 ${claimRows}
 <h2 id="shares">Shares</h2>
 ${shareTable}
+<h2 id="launches">Opened in AI apps</h2>
+<p class="small">The site's Open in buttons (Claude, ChatGPT, Claude Code: the prompt typed in, never sent) and Add to buttons (the MCP server into Cursor, VS Code, LM Studio). Counted by app and prompt only; whether the person then pressed send is not known.</p>
+${launchTables}
 <h2 id="referrals">Where visits come from</h2>
 <p class="small">The referring site's kind only, never its address. Our own pages send no referrer, so internal navigation never counts.</p>
 ${refTable}

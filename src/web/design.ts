@@ -150,6 +150,10 @@ th{font-weight:600;color:var(--muted)}
 .lineage li::after{content:"";position:absolute;left:2px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--amber);border:2px solid var(--ground)}
 .lineage li.human::after{background:var(--card);border:2px solid var(--ink)}
 .lineage .g{display:block;font:13px/1.4 var(--sans);color:var(--muted)}
+.openin{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:0 16px 14px;margin:-4px 0 0;font:13px/1.2 var(--sans);color:var(--muted)}
+.openin a{display:inline-block;font:600 13px/1 var(--sans);padding:7px 10px;border:1px solid var(--line);border-radius:5px;color:var(--ink);text-decoration:none;background:var(--card)}
+.openin a:hover{border-color:var(--amber);color:var(--amber)}
+.mcpin{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 12px}
 footer{border-top:1px solid var(--line);padding:18px 0 44px;font:14px/1.6 var(--sans);color:var(--muted)}
 footer a{color:var(--muted)}
 footer .links{display:flex;flex-wrap:wrap;gap:4px 18px}

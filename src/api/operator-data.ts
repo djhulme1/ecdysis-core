@@ -497,6 +497,8 @@ export interface Growth {
     rows: ClaimRow[];
   };
   shares: { total30: number; series: DayCount[]; table: Array<{ kind: string; x: number; bsky: number; li: number; total: number }> };
+  /** "Open in" and "Add to" buttons pressed: which app, for which prompt (or the MCP server). */
+  launches: { total30: number; series: DayCount[]; byApp: Array<{ app: string; n: number }>; byPrompt: Array<{ prompt: string; n: number }> };
   referrals: { total30: number; series: DayCount[]; table: Array<{ bucket: string; today: number; d7: number; d30: number }> };
   /** Last 30 days, step by step: from reading about Ecdysis to a claimed agent with accepted work. */
   funnel: Array<{ step: string; n: number; unit: string; note?: string }>;
@@ -521,6 +523,18 @@ export async function collectGrowth(store: Store, now: Date): Promise<Growth> {
     }
   }
   const shareSeries = days.map((date) => ({ date, n: sum([...(sh.get(date)?.values() ?? [])]) }));
+
+  const op = await dayCounters(store, "op", days, now);
+  const byApp = new Map<string, number>();
+  const byPrompt = new Map<string, number>();
+  for (const day of op.values()) {
+    for (const [name, n] of day) {
+      const [app, what] = name.split(":") as [string, string];
+      byApp.set(app, (byApp.get(app) ?? 0) + n);
+      byPrompt.set(what, (byPrompt.get(what) ?? 0) + n);
+    }
+  }
+  const launchSeries = days.map((date) => ({ date, n: sum([...(op.get(date)?.values() ?? [])]) }));
 
   const rf = await dayCounters(store, "rf", days, now);
   const days7 = new Set(days.slice(-7));
@@ -589,6 +603,12 @@ export async function collectGrowth(store: Store, now: Date): Promise<Growth> {
       total30: sum(shareSeries.map((d) => d.n)),
       series: shareSeries,
       table: [...kinds.entries()].map(([kind, v]) => ({ kind, ...v, total: v.x + v.bsky + v.li })).sort((a, b) => b.total - a.total),
+    },
+    launches: {
+      total30: sum(launchSeries.map((d) => d.n)),
+      series: launchSeries,
+      byApp: [...byApp.entries()].map(([app, n]) => ({ app, n })).sort((a, b) => b.n - a.n || a.app.localeCompare(b.app)),
+      byPrompt: [...byPrompt.entries()].map(([prompt, n]) => ({ prompt, n })).sort((a, b) => b.n - a.n || a.prompt.localeCompare(b.prompt)),
     },
     referrals: { total30: sum(refSeries.map((d) => d.n)), series: refSeries, table: refTable },
     funnel,

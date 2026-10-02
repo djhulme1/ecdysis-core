@@ -30,6 +30,8 @@ import type { ShareData } from "../web/share.js";
 import { graphPage } from "../web/graph.js";
 import { frontierPage } from "../web/frontier.js";
 import { commonsPage } from "../web/commons.js";
+import { appsFor, launchPage, MCP_APPS, mcpUrlFor, PROMPT_APPS, type McpApp, type PromptApp } from "../web/launch.js";
+import { isStarter, starterText } from "../web/starters.js";
 import { charterFormPage, charterResultPage, readCharterForm, CHARTER_MAX_BYTES } from "../web/charter.js";
 import type { GraphEdge, GraphNode } from "../core/graph.js";
 
@@ -514,6 +516,47 @@ async function shareRedirect(req: Request, path: string, svc: EcdysisService, op
 }
 
 /**
+ * /o/<app>/<what>: open an AI app with one of this site's prompts typed in
+ * (not sent), or add Ecdysis's MCP server to an AI tool. Counted by app and
+ * prompt only, never who. The target is built from fixed parts and a prompt
+ * this site wrote: never an open redirect. Web apps get a 302; apps with
+ * their own URL scheme get a page that opens them and says what to do if
+ * nothing happens.
+ */
+async function launchRedirect(req: Request, url: URL, path: string, svc: EcdysisService, opts: RouteOptions): Promise<Response | null> {
+  const m = path.match(/^\/o\/([a-z-]{2,16})\/([a-z-]{2,16})$/);
+  if (!m) return null;
+  const [, app, what] = m as unknown as [string, string, string];
+  const host = safeHost(url);
+  const base = `https://${host === "api.ecdysis.me" ? "ecdysis.me" : host}`;
+  const headers = { ...STATIC_PAGE_HEADERS, "cache-control": "no-store", "x-robots-tag": "noindex, nofollow" };
+  const missing = () => new Response("Nothing to open at this address.", { status: 404, headers: { ...TEXT_SITE_HEADERS("text/plain; charset=utf-8"), "cache-control": "no-store", "x-robots-tag": "noindex, nofollow" } });
+  let target: string;
+  let page: string | null = null;
+  if (app in PROMPT_APPS && isStarter(what) && appsFor(what).includes(app as PromptApp)) {
+    const def = PROMPT_APPS[app as PromptApp];
+    const prompt = starterText(what, base, { version: CONSTITUTION_VERSION, hash: await constitutionHash() });
+    if (prompt.length > def.max) return missing();
+    target = def.target(prompt);
+    if (!def.web) page = launchPage({ label: def.label, target, needs: def.needs, prompt });
+  } else if (app in MCP_APPS && what === "mcp") {
+    const def = MCP_APPS[app as McpApp];
+    const mcpUrl = mcpUrlFor(host);
+    target = def.target(mcpUrl);
+    page = launchPage({ label: def.label, target, needs: `${def.label} installed on this computer`, mcp: { url: mcpUrl, manual: def.manual(mcpUrl) } });
+  } else {
+    return missing();
+  }
+  if (req.method.toUpperCase() === "GET" && req.headers.get("x-ecdysis-probe") !== "1") {
+    const counting = svc.recordOperational([`op:${new Date().toISOString().slice(0, 10)}:${app}:${what}`]);
+    if (opts.waitUntil) opts.waitUntil(counting);
+    else await counting;
+  }
+  if (page !== null) return new Response(req.method.toUpperCase() === "HEAD" ? null : page, { status: 200, headers });
+  return new Response(null, { status: 302, headers: { ...headers, location: target } });
+}
+
+/**
  * POST /claim/<token>: check the person's claim post, then show the claim
  * page with the outcome. Counted here (the funnel can't read an HTML page),
  * by outcome only.
@@ -744,6 +787,8 @@ async function routeRequest(
     try {
       const shared = await shareRedirect(req, path, svc, opts);
       if (shared) return shared;
+      const launched = await launchRedirect(req, url, path, svc, opts);
+      if (launched) return launched;
       const page = await sitePage(req, url, path, opts, svc);
       if (page) return page;
       const paper = await paperPage(req, url, path, svc);

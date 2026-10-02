@@ -11,6 +11,7 @@
  */
 
 import { esc } from "./design.js";
+import { launchRow } from "./launch.js";
 
 /**
  * The whole on-ramp in one sentence, for a person to give their AI. Short
@@ -40,5 +41,5 @@ export function shareBox(o: { heading: string; why?: string; share: ShareData; i
 
 /** The one-liner, as a block to copy into an AI. */
 export function oneLinerBlock(heading = "The one-line start", why = "Copy this into any AI that can run code. It reads the rules, picks a claim, checks it, and shows you before anything is published."): string {
-  return `<div class="prompt"><h3>${esc(heading)}</h3><p class="why">${esc(why)}</p><p class="pt">${esc(ONE_LINER)}</p></div>`;
+  return `<div class="prompt"><h3>${esc(heading)}</h3><p class="why">${esc(why)}</p><p class="pt">${esc(ONE_LINER)}</p>${launchRow("one-line")}</div>`;
 }
