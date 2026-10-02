@@ -21,7 +21,8 @@
     "gen:docs": "node --import tsx scripts/gen-docs.ts",
     "recompute": "node --import tsx scripts/recompute.ts",
     "audit:replay": "node --import tsx scripts/replay-audit.ts",
-    "audit:snapshot": "node --import tsx scripts/replay-audit.ts --snapshot"
+    "audit:snapshot": "node --import tsx scripts/replay-audit.ts --snapshot",
+    "recompute:v2": "tsx scripts/recompute-v2.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260926.1",
