@@ -8,7 +8,7 @@ import type { V2Service } from "./service.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
 import { skillMdV2 } from "./skill.js";
-import { claimPageV2, frontierPageV2, missingPageV2, observatoryPageV2, papersPageV2, paperPageV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2 } from "../../web/v2/pages.js";
+import { agentPageV2, claimPageV2, frontierPageV2, missingPageV2, observatoryPageV2, papersPageV2, paperPageV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2 } from "../../web/v2/pages.js";
 
 export const PAGE_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
@@ -20,6 +20,7 @@ export const PAGE_HEADERS: Record<string, string> = {
 };
 const PAPER = /^\/p\/(ecd:[A-Za-z0-9:._-]{4,80})(?:\/(C[1-9][0-9]?))?$/;
 const EXTERNAL = /^\/x\/([0-9a-f]{16})(?:\/(C1))?$/;
+const AGENT = /^\/a\/([A-Za-z0-9][A-Za-z0-9-]{1,39})$/;
 
 export class PagesHandler {
   constructor(private v2: V2Service, private o: { host?: string; logPublicKey?: string | null } = {}) {}
@@ -38,6 +39,8 @@ export class PagesHandler {
       const p = await this.paper(pm[1]!);
       return p ? html(200, paperPageV2(p)) : html(404, missingPageV2("paper"));
     }
+    const am = path.match(AGENT);
+    if (am) { const a = await this.agent(am[1]!); return a ? html(200, agentPageV2(a)) : html(404, missingPageV2("agent")); }
     const xm = path.match(EXTERNAL);
     if (xm) {
       const c = await this.claim(`ext:${xm[1]}#C1`);
@@ -102,6 +105,27 @@ export class PagesHandler {
       .map((c) => ({ id: c.id, kind: c.kind, outcome: c.outcome, agent: c.handle, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, verifiedBy: c.verifiedBy.length, disputedBy: c.disputedBy.length }));
     const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref).map((u) => u.paper))].map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
     return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy };
+  }
+
+  private async agent(handle: string): Promise<AgentViewV2 | null> {
+    const r = await this.v2.record();
+    const a = r.agents.get(handle);
+    if (!a) return null;
+    const s = await this.v2.scores();
+    const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
+    return {
+      handle, operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", families: a.families,
+      reliability: s.track.reliability.get(handle) ?? 0.5, credit: s.track.credit.get(handle) ?? 0,
+      reports: s.track.reports.filter((x) => x.agent === handle && x.resolved !== null).length,
+      lapses: r.lapses.get(handle) ?? 0, checkKeys: a.checkKeys.length, retired: a.revokedAt !== null, voided: r.voidedOperators.has(a.operatorId),
+      papers: [...r.papers.values()].filter((p) => p.handle === handle).sort((x, y) => y.seq - x.seq).map((p) => {
+        const st = p.claims.map((ref) => s.claims.get(ref)?.status).filter((x): x is NonNullable<typeof x> => !!x);
+        return { id: p.id, title: p.title, field: p.field, ts: p.ts, worst: st.length ? st.reduce((x, y) => (rank(x) < rank(y) ? x : y)) : null };
+      }),
+      receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed").sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned })),
+      reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle).map((e) => ({ claim: e.claim, forecast: r.forecasts.get(`${e.claim}|${handle}`) ?? 0.5 })),
+      findings: r.findings.filter((f) => f.oddAgent === handle).map((f) => ({ id: f.id, verdict: f.verdict, inForce: f.inForce, reversed: f.reversed, decidedAt: f.decidedAt })),
+    };
   }
 
   private async observatory(): Promise<ObservatoryViewV2> {

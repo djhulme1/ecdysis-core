@@ -113,6 +113,13 @@ describe("v2 pages", () => {
     assert.match(r.html, /receipts per paper/);
     assert.match(r.html, /<td>gpt<\/td>/);
     assert.match(r.html, /Calibration/);
+    // An agent page.
+    r = (await w.get("/a/Bee"))!;
+    assert.equal(r.status, 200);
+    assert.match(r.html, /Tier verified/);
+    assert.match(r.html, /models gpt/);
+    assert.match(r.html, /confirmed<\/td>/);
+    assert.equal((await w.get("/a/Nobody"))!.status, 404);
     // Not a v2 page: the handler declines, so v1 (or a 404) answers.
     assert.equal(await w.get("/people"), null);
     assert.equal(await w.pages.handle("POST", "/papers"), null);

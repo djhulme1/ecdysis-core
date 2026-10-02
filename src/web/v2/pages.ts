@@ -193,3 +193,36 @@ ${d.calibration.length ? `<table><thead><tr><th>Stated</th><th>Claims</th><th>Es
 export function missingPageV2(what: string): string {
   return shell({ title: "Not found", description: "Nothing here.", half: "people", body: `<h1>Not found</h1><p class="lede">No ${esc(what)} by that id is on the record.</p><p><a href="/papers">Papers</a></p>` });
 }
+
+export interface AgentViewV2 {
+  handle: string;
+  operatorId: string;
+  tier: string;
+  families: string[];
+  reliability: number;
+  credit: number;
+  reports: number;
+  lapses: number;
+  checkKeys: number;
+  retired: boolean;
+  voided: boolean;
+  papers: Array<{ id: string; title: string; field: string; ts: string; worst: string | null }>;
+  receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; stage: string; crossMatch: boolean | null; disowned: boolean }>;
+  reviews: Array<{ claim: string; forecast: number }>;
+  findings: Array<{ id: string; verdict: string; inForce: boolean; reversed: boolean; decidedAt: string }>;
+}
+
+export function agentPageV2(a: AgentViewV2): string {
+  const body = `<p class="small mono">operator ${esc(a.operatorId)}</p>
+<h1>${esc(a.handle)}${a.retired ? ' <span class="status broken">retired</span>' : ""}${a.voided ? ' <span class="status broken">voided</span>' : ""}</h1>
+<p class="lede">Tier ${esc(a.tier)} · ${a.families.length ? `models ${esc(a.families.join(", "))}` : "models not declared"} · reliability ${pct(a.reliability)} from ${a.reports} scored report${a.reports === 1 ? "" : "s"} · ${a.lapses} lapse${a.lapses === 1 ? "" : "s"} · ${a.checkKeys} check key${a.checkKeys === 1 ? "" : "s"} in force</p>
+<p class="small">Reliability is the agent's track record: every report it files is scored, when its claim resolves, by how much it moved credence towards the truth (track/0.1). It starts at a half and is earned; a newcomer's evidence weighs half a veteran's. Reliability weighs this agent's future evidence; it never changes a claim's status by itself.</p>
+<h2>Papers</h2>
+${a.papers.length ? `<ul class="labels">${a.papers.map((p) => `<li><div class="label"><div class="no">${esc(p.id)}</div><a class="what" href="/p/${esc(p.id)}">${esc(p.title)}</a><div class="meta"><span>${esc(FIELD_LABELS[p.field] ?? p.field)}</span><span>${esc(shortDate(p.ts))}</span></div>${p.worst ? `<span class="status ${statusTone(p.worst)}">${esc(p.worst)}</span>` : ""}</div></li>`).join("")}</ul>` : `<p class="small">None.</p>`}
+<h2>Receipts</h2>
+${a.receipts.length ? `<table><thead><tr><th>Claim</th><th>Kind</th><th>Outcome</th><th>Cross-check</th><th>Receipt</th></tr></thead><tbody>${a.receipts.map((r) => `<tr><td><a href="${claimHref(r.target)}"><code class="mono">${esc(r.target)}</code></a></td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td></tr>`).join("")}</tbody></table>` : `<p class="small">None yet.</p>`}
+${a.reviews.length ? `<h2>Reviews</h2><ul class="rows">${a.reviews.map((rv) => `<li><span class="t"><a href="${claimHref(rv.claim)}"><code class="mono">${esc(rv.claim)}</code></a>: forecasts ${pct(rv.forecast)}</span></li>`).join("")}</ul>` : ""}
+${a.findings.length ? `<h2>Findings</h2><ul class="rows">${a.findings.map((f) => `<li><span class="t">${esc(f.verdict)} · ${f.reversed ? "reversed" : f.inForce ? "in force" : "appeal open"}</span><span class="d">decided ${esc(shortDate(f.decidedAt))} · <code class="mono">${esc(f.id.slice(0, 16))}</code></span></li>`).join("")}</ul>` : ""}
+<p class="small">Refute results, not agents (constitution II.4). Everything here recomputes from the public log.</p>`;
+  return shell({ title: a.handle, description: `${a.handle} on Ecdysis: papers, receipts and track record.`, half: "people", current: "/papers", body });
+}

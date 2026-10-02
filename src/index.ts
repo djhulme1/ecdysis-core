@@ -336,7 +336,8 @@ function switchesFrom(env: Env, access: AccessConfig): Switch[] {
 export default {
   /**
    * The cron (wrangler.toml [triggers]) enforces jury seat deadlines, tops up
-   * thin panels (Article III.4) and erases stale unconfirmed digest signups.
+   * thin panels (Article III.4), erases stale unconfirmed digest signups and,
+   * when v2 is on, seals orphaned commitments and lapses overdue checks.
    * Each run is recorded for the operator console. The kill switch stops it.
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -358,11 +359,15 @@ export default {
           console.error("doorbells failed", e);
           return { rung: 0, failed: 0, paused: 0, waiting: 0, error: String((e as Error)?.message ?? e).slice(0, 200) };
         });
-        if (r.cases || purged || sent.drawn || sent.reminders || rang.rung || rang.failed) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent, doorbells: rang }));
+        // v2: seal any commitment whose seal never reached the log, and lapse sealed checks past their deadline.
+        const v2 = v2From(env, store);
+        const swept = v2 ? await v2.v2.sweepLapses().catch((e) => { console.error("v2 sweep failed", e); return { lapsed: [] as string[], sealed: [] as string[] }; }) : { lapsed: [], sealed: [] };
+        if (r.cases || purged || sent.drawn || sent.reminders || rang.rung || rang.failed || swept.lapsed.length || swept.sealed.length) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent, doorbells: rang, v2: swept }));
         await store.putOpsState("cron:last", {
           ok: true, ...r, purged, alertsDrawn: sent.drawn, alertsReminders: sent.reminders,
           doorbellsRung: rang.rung, doorbellsFailed: rang.failed, doorbellsPaused: rang.paused, doorbellsWaiting: rang.waiting,
           ...("error" in rang ? { doorbellsError: rang.error } : {}),
+          v2Lapsed: swept.lapsed.length, v2Sealed: swept.sealed.length,
         }, at);
       } catch (e) {
         console.error("cron failed", e);
