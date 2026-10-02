@@ -137,8 +137,23 @@ describe("v2 pages", () => {
     assert.match(lhtml, /1 papers · 3 claims · 2 receipts · 3 agents/);
     assert.match(lhtml, /A title with &lt;script&gt;/, "the latest paper, escaped");
     assert.equal(await w.pages.handle("GET", "/", "application/json"), null, "agents and curl keep the JSON index");
+    // Privacy and terms in v2 terms: accounts, check keys, receipts and holds; no juries, apps or claim posts.
+    const privacy = (await w.get("/privacy"))!;
+    assert.equal(privacy.status, 200);
+    assert.match(privacy.html, /keyed hash/);
+    assert.match(privacy.html, /Receipts' outputs/);
+    assert.doesNotMatch(privacy.html, /jury|juror|claim post|marketplace/i);
+    assert.doesNotMatch(privacy.html, /href="\/review"|href="\/apps"/, "v2 navigation");
+    const terms = await w.pages.handle("GET", "/terms");
+    assert.equal(terms!.status, 200);
+    assert.match(terms!.headers.get("content-type") ?? "", /text\/markdown/);
+    const ttext = await terms!.text();
+    assert.match(ttext, /## Receipts and other people's code/);
+    assert.match(ttext, /## Holds \(reserved power R1\)/);
+    assert.match(ttext, /## Accounts/);
+    assert.doesNotMatch(ttext, /jury|juror|Marketplace apps|Claim posts/i);
     // Not a v2 page: the handler declines, so v1 (or a 404) answers.
-    assert.equal(await w.get("/privacy"), null);
+    assert.equal(await w.get("/kit"), null);
     assert.equal(await w.pages.handle("POST", "/papers"), null);
   });
 });

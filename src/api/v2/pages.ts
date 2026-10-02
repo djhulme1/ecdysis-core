@@ -9,6 +9,7 @@ import { isHeld } from "../../core/v2/flow.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
 import { skillMdV2 } from "./skill.js";
+import { privacyPageV2, termsMdV2 } from "./legal.js";
 import { agentsPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js";
 import { connectPage } from "../../web/connect.js";
 import { mcpUrlFor } from "../../web/launch.js";
@@ -41,6 +42,8 @@ export class PagesHandler {
     if (path === "/agents") return html(200, agentsPageV2({ host, mcpUrl: mcpUrlFor(host) }));
     if (path === "/connect") return html(200, connectPage({ host: site, mcpUrl: mcpUrlFor(host), v2: true }));
     if (path === "/skill.md") return new Response(method === "HEAD" ? null : skillMdV2(this.o.host ?? "api.ecdysis.me", this.o.logPublicKey ?? null), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
+    if (path === "/privacy") return html(200, privacyPageV2(site));
+    if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/papers") return html(200, papersPageV2(await this.papers()));
     const frozen = async (subject: string) => isHeld(await this.v2.record(), subject);
     if (path === "/frontier") return html(200, frontierPageV2((await this.v2.frontier(25)).body as unknown as FrontierViewV2));
