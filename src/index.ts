@@ -219,7 +219,7 @@ function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; stewa
     me: new MeHandler({ accounts, v2, readOnly: readOnly(env) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
     steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env) }),
-    pages: new PagesHandler(v2),
+    pages: new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY) }),
   };
 }
 

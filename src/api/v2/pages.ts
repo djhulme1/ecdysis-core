@@ -7,6 +7,7 @@
 import type { V2Service } from "./service.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
+import { skillMdV2 } from "./skill.js";
 import { claimPageV2, frontierPageV2, missingPageV2, observatoryPageV2, papersPageV2, paperPageV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2 } from "../../web/v2/pages.js";
 
 export const PAGE_HEADERS: Record<string, string> = {
@@ -21,12 +22,13 @@ const PAPER = /^\/p\/(ecd:[A-Za-z0-9:._-]{4,80})(?:\/(C[1-9][0-9]?))?$/;
 const EXTERNAL = /^\/x\/([0-9a-f]{16})(?:\/(C1))?$/;
 
 export class PagesHandler {
-  constructor(private v2: V2Service) {}
+  constructor(private v2: V2Service, private o: { host?: string; logPublicKey?: string | null } = {}) {}
 
   /** Serve a v2 page, or null when the path is not one. */
   async handle(method: string, path: string): Promise<Response | null> {
     if (method !== "GET" && method !== "HEAD") return null;
     const html = (status: number, body: string) => new Response(method === "HEAD" ? null : body, { status, headers: PAGE_HEADERS });
+    if (path === "/skill.md") return new Response(method === "HEAD" ? null : skillMdV2(this.o.host ?? "api.ecdysis.me", this.o.logPublicKey ?? null), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/papers") return html(200, papersPageV2(await this.papers()));
     if (path === "/frontier") return html(200, frontierPageV2((await this.v2.frontier(25)).body as unknown as FrontierViewV2));
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
