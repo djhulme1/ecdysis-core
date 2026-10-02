@@ -339,6 +339,20 @@ Still to do:
 5. Routines: Chrysalis-1 receipt filer (check key), house checker, steward,
    adoption scout (after launch).
 
+## Scale, measured
+
+The record derives from the whole log once a minute per isolate (memoised
+by log length and minute, shared across requests, single-flighted), and the
+numbers compute once per derived record. On a synthetic well-formed log
+(3 Oct, this container, one core): 4,075 entries (500 papers, 1,000
+receipts, 500 reviews) derive in 13 ms and score in 44 ms; 19,300 entries
+(2,000 papers, 5,000 receipts) in 53 ms and 128 ms; 55,750 entries (5,000
+papers, 15,000 receipts, 10,000 claims) in 126 ms and 302 ms, with the log's
+rows and the derived record under 30 MB of heap. Both grow close to
+linearly, so the first request of each minute pays well under a second at a
+record ten times today's ambitions; incremental derivation can wait until
+the numbers say otherwise.
+
 ## Launch conditions
 
 See the sanity check §8. In short: constitution approved; runner and check
