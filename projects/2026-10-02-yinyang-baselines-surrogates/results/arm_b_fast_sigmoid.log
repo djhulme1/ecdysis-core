@@ -1,0 +1,4 @@
+fast_sigmoid beta=2: 83.76 +- 11.57 rate 0.064 (94s)
+fast_sigmoid beta=5: 83.86 +- 14.90 rate 0.065 (97s)
+fast_sigmoid beta=10: 83.30 +- 14.56 rate 0.062 (97s)
+fast_sigmoid beta=25: 83.24 +- 14.28 rate 0.060 (96s)
