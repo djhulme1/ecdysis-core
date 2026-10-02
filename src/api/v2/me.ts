@@ -167,7 +167,7 @@ export class MeHandler {
       if (path === "/me/analytics" || path === "/me/analytics.csv") {
         const a = await this.analytics(signed);
         if (path.endsWith(".csv")) return new Response(method === "HEAD" ? null : analyticsCsv(a), { status: 200, headers: { ...ME_HEADERS, "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="ecdysis-${signed.account.operatorId}.csv"` } });
-        return this.html(200, analyticsPage(a));
+        return this.html(200, method === "HEAD" ? "" : analyticsPage(a));
       }
       if (path !== "/me") return this.redirect("/me");
       return this.html(200, await dashboard(url.searchParams.get("ok"), null));
@@ -220,19 +220,18 @@ export class MeHandler {
         return this.redirect(`/me?ok=${encodeURIComponent(`Key revoked.${at ? ` ${n} report${n === 1 ? "" : "s"} disowned.` : ""}`)}`);
       }
       case "/me/interests": {
-        const prefs = await this.o.accounts.preferences(signed);
         const fields = f.getAll("fields").filter((x): x is (typeof FIELDS)[number] => (FIELDS as readonly string[]).includes(x));
         const lines = (name: string, re: RegExp | null, max: number) => [...new Set((f.get(name) ?? "").split(/\r?\n/).map((s) => s.trim()).filter((s) => s && s.length <= 120 && (!re || re.test(s))))].slice(0, max);
-        const next: Preferences = { ...prefs, interests: { ...prefs.interests, fields: [...new Set(fields)], topics: lines("topics", null, 30), claims: lines("claims", CLAIM_REF, 100) } };
-        await this.o.accounts.savePreferences(signed, next);
+        // Each form writes only the section it owns, over the preferences as they stand at the moment of writing.
+        const r = await this.o.accounts.updatePreferences(signed, (p): Preferences => ({ ...p, interests: { ...p.interests, fields: [...new Set(fields)], topics: lines("topics", null, 30), claims: lines("claims", CLAIM_REF, 100) } }));
+        if (!r.ok) return this.html(r.status, await dashboard(null, r.error));
         return this.redirect("/me?ok=Interests+saved.");
       }
       case "/me/notifications": {
-        const prefs = await this.o.accounts.preferences(signed);
         const digest = f.get("digest");
         const alerts = f.getAll("alerts").filter((x): x is Alert => (ALERTS as readonly string[]).includes(x));
-        const next: Preferences = { ...prefs, notifications: { digest: (digest === "daily" || digest === "weekly" ? digest : "off") as Digest, alerts: [...new Set(alerts)] } };
-        await this.o.accounts.savePreferences(signed, next);
+        const r = await this.o.accounts.updatePreferences(signed, (p): Preferences => ({ ...p, notifications: { digest: (digest === "daily" || digest === "weekly" ? digest : "off") as Digest, alerts: [...new Set(alerts)] } }));
+        if (!r.ok) return this.html(r.status, await dashboard(null, r.error));
         return this.redirect("/me?ok=Notifications+saved.");
       }
       case "/me/profile": {

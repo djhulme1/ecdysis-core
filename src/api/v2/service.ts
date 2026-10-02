@@ -139,6 +139,8 @@ export class V2Cache {
   closedElectorates = new Map<number, Set<string>>();
   /** The steward's switches as of a log length: recomputed only when the log grows. */
   settings: { nextSeq: number; values: Map<string, string>; changed: Map<string, { ts: string; steward: string | null; seq: number }> } | null = null;
+  /** The refresh in flight, if any: concurrent readers share one read of the log's tail (single flight). */
+  refreshing: Promise<void> | null = null;
   reset(): void { this.rows = []; this.nextSeq = 0; this.derived.clear(); this.closedElectorates.clear(); this.settings = null; }
 }
 
@@ -217,19 +219,40 @@ export class V2Service {
     this.cache = o.cache ?? new V2Cache();
   }
 
-  /** Every row of the log, oldest first. */
+  /**
+   * Every row of the log, oldest first. Concurrent callers on one isolate
+   * share a single refresh: the cache is shared, so two readers refreshing
+   * at once would otherwise both fetch the same tail, and the second would
+   * take rows the first had already applied for a replay and throw the whole
+   * cache away (full re-reads of the log, every derived record lost).
+   */
   private async rows(): Promise<LogRow[]> {
+    if (!this.cache.refreshing) {
+      this.cache.refreshing = this.refresh().finally(() => { this.cache.refreshing = null; });
+    }
+    await this.cache.refreshing;
+    return this.cache.rows;
+  }
+
+  private async refresh(): Promise<void> {
+    let restarts = 0;
     for (;;) {
       const more = await this.o.store.listLog(this.cache.nextSeq, 10_000);
+      let gap = false;
       for (const r of more) {
-        if (r.seq !== this.cache.nextSeq) { // a gap or a replay: start again from nothing rather than trust a partial view
-          this.cache.reset();
-          return this.rows();
-        }
+        if (r.seq < this.cache.nextSeq) continue; // already known (a page overlapping what we have): nothing to do
+        if (r.seq > this.cache.nextSeq) { gap = true; break; }
         this.cache.rows.push(r);
         this.cache.nextSeq = r.seq + 1;
       }
-      if (more.length < 10_000) return this.cache.rows;
+      if (gap) {
+        // A true gap: start again from nothing rather than trust a partial view. Once; a gap that survives a full
+        // re-read is the store's, and the request fails rather than looping.
+        if (restarts++ > 0) throw new Error(`the log has a gap at seq ${this.cache.nextSeq}`);
+        this.cache.reset();
+        continue;
+      }
+      if (more.length < 10_000) return;
     }
   }
 
@@ -494,6 +517,7 @@ export class V2Service {
     for (const x of rows) {
       if (x.type !== "operator.setting") continue;
       const p = (x.payload ?? {}) as Record<string, unknown>;
+      if (p["by"] !== "steward") continue; // only a steward's act sets a v2 switch, whatever else writes this entry type
       const key = String(p["setting"] ?? "");
       if (!Object.prototype.hasOwnProperty.call(V2_SETTINGS, key)) continue;
       const allowed = V2_SETTINGS[key as V2SettingKey] as readonly string[];

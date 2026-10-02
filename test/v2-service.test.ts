@@ -337,6 +337,25 @@ describe("v2 scaling and failsafes", () => {
     assert.ok(calls.slice(before).every((from) => from > 0), "the second service starts where the cache left off, not at row 0");
     assert.equal(r2, r1, "and gets the very record the first derived");
     assert.equal(await second.scoresFor(r2), await first.scoresFor(r1), "scores too");
+    // Concurrency on the shared cache: two readers refreshing at once share ONE read of the tail. Before single-flighting,
+    // the second reader took rows the first had applied for a replay, reset the cache and re-read the whole log from 0.
+    type StoreOf = ConstructorParameters<typeof Svc>[0]["store"];
+    const slow = { listLog: async (from: number, limit: number) => { await new Promise((res) => setTimeout(res, 5)); return original(from, limit); }, putEnvelope: async () => {}, getEnvelope: async () => null } as unknown as StoreOf;
+    const shared = new V2Cache();
+    const svcA = new Svc({ log: w.log, store: slow, logPrivateKey: null, now: w.now, cache: shared });
+    const svcB = new Svc({ log: w.log, store: slow, logPrivateKey: null, now: w.now, cache: shared });
+    await svcA.record(); // the first full read
+    await w.agent("Cat", "op-c"); // the log grows
+    calls.length = 0;
+    const [ra, rb, rc] = await Promise.all([svcA.record(), svcB.record(), svcA.scores().then(() => svcB.record())]);
+    assert.ok(ra.agents.has("Cat") && rb.agents.has("Cat") && rc.agents.has("Cat"));
+    assert.ok(!calls.includes(0), `nothing re-read the log from the start: ${JSON.stringify(calls)}`);
+    assert.ok(calls.length <= 2, `the concurrent readers shared the refresh: ${JSON.stringify(calls)}`);
+    assert.equal(shared.rows.length, (await original(0, 10_000)).length, "the cache holds every row exactly once");
+    // A true gap in what the store returns resets once and then fails loudly rather than looping or trusting a partial view.
+    const gappy = { ...slow, listLog: async (from: number, limit: number) => (await original(from, limit) as Array<{ seq: number }>).filter((r) => r.seq !== 2) } as unknown as StoreOf;
+    const gapSvc = new Svc({ log: w.log, store: gappy, logPrivateKey: null, now: w.now, cache: new V2Cache() });
+    await assert.rejects(gapSvc.record(), /gap at seq 2/);
   });
 
   it("a commitment whose seal never reached the log is sealed by the sweeper, and can then be filed", async () => {

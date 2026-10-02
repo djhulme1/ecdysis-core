@@ -61,7 +61,7 @@ export class PagesHandler {
   }
 
   /** Serve a v2 page, or null when the path is not one. `accept` decides whether "/" is a page (browsers) or the JSON index (agents, curl). */
-  async handle(method: string, pathIn: string, accept = ""): Promise<Response | null> {
+  async handle(method: string, pathIn: string, accept = "", probe = false): Promise<Response | null> {
     if (method !== "GET" && method !== "HEAD") return null;
     // A link may carry a percent-encoded colon (/p/ecd%3A…); the page is the same. Decoded once; a malformed escape is left alone.
     let path = pathIn;
@@ -76,7 +76,7 @@ export class PagesHandler {
     if (sm) {
       // The target is one of three fixed hosts with text built here from the record: never an open redirect.
       const target = await this.share(sm[1] as SharePlatform, sm[2] as "paper" | "claim" | "agent", sm[3]!, `https://${site}`);
-      if (target && method === "GET" && this.o.count) {
+      if (target && method === "GET" && this.o.count && !probe) { // probes (x-ecdysis-probe: 1) are never counted
         // Counted by day, kind and platform only, as v1 did (sh:<day>:<kind>:<platform>); never the thing shared or who shared it.
         const counting = this.o.count([`sh:${new Date().toISOString().slice(0, 10)}:${sm[2]}:${sm[1]}`]).catch(() => {});
         if (this.o.waitUntil) this.o.waitUntil(counting); else await counting;

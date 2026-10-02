@@ -105,13 +105,13 @@ export class StewardHandler {
       }
       case "/steward/canaries/reveal": {
         if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
-        const r = await this.o.canaries.reveal(f.get("claim") ?? "", steward);
+        const r = await this.o.canaries.reveal(f.get("key") ?? "", steward);
         if (!r.ok) return this.page("/steward/canaries", signed, url, null, `Couldn't reveal: ${r.error}.`);
         return this.redirect(`/steward/canaries?ok=${encodeURIComponent(r.note)}`);
       }
       case "/steward/canaries/remove": {
         if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
-        if (!(await this.o.canaries.remove(f.get("claim") ?? ""))) return this.page("/steward/canaries", signed, url, null, "Couldn't remove: not in the registry.");
+        if (!(await this.o.canaries.remove(f.get("key") ?? ""))) return this.page("/steward/canaries", signed, url, null, "Couldn't remove: not in the registry.");
         return this.redirect("/steward/canaries?ok=Removed+from+the+registry.+The+log+is+untouched.");
       }
       default:

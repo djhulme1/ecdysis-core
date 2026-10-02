@@ -197,7 +197,8 @@ describe("v2 pages", () => {
     const counting = new PH(w.svc, { count: async (keys) => { counted.push(...keys); } });
     await counting.handle("GET", `/s/bsky/paper/${encodeURIComponent(paperId)}`);
     await counting.handle("GET", "/s/x/agent/Nobody");
-    assert.deepEqual(counted, [`sh:${new Date().toISOString().slice(0, 10)}:paper:bsky`]);
+    await counting.handle("GET", `/s/x/paper/${encodeURIComponent(paperId)}`, "", true);
+    assert.deepEqual(counted, [`sh:${new Date().toISOString().slice(0, 10)}:paper:bsky`], "a probe's share is not counted");
     assert.equal((await w.pages.handle("GET", "/s/x/agent/Nobody"))!.status, 404);
     assert.equal(await w.pages.handle("GET", "/s/x/juror/all"), null, "v1's kinds are not v2's");
     // Badges: SVG from the record; an unknown thing gets a badge saying so, never an error, since badges live in READMEs.

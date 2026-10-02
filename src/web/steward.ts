@@ -101,18 +101,18 @@ ${o.fresh ? "" : `<p class="small">Reversing a finding or revealing a canary nee
 /** The canary registry: live canaries with sealed outcomes, opened for the steward alone; nothing here is public. */
 export function canariesPage(o: { rows: CanaryView[]; csrf: string; fresh: boolean; now: string }, flash: string | null, problem: string | null): string {
   const hidden = `<input type="hidden" name="csrf" value="${esc(o.csrf)}">`;
-  const state = (c: CanaryView) => (c.revealedOnLog ? "revealed" : !c.onRecord ? "not on the record" : c.due ? "due" : "live");
+  const state = (c: CanaryView) => (c.revealedOnLog ? "revealed" : !c.secret ? "cannot be opened" : !c.onRecord ? "not on the record" : c.due ? "due" : "live");
   const body = `<h1>Canaries</h1>
-<p class="lede">Claims from human replication projects whose outcome is already known, registered on the record as ordinary external claims and listed here, privately, with the known outcome sealed. Nothing marks a live canary. Revealing writes the known outcome to the log and scores every report filed on it; from the registry, the outcome written is the one you recorded when you planted it.</p>
+<p class="lede">Claims from human replication projects whose outcome is already known, registered on the record as ordinary external claims and listed here, privately, with the claim and the known outcome sealed. Nothing marks a live canary. Revealing writes the known outcome to the log and scores every report filed on it; from the registry, the outcome written is the one you recorded when you planted it.</p>
 <p class="small">This page is for stewards' eyes. The list of candidates, with sources and verification notes, is kept outside the archive; a canary is worth exactly as much as its secrecy.</p>
 ${o.rows.length ? `<table><thead><tr><th>Claim</th><th>Label</th><th>Known outcome</th><th>Reports so far</th><th>Reveal after</th><th>State</th><th></th></tr></thead><tbody>${o.rows.map((c) => `<tr>
-<td><a href="/x/${esc(c.claim.slice(4, 20))}/C1"><code class="mono">${esc(c.claim)}</code></a><br><span class="small">by ${esc(c.registeredBy)} · ${esc(shortDate(c.registeredAt))}${c.source ? ` · ${esc(c.source.slice(0, 80))}` : ""}</span></td>
-<td>${esc(c.label)}</td>
-<td>${c.outcome === "confirmed" ? "known to hold" : "known to fail"}</td>
-<td>${c.reports}</td>
+<td>${c.secret ? `<a href="/x/${esc(c.secret.claim.slice(4, 20))}/C1"><code class="mono">${esc(c.secret.claim)}</code></a>` : `<code class="mono">${esc(c.key.slice(0, 12))}…</code> <span class="status broken">sealed entry cannot be opened</span>`}<br><span class="small">by ${esc(c.registeredBy)} · ${esc(shortDate(c.registeredAt))}${c.secret?.source ? ` · ${esc(c.secret.source.slice(0, 80))}` : ""}</span></td>
+<td>${c.secret ? esc(c.secret.label) : "—"}</td>
+<td>${c.secret ? (c.secret.outcome === "confirmed" ? "known to hold" : "known to fail") : "<b>unknown</b>"}</td>
+<td>${c.secret ? c.reports : "—"}</td>
 <td>${c.revealAfter ? esc(shortDate(c.revealAfter)) : "by hand"}</td>
-<td>${c.revealedOnLog ? `revealed${c.revealedAt ? ` ${esc(shortDate(c.revealedAt))}` : ""}` : `<span class="status ${c.due ? "risk" : "sound"}">${esc(state(c))}</span>`}</td>
-<td>${c.revealedOnLog ? "" : `<form method="post" action="/steward/canaries/reveal" class="inline">${hidden}<input type="hidden" name="claim" value="${esc(c.claim)}"><button class="btn quiet" type="submit">Reveal now</button></form> `}<form method="post" action="/steward/canaries/remove" class="inline">${hidden}<input type="hidden" name="claim" value="${esc(c.claim)}"><button class="btn quiet" type="submit">Forget</button></form></td>
+<td>${c.revealedOnLog ? `revealed${c.revealedAt ? ` ${esc(shortDate(c.revealedAt))}` : ""}` : `<span class="status ${c.due || !c.secret ? "risk" : "sound"}">${esc(state(c))}</span>`}</td>
+<td>${c.revealedOnLog || !c.secret ? "" : `<form method="post" action="/steward/canaries/reveal" class="inline">${hidden}<input type="hidden" name="key" value="${esc(c.key)}"><button class="btn quiet" type="submit">Reveal now</button></form> `}<form method="post" action="/steward/canaries/remove" class="inline">${hidden}<input type="hidden" name="key" value="${esc(c.key)}"><button class="btn quiet" type="submit">Forget</button></form></td>
 </tr>`).join("")}</tbody></table>` : `<p class="small">No canaries registered. Register the external claim first (an agent's <code>register_claim</code>, with the quote and the test as for any claim), then list it here.</p>`}
 <form method="post" action="/steward/canaries/register">${hidden}
 <fieldset><legend>Register a live canary</legend>

@@ -99,6 +99,23 @@ export class D1AccountStore implements AccountStore {
     await this.db.prepare("INSERT INTO account_preferences (account_id, prefs_json, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET prefs_json = excluded.prefs_json, updated_at = excluded.updated_at")
       .bind(accountId, JSON.stringify(prefs), this.now().toISOString()).run();
   }
+  async getPreferencesJson(accountId: string) {
+    const r = await this.db.prepare("SELECT prefs_json FROM account_preferences WHERE account_id = ?1").bind(accountId).first<{ prefs_json: string }>();
+    return r ? r.prefs_json : null;
+  }
+  /** Compare-and-set on the stored text: the UPDATE matches only the row as the caller saw it; a first write is an INSERT that yields to any row already there. */
+  async putPreferencesIf(accountId: string, prefs: Preferences, expectedJson: string | null) {
+    const at = this.now().toISOString();
+    if (expectedJson === null) {
+      const r = await this.db.prepare("INSERT OR IGNORE INTO account_preferences (account_id, prefs_json, updated_at) VALUES (?1, ?2, ?3)").bind(accountId, JSON.stringify(prefs), at).run();
+      if ((r.meta?.changes ?? 0) > 0) return true;
+      // Ignored: either a row appeared meanwhile (the caller re-reads) or the profile name is another account's (a refusal).
+      if ((await this.getPreferencesJson(accountId)) === null) throw new Error("UNIQUE constraint failed: account_preferences_profile");
+      return false;
+    }
+    const r = await this.db.prepare("UPDATE account_preferences SET prefs_json = ?2, updated_at = ?3 WHERE account_id = ?1 AND prefs_json = ?4").bind(accountId, JSON.stringify(prefs), at, expectedJson).run();
+    return (r.meta?.changes ?? 0) > 0;
+  }
   async getAccountByProfile(name: string) {
     const r = await this.db.prepare("SELECT a.* FROM account_preferences p JOIN accounts a ON a.id = p.account_id WHERE json_extract(p.prefs_json, '$.profile') = ?1").bind(name).first<Record<string, unknown>>();
     return r ? this.rowToAccount(r) : null;

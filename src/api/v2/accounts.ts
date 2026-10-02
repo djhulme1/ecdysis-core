@@ -102,6 +102,13 @@ export interface AccountStore {
   getPreferences(accountId: string): Promise<Preferences | null>;
   /** Save preferences. Throws when `prefs.profile` is a name another account holds (the store keeps names unique). */
   putPreferences(accountId: string, prefs: Preferences): Promise<void>;
+  /** The stored preferences exactly as stored (JSON text), for compare-and-set; null when none. */
+  getPreferencesJson(accountId: string): Promise<string | null>;
+  /**
+   * Save preferences only if what is stored is still `expectedJson` (null: no row yet). False when something else
+   * wrote in between, so the caller re-reads and patches again. Throws on a profile-name collision like putPreferences.
+   */
+  putPreferencesIf(accountId: string, prefs: Preferences, expectedJson: string | null): Promise<boolean>;
   /** The account that holds a profile name, if any. */
   getAccountByProfile(name: string): Promise<AccountRow | null>;
   /** Rate limiting: how many events a bucket saw since `sinceIso`, and record one. Events are forgotten after a day. */
@@ -158,6 +165,12 @@ export class MemoryAccountStore implements AccountStore {
     if (prefs.profile) for (const [id, p] of this.prefs) if (id !== accountId && p.profile === prefs.profile) throw new Error("UNIQUE constraint failed: profile");
     this.prefs.set(accountId, structuredClone(prefs));
   }
+  async getPreferencesJson(accountId: string) { const p = this.prefs.get(accountId); return p ? JSON.stringify(p) : null; }
+  async putPreferencesIf(accountId: string, prefs: Preferences, expectedJson: string | null) {
+    if ((await this.getPreferencesJson(accountId)) !== expectedJson) return false;
+    await this.putPreferences(accountId, prefs);
+    return true;
+  }
   async getAccountByProfile(name: string) {
     for (const [id, p] of this.prefs) if (p.profile === name) return this.accounts.get(id) ?? null;
     return null;
@@ -206,7 +219,7 @@ export const PAIRING_CODE = /^[a-z2-9]{5}-[a-z2-9]{5}-[a-z2-9]{5}$/;
 export class Accounts {
   private now: () => Date;
   private rnd: (n: number) => Uint8Array;
-  private keys: Promise<{ hmac: CryptoKey; aes: CryptoKey; tokens: CryptoKey; keys: CryptoKey } | null> | null = null;
+  private keys: Promise<{ hmac: CryptoKey; aes: CryptoKey; tokens: CryptoKey; keys: CryptoKey; sealing: CryptoKey } | null> | null = null;
 
   constructor(private o: AccountsOptions) {
     this.now = o.now ?? (() => new Date());
@@ -218,7 +231,7 @@ export class Accounts {
     return !!this.o.key && HEX64.test(this.o.key.trim());
   }
 
-  private async material(): Promise<{ hmac: CryptoKey; aes: CryptoKey; tokens: CryptoKey; keys: CryptoKey } | null> {
+  private async material(): Promise<{ hmac: CryptoKey; aes: CryptoKey; tokens: CryptoKey; keys: CryptoKey; sealing: CryptoKey } | null> {
     if (!this.enabled()) return null;
     if (!this.keys) {
       this.keys = (async () => {
@@ -231,6 +244,7 @@ export class Accounts {
           aes: await derive("email-seal/1", { name: "AES-GCM", length: 256 }, ["encrypt", "decrypt"]),
           tokens: await derive("tokens/1", { name: "HMAC", hash: "SHA-256" }, ["sign"]),
           keys: await derive("managed-key/1", { name: "AES-GCM", length: 256 }, ["encrypt", "decrypt"]),
+          sealing: await derive("sealing/1", { name: "AES-GCM", length: 256 }, ["encrypt", "decrypt"]),
         };
       })();
     }
@@ -309,6 +323,29 @@ export class Accounts {
     if (!m || !iv || !ct) return null;
     try {
       return td.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: bufferSource(b64urlDecode(iv)), additionalData: bufferSource(te.encode(`managed|${handle}`)) }, m.keys, bufferSource(b64urlDecode(ct))));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Seal a text for another module (the canary registry, say), under a key of
+   * its own and BOUND to a purpose and a subject: a blob moved to another row
+   * does not open. Never used for emails or keys, which have their own.
+   */
+  async sealBound(purpose: string, subject: string, text: string): Promise<string> {
+    const m = await this.material();
+    if (!m) throw new Error("accounts closed");
+    const iv = this.rnd(12);
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: bufferSource(iv), additionalData: bufferSource(te.encode(`${purpose}|${subject}`)) }, m.sealing, bufferSource(te.encode(text))));
+    return `${b64urlEncode(iv)}.${b64urlEncode(ct)}`;
+  }
+  async unsealBound(purpose: string, subject: string, sealed: string): Promise<string | null> {
+    const m = await this.material();
+    const [iv, ct] = sealed.split(".");
+    if (!m || !iv || !ct) return null;
+    try {
+      return td.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: bufferSource(b64urlDecode(iv)), additionalData: bufferSource(te.encode(`${purpose}|${subject}`)) }, m.sealing, bufferSource(b64urlDecode(ct))));
     } catch {
       return null;
     }
@@ -473,6 +510,27 @@ export class Accounts {
   async savePreferences(s: Signed, prefs: Preferences): Promise<void> {
     await this.o.store.putPreferences(s.account.id, prefs);
   }
+  /**
+   * Change part of the preferences: re-read immediately before writing, so a
+   * form that owns one section does not write back a stale copy of another
+   * (two tabs: "Reset the address" and "Save interests"). A uniqueness
+   * refusal (another account took the profile name meanwhile) is a 409, not
+   * an error page.
+   */
+  async updatePreferences(s: Signed, patch: (current: Preferences) => Preferences): Promise<{ ok: true; prefs: Preferences } | { ok: false; status: number; error: string }> {
+    // Compare-and-set on the stored text: a write lands only on the version it was patched from; otherwise read again.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const json = await this.o.store.getPreferencesJson(s.account.id);
+      const next = patch(Accounts.withDefaults(json ? (JSON.parse(json) as Preferences) : null));
+      try {
+        if (await this.o.store.putPreferencesIf(s.account.id, next, json)) return { ok: true, prefs: next };
+      } catch (e) {
+        if (/unique|constraint/i.test(String((e as Error)?.message ?? e))) return { ok: false, status: 409, error: "that profile name is taken" };
+        throw e;
+      }
+    }
+    return { ok: false, status: 409, error: "your settings are changing in another tab at the same time; reload and try again" };
+  }
 
   /* ---------------- public profile and private feed ---------------- */
 
@@ -481,7 +539,6 @@ export class Accounts {
    * unique: the store refuses a second holder, and the first holder keeps it.
    */
   async setProfile(s: Signed, nameIn: string | null): Promise<{ ok: true; name: string | null } | { ok: false; status: number; error: string }> {
-    const prefs = await this.preferences(s);
     const name = nameIn === null ? null : nameIn.trim().toLowerCase();
     if (name !== null) {
       if (!PROFILE_NAME.test(name)) return { ok: false, status: 400, error: "a profile name is 3 to 30 letters, digits and hyphens, starting and ending with a letter or digit" };
@@ -489,13 +546,9 @@ export class Accounts {
       const holder = await this.o.store.getAccountByProfile(name);
       if (holder && holder.id !== s.account.id) return { ok: false, status: 409, error: "that name is taken" };
     }
-    try {
-      await this.o.store.putPreferences(s.account.id, { ...prefs, profile: name });
-    } catch (e) {
-      // Two people claiming one name at once: the store's uniqueness decides, and the loser hears "taken".
-      if (/unique|constraint/i.test(String((e as Error)?.message ?? e))) return { ok: false, status: 409, error: "that name is taken" };
-      throw e;
-    }
+    // Two people claiming one name at once: the store's uniqueness decides, and the loser hears "taken".
+    const r = await this.updatePreferences(s, (current) => ({ ...current, profile: name }));
+    if (!r.ok) return { ok: false, status: 409, error: "that name is taken" };
     return { ok: true, name };
   }
 
@@ -522,8 +575,7 @@ export class Accounts {
 
   /** Reset the private feed's address: a new epoch, so the old address stops working at once. */
   async resetFeed(s: Signed): Promise<void> {
-    const prefs = await this.preferences(s);
-    await this.o.store.putPreferences(s.account.id, { ...prefs, feed: { epoch: prefs.feed.epoch + 1 } });
+    await this.updatePreferences(s, (current) => ({ ...current, feed: { epoch: current.feed.epoch + 1 } }));
   }
 
   /** The person's email, for sending them things they asked for. Never shown in lists or logs. */

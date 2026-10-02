@@ -203,8 +203,8 @@ describe("the stewardship area", () => {
     let res = await w.post("/steward/canaries/register", { csrf, claim: ref, outcome: "confirmed", label: "B2 square-lattice percolation", source: "Newman & Ziff 2000", revealAfter: "2026-12-01" }, d.session);
     assert.equal(res.status, 303, await res.text());
     const row = (await w.canaryStore.list())[0]!;
-    assert.equal(row.claim, ref);
-    assert.doesNotMatch(row.sealed, /confirmed|percolation|Newman/, "the store holds nothing readable");
+    assert.match(row.key, /^[0-9a-f]{40}$/, "the row is keyed by a keyed hash of the claim");
+    assert.doesNotMatch(JSON.stringify(row), new RegExp(`confirmed|percolation|Newman|${ref.slice(4, 20)}`), "the store holds nothing readable, not even which claim");
     assert.equal(row.revealAfter, "2026-12-01T00:00:00.000Z");
     assert.equal(row.registeredBy, d.account.operatorId);
     assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: ref, outcome: "refuted", label: "again" }, d.session)).text(), /already in the registry/);
@@ -232,8 +232,19 @@ describe("the stewardship area", () => {
     html = await (await w.get("/steward/canaries", d2.session)).text();
     assert.match(html, /<span class="status risk">due<\/span>/);
     const csrf2 = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    // A sealed blob moved to another row does not open: the seal is bound to the row key, and the ref inside must hash to it.
+    const moved = { ...row, key: "f".repeat(40) };
+    await w.canaryStore.put(moved);
+    const views = await w.canaries.list();
+    assert.equal(views.find((v) => v.key === moved.key)!.secret, null, "the moved blob opens to nothing");
+    assert.match(await (await w.post("/steward/canaries/reveal", { csrf: csrf2, key: moved.key }, d2.session)).text(), /cannot be opened/);
+    assert.equal((await w.svc.record()).anchors.size, 0, "and nothing was revealed");
+    html = await (await w.get("/steward/canaries", d2.session)).text();
+    assert.match(html, /sealed entry cannot be opened/);
+    assert.match(html, /<td><b>unknown<\/b><\/td>/, "an unopenable row shows no outcome");
+    await w.canaryStore.delete(moved.key);
     // Reveal from the registry: the sealed outcome goes to the log under the steward's id; a second reveal is refused.
-    res = await w.post("/steward/canaries/reveal", { csrf: csrf2, claim: ref }, d2.session);
+    res = await w.post("/steward/canaries/reveal", { csrf: csrf2, key: row.key }, d2.session);
     assert.equal(res.status, 303, await res.text());
     assert.match(res.headers.get("location")!, /1%20report%20on%20this%20claim%20is%20now%20scored/);
     const rec = await w.svc.record();
@@ -241,12 +252,12 @@ describe("the stewardship area", () => {
     const acts = await w.svc.audit();
     assert.equal(acts[0]!.type, "canary.reveal");
     assert.equal(acts[0]!.steward, d2.account.operatorId);
-    assert.match(await (await w.post("/steward/canaries/reveal", { csrf: csrf2, claim: ref }, d2.session)).text(), /already revealed/);
+    assert.match(await (await w.post("/steward/canaries/reveal", { csrf: csrf2, key: row.key }, d2.session)).text(), /already revealed/);
     html = await (await w.get("/steward/canaries", d2.session)).text();
     assert.match(html, /<td>revealed /);
     assert.doesNotMatch(html, /Reveal now/);
     // Forget: the registry row goes, the log keeps the reveal.
-    assert.equal((await w.post("/steward/canaries/remove", { csrf: csrf2, claim: ref }, d2.session)).status, 303);
+    assert.equal((await w.post("/steward/canaries/remove", { csrf: csrf2, key: row.key }, d2.session)).status, 303);
     assert.equal((await w.canaryStore.list()).length, 0);
     assert.equal((await w.svc.record()).anchors.get(ref), true);
     // A member, or a visitor, sees none of this.
@@ -310,6 +321,11 @@ describe("the stewardship area", () => {
     // A member cannot reach the switches; the page needs a steward.
     const m = await w.signIn("member@example.org");
     assert.equal((await w.get("/steward/controls", m.session)).status, 403);
+    // An operator.setting entry that is not a steward's act (v1's console wrote these without `by`) changes no v2 switch.
+    await w.log.append("operator.setting", { setting: "v2.publishing", value: "paused" });
+    assert.equal(await w.svc.setting("v2.publishing"), "open", "only by: \"steward\" counts");
+    await w.log.append("operator.setting", { setting: "v2.publishing", value: "nonsense", by: "steward", steward: "op-x" });
+    assert.equal(await w.svc.setting("v2.publishing"), "open", "a malformed value changes nothing");
   });
 
   it("content: lists hazard holds from escalations, and offers no way to release them", async () => {

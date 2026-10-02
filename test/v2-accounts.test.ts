@@ -535,6 +535,25 @@ describe("accounts (v2)", () => {
     assert.equal((await w.me.handle(new Request(feedUrl2), "/me/feed.xml", ip)).status, 200);
     assert.equal((await w.me.handle(new Request(feedUrl2, { method: "POST", headers: { origin: "https://ecdysis.me" } }), "/me/feed.xml", ip)).status, 405);
 
+    // Two forms racing: each writes only the section it owns, over the preferences as they stand, so saving interests
+    // cannot resurrect a reset feed address or a cleared profile (the lost update a read-then-write-everything had).
+    const before = (await w.store.getPreferences(s.account.id))!;
+    const slowStore = w.store as unknown as { getPreferencesJson: (id: string) => Promise<unknown> };
+    const realGet = slowStore.getPreferencesJson.bind(w.store);
+    let gate: (() => void) | null = null;
+    slowStore.getPreferencesJson = async (id: string) => { const p = await realGet(id); if (gate) { const g = gate; gate = null; await new Promise<void>((r) => { setTimeout(r, 20); g(); }); } return p; };
+    let released = false;
+    gate = () => { released = true; };
+    const racing = post("/me/interests", { csrf, topics: "raced" }); // reads, then waits 20 ms before writing
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal((await post("/me/feed/reset", { csrf })).status, 303, "meanwhile the feed is reset");
+    assert.equal((await racing).status, 303);
+    assert.ok(released);
+    const after = (await w.store.getPreferences(s.account.id))!;
+    assert.deepEqual(after.interests.topics, ["raced"]);
+    assert.equal(after.feed.epoch, before.feed.epoch + 1, "the reset survived the concurrent save: the stale write was refused and patched again");
+    slowStore.getPreferencesJson = realGet;
+
     // Turning the profile off removes the page and frees the name; deleting the account would too.
     res = await post("/me/profile", { csrf, action: "clear" });
     assert.equal(res.status, 303);

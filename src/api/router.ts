@@ -92,6 +92,24 @@ export interface RouteOptions {
 export const BUCKET_LIMITS: Record<string, number> = { mcp: 600, "mcp-agent": 30 };
 
 /**
+ * The key an address is limited under: IPv4 as it is; IPv6 by its /64 (the
+ * first four groups, written out), since a subscriber holds a /64 or more and
+ * could otherwise rotate through 2^64 keys. Anything unparseable is kept as
+ * given.
+ */
+export function ipKey(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  const [head, tail, extra] = ip.split("::");
+  if (extra !== undefined) return ip;
+  const left = head ? head.split(":") : [];
+  const right = tail !== undefined ? (tail ? tail.split(":") : []) : [];
+  if (left.some((g) => !/^[0-9a-fA-F]{1,4}$/.test(g)) || right.some((g) => !/^[0-9a-fA-F]{1,4}$/.test(g))) return ip;
+  const groups = tail === undefined ? left : [...left, ...Array<string>(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right];
+  if (groups.length !== 8) return ip;
+  return `${groups.slice(0, 4).map((g) => g.toLowerCase().replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
+/**
  * The in-memory limiter: a sliding window per bucket and address. Without
  * Cloudflare's rate-limit binding the Worker uses one of these per isolate
  * (index.ts keeps the instance at module level; a limiter made per request
@@ -118,10 +136,17 @@ export class MemoryRateLimiter implements RateLimiter {
     this.hits.set(key, arr);
     return true;
   }
-  /** Forget every address whose hits are all outside the window; if the table is still full, forget the oldest. */
+  /**
+   * Forget every address whose hits are all outside the window; if the table
+   * is still full, forget the tenth of it that was quietest longest (by last
+   * hit, not by when it was first seen, so a busy address is never the one
+   * forgotten to make room for a flood of new ones).
+   */
   private sweep(t: number): void {
     for (const [k, arr] of this.hits) if (!arr.length || t - arr[arr.length - 1]! >= this.windowMs) this.hits.delete(k);
-    while (this.hits.size >= MemoryRateLimiter.MAX_KEYS) this.hits.delete(this.hits.keys().next().value!);
+    if (this.hits.size < MemoryRateLimiter.MAX_KEYS) return;
+    const byLastHit = [...this.hits.entries()].map(([k, arr]) => [k, arr[arr.length - 1]!] as const).sort((a, b) => a[1] - b[1]);
+    for (const [k] of byLastHit.slice(0, Math.ceil(MemoryRateLimiter.MAX_KEYS / 10))) this.hits.delete(k);
   }
 }
 
@@ -700,7 +725,16 @@ export async function route(
   limiter: RateLimiter,
   opts: RouteOptions = {},
 ): Promise<Response> {
-  const res = await routeRequest(req, svc, limiter, opts);
+  let res: Response;
+  try {
+    res = await routeRequest(req, svc, limiter, opts);
+  } catch (e) {
+    // Nothing escapes as a bare platform error: a failure anywhere (the account pages, stewardship, OAuth, the v2 pages,
+    // which run before the API's own try) answers with a correlation id and nothing else.
+    const id = crypto.randomUUID();
+    console.error(`unhandled ${id}`, e);
+    res = respond(500, { error: "internal error", correlationId: id });
+  }
   // The platform's own health probe deliberately sends bad writes; they are
   // not visitors' attempts, so they are not counted. (Anyone may send this
   // header; doing so only removes them from aggregate counts.)
@@ -743,8 +777,9 @@ async function routeRequest(
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const method = req.method.toUpperCase();
 
-  // Rate limit by connecting IP for anonymous reads and writes alike.
-  const ip = req.headers.get("cf-connecting-ip") ?? "local";
+  // Rate limit by connecting address for anonymous reads and writes alike. An IPv6 address counts by its /64: one
+  // subscriber holds at least that many addresses, so a finer key would let them dodge every limit.
+  const ip = ipKey(req.headers.get("cf-connecting-ip") ?? "local");
   const reading = method === "GET" || method === "HEAD";
   // MCP is POST-shaped but read-only: it shares the read bucket and stays
   // up in read-only mode, like every other read surface.
@@ -777,7 +812,7 @@ async function routeRequest(
   }
   // v2's public pages, when v2 is on: they replace v1's at the same paths.
   if (opts.pages && (method === "GET" || method === "HEAD")) {
-    const page = await opts.pages.handle(method, path, req.headers.get("accept") ?? "");
+    const page = await opts.pages.handle(method, path, req.headers.get("accept") ?? "", req.headers.get("x-ecdysis-probe") === "1");
     if (page) return page;
   }
 
