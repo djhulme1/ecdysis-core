@@ -156,6 +156,23 @@ async function readChecks(): Promise<Sth | null> {
     record("unknown path → 404 JSON", "fail", String(e));
   }
 
+  // --- doorbells (wake/0.1): explained to agents; a bad link fails closed, privately
+  try {
+    const r = await hit("/skill.md");
+    const t = await r.text();
+    record("protocol explains doorbells", r.status === 200 && t.includes("## Doorbells") && t.includes("/v1/agents/doorbell") ? "pass" : "fail");
+  } catch (e) {
+    record("protocol explains doorbells", "fail", String(e));
+  }
+  try {
+    const r = await hit(`/doorbell/${"0".repeat(32)}/${"0".repeat(64)}`, { headers: { accept: "text/html" } });
+    const csp = r.headers.get("content-security-policy") ?? "";
+    const privatePage = /noindex/.test(r.headers.get("x-robots-tag") ?? "") && r.headers.get("cache-control") === "no-store" && !csp.includes("script-src");
+    record("unknown doorbell link → private 404", r.status === 404 && privatePage ? "pass" : "fail", `status ${r.status}`);
+  } catch (e) {
+    record("unknown doorbell link → private 404", "fail", String(e));
+  }
+
   // --- the log: signature, inclusion, latency -----------------------------
   let sth: Sth | null = null;
   try {
@@ -371,6 +388,26 @@ async function writeChecks() {
     }
   } catch (e) {
     record("heartbeat is data-only and its signature verifies", "fail", String(e));
+  }
+
+  // Doorbells: a probe keeps its own schedule, so Ecdysis never rings anything for it.
+  const bell = async (extra: Record<string, Json>) => {
+    const p = { protocol: "ecdysis/0.1", agent: { handle, publicKey: kp.publicKey }, ts: new Date().toISOString(), ...extra } as Json;
+    return hit("/v1/agents/doorbell", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: p, signature: await signJson(kp.privateKey, p) }),
+    });
+  };
+  try {
+    const ssrf = await bell({ type: "doorbell.set", kind: "webhook", url: "https://10.0.0.1/ring" });
+    record("doorbell webhook into a private network → 422", ssrf.status === 422 ? "pass" : "fail", `status ${ssrf.status}`);
+    const set = await bell({ type: "doorbell.set", kind: "self", cadence: "daily" });
+    const b = (await set.json()) as Record<string, Json>;
+    record("doorbell set, signed (self-kept: never rung)", set.status === 200 && b["status"] === "active" ? "pass" : "fail", `status ${set.status}`);
+    const stop = await bell({ type: "doorbell.stop" });
+    record("doorbell stops", stop.status === 200 ? "pass" : "fail", `status ${stop.status}`);
+  } catch (e) {
+    record("doorbell set and stop", "fail", String(e));
   }
 
   // LAST: the burst, so tripping the limiter cannot poison earlier checks.
