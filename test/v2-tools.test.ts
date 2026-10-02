@@ -29,6 +29,8 @@ describe("v2 connector tools", () => {
     const names = tools.map((t) => t.name);
     for (const n of ["get_frontier", "get_heartbeat", "get_credence", "register_agent", "publish_paper", "register_claim", "commit_check", "file_result", "file_review", "escalate"]) assert.ok(names.includes(n), n);
     assert.equal(names.filter((n) => n === "get_frontier").length, 1, "the v2 tool replaces the v1 one of the same name");
+    for (const n of ["submit_paper", "submit_replication", "get_jurors", "get_review_queue", "get_marketplace", "jury_alerts"]) assert.ok(!names.includes(n), `${n} is v1 only and gone`);
+    for (const n of ["about", "get_constitution", "get_tree_head", "get_inclusion_proof", "set_doorbell", "stop_doorbell"]) assert.ok(names.includes(n), `${n} stays`);
     for (const t of tools) {
       assert.ok(t.title && t.title.length > 3, `${t.name} has a title`);
       assert.equal(typeof t.annotations?.["readOnlyHint"], "boolean", `${t.name} says whether it only reads`);
@@ -97,5 +99,11 @@ describe("v2 over HTTP", () => {
     assert.equal(claims[0]!["status"], "unchecked", "the registrant's own unverified receipt moves credence but cannot resolve");
     assert.equal((await get("/v2/heartbeat?agent=Moth-1")).status, 200);
     assert.equal((await get("/v2/nothing")).status, 404);
+    // With v2 on, v1 takes no writes; its reads still answer.
+    const v1write = await post("/v1/agents/register", { handle: "Old-1", publicKey: kp.publicKey, operatorId: "op-old" });
+    assert.equal(v1write.status, 410);
+    assert.match(String(v1write.body["error"]), /archived/);
+    assert.equal((await get("/v1/stats")).status, 200);
+    assert.equal((await post("/v1/agents/register", { handle: "Old-1", publicKey: kp.publicKey, operatorId: "op-old" }, false)).status, 428, "with v2 off, v1 answers as before (here: a missing constitution acknowledgment)");
   });
 });

@@ -521,10 +521,13 @@ const TOOLS: ToolDef[] = [
 ];
 
 /** The built-in tools plus any extra set, extras first so that a v2 tool of the same name replaces a v1 one. */
+/** v1 tools that have no place once v2 is on: juries, preprints, builds, v1 submission. */
+const V1_ONLY = new Set(["get_challenges", "get_preprints", "get_jurors", "get_standing", "get_marketplace", "get_wanted_builds", "get_review_queue", "get_jury_packet", "get_case_reasons", "get_practice_case", "answer_practice_case", "submit_paper", "submit_replication", "jury_alerts", "list_papers", "get_paper"]);
+
 function toolsFor(ctx: McpContext): ToolDef[] {
   if (!ctx.extraTools?.length) return TOOLS;
   const names = new Set(ctx.extraTools.map((t) => t.name));
-  return [...ctx.extraTools, ...TOOLS.filter((t) => !names.has(t.name))];
+  return [...ctx.extraTools, ...TOOLS.filter((t) => !names.has(t.name) && !V1_ONLY.has(t.name))];
 }
 
 /** A write's outcome as the dispatcher expects it (v2 tools use this). */

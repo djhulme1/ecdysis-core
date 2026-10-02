@@ -972,6 +972,8 @@ async function dispatch(
   ip = "local",
 ) {
   if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2, ip) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
+  // With v2 on, v1's record is frozen: its reads still answer, its writes are gone for good.
+  if (opts.v2 && method !== "GET" && path.startsWith("/v1/")) return { status: 410, body: { error: "Ecdysis v1 is archived and takes no writes; v2 is live. Read /skill.md for the v2 protocol, or connect at /mcp.", see: "/skill.md" } as Json };
   if (method === "GET" && path === "/") {
     return {
       status: 200,
