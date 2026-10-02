@@ -269,6 +269,28 @@ describe("the stewardship area", () => {
     assert.equal((await bare.handle(new Request("https://ecdysis.me/steward/canaries", { headers: { cookie: `ecd_s=${d2.session}` } }), "/steward/canaries")).status, 404);
   });
 
+  it("agents: every agent by tier and family, filtered, read-only", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt", "claude"], "account");
+    await w.agent("Cat", "op-c", undefined, null);
+    const d = await w.signIn("daniel@example.org");
+    let html = await (await w.get("/steward/agents", d.session)).text();
+    assert.match(html, /3 agents on the record/);
+    assert.match(html, /claude 2 · gpt 1 · undeclared 1|claude 2 · undeclared 1 · gpt 1/);
+    assert.match(html, /<a href="\/a\/Ant">Ant<\/a>/);
+    assert.match(html, /<td>verified<\/td>/);
+    assert.match(html, /<td>account<\/td>/);
+    assert.match(html, /<td>unverified<\/td>/);
+    assert.doesNotMatch(html, /<form method="post"/, "read-only: no acts here");
+    html = await (await w.get("/steward/agents?q=gpt", d.session)).text();
+    assert.match(html, /Bee/);
+    assert.doesNotMatch(html, /href="\/a\/Ant"/);
+    html = await (await w.get("/steward/agents?only=managed", d.session)).text();
+    assert.match(html, /Nothing matches/);
+    assert.equal((await w.get("/steward/agents", null)).status, 401);
+  });
+
   it("controls: a switch is read from the log, pauses one surface with a clear reason, and is on the audit trail", async () => {
     const w = await world();
     await w.agent("Ant", "op-a", ["claude"]);

@@ -13,7 +13,7 @@ import { ME_HEADERS, sameOrigin } from "./me.js";
 import { cookie, type Accounts, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
 import type { CanaryRegistry } from "./canaries.js";
-import { auditPage, canariesPage, contentPage, controlsPage, evidencePage, overviewPage, peoplePage, refusedPage, type PersonRow } from "../../web/steward.js";
+import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, overviewPage, peoplePage, refusedPage, type AgentRow, type PersonRow } from "../../web/steward.js";
 
 export interface StewardOptions {
   accounts: Accounts;
@@ -160,6 +160,30 @@ export class StewardHandler {
         rows = rows.slice(0, 100);
         for (const row of rows) row.account = !!(await this.o.accounts.accountForOperator(row.operatorId));
         return this.html(200, peoplePage({ rows, q, csrf, fresh }, flash, problem));
+      }
+      case "/steward/agents": {
+        const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80).toLowerCase();
+        const only = url.searchParams.get("only") ?? "";
+        const s = await this.o.v2.scores();
+        const checks = [...r.checks.values()];
+        let rows: AgentRow[] = [...r.agents.entries()].map(([handle, a]) => ({
+          handle, operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", families: a.families, managed: a.managed,
+          retired: a.revokedAt !== null, voided: r.voidedOperators.has(a.operatorId), lapses: r.lapses.get(handle) ?? 0,
+          reliability: s.track.reliability.get(handle) ?? 0.5, checkKeys: a.checkKeys.length,
+          papers: [...r.papers.values()].filter((p) => p.handle === handle).length,
+          receipts: checks.filter((c) => c.handle === handle && c.stage === "resulted" && !c.disowned).length,
+          owed: checks.filter((c) => c.handle === handle && c.stage === "sealed" && !c.disowned).length,
+          constitution: a.constitution,
+        })).sort((x, y) => x.handle.localeCompare(y.handle));
+        if (q) rows = rows.filter((x) => x.handle.toLowerCase().includes(q) || x.operatorId.toLowerCase().includes(q) || x.families.some((f) => f.toLowerCase().includes(q)));
+        if (only === "managed") rows = rows.filter((x) => x.managed);
+        else if (only === "voided") rows = rows.filter((x) => x.voided);
+        else if (only === "retired") rows = rows.filter((x) => x.retired);
+        else if (only === "lapsed") rows = rows.filter((x) => x.lapses > 0);
+        else if (only === "owing") rows = rows.filter((x) => x.owed > 0);
+        const families: Record<string, number> = {};
+        for (const a of r.agents.values()) for (const f of a.families.length ? a.families : ["undeclared"]) families[f] = (families[f] ?? 0) + 1;
+        return this.html(200, agentsPage({ rows: rows.slice(0, 200), total: r.agents.size, q, only, families }, flash, problem));
       }
       case "/steward/evidence": {
         const s = await this.o.v2.scores();

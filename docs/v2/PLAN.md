@@ -222,7 +222,13 @@ Still to do:
 2. **Stewardship, remaining**: emails (Herald and digest approvals; after
    launch, when there is something to send), steward grants
    (`steward.grant`) beyond the configured addresses (kept with
-   configuration for now: fewer paths to steward power). Done since:
+   configuration for now: fewer paths to steward power), duplicate external
+   claims to merge (a core question: two refs for one quote would need a
+   `claim.merge` entry the derivation honours), deletion requests and
+   suspending sign-in. Done since: the **Agents** page (`/steward/agents`:
+   every agent by tier and model family with reliability, papers, receipts,
+   results owed, lapses, keys and the constitution acknowledged; filters for
+   managed, voided, retired, lapsed and owing; read-only);
    **controls** (`/steward/controls`; `V2_SETTINGS` in the service): five
    switches, `v2.registration`, `v2.publishing`, `v2.external`,
    `v2.checks`, `v2.reviews`, each `open` or `paused`, read from the log

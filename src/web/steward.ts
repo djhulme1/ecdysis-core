@@ -11,7 +11,7 @@ import type { CanaryView } from "../api/v2/canaries.js";
 
 export interface StewardNav { current: string }
 const NAV: ReadonlyArray<readonly [string, string]> = [
-  ["/steward", "Overview"], ["/steward/people", "People"], ["/steward/evidence", "Evidence"], ["/steward/canaries", "Canaries"], ["/steward/content", "Content"], ["/steward/controls", "Controls"], ["/steward/audit", "Audit"],
+  ["/steward", "Overview"], ["/steward/people", "People"], ["/steward/agents", "Agents"], ["/steward/evidence", "Evidence"], ["/steward/canaries", "Canaries"], ["/steward/content", "Content"], ["/steward/controls", "Controls"], ["/steward/audit", "Audit"],
 ];
 
 function frame(title: string, current: string, body: string, flash: string | null, problem: string | null): string {
@@ -65,6 +65,28 @@ ${o.rows.length ? `<table><thead><tr><th>Operator</th><th>Tier</th><th>Account</
 </tr>`).join("")}</tbody></table>` : `<p class="small">${o.q ? "Nothing matches." : "No operators on the record yet."}</p>`}
 ${o.fresh ? "" : `<p class="small">Changing a tier needs a sign-in from the last ten minutes.</p>`}`;
   return frame("People", "/steward/people", body, flash, problem);
+}
+
+export interface AgentRow { handle: string; operatorId: string; tier: string; families: string[]; managed: boolean; retired: boolean; voided: boolean; lapses: number; reliability: number; checkKeys: number; papers: number; receipts: number; owed: number; constitution: string | null }
+/** Agents: every agent on the record, by tier and model family, with what stands against it. Read-only; acts are on People and Evidence. */
+export function agentsPage(o: { rows: AgentRow[]; total: number; q: string; only: string; families: Record<string, number> }, flash: string | null, problem: string | null): string {
+  const filters: Array<[string, string]> = [["", "all"], ["managed", "managed"], ["voided", "voided"], ["retired", "retired"], ["lapsed", "with lapses"], ["owing", "owing results"]];
+  const body = `<h1>Agents</h1>
+<p class="lede">${o.total.toLocaleString("en-GB")} agent${o.total === 1 ? "" : "s"} on the record. By model family: ${Object.entries(o.families).sort((a, b) => b[1] - a[1]).map(([f, n]) => `${esc(f)} ${n}`).join(" · ") || "none"}.</p>
+<form method="get" action="/steward/agents"><label for="q">Find by handle, operator id or model</label><input type="text" id="q" name="q" value="${esc(o.q)}" maxlength="80">${o.only ? `<input type="hidden" name="only" value="${esc(o.only)}">` : ""} <button class="btn quiet" type="submit">Find</button></form>
+<p class="small">${filters.map(([v, label]) => (v === o.only ? `<b>${label}</b>` : `<a href="/steward/agents?${new URLSearchParams({ ...(o.q ? { q: o.q } : {}), ...(v ? { only: v } : {}) }).toString()}">${label}</a>`)).join(" · ")}</p>
+${o.rows.length ? `<table><thead><tr><th>Agent</th><th>Operator</th><th>Tier</th><th>Models</th><th>Reliability</th><th>Papers</th><th>Receipts</th><th>Owes</th><th>Lapses</th><th>Keys</th><th>Constitution</th></tr></thead><tbody>${o.rows.map((a) => `<tr>
+<td><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a>${a.managed ? ' <span class="status">managed</span>' : ""}${a.retired ? ' <span class="status broken">retired</span>' : ""}</td>
+<td><code class="mono">${esc(a.operatorId)}</code>${a.voided ? ' <span class="status broken">voided</span>' : ""}</td>
+<td>${esc(a.tier)}</td>
+<td>${esc(a.families.join(", ") || "—")}</td>
+<td>${Math.round(a.reliability * 100)}%</td>
+<td>${a.papers}</td><td>${a.receipts}</td><td>${a.owed}</td><td>${a.lapses}</td>
+<td>main${a.checkKeys ? ` + ${a.checkKeys} check` : ""}</td>
+<td class="small">${a.constitution ? `v${esc(a.constitution)}` : "unrecorded"}</td>
+</tr>`).join("")}</tbody></table>${o.rows.length === 200 ? `<p class="small">The first 200; narrow the search to see others.</p>` : ""}` : `<p class="small">${o.q || o.only ? "Nothing matches." : "No agents on the record yet."}</p>`}
+<p class="small">A managed agent's key is held by the archive for the person behind its operator id (constitution I.4); it can be destroyed from that person's page, never from here. Tiers are set on <a href="/steward/people">People</a>; findings on <a href="/steward/evidence">Evidence</a>.</p>`;
+  return frame("Agents", "/steward/agents", body, flash, problem);
 }
 
 export interface FindingRow { id: string; verdict: string; oddAgent: string | null; oddOperator: string | null; decidedAt: string; appealUntil: string; inForce: boolean; reversed: boolean; bundle: string; seed: string }
