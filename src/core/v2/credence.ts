@@ -37,10 +37,12 @@
  *                  check weighs ½; a three-model check after a Claude check
  *                  weighs 5/6; undeclared items are not discounted against each
  *                  other, but count as at most one family towards "established".
- * Items under a fabrication finding weigh nothing. Checks by operators who
- * are not verified together move a claim by at most ln 3, like reviews:
- * verified operators are the trust anchor, and a cheap crowd must not be
- * able to carry a claim far on its own.
+ * Items under a fabrication finding weigh nothing. Everything from operators
+ * who are not verified, checks and reviews together, moves a claim by at
+ * most ln 3; verified operators' reviews together at most ln 3 as well:
+ * verified operators' checks are the trust anchor, and a cheap crowd must
+ * not be able to carry a claim far on its own. Use is weighed by the citing
+ * operator's tier for the same reason.
  *
  * Three numbers per claim, never blended:
  *   credence p   what to believe;
@@ -83,12 +85,14 @@ export const CREDENCE_V2_PARAMS = {
   /** All reviews together never move the odds by more than 3:1. */
   reviewCap: Math.log(3),
   /**
-   * All checks by operators who are not verified (unverified and account
-   * tiers together) never move the odds by more than 3:1 either. Accounts
-   * cost an email and unverified operator ids cost nothing, so a crowd of
-   * them is cheap to assemble; verified operators are the trust anchor.
-   * Without this cap ten undeclared unverified sybils could carry a false
-   * claim from a half to 0.85 while its status still read "unchecked".
+   * Everything from operators who are not verified (unverified and account
+   * tiers; checks and reviews alike) never moves the odds by more than 3:1
+   * all together. Accounts cost an email and unverified operator ids cost
+   * nothing, so a crowd of them is cheap to assemble; verified operators are
+   * the trust anchor. Without this cap ten undeclared unverified sybils
+   * could carry a false claim from a half to 0.85 while its status still
+   * read "unchecked"; with separate caps for checks and reviews they could
+   * still reach 0.9.
    */
   unverifiedCap: Math.log(3),
   /** Chance a claim holds even though a foundation fails (0.10: deep chains of good work should not start near zero). */
@@ -154,6 +158,8 @@ export interface UseInput {
   claim: string;
   paper: string;
   operatorId: string;
+  /** The citing operator's tier: use is weighed by it, so free identities cannot raise a claim's threshold or hijack the queues. */
+  tier?: Tier;
 }
 
 export interface CredenceV2Options {
@@ -284,8 +290,8 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
     if (!cur || RANK[e.kind] > RANK[cur.kind] || (RANK[e.kind] === RANK[cur.kind] && e.seq > cur.seq)) best.set(e.operatorId, e);
   }
   let checks = 0;
-  let unverifiedChecks = 0;
-  let reviews = 0;
+  let unverified = 0; // every item, check or review, from an operator who is not verified
+  let reviews = 0; // verified operators' reviews
   let s = 0;
   let f = 0;
   let confirmingReplication = false;
@@ -303,14 +309,14 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
     let ev: number;
     if (e.kind === "review") {
       ev = e.confirms ? P.reviewStep : -P.reviewStep;
-      reviews += w * ev;
+      if (e.tier === "verified") reviews += w * ev; else unverified += w * ev;
     } else if (e.kind === "rerun") {
       ev = e.confirms ? P.confirm * P.rerunConfirmShare : -P.refute * P.rerunFailShare;
-      if (e.tier === "verified") checks += w * ev; else unverifiedChecks += w * ev;
+      if (e.tier === "verified") checks += w * ev; else unverified += w * ev;
       if (e.confirms) reproduced = true;
     } else {
       ev = e.confirms ? P.confirm : -P.refute;
-      if (e.tier === "verified") checks += w * ev; else unverifiedChecks += w * ev;
+      if (e.tier === "verified") checks += w * ev; else unverified += w * ev;
       if (e.tier === "verified") {
         if (e.confirms) {
           confirmingReplication = true;
@@ -326,7 +332,7 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
     counted.push({ item: e, weight: w, e: ev });
   }
   const cappedReviews = Math.max(-P.reviewCap, Math.min(P.reviewCap, reviews));
-  const cappedUnverified = Math.max(-P.unverifiedCap, Math.min(P.unverifiedCap, unverifiedChecks));
+  const cappedUnverified = Math.max(-P.unverifiedCap, Math.min(P.unverifiedCap, unverified));
   return { sum: checks + cappedUnverified + cappedReviews, s, f, confirmingReplication, failingReplication, confirmingFamilies, reproduced, counted };
 }
 
@@ -374,7 +380,7 @@ export function computeCredenceV2(
   for (const u of uses) {
     const a = author.get(u.claim);
     if (a === undefined) continue;
-    const w = independence(u.operatorId, a, o.vouchLinked, o.ringLinked);
+    const w = independence(u.operatorId, a, o.vouchLinked, o.ringLinked) * P.tier[u.tier ?? "verified"];
     const m = useBy.get(u.claim) ?? new Map<string, number>();
     m.set(u.paper, Math.max(m.get(u.paper) ?? 0, w));
     useBy.set(u.claim, m);

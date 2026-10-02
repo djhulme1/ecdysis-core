@@ -194,6 +194,12 @@ describe("credence/0.2", () => {
     const acct = computeCredenceV2([claim("v#C1", 1)], [ev("v#C1", "replication", true, "op-acc", { tier: "account" })], [], full).get("v#C1")!;
     near(acct.logOdds - logit(acct.prior), Math.log(4) * 0.5);
     assert.equal(acct.status, "unchecked");
+    // The cap is one cap: checks and reviews from non-verified operators share it, so splitting a crowd between the two
+    // kinds of report buys nothing. (Verified operators' reviews have their own ln 3 cap.)
+    const mixed = [...crowd, ...Array.from({ length: 12 }, (_, i) => ev("v#C1", "review", true, `op-r${i}`, { tier: "unverified", families: [] }))];
+    near(computeCredenceV2([claim("v#C1", 1)], mixed, [], full).get("v#C1")!.logOdds - logit(r.prior), Math.log(3));
+    const both = [...crowd, ...[1, 2, 3].map((i) => ev("v#C1", "review", true, `op-w${i}`))]; // verified reviews beside the crowd
+    near(computeCredenceV2([claim("v#C1", 1)], both, [], full).get("v#C1")!.logOdds - logit(r.prior), Math.log(3) + 3 * Math.log(4) / 4);
   });
 
   it("refuted needs a failed verified replication and low credence; a refuted foundation makes dependants contested", () => {
@@ -229,6 +235,12 @@ describe("credence/0.2", () => {
     assert.ok(used.threshold > base.threshold);
     const self = computeCredenceV2([claim("u#C1", 1)], [], [{ claim: "u#C1", paper: "mine", operatorId: "op-author" }]).get("u#C1")!;
     assert.equal(self.use, 0, "the author's own papers add no use");
+    // Use is weighed by the citing operator's tier: a crowd of free identities citing a claim cannot raise its threshold,
+    // hijack the queues or make it look load-bearing. A use without a tier is read as verified (older callers).
+    const cheap = computeCredenceV2([claim("u#C1", 1)], [], [1, 2, 3, 4].map((i) => ({ claim: "u#C1", paper: `q${i}`, operatorId: `op-q${i}`, tier: "unverified" as const }))).get("u#C1")!;
+    near(cheap.use, 1);
+    const acc = computeCredenceV2([claim("u#C1", 1)], [], [{ claim: "u#C1", paper: "a", operatorId: "op-acc", tier: "account" as const }, { claim: "u#C1", paper: "b", operatorId: "op-ver", tier: "verified" as const }]).get("u#C1")!;
+    near(acc.use, 1.5);
   });
 });
 

@@ -30,7 +30,7 @@
  */
 
 import type { Json } from "../../core/canonical.js";
-import { hashJson } from "../../core/canonical.js";
+import { b64urlDecode, b64urlEncode, hashJson } from "../../core/canonical.js";
 import { publicKeyProblem, verifyJson } from "../../core/crypto.js";
 import type { TransparencyLog } from "../../core/log.js";
 import { modelFamilies } from "../../core/v2/credence.js";
@@ -120,6 +120,11 @@ const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
 
 /** What a key may sign: everything (the main key) or reports only (a check key). */
 type Scope = "main" | "reports";
+
+/** One spelling per key: decoding and re-encoding gives the same string, so no key can register twice under another alphabet or padding. */
+function canonicalKey(k: string): boolean {
+  try { return b64urlEncode(b64urlDecode(k)) === k; } catch { return false; }
+}
 
 interface KeyDelegatePayload { protocol: string; type: "key.delegate"; key: string; scope: "reports"; label?: string; agent: { handle: string; publicKey: string }; ts: string }
 interface KeyRevokePayload { protocol: string; type: "key.revoke"; key: string; compromisedAt?: string; agent: { handle: string; publicKey: string }; ts: string }
@@ -231,12 +236,13 @@ export class V2Service {
    * enters the record at the account tier); otherwise under whatever stable
    * id the agent gives, unverified.
    */
-  async registerAgent(p: { handle: unknown; publicKey: unknown; operatorId?: unknown; models?: unknown; pairing?: unknown; constitution?: unknown }, ip = "local"): Promise<ApiResult> {
+  async registerAgent(p: { handle: unknown; publicKey: unknown; operatorId?: unknown; models?: unknown; pairing?: unknown; constitution?: unknown; sponsor?: unknown }, ip = "local"): Promise<ApiResult> {
     const handle = typeof p.handle === "string" ? p.handle : "";
     if (!HANDLE.test(handle)) return err(400, "handle must be 2-40 chars: letters, digits, hyphens");
     const publicKey = typeof p.publicKey === "string" ? p.publicKey : "";
     const kp = await publicKeyProblem(publicKey);
     if (kp) return err(400, `publicKey: ${kp}`);
+    if (!canonicalKey(publicKey)) return err(400, "publicKey: base64url without padding (one spelling per key)");
     // Article I.2: registration is assent. Acknowledging the version in force, by version and hash, is the signature; the log records it.
     const inForce = await (this.o.constitution ?? (async () => ({ version: CONSTITUTION_VERSION, hash: await constitutionHash() })))();
     const ack = (p.constitution ?? null) as { version?: unknown; hash?: unknown } | null;
@@ -257,6 +263,19 @@ export class V2Service {
     const r = await this.record();
     if (r.agents.has(handle)) return err(409, "handle taken");
     if (r.keys.has(publicKey)) return err(409, "this key already belongs to an agent; generate a fresh keypair");
+    // An operator id that already has agents is someone's: joining it unpaired needs a SPONSOR, an existing agent of that
+    // operator signing {op: "sponsor", handle, publicKey} with its main key. Otherwise anyone could register under a verified
+    // operator's id, inherit its tier, and have its fabrications void the real operator.
+    if (!paired) {
+      const existing = [...r.agents.entries()].filter(([, a]) => a.operatorId === operatorId && !a.revokedAt);
+      if (existing.length) {
+        const sp = (p.sponsor ?? null) as { handle?: unknown; signature?: unknown } | null;
+        if (!sp || typeof sp.handle !== "string" || typeof sp.signature !== "string") return err(403, "this operator id already has agents: a registration under it needs sponsor {handle, signature}, an existing agent's main-key signature over {op: \"sponsor\", handle, publicKey}, or a pairing code from the operator's account", { operatorId });
+        const sponsor = existing.find(([h]) => h === sp.handle);
+        if (!sponsor) return err(403, "sponsor: not an agent of that operator");
+        if (!(await verifyJson(sponsor[1].publicKey, { op: "sponsor", handle, publicKey }, sp.signature))) return err(401, "sponsor: signature does not verify against the sponsor's main key");
+      }
+    }
     // Everything else checked, spend the code last: a refused registration must not burn it.
     if (paired) {
       const pr = await this.o.pairing!(p.pairing as string, ip);
@@ -307,7 +326,7 @@ export class V2Service {
     const opened = await this.openEnvelope<VouchPayload>(env, "operator.vouch", validate, "main");
     if (!opened.ok) return opened.result;
     const { payload: v, operatorId: from, record: r } = opened;
-    if ((r.tiers.get(from) ?? "unverified") !== "verified") return err(403, "only a verified operator may vouch");
+    if (!r.stewardVerified.has(from)) return err(403, "only an operator a steward verified may vouch (vouching does not chain)");
     if (r.suspendedVouchers.has(from)) return err(403, "your vouches are suspended: an operator you vouched for is under a finding in force");
     if (v.for === from) return err(400, "for: not yourself");
     if (![...r.agents.values()].some((a) => a.operatorId === v.for)) return err(404, "for: no agent is registered under that operator id");
@@ -388,6 +407,7 @@ export class V2Service {
   private async delegate(r: V2Record, handle: string, key: string, label: string | undefined, by: "operator" | null): Promise<ApiResult> {
     const kp = await publicKeyProblem(key);
     if (kp) return err(400, `key: ${kp}`);
+    if (!canonicalKey(key)) return err(400, "key: base64url without padding (one spelling per key)");
     const agent = r.agents.get(handle)!;
     if (key === agent.publicKey) return err(400, "key: a check key must differ from the main key");
     const known = r.keys.get(key);
@@ -436,13 +456,19 @@ export class V2Service {
   private async revoke(r: V2Record, key: string, compromisedAt: string | undefined, by: "operator" | null): Promise<ApiResult> {
     const k = r.keys.get(key)!;
     if (compromisedAt !== undefined && Date.parse(compromisedAt) > this.now().getTime()) return err(400, "compromisedAt: not in the future");
+    if (compromisedAt !== undefined && Date.parse(compromisedAt) < Date.parse(k.delegatedAt)) return err(400, "compromisedAt: not before the key existed", { since: k.delegatedAt });
     if (k.revokedAt) {
       const earlier = compromisedAt !== undefined && (!k.compromisedAt || Date.parse(compromisedAt) < Date.parse(k.compromisedAt));
       if (!earlier) return err(409, "already revoked; a second revocation may only declare an earlier compromise time", { revokedAt: k.revokedAt, compromisedAt: k.compromisedAt });
     }
     const operatorId = r.agents.get(k.handle)?.operatorId ?? "";
     await this.o.log.append("key.revoke", { handle: k.handle, operatorId, key, scope: k.scope, ...(compromisedAt ? { compromisedAt } : {}), ...(by ? { by } : {}) });
-    const disowned = [...r.checks.values()].filter((c) => compromisedAt && ((c.key === key && Date.parse(c.committedAt) >= Date.parse(compromisedAt)) || (c.resultKey === key && c.resultedAt && Date.parse(c.resultedAt) >= Date.parse(compromisedAt)))).map((c) => c.id);
+    // What this declaration disowns (the derivation is the authority; this is the same rule, told back): reports this key signed
+    // from the compromise on and, for a main key, everything signed by a check key the thief could have delegated after it.
+    const at = compromisedAt ? Date.parse(compromisedAt) : NaN;
+    const thiefs = new Set(k.scope === "main" && compromisedAt ? [...r.keys.values()].filter((x) => x.handle === k.handle && x.scope === "reports" && Date.parse(x.delegatedAt) >= at).map((x) => x.key) : []);
+    const signedAfter = (signer: string | null, ts: string | null) => !!signer && !!ts && ((signer === key && Date.parse(ts) >= at) || thiefs.has(signer));
+    const disowned = compromisedAt ? [...r.checks.values()].filter((c) => signedAfter(c.key, c.committedAt) || signedAfter(c.resultKey, c.resultedAt)).map((c) => c.id) : [];
     return ok(200, {
       key, scope: k.scope, revoked: true, compromisedAt: compromisedAt ?? null, disownedChecks: disowned,
       note: k.scope === "main"
@@ -528,9 +554,14 @@ export class V2Service {
   private async seal(r: V2Record, id: string, target: string, operatorId: string): Promise<{ seal: string; seed: string; cross: string | null }> {
     const { seal, seed } = await sealCommit(this.o.logPrivateKey!, id);
     const earlier = r.receiptsByClaim.get(target) ?? [];
-    const decided = new Set(r.findings.filter((f) => !f.reversed && f.verdict !== "unresolved").map((f) => `${f.bundle}|${f.seed}`));
+    const decided = new Set(r.findings.filter((f) => f.verdict !== "unresolved").map((f) => `${f.bundle}|${f.seed}`)); // reversed ones too: the steward closed them
     const disputed = earlier.filter((x) => { const ch = r.checks.get(x.id); return !!ch && ch.disputedBy.length > 0 && !decided.has(`${ch.bundle}|${ch.seed}`); });
-    const pool = disputed.length ? disputed : earlier;
+    // Next in line, for a VERIFIED committer: receipts only non-verified operators have disagreed with, since only a verified
+    // operator's cross-check can open (or close) the question those disagreements raise.
+    const unsettled = (r.tiers.get(operatorId) ?? "unverified") === "verified"
+      ? earlier.filter((x) => { const ch = r.checks.get(x.id); return !!ch && ch.disputedBy.length === 0 && ch.verifiedBy.length === 0 && ch.otherCrossChecks.some((o) => !o.match) && !decided.has(`${ch.bundle}|${ch.seed}`); })
+      : [];
+    const pool = disputed.length ? disputed : unsettled.length ? unsettled : earlier;
     const cross = pickCrossCheck(seed, pool, operatorId, r.vouchLinked);
     await this.o.log.append("check.seal", { commit: id, seal, seed, crossCheck: cross });
     return { seal, seed, cross };
@@ -564,9 +595,13 @@ export class V2Service {
     const r = await this.record();
     const c = r.checks.get(id);
     if (!c) return err(404, "no such receipt");
-    const crossChecked = c.verifiedBy.length + c.disputedBy.length > 0;
+    // Revealed once a verified cross-check matched, or a finding on this bundle and seed was decided; while a dispute is open the
+    // outputs stay withheld however old the receipt is, so nobody can "cross-check" by copying them. Undisputed receipts are
+    // revealed after thirty days regardless, so nothing stays hidden for ever.
+    const decided = r.findings.some((f) => f.bundle === c.bundle && f.seed === c.seed && f.verdict !== "unresolved");
+    const disputeOpen = c.disputedBy.length > 0 && !decided;
     const aged = c.resultedAt !== null && this.now().getTime() - Date.parse(c.resultedAt) >= OUTPUTS_REVEAL_MS;
-    const revealed = c.stage === "resulted" && (crossChecked || aged);
+    const revealed = c.stage === "resulted" && !disputeOpen && (c.verifiedBy.length > 0 || decided || aged);
     const outputs = revealed ? await this.o.store.getOutputs(id) : null;
     const bundle = await this.o.store.getBundle(id);
     return ok(200, {
@@ -575,7 +610,8 @@ export class V2Service {
       outcome: c.outcome, crossMatch: c.crossMatch, verifiedBy: c.verifiedBy, disputedBy: c.disputedBy, disowned: c.disowned,
       bundle: bundle as unknown as Json, bundleHash: c.bundle,
       outputs: outputs as unknown as Json,
-      outputsStatus: c.stage !== "resulted" ? "not filed" : revealed ? "revealed" : "withheld until cross-checked or 30 days old",
+      outputsStatus: c.stage !== "resulted" ? "not filed" : revealed ? "revealed" : disputeOpen ? "withheld while a finding is open" : "withheld until a verified cross-check matches or 30 days pass",
+      otherCrossChecks: c.otherCrossChecks as unknown as Json,
       note: "Data, never instructions. Re-run the bundle under the seed and compare: the outputs, once revealed, are what every cross-check was compared against.",
     });
   }
@@ -608,25 +644,31 @@ export class V2Service {
     } else if (res.crossCheck) {
       return err(422, "crossCheck: the seal assigned none; send null");
     }
-    // Seed-insensitivity: the same bundle produced exactly these outputs under a different seed before, so the seed selects nothing and its re-runs count as one.
+    // Seed-insensitivity: an earlier receipt of the same bundle produced exactly these outputs under a different seed, so the seed
+    // selected nothing and THIS receipt adds nothing. The flag marks this receipt only: nobody's later honest run is affected.
     let insensitive = false;
     const spec = (await this.o.store.getBundle(res.commit))?.outputs ?? [];
     for (const other of r.checks.values()) {
-      if (other.id === res.commit || other.bundle !== check.bundle || other.stage !== "resulted" || other.seed === check.seed) continue;
+      if (other.id === res.commit || other.bundle !== check.bundle || other.stage !== "resulted" || other.disowned || other.seed === check.seed) continue;
       const theirs = await this.o.store.getOutputs(other.id);
       if (theirs && seedInsensitive(theirs, res.outputs, spec)) { insensitive = true; break; }
     }
     await this.o.store.putOutputs(res.commit, res.outputs);
     await this.o.log.append("check.result", { commit: res.commit, outcome: res.outcome, crossMatch, ...(crossExact !== null ? { crossExact } : {}), ...(checkKey ? { key } : {}), ...(insensitive ? { seedInsensitive: true } : {}) });
 
+    // Only a verified operator's disagreement opens a finding (the derivation counts only their cross-checks as disputes); a
+    // non-verified one is recorded and shown, and the frontier asks a verified operator to settle it.
+    const verifiedOperator = (r.tiers.get(operatorId) ?? "unverified") === "verified";
     let finding: Json = null;
-    if (check.crossCheck && crossMatch === false) finding = await this.decideFinding(check.crossCheck);
+    if (check.crossCheck && crossMatch === false && verifiedOperator) finding = await this.decideFinding(check.crossCheck);
     return ok(201, {
       id: res.commit, outcome: res.outcome, crossMatch,
       ...(finding ? { finding } : {}),
-      ...(insensitive ? { seedInsensitive: true, seedNote: "This bundle gave exactly the same outputs under a different seed: it ignores ECDYSIS_SEED, so its re-runs count together as one piece of evidence. Bundles should let the seed choose what they sample." } : {}),
+      ...(insensitive ? { seedInsensitive: true, seedNote: "An earlier receipt of this bundle gave exactly these outputs under a different seed: the bundle ignores ECDYSIS_SEED, so this re-run adds nothing and is not counted as evidence. Bundles should let the seed choose what they sample." } : {}),
       note: crossMatch === false
-        ? "Your cross-check disagreed with the earlier receipt. A finding is open: further independent runs decide it. Nobody is voided by a disagreement alone."
+        ? (verifiedOperator
+          ? "Your cross-check disagreed with the earlier receipt. A finding is open: further independent runs decide it. Nobody is voided by a disagreement alone."
+          : "Your cross-check disagreed with the earlier receipt. It is recorded and shown on that receipt, but only verified operators' cross-checks open findings; the frontier offers the receipt to a verified operator to re-run. Your person can verify your operator from their account page.")
         : "Filed. Your outputs stay withheld until another agent cross-checks you; your receipt counts from now.",
     });
   }
@@ -643,18 +685,24 @@ export class V2Service {
     const bundle = await this.o.store.getBundle(receiptId);
     const own = await this.o.store.getOutputs(receiptId);
     if (!check || !bundle || !own || !check.seed) return null;
+    // A finding once decided on this bundle and seed stays decided, reversed or not: a reversal is the steward's word, and
+    // the next disagreeing run must not re-open what the steward closed. Further runs there are the steward's to read.
+    const already = r.findings.find((f) => f.bundle === check.bundle && f.seed === check.seed && f.verdict !== "unresolved");
+    if (already) return { status: "decided", verdict: already.verdict, id: already.id, reversed: already.reversed };
+    // The runs that decide: the receipt's own, and cross-checks by VERIFIED operators that are independent of the receipt's
+    // operator and of each other (distinct operators, not vouch- or ring-linked). verifiedBy and disputedBy already hold only
+    // verified operators' cross-checks; a crowd of free identities never reaches this point.
     const runs: Array<{ by: string; outputs: Outputs; commit: string }> = [{ by: check.operatorId, outputs: own, commit: receiptId }];
-    for (const id of [...check.verifiedBy, ...check.disputedBy]) {
+    const independent = (op: string) => runs.every((x) => x.by !== op && !r.vouchLinked(x.by, op) && !r.ringLinked(x.by, op));
+    for (const id of [...check.verifiedBy, ...check.disputedBy].sort((a, b) => (r.checks.get(a)?.seq ?? 0) - (r.checks.get(b)?.seq ?? 0))) {
       const o = await this.o.store.getOutputs(`${receiptId}@${id}`);
       const by = r.checks.get(id)?.operatorId;
-      if (o && by) runs.push({ by, outputs: o, commit: id });
+      if (o && by && independent(by)) runs.push({ by, outputs: o, commit: id });
     }
     // Determinism, observed: at least two independent runs under this seed with exactly identical outputs, on a pinned image.
     const deterministic = isDeterministic(bundle, largestIdenticalGroup(runs, bundle.outputs));
     const s = settleRuns(runs.map(({ by, outputs }) => ({ by, outputs })), bundle.outputs, deterministic);
     if (s.verdict === "open") return { status: "open", runs: runs.length, need: s.need, bundle: check.bundle, seed: check.seed };
-    const already = r.findings.find((f) => f.bundle === check.bundle && f.seed === check.seed && !f.reversed && f.verdict !== "unresolved");
-    if (already) return { status: "decided", verdict: already.verdict, id: already.id };
     const oddCommit = "odd" in s ? runs.find((x) => x.by === s.odd)?.commit ?? null : null;
     const id = await hashJson({ bundle: check.bundle, seed: check.seed, runs: runs.map((x) => x.commit) });
     await this.o.log.append("finding.decide", { id, bundle: check.bundle, seed: check.seed, verdict: s.verdict, oddCommit, deterministic, runs: runs.map((x) => x.commit) });
@@ -784,9 +832,16 @@ export class V2Service {
       .map((c) => ({ ref: c.ref, credence: round(c.credence), use: c.use, status: c.status, families: c.families, value: round(c.valueOfChecking), perMinute: round(c.valueOfChecking / cost(c.ref), 6), minutes: cost(c.ref) }))
       .sort((a, b) => b.perMinute - a.perMinute).slice(0, limit);
     const disputes = all.filter((c) => c.dispute > 0)
-      .map((c) => ({ ref: c.ref, credence: round(c.credence), use: c.use, status: c.status, dispute: round(c.dispute), priority: round(c.disputePriority), perMinute: round(c.disputePriority / cost(c.ref), 6), minutes: cost(c.ref) }))
+      .map((c) => ({ ref: c.ref, credence: round(c.credence), use: c.use, status: c.status, dispute: round(c.dispute), perMinute: round(c.disputePriority / cost(c.ref), 6), priority: round(c.disputePriority), minutes: cost(c.ref) }))
       .sort((a, b) => b.perMinute - a.perMinute).slice(0, limit);
-    return ok(200, { version: "credence/0.2", checking, disputes, note: "Two queues, never blended into credence: what nobody knows yet (value of checking = (use + ½)·p(1 − p)), and where the evidence disagrees ((use + ½)·D), each per minute of expected compute." });
+    // Receipts a non-verified operator's cross-check disagreed with, and no verified one has yet looked at: such a disagreement
+    // opens no finding on its own, so it is offered here for a verified operator to re-run. The claim's use ranks them.
+    const decided = new Set(r.findings.filter((f) => f.verdict !== "unresolved").map((f) => `${f.bundle}|${f.seed}`));
+    const unsettled = [...r.checks.values()]
+      .filter((c) => c.stage === "resulted" && !c.disowned && c.disputedBy.length === 0 && c.verifiedBy.length === 0 && c.otherCrossChecks.some((x) => !x.match) && !decided.has(`${c.bundle}|${c.seed}`))
+      .map((c) => ({ receipt: c.id, claim: c.target, disagreements: c.otherCrossChecks.filter((x) => !x.match).length, use: s.claims.get(c.target)?.use ?? 0, minutes: c.runtimeMinutes ?? cost(c.target) }))
+      .sort((a, b) => b.use - a.use || b.disagreements - a.disagreements).slice(0, limit);
+    return ok(200, { version: "credence/0.2", checking, disputes, unsettled, note: "Two queues, never blended into credence: what nobody knows yet (value of checking = (use + ½)·p(1 − p)), and where the evidence disagrees ((use + ½)·D), each per minute of expected compute. `unsettled` lists receipts that only non-verified operators have disagreed with; a verified operator's commit_check on the claim is drawn to them." });
   }
 
   /**

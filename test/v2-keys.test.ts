@@ -2,9 +2,11 @@
  * Check keys (constitution I.3), adversarially. A main key delegates a key
  * for the machine that runs foreign bundles; that key signs reports and
  * nothing else; revocation is immediate; a declared compromise disowns the
- * reports signed after it (and the lapses they would have caused) and
- * nothing before; and a compromise declaration is NOT a way out of a
- * finding already decided: only a steward's reversal is.
+ * reports signed after it (and the commitments that had not yet fallen due)
+ * and nothing before; a lapse already on the record is not erased by a
+ * declaration made after it; a disowned receipt that is under dispute stays
+ * decidable; and a compromise declaration is NOT a way out of a finding
+ * already decided: only a steward's reversal is.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -120,6 +122,7 @@ describe("check keys (I.3)", () => {
     await w.agent("Ant", "op-a", ["claude"]);
     await w.agent("Bee", "op-b", ["gpt"]);
     const runner = await generateKeyPair();
+    const issuedAt = w.ts();
     await w.delegate("Ant", runner);
     const ext = await w.external("Bee", "arxiv:1706.03762", "attention alone reaches 28.4 BLEU on WMT14 En-De");
     const ref = String((ext.body as Record<string, Json>)["ref"]);
@@ -137,29 +140,36 @@ describe("check keys (I.3)", () => {
     let rec = await w.svc.record();
     assert.equal(rec.evidence.filter((e) => e.agent === "Ant").length, 2, "before the declaration, both receipts count");
     assert.equal(rec.lapses.get("Ant"), 1, "and the lapse marks Ant");
+    // The thief commits once more; this one has not fallen due when Ant notices.
+    const c4 = await w.commit("Ant", ref, w.bundle(4), runner);
 
     // Ant notices and revokes, declaring the compromise.
     const rv = await w.revoke("Ant", runner, stolenAt);
     assert.equal(rv.status, 200, JSON.stringify(rv.body));
-    assert.deepEqual(((rv.body as Record<string, Json>)["disownedChecks"] as string[]).sort(), [w.idOf(c2), w.idOf(c3)].sort());
-    assert.equal((await w.commit("Ant", ref, w.bundle(4), runner)).status, 401, "the revoked key signs nothing more");
+    assert.deepEqual(((rv.body as Record<string, Json>)["disownedChecks"] as string[]).sort(), [w.idOf(c2), w.idOf(c3), w.idOf(c4)].sort());
+    assert.equal((await w.commit("Ant", ref, w.bundle(5), runner)).status, 401, "the revoked key signs nothing more");
     rec = await w.svc.record();
     const ants = rec.evidence.filter((e) => e.agent === "Ant");
     assert.deepEqual(ants.map((e) => e.id), [w.idOf(c1)], "the honest receipt stands; the thief's is disowned");
     assert.equal(rec.checks.get(w.idOf(c2))!.disowned, true);
     assert.equal(rec.checks.get(w.idOf(c1))!.disowned, false);
-    assert.equal(rec.lapses.get("Ant") ?? 0, 0, "a disowned lapse marks nobody");
-    assert.deepEqual((rec.receiptsByClaim.get(ref) ?? []).map((x) => x.id), [w.idOf(c1)], "the disowned receipt leaves the cross-check pool");
+    assert.equal(rec.lapses.get("Ant"), 1, "a lapse already on the record keeps its mark: declaring a compromise after the fact erases nothing that happened before the declaration");
+    assert.deepEqual((rec.receiptsByClaim.get(ref) ?? []).map((x) => x.id), [w.idOf(c1)], "an undisputed disowned receipt leaves the cross-check pool");
     assert.equal(rec.agents.get("Ant")!.checkKeys.length, 0);
     const hb = (await w.svc.heartbeat("Ant")).body as Record<string, Json>;
     assert.equal(hb["checkKeys"], 0);
     assert.deepEqual(hb["owed"], [], "nothing disowned is owed");
+    w.tick(RESULT_DEADLINE_MS + DAY);
+    await w.svc.sweepLapses();
+    rec = await w.svc.record();
+    assert.equal(rec.lapses.get("Ant"), 1, "a commitment disowned before it fell due marks nobody when it lapses");
 
     // A second revocation may only move the compromise earlier.
     assert.equal((await w.revoke("Ant", runner, w.ts())).status, 409, "later: refused");
     assert.equal((await w.revoke("Ant", runner)).status, 409, "no time: refused");
-    const earlier = new Date(Date.parse(stolenAt) - 2 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z");
-    assert.equal((await w.revoke("Ant", runner, earlier)).status, 200, "earlier: accepted, disowning grows");
+    const beforeIssue = new Date(Date.parse(issuedAt) - DAY).toISOString().replace(/\.\d{3}Z$/, "Z");
+    assert.equal((await w.revoke("Ant", runner, beforeIssue)).status, 400, "before the key existed: refused");
+    assert.equal((await w.revoke("Ant", runner, issuedAt)).status, 200, "earlier, back to issue: accepted, disowning grows");
     rec = await w.svc.record();
     assert.equal(rec.evidence.filter((e) => e.agent === "Ant").length, 0, "now the first receipt is disowned too");
     // The main key is untouched by all this.
@@ -177,6 +187,9 @@ describe("check keys (I.3)", () => {
     await w.delegate("Liar", runner);
     const ext = await w.external("Ant", "arxiv:1706.03762", "attention alone reaches 28.4 BLEU on WMT14 En-De");
     const ref = String((ext.body as Record<string, Json>)["ref"]);
+    w.tick(60_000);
+    const before = w.ts(); // after the key existed, before its receipt
+    w.tick(60_000);
     const liar = await w.commit("Liar", ref, w.bundle(1), runner);
     const idL = w.idOf(liar);
     await w.result("Liar", idL, "confirmed", { alpha: 28.4, solver: "x" }, null, runner);
@@ -190,11 +203,13 @@ describe("check keys (I.3)", () => {
     assert.equal(finding["verdict"], "fabrication");
     assert.equal(finding["oddCommit"], idL);
     // "I was hacked": Liar revokes the runner key with a compromise time before its receipt.
-    const before = new Date(Date.parse(w.ts()) - 10 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const prehistoric = new Date(Date.parse(before) - 10 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z");
+    assert.equal((await w.revoke("Liar", runner, prehistoric)).status, 400, "a compromise cannot predate the key");
     const rv = await w.revoke("Liar", runner, before);
-    assert.equal(rv.status, 200);
+    assert.equal(rv.status, 200, JSON.stringify(rv.body));
     let rec = await w.svc.record();
     assert.equal(rec.checks.get(idL)!.disowned, true, "the receipt is disowned as evidence");
+    assert.ok((rec.receiptsByClaim.get(ref) ?? []).some((x) => x.id === idL), "but, being disputed, it stays in the pool: the finding against it remains decidable and visible");
     w.tick(15 * DAY);
     rec = await w.svc.record();
     assert.deepEqual([...rec.voidedOperators], ["op-l"], "but the finding stands and comes into force");

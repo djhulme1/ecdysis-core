@@ -56,13 +56,21 @@
  * for the reports it signed.
  *
  * Vouching (design §9; sanity check §5.4). An operator is VERIFIED by a
- * steward's tier entry, or by vouches in force from two distinct verified
- * operators. A vouch is in force while its voucher is verified, is not
- * SUSPENDED, and came after the vouchee's latest explicit tier entry (a
- * steward's demotion cancels what came before it). A voucher is suspended
- * while any operator it vouched for is voided by a finding in force; the
- * liability also marks each of the voucher's agents once (a lapse-sized
- * cost). Reversal of the finding restores everything.
+ * steward's tier entry, or by vouches in force from two distinct operators
+ * that a steward verified: vouching does not chain, so two colluders cannot
+ * mint an unbounded verified crowd. A vouch is in force while its voucher
+ * is not SUSPENDED and came after the vouchee's latest explicit tier entry
+ * (a steward's demotion cancels what came before it). A voucher is
+ * suspended while any operator it vouched for is voided by a finding in
+ * force; the liability also marks each of the voucher's agents once (a
+ * lapse-sized cost). Reversal of the finding restores everything.
+ *
+ * Cross-checks and findings. Only a VERIFIED operator's cross-check
+ * verifies or disputes a receipt, so only verified operators can open a
+ * finding; a crowd of free identities cannot frame anyone. A disowned
+ * receipt that was already disputed stays decidable. A receipt that
+ * duplicated an earlier one's outputs under another seed is not evidence.
+ * Items under a hazard hold (R1) are frozen out of every number.
  *
  * Rings (§5.6). Two operators that have each confirmed the other's claims
  * are RING-LINKED: their evidence on each other weighs half, like
@@ -77,12 +85,12 @@ import { APPEAL_MS } from "./receipts.js";
 export type V2EntryType =
   | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
   | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "finding.decide" | "finding.reverse" | "review.file"
-  | "key.delegate" | "key.revoke" | "canary.reveal";
+  | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
   "check.commit", "check.seal", "check.result", "check.lapse", "finding.decide", "finding.reverse", "review.file",
-  "key.delegate", "key.revoke", "canary.reveal",
+  "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release",
 ];
 
 export interface V2Entry {
@@ -111,9 +119,15 @@ export interface CheckState {
   outcome: "confirmed" | "failed" | "inconclusive" | null;
   /** Whether this receipt's cross-check matched the earlier receipt it re-ran. */
   crossMatch: boolean | null;
-  /** This receipt has been re-run by a later one that matched (verified) or not. */
+  /** This receipt has been re-run by a later VERIFIED operator's receipt that matched (verified) or not (disputed). Only these open findings. */
   verifiedBy: string[];
   disputedBy: string[];
+  /** Cross-checks by operators who are not verified: shown, never decisive. */
+  otherCrossChecks: Array<{ id: string; match: boolean }>;
+  /** The log position of the lapse entry, if the check lapsed. */
+  lapsedSeq: number | null;
+  /** This receipt duplicated an earlier one's outputs under a different seed: it adds nothing and is not evidence. */
+  seedInsensitive: boolean;
   /** Log times of the commit, the seal and the result. */
   committedAt: string;
   sealedAt: string | null;
@@ -132,8 +146,9 @@ export interface KeyState {
   scope: "main" | "reports";
   delegatedAt: string;
   revokedAt: string | null;
-  /** The earliest compromise time declared for this key, if any. */
+  /** The earliest compromise time declared for this key, if any, and the log position of the entry that declared it. */
   compromisedAt: string | null;
+  compromiseSeq: number | null;
 }
 
 export interface PaperState {
@@ -182,6 +197,8 @@ export interface V2Record {
   vouches: Array<{ from: string; for: string; seq: number; inForce: boolean }>;
   /** Operators whose vouches are suspended: they vouched for someone now voided. */
   suspendedVouchers: Set<string>;
+  /** Operators verified by a steward's own tier entry: the only ones whose vouches count (vouching does not chain). */
+  stewardVerified: Set<string>;
   /** Pairs of operators that have each confirmed the other's claims. */
   rings: Array<[string, string]>;
   ringLinked: (a: string, b: string) => boolean;
@@ -208,8 +225,10 @@ export interface V2Record {
   anchors: Map<string, boolean>;
   /** Review forecasts, by "<claim>|<agent>" (the latest). */
   forecasts: Map<string, number>;
-  /** Bundle hashes seen to ignore their seed. */
+  /** Bundle hashes with at least one receipt that duplicated an earlier one's outputs under another seed. */
   seedInsensitiveBundles: Set<string>;
+  /** Items held under reserved power R1 (an escalation or a screening hold not yet released): frozen out of every page and number. */
+  held: Set<string>;
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -234,6 +253,9 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const anchors = new Map<string, boolean>();
   const seedInsensitiveBundles = new Set<string>();
   const forecasts = new Map<string, number>();
+  const held = new Set<string>();
+  /** Cross-checks, to be sorted into verified and other once tiers are known. */
+  const crossChecks: Array<{ later: CheckState; earlier: CheckState }> = [];
 
   const sorted = [...entries].sort((a, b) => a.seq - b.seq);
   for (const e of sorted) {
@@ -256,7 +278,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         if (agents.has(handle) || keys.has(publicKey)) break; // first registration wins; a key belongs to one agent
         const ack = p["constitution"] as { version?: unknown } | undefined;
         agents.set(handle, { operatorId: str(p["operatorId"]), publicKey, families: modelFamilies(p["models"] as string[] | undefined), checkKeys: [], revokedAt: null, constitution: typeof ack?.version === "string" ? ack.version : null });
-        keys.set(publicKey, { key: publicKey, handle, scope: "main", delegatedAt: e.ts, revokedAt: null, compromisedAt: null });
+        keys.set(publicKey, { key: publicKey, handle, scope: "main", delegatedAt: e.ts, revokedAt: null, compromisedAt: null, compromiseSeq: null });
         break;
       }
       case "key.delegate": {
@@ -264,7 +286,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         const key = str(p["key"]);
         const a = agents.get(handle);
         if (!a || !key || keys.has(key) || a.revokedAt) break;
-        keys.set(key, { key, handle, scope: "reports", delegatedAt: e.ts, revokedAt: null, compromisedAt: null });
+        keys.set(key, { key, handle, scope: "reports", delegatedAt: e.ts, revokedAt: null, compromisedAt: null, compromiseSeq: null });
         a.checkKeys.push(key);
         break;
       }
@@ -273,7 +295,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         if (!k || k.handle !== str(p["handle"])) break;
         if (!k.revokedAt) k.revokedAt = e.ts;
         const at = str(p["compromisedAt"]);
-        if (at && Number.isFinite(Date.parse(at)) && (!k.compromisedAt || Date.parse(at) < Date.parse(k.compromisedAt))) k.compromisedAt = at;
+        if (at && Number.isFinite(Date.parse(at)) && (!k.compromisedAt || Date.parse(at) < Date.parse(k.compromisedAt))) { k.compromisedAt = at; k.compromiseSeq = e.seq; }
         const a = agents.get(k.handle);
         if (a) {
           if (k.scope === "main") a.revokedAt = a.revokedAt ?? e.ts;
@@ -296,7 +318,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
             const ref = `${parent}#${label}`;
             if (claimAuthorOp.has(ref)) {
               foundations.push(ref);
-              uses.push({ claim: ref, paper: id, operatorId: op });
+              uses.push({ claim: ref, paper: id, operatorId: op, tier: "unverified" });
             }
           }
         }
@@ -331,7 +353,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
           bundle: str(p["bundle"]), image: p["image"] === true, runtimeMinutes: num(p["runtimeMinutes"], 0),
           handle, operatorId: str(p["operatorId"]),
           families: declared.length ? declared : (agents.get(handle)?.families ?? []),
-          seq: e.seq, stage: "committed", seed: null, crossCheck: null, outcome: null, crossMatch: null, verifiedBy: [], disputedBy: [],
+          seq: e.seq, stage: "committed", seed: null, crossCheck: null, outcome: null, crossMatch: null, verifiedBy: [], disputedBy: [], otherCrossChecks: [], lapsedSeq: null, seedInsensitive: false,
           committedAt: e.ts, sealedAt: null, resultedAt: null,
           key: str(p["key"]) || (agents.get(handle)?.publicKey ?? ""), resultKey: null, disowned: false,
         });
@@ -351,16 +373,25 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         c.resultKey = str(p["key"]) || (agents.get(c.handle)?.publicKey ?? "");
         c.outcome = o === "confirmed" || o === "failed" || o === "inconclusive" ? o : "inconclusive";
         c.crossMatch = typeof p["crossMatch"] === "boolean" ? (p["crossMatch"] as boolean) : null;
-        if (p["seedInsensitive"] === true) seedInsensitiveBundles.add(c.bundle);
+        if (p["seedInsensitive"] === true) { c.seedInsensitive = true; seedInsensitiveBundles.add(c.bundle); }
         if (c.crossCheck && c.crossMatch !== null) {
           const earlier = checks.get(c.crossCheck);
-          if (earlier) (c.crossMatch ? earlier.verifiedBy : earlier.disputedBy).push(c.id);
+          if (earlier) crossChecks.push({ later: c, earlier });
         }
         break;
       }
       case "check.lapse": {
         const c = checks.get(str(p["commit"]));
-        if (c && (c.stage === "committed" || c.stage === "sealed")) c.stage = "lapsed";
+        if (c && (c.stage === "committed" || c.stage === "sealed")) { c.stage = "lapsed"; c.lapsedSeq = e.seq; }
+        break;
+      }
+      case "hazard.hold": {
+        const subject = str(p["subject"]);
+        if (subject) held.add(subject);
+        break;
+      }
+      case "hazard.release": {
+        held.delete(str(p["subject"]));
         break;
       }
       case "finding.decide": {
@@ -401,9 +432,19 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   }
 
   // Disowned reports: signed by a key at or after its declared compromise (I.3). The log's time, not the payload's, is what counts: a thief dates its own payloads.
-  const disownedAt = (key: string, ts: string): boolean => {
+  // A check key delegated at or after its main key's compromise was delegated by the thief: everything it signed is disowned.
+  const effectiveCompromise = (key: string): string | null => {
     const k = keys.get(key);
-    return !!k && k.compromisedAt !== null && Date.parse(ts) >= Date.parse(k.compromisedAt);
+    if (!k) return null;
+    if (k.scope === "reports") {
+      const main = agents.get(k.handle) ? keys.get(agents.get(k.handle)!.publicKey) : undefined;
+      if (main?.compromisedAt && Date.parse(k.delegatedAt) >= Date.parse(main.compromisedAt)) return k.delegatedAt;
+    }
+    return k.compromisedAt;
+  };
+  const disownedAt = (key: string, ts: string): boolean => {
+    const at = effectiveCompromise(key);
+    return at !== null && Date.parse(ts) >= Date.parse(at);
   };
   for (const c of checks.values()) {
     c.disowned = disownedAt(c.key, c.committedAt) || (c.resultKey !== null && c.resultedAt !== null && disownedAt(c.resultKey, c.resultedAt));
@@ -421,37 +462,48 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
       if (f.inForce) { if (f.oddOperator) voidedOperators.add(f.oddOperator); if (f.oddAgent) fabricators.add(f.oddAgent); }
     } else if (f.verdict === "irreproducible") mark(f.oddAgent);
   }
-  for (const c of checks.values()) if (c.stage === "lapsed" && !c.disowned) mark(c.handle);
+  // A lapse marks its agent unless the commitment was disowned BEFORE it lapsed. A lapse already on the log when the
+  // compromise was declared keeps its mark: declaring a compromise is not a way to erase the cost of hiding a failure.
+  for (const c of checks.values()) {
+    if (c.stage !== "lapsed") continue;
+    const declaredAt = keys.get(c.key)?.compromiseSeq ?? null;
+    if (!c.disowned || (c.lapsedSeq !== null && declaredAt !== null && c.lapsedSeq < declaredAt)) mark(c.handle);
+  }
 
-  // Vouching: suspended vouchers, vouches in force, verification by two vouches (to a fixed point, since vouchers may themselves be vouch-verified).
+  // Vouching (depth one): only operators a steward verified may vouch; two such vouches in force verify an operator.
+  // Verification by vouching does not chain, so two colluders cannot mint an unbounded verified crowd.
   const suspendedVouchers = new Set<string>();
   for (const v of vouches) if (voidedOperators.has(v.for)) suspendedVouchers.add(v.from);
   for (const [handle, a] of agents) if (suspendedVouchers.has(a.operatorId)) mark(handle);
-  const explicitVerified = new Set([...tiers].filter(([, t]) => t === "verified").map(([op]) => op));
-  const verified = new Set(explicitVerified);
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const v of vouches) v.inForce = verified.has(v.from) && !suspendedVouchers.has(v.from) && v.seq > (tierSeq.get(v.for) ?? -1);
-    const byVouchee = new Map<string, Set<string>>();
-    for (const v of vouches) if (v.inForce) byVouchee.set(v.for, new Set([...(byVouchee.get(v.for) ?? []), v.from]));
-    for (const [op, vouchers] of byVouchee) if (vouchers.size >= 2 && !verified.has(op)) { verified.add(op); changed = true; }
-  }
-  for (const op of verified) tiers.set(op, "verified");
+  const stewardVerified = new Set([...tiers].filter(([, t]) => t === "verified").map(([op]) => op));
+  for (const v of vouches) v.inForce = stewardVerified.has(v.from) && !suspendedVouchers.has(v.from) && v.seq > (tierSeq.get(v.for) ?? -1);
+  const byVouchee = new Map<string, Set<string>>();
+  for (const v of vouches) if (v.inForce) byVouchee.set(v.for, new Set([...(byVouchee.get(v.for) ?? []), v.from]));
+  for (const [op, vouchers] of byVouchee) if (vouchers.size >= 2) tiers.set(op, "verified");
 
   const tierOf = (op: string): Tier => tiers.get(op) ?? "unverified";
+  for (const u of uses) u.tier = tierOf(u.operatorId);
+
+  // Cross-checks, now that tiers are known: only a VERIFIED operator's cross-check verifies or disputes a receipt (and so can open a
+  // finding); a disowned cross-check does neither. Others are kept to be shown, never to decide.
+  for (const { later, earlier } of crossChecks) {
+    if (later.disowned) continue;
+    if (tierOf(later.operatorId) === "verified") (later.crossMatch ? earlier.verifiedBy : earlier.disputedBy).push(later.id);
+    else earlier.otherCrossChecks.push({ id: later.id, match: !!later.crossMatch });
+  }
+
   const evidence: EvidenceInput[] = [];
   const receiptsByClaim = new Map<string, Array<{ id: string; operatorId: string; seq: number }>>();
-  const seedless = new Set<string>(); // claim|bundle pairs already counted once for a seed-insensitive bundle
   for (const c of [...checks.values()].sort((a, b) => a.seq - b.seq)) {
-    if (c.stage !== "resulted" || !c.outcome || c.disowned) continue;
+    if (c.stage !== "resulted" || !c.outcome) continue;
+    // A disowned receipt is no longer its agent's evidence, but one already under dispute stays in the pool so the finding can
+    // still be decided: declaring a compromise does not close an open finding.
+    if (c.disowned && c.disputedBy.length === 0) continue;
     receiptsByClaim.set(c.target, [...(receiptsByClaim.get(c.target) ?? []), { id: c.id, operatorId: c.operatorId, seq: c.seq }]);
-    if (c.outcome === "inconclusive") continue;
-    if (seedInsensitiveBundles.has(c.bundle)) {
-      // The bundle ignores its seed: however many operators re-run it, it is one piece of evidence (the first).
-      const key = `${c.target}|${c.bundle}`;
-      if (seedless.has(key)) continue;
-      seedless.add(key);
-    }
+    if (c.disowned || c.outcome === "inconclusive") continue;
+    // A receipt whose outputs duplicate an earlier one's under a different seed adds nothing: the bundle ignored its seed.
+    if (c.seedInsensitive) continue;
+    if (held.has(c.id)) continue;
     evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq });
   }
   for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
@@ -473,5 +525,5 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, rings, ringLinked, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held };
 }

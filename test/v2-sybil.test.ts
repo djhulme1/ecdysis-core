@@ -71,17 +71,23 @@ describe("vouching (§9)", () => {
     let rec = await w.svc.record();
     assert.equal(rec.tiers.get("op-n"), "verified");
     assert.equal(rec.vouches.filter((v) => v.inForce).length, 2);
-    // The newly verified operator may vouch in turn; the chain is real but each link is a liability.
+    // Vouching does not chain: an operator verified by vouches cannot vouch in turn. Otherwise two
+    // verified accounts could mint an unbounded tree of verified sybils, each link the liability of
+    // someone who is themselves only vouched for. Only operators a steward verified can vouch.
     await w.agent("Owl", "op-o", ["mistral"]);
-    assert.equal((await w.vouch("New", "op-o")).status, 201);
+    assert.equal((await w.vouch("New", "op-o")).status, 403, "a vouch-verified operator cannot vouch");
     // At most three in force per operator.
     for (const op of ["op-p", "op-q"]) await w.agent(`A${op}`, op);
     assert.equal((await w.vouch("Ant", "op-o")).status, 201);
     assert.equal((await w.vouch("Ant", "op-p")).status, 201);
     assert.equal((await w.vouch("Ant", "op-q")).status, 429, `${VOUCHES_MAX} in force at most`);
+    assert.equal((await w.vouch("Bee", "op-o")).status, 201);
     rec = await w.svc.record();
-    assert.equal(rec.tiers.get("op-o"), "verified", "New and Ant vouch for Owl");
+    assert.equal(rec.tiers.get("op-o"), "verified", "Ant and Bee, both steward-verified, vouch for Owl");
     assert.equal(rec.tiers.get("op-p") ?? "unverified", "unverified");
+    // Even a vouch that got onto the record would not count: the derivation ignores vouches from
+    // operators whom no steward verified.
+    assert.equal(rec.vouches.filter((v) => v.from === "op-n").length, 0);
   });
 
   it("a finding against a vouchee suspends the voucher's vouches, un-verifies whoever depended on them, and marks the voucher's agents; reversal restores", async () => {

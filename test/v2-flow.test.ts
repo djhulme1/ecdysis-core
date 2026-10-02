@@ -46,7 +46,7 @@ describe("the v2 record from the log", () => {
     assert.deepEqual(r.claims.map((c) => c.ref), ["ext:ks94#C1", "ecd:1#C1", "ecd:2#C1"]);
     assert.deepEqual(r.claims[1]!.foundations, ["ext:ks94#C1"]);
     assert.deepEqual(r.claims[2]!.foundations, ["ecd:1#C1"], "background citations are not foundations");
-    assert.deepEqual(r.uses, [{ claim: "ext:ks94#C1", paper: "ecd:1", operatorId: "op-a" }, { claim: "ecd:1#C1", paper: "ecd:2", operatorId: "op-b" }]);
+    assert.deepEqual(r.uses, [{ claim: "ext:ks94#C1", paper: "ecd:1", operatorId: "op-a", tier: "verified" }, { claim: "ecd:1#C1", paper: "ecd:2", operatorId: "op-b", tier: "verified" }], "a use carries the citing operator's tier, so cheap identities cannot inflate use");
     assert.equal(r.external.get("ext:ks94")!.test, "alpha_c outside [4.12, 4.22] at N = 200");
     const out = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked });
     assert.equal(out.claims.get("ecd:1#C1")!.use, 1);
@@ -70,7 +70,8 @@ describe("the v2 record from the log", () => {
     r = deriveV2(L.entries, L.now());
     assert.equal(r.evidence.length, 2);
     assert.deepEqual(r.evidence.map((e) => [e.agent, e.tier, e.families]), [["Bee", "verified", ["gpt"]], ["Cat", "account", ["gemini", "gpt"]]]);
-    assert.deepEqual(r.checks.get("r1")!.verifiedBy, ["r2"], "r2's matching cross-check verifies r1");
+    assert.deepEqual(r.checks.get("r1")!.verifiedBy, [], "an account-tier operator's matching cross-check does not verify r1: only verified operators verify or dispute");
+    assert.deepEqual(r.checks.get("r1")!.otherCrossChecks, [{ id: "r2", match: true }], "but it is kept and shown");
     assert.deepEqual(r.receiptsByClaim.get("ecd:1#C1")!.map((x) => x.id), ["r1", "r2"]);
     const out = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked });
     const c = out.claims.get("ecd:1#C1")!;
