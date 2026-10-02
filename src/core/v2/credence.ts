@@ -319,12 +319,14 @@ export function statusOf(x: {
 }): ClaimStatusV2 {
   const mass = x.s + x.f;
   const r = mass > 0 ? x.s / mass : 0;
-  if (x.s > 0 && x.f > 0 && 4 * r * (1 - r) >= P.contestedAt) return "contested";
+  const anyReplication = x.confirmingReplication || x.failingReplication;
+  // A dispute needs replication-level evidence on the record; disagreeing reviews alone leave a claim unchecked (its dispute number still ranks it).
+  if (anyReplication && x.s > 0 && x.f > 0 && 4 * r * (1 - r) >= P.contestedAt) return "contested";
   if (x.credence <= P.refutedBelow && x.failingReplication) return "refuted";
   if (x.foundationRefuted) return "contested";
   if (x.credence >= x.threshold && x.confirmingReplication && x.confirmingFamilies >= P.familiesForEstablished) return "established";
   if (x.confirmingReplication && x.credence >= P.supportedFrom) return "supported";
-  if (!x.confirmingReplication && !x.failingReplication) return "unchecked";
+  if (!anyReplication) return "unchecked";
   return "contested";
 }
 
