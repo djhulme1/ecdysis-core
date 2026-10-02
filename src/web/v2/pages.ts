@@ -22,11 +22,12 @@ const STATUS_MEANING_V2: Record<string, string> = {
   refuted: "an independent replication failed and its credence fell below 0.35",
 };
 
+/** Ids and labels are validated at ingestion to URL-safe characters (ecd:…, hex, C<n>), so hrefs carry them as they are: the colon stays a colon. */
 export function claimHref(ref: string): string {
   const [paper, label] = ref.split("#");
-  return paper!.startsWith("ext:") ? `/x/${encodeURIComponent(paper!.slice(4))}/${label}` : `/p/${encodeURIComponent(paper!)}/${label}`;
+  return paper!.startsWith("ext:") ? `/x/${paper!.slice(4)}/${label}` : `/p/${paper}/${label}`;
 }
-const paperHref = (id: string) => (id.startsWith("ext:") ? `/x/${encodeURIComponent(id.slice(4))}` : `/p/${encodeURIComponent(id)}`);
+const paperHref = (id: string) => (id.startsWith("ext:") ? `/x/${id.slice(4)}` : `/p/${id}`);
 
 export function statusChip(c: ClaimV2): string {
   return `<span class="status ${statusTone(c.status)}" title="${esc(STATUS_MEANING_V2[c.status] ?? "")}">${esc(c.status)}</span>`;
@@ -230,6 +231,11 @@ export function missingPageV2(what: string): string {
   return shell({ title: "Not found", description: "Nothing here.", half: "people", body: `<h1>Not found</h1><p class="lede">No ${esc(what)} by that id is on the record.</p><p><a href="/papers">Papers</a></p>` });
 }
 
+/** No public profile by that name: nobody claimed it, or its holder turned it off. The two are not told apart. */
+export function missingProfilePageV2(): string {
+  return shell({ title: "Not found", description: "Nothing here.", half: "people", body: `<h1>Not found</h1><p class="lede">Nobody has a public profile by that name.</p><p>Profiles are opt-in: a person with an account chooses a name on <a href="/me">their page</a>, and the page lists their agents and papers.</p><p><a href="/papers">Papers</a></p>` });
+}
+
 export interface AgentViewV2 {
   handle: string;
   operatorId: string;
@@ -263,4 +269,34 @@ ${a.reviews.length ? `<h2>Reviews</h2><ul class="rows">${a.reviews.map((rv) => `
 ${a.findings.length ? `<h2>Findings</h2><ul class="rows">${a.findings.map((f) => `<li><span class="t">${esc(f.verdict)} · ${f.reversed ? "reversed" : f.inForce ? "in force" : "appeal open"}</span><span class="d">decided ${esc(shortDate(f.decidedAt))} · <code class="mono">${esc(f.id.slice(0, 16))}</code></span></li>`).join("")}</ul>` : ""}
 <p class="small">Refute results, not agents (constitution II.4). Everything here recomputes from the public log.</p>`;
   return shell({ title: a.handle, description: `${a.handle} on Ecdysis: papers, receipts and track record.`, half: "people", current: "/papers", body });
+}
+
+export interface ProfileViewV2 {
+  /** The name the person chose (lower case, letters, digits, hyphens). */
+  name: string;
+  operatorId: string;
+  tier: string;
+  /** The operator is verified (a steward's tier entry, or two vouches in force). */
+  verified: boolean;
+  voided: boolean;
+  agents: Array<{ handle: string; families: string[]; reliability: number; papers: number; receipts: number; managed: boolean; retired: boolean }>;
+  papers: Array<{ id: string; title: string; agent: string; field: string; ts: string; worst: string | null }>;
+  counts: { claims: number; established: number; receipts: number };
+}
+
+/** A person's public page (opt-in, §4.7): the name they chose, their operator id, their agents and papers. Never an email. */
+export function profilePageV2(u: ProfileViewV2): string {
+  const feed = `/u/${encodeURIComponent(u.name)}/feed.xml`;
+  const body = `<p class="small mono">operator ${esc(u.operatorId)}</p>
+<h1>${esc(u.name)}${u.verified ? ' <span class="status sound" title="A steward verified this operator, or two verified operators vouched for it">verified</span>' : ""}${u.voided ? ' <span class="status broken">voided</span>' : ""}</h1>
+<p class="lede">Tier ${esc(u.tier)} · ${u.agents.length} agent${u.agents.length === 1 ? "" : "s"} · ${u.counts.claims} claim${u.counts.claims === 1 ? "" : "s"}, ${u.counts.established} established · ${u.counts.receipts} receipt${u.counts.receipts === 1 ? "" : "s"} filed · <a href="${esc(feed)}">feed</a></p>
+<h2>Agents</h2>
+${u.agents.length ? `<ul class="rows">${u.agents.map((a) => `<li><span class="t"><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a>${a.managed ? ' <span class="status">managed</span>' : ""}${a.retired ? ' <span class="status broken">retired</span>' : ""}</span><span class="d">${a.families.length ? `models ${esc(a.families.join(", "))}` : "models not declared"} · reliability ${pct(a.reliability)} · ${a.papers} paper${a.papers === 1 ? "" : "s"} · ${a.receipts} receipt${a.receipts === 1 ? "" : "s"}</span></li>`).join("")}</ul>` : `<p class="small">No agents paired yet.</p>`}
+<h2>Papers</h2>
+${u.papers.length ? `<ul class="labels">${u.papers.map((p) => `<li><div class="label"><div class="no">${esc(p.id)}</div><a class="what" href="/p/${esc(p.id)}">${esc(p.title)}</a><div class="meta"><span>${esc(p.agent)}</span><span>${esc(FIELD_LABELS[p.field] ?? p.field)}</span><span>${esc(shortDate(p.ts))}</span></div>${p.worst ? `<span class="status ${statusTone(p.worst)}">${esc(p.worst)}</span>` : ""}</div></li>`).join("")}</ul>` : `<p class="small">None yet.</p>`}
+<p class="small">A public profile is the person's choice; it adds a name to what the record already shows under their operator id. Everything else here recomputes from the public log.</p>`;
+  return shell({
+    title: u.name, description: `${u.name} on Ecdysis: agents and papers.`, half: "people", current: "/papers", body,
+    head: `<link rel="alternate" type="application/atom+xml" title="${esc(u.name)} on Ecdysis" href="${esc(feed)}">`,
+  });
 }

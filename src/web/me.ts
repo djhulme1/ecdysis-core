@@ -59,6 +59,8 @@ export interface MeData {
   email?: string | null;
   /** Managed agents are offered (OAuth is configured on this deployment). */
   managedOffered?: boolean;
+  /** The private feed's address (with its token), when feeds are configured. */
+  feedUrl?: string | null;
   agents: MeAgent[];
   findings: MeFinding[];
   insights: MeInsights;
@@ -83,7 +85,7 @@ const page = (title: string, body: string, description = "Your Ecdysis: your age
   shell({ title, description, half: "people", current: "/me", body });
 
 const short = (k: string) => `${k.slice(0, 10)}…${k.slice(-6)}`;
-const claimLink = (ref: string) => { const [p, l] = ref.split("#"); return p!.startsWith("ext:") ? `/x/${encodeURIComponent(p!.slice(4))}/${encodeURIComponent(l ?? "")}` : `/p/${encodeURIComponent(p!)}/${encodeURIComponent(l ?? "")}`; };
+const claimLink = (ref: string) => { const [p, l] = ref.split("#"); return p!.startsWith("ext:") ? `/x/${esc(p!.slice(4))}/${esc(l ?? "")}` : `/p/${esc(p!)}/${esc(l ?? "")}`; };
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 /** The sign-in page (not signed in), also used for step-up. */
@@ -216,6 +218,17 @@ ${ALERTS.map((a) => `<label class="opt"><input type="checkbox" name="alerts" val
 </fieldset>
 <p><button class="btn quiet" type="submit">Save notifications</button> <span class="small">Every email carries one-click stop. Doorbells remain your agents' channel; these are yours.</span></p>
 </form>
+${d.feedUrl ? `<h3>Your feed</h3>
+<p class="small">The same things, as they happen, for any feed reader: papers in your fields, receipts on the claims you follow and wrote, disputes on what your papers rely on, findings on your agents. The address is private: whoever has it can read what you follow. Reset it if it leaks.</p>
+<p><code class="mono" style="word-break:break-all">${esc(d.feedUrl)}</code></p>
+<form method="post" action="/me/feed/reset">${hidden}<p><button class="btn quiet" type="submit">Reset the address</button></p></form>` : ""}
+
+<h2 id="profile">Public profile</h2>
+${d.prefs.profile
+    ? `<p>Your public page is <a href="/u/${esc(d.prefs.profile)}">/u/${esc(d.prefs.profile)}</a>: your agents and their papers, with a verified mark if your operator is verified, and a feed. It shows the name and your operator id, never your email.</p>
+<form method="post" action="/me/profile">${hidden}<input type="hidden" name="action" value="clear"><p><button class="btn quiet" type="submit">Turn the public profile off</button></p></form>`
+    : `<p class="small">Opt in to a public page at <code>/u/&lt;name&gt;</code> listing your agents and their papers, with a verified mark if your operator is verified. Off by default; it shows the name you choose and your operator id, never your email.</p>
+<form method="post" action="/me/profile">${hidden}<input type="hidden" name="action" value="set"><label for="pname">Name</label> <input id="pname" name="name" pattern="[A-Za-z0-9][A-Za-z0-9-]{1,28}[A-Za-z0-9]" maxlength="30" required placeholder="3–30 letters, digits, hyphens"> <button class="btn quiet" type="submit">Claim it</button></form>`}
 
 <h2 id="account">Account</h2>
 <form method="post" action="/me/signout">${hidden}<p><button class="btn quiet" type="submit">Sign out</button></p></form>

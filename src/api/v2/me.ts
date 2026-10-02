@@ -15,6 +15,7 @@ import type { OAuth } from "./oauth.js";
 import type { V2Governance } from "./governance.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
 import { NEXT_COOKIE, safeNext } from "./oauth-http.js";
+import type { V2Feeds } from "./feed.js";
 import { keyIssuedPage, linkSentPage, mePage, noticePage, pairingPage, signInPage, type MeAgent, type MeConstitution, type MeData, type MeFinding } from "../../web/me.js";
 
 export const ME_HEADERS: Record<string, string> = {
@@ -39,6 +40,8 @@ export interface MeOptions {
   oauth?: OAuth | null;
   /** Amendments (Article V), when configured: the page shows the constitution in force, acknowledgments and open proposals. */
   governance?: V2Governance | null;
+  /** The private feed (/me/feed.xml), when configured: fetched by a feed reader with a capability token, no cookie. */
+  feeds?: V2Feeds | null;
   /** Secure cookies (off only in local tests over http). */
   secure?: boolean;
   readOnly?: boolean;
@@ -95,6 +98,15 @@ export class MeHandler {
     // into the attacker's account (login CSRF): the browser cookie is minted on the sign-in page and must already be here.
     if (method === "POST" && path !== "/me/stop" && !sameOrigin(req)) return this.html(403, noticePage("Not from here", "That request did not come from this site, so nothing was done. Open your Ecdysis page and try again."));
 
+    // The private feed: a feed reader holds no cookie, so the address itself is the key (a token over the account and its
+    // feed epoch). A wrong or stale token is a plain 404: the address says nothing about whether the account exists.
+    if (path === "/me/feed.xml") {
+      if (method === "POST") return new Response("Method not allowed", { status: 405, headers: { ...ME_HEADERS, allow: "GET, HEAD" } });
+      const owner = this.o.feeds ? await this.o.accounts.feedOwner(url.searchParams.get("a") ?? "", url.searchParams.get("t") ?? "") : null;
+      if (!owner) return new Response(method === "HEAD" ? null : "Not found", { status: 404, headers: { ...ME_HEADERS, "content-type": "text/plain; charset=utf-8" } });
+      const xml = await this.o.feeds!.personal(owner.prefs, owner.account.operatorId, `${url.origin}${url.pathname}${url.search}`);
+      return new Response(method === "HEAD" ? null : xml, { status: 200, headers: { ...ME_HEADERS, "content-type": "application/atom+xml; charset=utf-8" } });
+    }
     // One-click stop from an alert email: no session needed, GET or POST, always honoured (even read-only).
     if (path === "/me/stop") {
       const a = url.searchParams.get("a") ?? "";
@@ -131,14 +143,15 @@ export class MeHandler {
       return this.html(401, signInPage({ problem: path === "/me" ? null : "Sign in first." }), named);
     }
 
+    const dashboard = (flash: string | null, problem: string | null) => this.dashboard(signed, flash, problem, url.origin);
     if (method !== "POST") {
       if (path !== "/me") return this.redirect("/me");
-      return this.html(200, await this.dashboard(signed, url.searchParams.get("ok"), null));
+      return this.html(200, await dashboard(url.searchParams.get("ok"), null));
     }
 
     // Every POST below needs the anti-forgery token.
     const f = await this.form(req);
-    if (!f || !(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.html(403, await this.dashboard(signed, null, "That form had expired. Please try again."));
+    if (!f || !(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.html(403, await dashboard(null, "That form had expired. Please try again."));
     if (this.o.readOnly && path !== "/me/signout" && path !== "/me/signout-all") return this.html(503, noticePage("Not right now", "Ecdysis isn't taking changes at the moment. Please try again later."));
     // Keys, deletion and pairing (which lets whoever holds the code register agents under this operator) need a recent sign-in.
     const needsStepUp = path === "/me/keys/issue" || path === "/me/keys/revoke" || path === "/me/delete" || path === "/me/pairing" || path === "/me/agents/managed" || path === "/me/agents/managed/destroy";
@@ -156,13 +169,13 @@ export class MeHandler {
         if (!this.o.oauth) return this.html(404, noticePage("Not offered", "Managed agents are not offered on this deployment."));
         const models = (f.get("models") ?? "").split(",").map((m) => m.trim()).filter(Boolean).slice(0, 8);
         const r = await this.o.oauth.createManagedAgent(signed.account, (f.get("handle") ?? "").trim(), models);
-        if (r.status !== 201) return this.html(r.status, await this.dashboard(signed, null, `Couldn't create the agent: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
+        if (r.status !== 201) return this.html(r.status, await dashboard(null, `Couldn't create the agent: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
         return this.redirect(`/me?ok=${encodeURIComponent(`Managed agent created. An app signed in as you can now act as it; the record labels it managed.`)}`);
       }
       case "/me/agents/managed/destroy": {
         if (!this.o.oauth) return this.html(404, noticePage("Not offered", "Managed agents are not offered on this deployment."));
         const r = await this.o.oauth.destroyManaged(signed, (f.get("handle") ?? "").trim());
-        if (r.status !== 200) return this.html(r.status, await this.dashboard(signed, null, `Couldn't destroy the key: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
+        if (r.status !== 200) return this.html(r.status, await dashboard(null, `Couldn't destroy the key: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
         return this.redirect(`/me?ok=${encodeURIComponent("The key is destroyed and the agent retired. What it signed stays on the record, labelled managed.")}`);
       }
       case "/me/pairing":
@@ -171,14 +184,14 @@ export class MeHandler {
         const handle = f.get("handle") ?? "";
         const kp = await generateKeyPair();
         const r = await this.o.v2.delegateKeyByOperator(signed.account.operatorId, handle, kp.publicKey, f.get("label") ?? undefined);
-        if (r.status !== 201) return this.html(r.status, await this.dashboard(signed, null, `Couldn't issue a key: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
+        if (r.status !== 201) return this.html(r.status, await dashboard(null, `Couldn't issue a key: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
         return this.html(200, keyIssuedPage({ handle, publicKey: kp.publicKey, privateKey: kp.privateKey }));
       }
       case "/me/keys/revoke": {
         const key = f.get("key") ?? "";
         const at = (f.get("compromisedAt") ?? "").trim();
         const r = await this.o.v2.revokeKeyByOperator(signed.account.operatorId, key, at || undefined);
-        if (r.status !== 200) return this.html(r.status, await this.dashboard(signed, null, `Couldn't revoke: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
+        if (r.status !== 200) return this.html(r.status, await dashboard(null, `Couldn't revoke: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
         const n = ((r.body as Record<string, unknown>)["disownedChecks"] as string[]).length;
         return this.redirect(`/me?ok=${encodeURIComponent(`Key revoked.${at ? ` ${n} report${n === 1 ? "" : "s"} disowned.` : ""}`)}`);
       }
@@ -198,8 +211,19 @@ export class MeHandler {
         await this.o.accounts.savePreferences(signed, next);
         return this.redirect("/me?ok=Notifications+saved.");
       }
+      case "/me/profile": {
+        // Opt in to a public page at /u/<name>, or opt out. The name is the only thing the page adds to what the record shows.
+        const clear = f.get("action") === "clear";
+        const r = await this.o.accounts.setProfile(signed, clear ? null : (f.get("name") ?? ""));
+        if (!r.ok) return this.html(r.status, await dashboard(null, `Couldn't set the profile name: ${r.error}.`));
+        return this.redirect(`/me?ok=${encodeURIComponent(r.name ? `Your public profile is at /u/${r.name}.` : "Your public profile is off.")}`);
+      }
+      case "/me/feed/reset": {
+        await this.o.accounts.resetFeed(signed);
+        return this.redirect("/me?ok=Your+feed+has+a+new+address%3B+the+old+one+no+longer+works.");
+      }
       case "/me/delete": {
-        if (f.get("confirm") !== "delete") return this.html(400, await this.dashboard(signed, null, "Tick the box to confirm deletion."));
+        if (f.get("confirm") !== "delete") return this.html(400, await dashboard(null, "Tick the box to confirm deletion."));
         if (this.o.oauth) {
           // Managed keys die with the account: nothing signs for a person who left.
           await this.o.oauth.revokeAll(signed.account.id);
@@ -213,7 +237,7 @@ export class MeHandler {
     }
   }
 
-  private async dashboard(signed: Signed, flash: string | null, problem: string | null): Promise<string> {
+  private async dashboard(signed: Signed, flash: string | null, problem: string | null, origin: string): Promise<string> {
     const op = signed.account.operatorId;
     const r = await this.o.v2.record();
     const s = await this.o.v2.scores();
@@ -267,6 +291,8 @@ export class MeHandler {
       email: email ? Accounts.maskEmail(email) : null,
       managedOffered: !!this.o.oauth,
       insights: { claims: mine, disputes, queue, followed },
+      // The private feed's address carries its own key; shown here, to be pasted into a reader, and reset from here.
+      feedUrl: this.o.feeds ? `${origin}/me/feed.xml?a=${encodeURIComponent(signed.account.id)}&t=${await this.o.accounts.feedToken(signed.account.id, prefs.feed.epoch)}` : null,
       prefs, csrf: await this.o.accounts.csrf(signed), fresh: this.o.accounts.fresh(signed), flash, problem,
     };
     return mePage(data);

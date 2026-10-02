@@ -91,6 +91,8 @@ describe("v2 pages", () => {
     // A claim page.
     r = (await w.get(`/p/${paperId}/C1`))!;
     assert.equal(r.status, 200);
+    assert.equal((await w.get(`/p/${encodeURIComponent(paperId)}/C1`))!.status, 200, "a link with the colon percent-encoded reaches the same page");
+    assert.equal((await w.get(`/p/${paperId}/C1`))!.html.includes(`href="/p/${paperId}"`), true, "pages link to ids as they are");
     assert.match(r.html, /What would raise it most/);
     assert.match(r.html, /confirms<\/td><td><a href="\/a\/Bee"/);
     assert.match(r.html, /Confirming model families: gpt/);

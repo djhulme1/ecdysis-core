@@ -6,6 +6,8 @@
 
 import type { V2Service } from "./service.js";
 import type { V2Governance } from "./governance.js";
+import type { Accounts } from "./accounts.js";
+import { V2Feeds } from "./feed.js";
 import { isHeld } from "../../core/v2/flow.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
@@ -15,7 +17,7 @@ import { agentsPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js"
 import { connectPage } from "../../web/connect.js";
 import { mcpUrlFor } from "../../web/launch.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
-import { agentPageV2, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, missingPageV2, observatoryPageV2, papersPageV2, paperPageV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2 } from "../../web/v2/pages.js";
+import { agentPageV2, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
 
 export const PAGE_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
@@ -28,16 +30,47 @@ export const PAGE_HEADERS: Record<string, string> = {
 const PAPER = /^\/p\/(ecd:[A-Za-z0-9:._-]{4,80})(?:\/(C[1-9][0-9]?))?$/;
 const EXTERNAL = /^\/x\/([0-9a-f]{16})(?:\/(C1))?$/;
 const AGENT = /^\/a\/([A-Za-z0-9][A-Za-z0-9-]{1,39})$/;
+/** A person's public profile and its feed. Names are 3 to 30 characters, so v1's /u/n/… and /u/j/… stop links never collide. */
+const PROFILE = /^\/u\/([A-Za-z0-9][A-Za-z0-9-]{1,28}[A-Za-z0-9])(\/feed\.xml)?$/;
+const FIELD_FEED = /^\/feeds\/([a-z]{2,10})\.atom$/;
+const FEED_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-type": "application/atom+xml; charset=utf-8", "cache-control": "public, max-age=300" };
+
+export interface PagesOptions {
+  host?: string;
+  logPublicKey?: string | null;
+  governance?: V2Governance | null;
+  /** Accounts, when configured: public profiles (/u/<name>) look the name up here. Without them, no profile page exists. */
+  accounts?: Accounts | null;
+}
 
 export class PagesHandler {
-  constructor(private v2: V2Service, private o: { host?: string; logPublicKey?: string | null; governance?: V2Governance | null } = {}) {}
+  private feeds: V2Feeds;
+  constructor(private v2: V2Service, private o: PagesOptions = {}) {
+    const host = o.host ?? "api.ecdysis.me";
+    this.feeds = new V2Feeds(v2, { site: `https://${host.replace(/^api\./, "")}`, api: `https://${host}` });
+  }
 
   /** Serve a v2 page, or null when the path is not one. `accept` decides whether "/" is a page (browsers) or the JSON index (agents, curl). */
-  async handle(method: string, path: string, accept = ""): Promise<Response | null> {
+  async handle(method: string, pathIn: string, accept = ""): Promise<Response | null> {
     if (method !== "GET" && method !== "HEAD") return null;
+    // A link may carry a percent-encoded colon (/p/ecd%3A…); the page is the same. Decoded once; a malformed escape is left alone.
+    let path = pathIn;
+    try { path = decodeURIComponent(pathIn); } catch { /* not a valid escape sequence: match the path as given */ }
     const html = (status: number, body: string) => new Response(method === "HEAD" ? null : body, { status, headers: PAGE_HEADERS });
+    const xml = (body: string) => new Response(method === "HEAD" ? null : body, { status: 200, headers: FEED_HEADERS });
     const host = this.o.host ?? "api.ecdysis.me";
     const site = host.replace(/^api\./, "");
+    const ff = path.match(FIELD_FEED);
+    if (ff) { const feed = await this.feeds.field(ff[1]!); return feed ? xml(feed) : null; }
+    const um = path.match(PROFILE);
+    if (um) {
+      // The name is looked up in lower case (names are stored so); a name nobody holds, or no accounts at all, is a plain 404.
+      const account = this.o.accounts ? await this.o.accounts.accountByProfile(um[1]!) : null;
+      const name = um[1]!.toLowerCase();
+      if (!account) return um[2] ? new Response(method === "HEAD" ? null : "Not found", { status: 404, headers: { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } }) : html(404, missingProfilePageV2());
+      if (um[2]) return xml(await this.feeds.profile(name, account.operatorId));
+      return html(200, profilePageV2(await this.profile(name, account.operatorId)));
+    }
     if (path === "/" && accept.includes("text/html")) return html(200, landingPageV2(await this.landing(site)));
     if (path === "/people" || path === "/start" || path === "/join") return html(200, peoplePageV2({ host: site, mcpUrl: mcpUrlFor(host) }));
     if (path === "/agents") return html(200, agentsPageV2({ host, mcpUrl: mcpUrlFor(host) }));
@@ -168,6 +201,28 @@ export class PagesHandler {
       receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed" && !isHeld(r, c.id)).sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned })),
       reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle).map((e) => ({ claim: e.claim, forecast: r.forecasts.get(`${e.claim}|${handle}`) ?? 0.5 })),
       findings: r.findings.filter((f) => f.oddAgent === handle).map((f) => ({ id: f.id, verdict: f.verdict, inForce: f.inForce, reversed: f.reversed, decidedAt: f.decidedAt })),
+    };
+  }
+
+  /** A person's public page: the agents under their operator id and those agents' papers, from the record. */
+  private async profile(name: string, operatorId: string): Promise<ProfileViewV2> {
+    const r = await this.v2.record();
+    const s = await this.v2.scores();
+    const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
+    const receipts = [...r.checks.values()].filter((c) => c.operatorId === operatorId && c.stage === "resulted" && !c.disowned && !isHeld(r, c.id));
+    const papers = [...r.papers.values()].filter((p) => p.operatorId === operatorId && !isHeld(r, p.id)).sort((x, y) => y.seq - x.seq);
+    const claims = r.claims.filter((c) => c.authorOperator === operatorId && !isHeld(r, c.ref));
+    return {
+      name, operatorId, tier: r.tiers.get(operatorId) ?? "unverified", verified: r.tiers.get(operatorId) === "verified", voided: r.voidedOperators.has(operatorId),
+      agents: [...r.agents.entries()].filter(([, a]) => a.operatorId === operatorId).map(([handle, a]) => ({
+        handle, families: a.families, reliability: s.track.reliability.get(handle) ?? 0.5, managed: a.managed, retired: a.revokedAt !== null,
+        papers: papers.filter((p) => p.handle === handle).length, receipts: receipts.filter((c) => c.handle === handle).length,
+      })),
+      papers: papers.map((p) => {
+        const st = p.claims.map((ref) => s.claims.get(ref)?.status).filter((x): x is NonNullable<typeof x> => !!x);
+        return { id: p.id, title: p.title, agent: p.handle, field: p.field, ts: p.ts, worst: st.length ? st.reduce((x, y) => (rank(x) < rank(y) ? x : y)) : null };
+      }),
+      counts: { claims: claims.length, established: claims.filter((c) => s.claims.get(c.ref)?.status === "established").length, receipts: receipts.length },
     };
   }
 

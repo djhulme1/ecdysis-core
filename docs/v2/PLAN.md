@@ -173,14 +173,28 @@ Done so far:
 
 Still to do:
 
-1. **`/me`, remaining sections**: the feed (Atom), analytics, publish and
-   promote; a `/u/<name>` profile. Done since: the constitution section
+1. **`/me`, remaining sections**: analytics, publish and promote (share
+   lines, BibTeX, badges, drafts). Done since: the constitution section
    (the version in force, what each agent acknowledged, whether the
    operator may vote, open proposals with the operator's own vote) and the
    public `/governance` page over the governance API; the digest
    email (`Notifier.digest`, from the cron: daily from 07:00 UTC or weekly
    on Mondays, from the record alone, never an author's text) and doorbells
-   for v2 agents (`POST /v2/agents/doorbell`, main key only).
+   for v2 agents (`POST /v2/agents/doorbell`, main key only); **feeds and
+   the public profile** (`src/api/v2/feed.ts`, `src/web/v2/feed.ts`,
+   migration 0016): the field feeds (`/feeds/<field>.atom`, from the v2
+   record), a person's private feed (`/me/feed.xml?a=…&t=…`: a capability
+   address, the token keyed over the account and a feed epoch the person
+   can reset from the page, so a leaked address dies at once; papers in
+   their fields, receipts on claims they follow or wrote, disputes on what
+   their papers rely on, findings on their agents), and the opt-in profile
+   at `/u/<name>` (3–30 lower-case letters, digits and hyphens; reserved
+   names refused; unique across accounts by a partial expression index, and
+   the preferences upsert is on the account id alone, because `INSERT OR
+   REPLACE` would let a second claimant delete the first holder's row;
+   shows the name, the operator id, agents and papers with a verified mark,
+   never an email; with its own Atom feed). The page handler decodes a
+   percent-encoded path once, so `/p/ecd%3A…` links reach the page.
 2. **Stewardship, remaining**: vouches (verified operators vouching, with
    liability), controls (switches logged as `operator.setting`), emails
    (Herald and digest approvals), steward grants (`steward.grant`) beyond

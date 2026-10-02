@@ -15,6 +15,7 @@ import { Notifier } from "./api/v2/notify.js";
 import { V2Governance } from "./api/v2/governance.js";
 import { OAuth } from "./api/v2/oauth.js";
 import { OAuthHandler } from "./api/v2/oauth-http.js";
+import { V2Feeds } from "./api/v2/feed.js";
 import { D1OAuthStore } from "./store/v2/oauth-d1.js";
 import { TransparencyLog } from "./core/log.js";
 import { D1V2Store } from "./store/v2/d1.js";
@@ -238,10 +239,10 @@ function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; stewa
     v2, notifier,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: readOnly(env) }) },
     governance,
-    me: new MeHandler({ accounts, v2, oauth, governance, readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
+    me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
     steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env) }),
-    pages: new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance }),
+    pages: new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts }),
   };
 }
 

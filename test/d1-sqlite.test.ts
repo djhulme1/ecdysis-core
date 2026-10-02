@@ -284,7 +284,7 @@ describe("the account store against SQLite, every migration applied", { skip: !s
     const reg = await svc.registerAgent({ constitution: ACK, handle: "Moth", publicKey: kp.publicKey, pairing: code }, "1.1.1.1");
     assert.equal(reg.status, 201, JSON.stringify(reg.body));
     assert.equal((reg.body as Record<string, Json>)["operatorId"], c.account.operatorId);
-    await accounts.savePreferences(s, { interests: { fields: ["math"], topics: ["sat"], claims: [], agents: [] }, notifications: { digest: "weekly", alerts: ["check.owed"] }, profile: null });
+    await accounts.savePreferences(s, { interests: { fields: ["math"], topics: ["sat"], claims: [], agents: [] }, notifications: { digest: "weekly", alerts: ["check.owed"] }, profile: null, feed: { epoch: 0 } });
     assert.deepEqual((await accounts.preferences(s)).interests.fields, ["math"]);
     const row = db.prepare("SELECT email_hash, email_sealed FROM accounts").get() as { email_hash: string; email_sealed: string };
     assert.ok(!row.email_sealed.includes("example") && !row.email_hash.includes("example"), "no readable address in the database");
@@ -317,7 +317,27 @@ describe("the account store against SQLite, every migration applied", { skip: !s
     const signed = await oauth.signAs(principal, { protocol: "ecdysis/0.2", type: "review", claim: "ecd:x#C1", forecast: 0.5, rationale: "r".repeat(40), agent: { handle: "Wren" }, ts: now().toISOString() });
     assert.ok(signed.ok);
     assert.ok((await svc.record()).agents.get("Wren")!.managed, "the log says the archive held the pen");
+    // Public profile names are unique in SQL (migration 0016): the index decides a race, and deletion frees the name.
+    const p1 = await accounts.setProfile(s, "Dan-Hulme");
+    assert.deepEqual(p1, { ok: true, name: "dan-hulme" });
+    assert.equal((await accounts.accountByProfile("DAN-hulme"))?.id, c.account.id, "found by name, whatever the case");
+    const r2 = await accounts.requestLink("eve@example.org", "2.2.2.2", null);
+    assert.ok(r2.ok);
+    const c2 = await accounts.completeLink(sent.at(-1)!.match(/t=([A-Za-z0-9_-]+)/)![1]!, r2.browser, "2.2.2.2");
+    assert.ok(c2.ok);
+    const s2 = (await accounts.session(c2.session))!;
+    assert.deepEqual(await accounts.setProfile(s2, "dan-hulme"), { ok: false, status: 409, error: "that name is taken" });
+    const d1 = new D1AccountStore(d1Over(db), now);
+    await assert.rejects(d1.putPreferences(s2.account.id, { ...(await accounts.preferences(s2)), profile: "dan-hulme" }), /UNIQUE|constraint/i, "the index itself refuses a second holder");
+    assert.equal((await accounts.preferences(s2)).profile, null, "and nothing of the loser's was written");
+    assert.deepEqual(await accounts.setProfile(s2, "eve"), { ok: true, name: "eve" });
+    assert.equal((await accounts.setProfile(s2, "eve")).ok, true, "re-saving one's own name is fine");
+    await assert.rejects(d1.putAccount({ ...s2.account, emailHash: s.account.emailHash }), /UNIQUE|constraint/i, "an account row cannot take another's address or operator id; REPLACE would have deleted the other account");
+    assert.equal((await d1.getAccount(s.account.id))?.operatorId, s.account.operatorId, "the first account is untouched");
     await accounts.deleteAccount(s);
+    assert.equal(await accounts.accountByProfile("dan-hulme"), null, "deletion frees the name");
+    assert.deepEqual(await accounts.setProfile(s2, "dan-hulme"), { ok: true, name: "dan-hulme" });
+    await accounts.deleteAccount(s2);
     assert.equal((db.prepare("SELECT COUNT(*) AS n FROM accounts").get() as { n: number }).n, 0);
     assert.equal((db.prepare("SELECT COUNT(*) AS n FROM account_sessions").get() as { n: number }).n, 0);
     assert.equal((db.prepare("SELECT COUNT(*) AS n FROM account_preferences").get() as { n: number }).n, 0);

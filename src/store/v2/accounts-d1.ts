@@ -23,8 +23,9 @@ export class D1AccountStore implements AccountStore {
     const r = await this.db.prepare("SELECT * FROM accounts WHERE operator_id = ?1").bind(op).first<Record<string, unknown>>();
     return r ? this.rowToAccount(r) : null;
   }
+  /** Upsert on the id only: a row whose email hash or operator id is another account's is refused, never replaced (REPLACE would delete that other account). */
   async putAccount(a: AccountRow) {
-    await this.db.prepare("INSERT OR REPLACE INTO accounts (id, email_hash, email_sealed, operator_id, role, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
+    await this.db.prepare("INSERT INTO accounts (id, email_hash, email_sealed, operator_id, role, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET email_hash = excluded.email_hash, email_sealed = excluded.email_sealed, operator_id = excluded.operator_id, role = excluded.role, created_at = excluded.created_at")
       .bind(a.id, a.emailHash, a.emailSealed, a.operatorId, a.role, a.createdAt).run();
   }
   async createAccount(a: AccountRow) {
@@ -89,8 +90,18 @@ export class D1AccountStore implements AccountStore {
     const r = await this.db.prepare("SELECT prefs_json FROM account_preferences WHERE account_id = ?1").bind(accountId).first<{ prefs_json: string }>();
     return r ? (JSON.parse(r.prefs_json) as Preferences) : null;
   }
+  /**
+   * Throws (a UNIQUE constraint, migration 0016) when the profile name is another account's, so names stay unique under
+   * concurrent claims. An upsert on the account id, deliberately not INSERT OR REPLACE: REPLACE resolves ANY unique
+   * violation by deleting the offending row, which would let a second claimant erase the first holder's preferences.
+   */
   async putPreferences(accountId: string, prefs: Preferences) {
-    await this.db.prepare("INSERT OR REPLACE INTO account_preferences (account_id, prefs_json, updated_at) VALUES (?1, ?2, ?3)").bind(accountId, JSON.stringify(prefs), this.now().toISOString()).run();
+    await this.db.prepare("INSERT INTO account_preferences (account_id, prefs_json, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET prefs_json = excluded.prefs_json, updated_at = excluded.updated_at")
+      .bind(accountId, JSON.stringify(prefs), this.now().toISOString()).run();
+  }
+  async getAccountByProfile(name: string) {
+    const r = await this.db.prepare("SELECT a.* FROM account_preferences p JOIN accounts a ON a.id = p.account_id WHERE json_extract(p.prefs_json, '$.profile') = ?1").bind(name).first<Record<string, unknown>>();
+    return r ? this.rowToAccount(r) : null;
   }
 
   async listAlertAccounts() {

@@ -16,7 +16,10 @@ import { sha256Hex } from "../src/api/access.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { V2Governance } from "../src/api/v2/governance.js";
+import { V2Feeds } from "../src/api/v2/feed.js";
+import { PagesHandler } from "../src/api/v2/pages.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
+const LOG_KEY = await generateKeyPair();
 
 const MIN = 60 * 1000;
 const KEY = "ab".repeat(32);
@@ -38,9 +41,11 @@ function world(o: { key?: string | null; stewards?: string[]; send?: boolean } =
   const logStore = new MemoryStore();
   const log = new TransparencyLog(logStore, now);
   const v2store = new MemoryV2Store(() => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
-  const v2 = new V2Service({ log, store: v2store, logPrivateKey: null, now, pairing: (code, ip) => accounts.consumePairing(code, ip) });
+  const v2 = new V2Service({ log, store: v2store, logPrivateKey: LOG_KEY.privateKey, now, pairing: (code, ip) => accounts.consumePairing(code, ip) });
   const governance = new V2Governance({ v2, log, operatorPublicKey: null, now });
-  const me = new MeHandler({ accounts, v2, governance, secure: false });
+  const feeds = new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" });
+  const me = new MeHandler({ accounts, v2, governance, feeds, secure: false });
+  const pages = new PagesHandler(v2, { host: "api.ecdysis.me", accounts });
   const tick = (ms: number) => { clock.t += ms; };
   const linkToken = () => { const m = sent.at(-1)!.text.match(/\/me\/login\?t=([A-Za-z0-9_-]+)/); return m![1]!; };
   /** Sign in as `email` from browser `b` and return the session cookie value. */
@@ -51,7 +56,7 @@ function world(o: { key?: string | null; stewards?: string[]; send?: boolean } =
     assert.ok(c.ok, JSON.stringify(c));
     return c;
   };
-  return { accounts, store, v2, me, now, tick, sent, linkToken, signIn, log };
+  return { accounts, store, v2, me, pages, now, tick, sent, linkToken, signIn, log };
 }
 
 describe("accounts (v2)", () => {
@@ -374,6 +379,143 @@ describe("accounts (v2)", () => {
     assert.equal((await post("/me/signout", { csrf })).status, 303);
     assert.equal(await w.accounts.session(c.session), null);
   });
+
+  it("a public profile is opt-in with a unique name and never shows the email; the private feed is a capability address that a reset invalidates", async () => {
+    const w = world();
+    const ip = "1.1.1.1";
+    const b = "browser-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const dan = await w.signIn("dan@example.org", b, ip);
+    const cookies = { ecd_b: b, ecd_s: dan.session };
+    const get = (path: string, c: Record<string, string> = cookies) => w.me.handle(new Request(`https://ecdysis.me${path}`, { headers: { cookie: Object.entries(c).map(([k, v]) => `${k}=${v}`).join("; ") } }), path.split("?")[0]!, ip);
+    const post = (path: string, form: Record<string, string>, c: Record<string, string> = cookies) => {
+      const p = new URLSearchParams(form).toString();
+      return w.me.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: Object.entries(c).map(([k, v]) => `${k}=${v}`).join("; "), origin: "https://ecdysis.me" } }), path, ip);
+    };
+    const page = async (path: string) => { const r = await w.pages.handle("GET", path); return r ? { status: r.status, text: await r.text(), headers: r.headers } : null; };
+    const s = (await w.accounts.session(dan.session))!;
+    const csrf = await w.accounts.csrf(s);
+
+    // Pair an agent and publish a paper, so the profile has something to show.
+    const code = await w.accounts.newPairingCode(s);
+    const kp = await generateKeyPair();
+    assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Moth", publicKey: kp.publicKey, pairing: code, models: ["claude"] }, ip)).status, 201);
+    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "Moth's result <b>bold</b>", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval." }], builds_on: [], agent: { handle: "Moth", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" } as unknown as Json;
+    const published = await w.v2.publishPaper({ payload: paper, signature: await signJson(kp.privateKey, paper) });
+    assert.equal(published.status, 201, JSON.stringify(published.body));
+    const paperId = String((published.body as Record<string, Json>)["id"]);
+
+    // Off by default: no page, no feed.
+    let html = await (await get("/me")).text();
+    assert.match(html, /Opt in to a public page/);
+    assert.equal((await page("/u/dan-hulme"))!.status, 404);
+    assert.match((await page("/u/dan-hulme"))!.text, /Nobody has a public profile by that name/);
+    assert.equal((await page("/u/dan-hulme/feed.xml"))!.status, 404);
+    assert.equal(await page("/u/n/0123456789abcdef0123456789abcdef/0123456789abcdef0123456789abcdef"), null, "v1's stop links are not profiles");
+    assert.equal(await page("/u/ab"), null, "too short to be a name");
+
+    // Bad names are refused; the name is lower-cased; a second account cannot take it.
+    for (const bad of ["ab", "-dan", "dan-", "dan hulme", "d".repeat(31), "ecdysis", "Steward", "me"]) {
+      const r = await post("/me/profile", { csrf, action: "set", name: bad });
+      assert.equal(r.status, 400, bad);
+      assert.match(await r.text(), /Couldn&#39;t set the profile name/);
+    }
+    let res = await post("/me/profile", { csrf, action: "set", name: "Dan-Hulme" });
+    assert.equal(res.status, 303);
+    assert.match(res.headers.get("location")!, /u%2Fdan-hulme/);
+    assert.equal((await w.store.getPreferences(s.account.id))!.profile, "dan-hulme");
+    html = await (await get("/me")).text();
+    assert.match(html, /<a href="\/u\/dan-hulme">\/u\/dan-hulme<\/a>/);
+    const eve = await w.signIn("eve@example.org", "browser-eeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "2.2.2.2");
+    const ec = { ecd_b: "browser-eeeeeeeeeeeeeeeeeeeeeeeeeeeeee", ecd_s: eve.session };
+    const ecsrf = await w.accounts.csrf((await w.accounts.session(eve.session))!);
+    res = await post("/me/profile", { csrf: ecsrf, action: "set", name: "DAN-HULME" }, ec);
+    assert.equal(res.status, 409);
+    assert.match(await res.text(), /that name is taken/);
+    assert.equal((await w.store.getPreferences(s.account.id))!.profile, "dan-hulme", "the holder keeps it");
+
+    // The public page: name, operator id, agents, papers, a verified mark only when the operator is verified; never the email.
+    let u = (await page("/u/Dan-Hulme"))!;
+    assert.equal(u.status, 200);
+    assert.match(u.text, /<h1>dan-hulme<\/h1>/);
+    assert.match(u.text, new RegExp(`operator ${s.account.operatorId}`));
+    assert.match(u.text, /href="\/a\/Moth">Moth<\/a>/);
+    assert.match(u.text, /Moth&#39;s result &lt;b&gt;bold&lt;\/b&gt;/);
+    assert.match(u.text, /1 claim, 0 established/);
+    assert.doesNotMatch(u.text, /example\.org|dan@/, "no email anywhere");
+    assert.doesNotMatch(u.text, /verified<\/span>/);
+    assert.match(u.text, /<link rel="alternate" type="application\/atom\+xml" title="dan-hulme on Ecdysis" href="\/u\/dan-hulme\/feed.xml">/);
+    assert.equal(u.headers.get("cache-control"), "public, max-age=120");
+    await w.v2.setTier(s.account.operatorId, "verified");
+    u = (await page("/u/dan-hulme"))!;
+    assert.match(u.text, /<span class="status sound"[^>]*>verified<\/span>/);
+    // Its feed.
+    let feed = (await page("/u/dan-hulme/feed.xml"))!;
+    assert.equal(feed.status, 200);
+    assert.equal(feed.headers.get("content-type"), "application/atom+xml; charset=utf-8");
+    assert.match(feed.text, /<title>dan-hulme on Ecdysis<\/title>/);
+    assert.match(feed.text, new RegExp(`<id>https://ecdysis.me/p/${paperId.replace(/[.:]/g, "\\$&")}</id>`));
+    assert.match(feed.text, /<title>Moth&#39;s result &lt;b&gt;bold&lt;\/b&gt;<\/title>/, "escaped for XML");
+    assert.match(feed.text, /<category term="math"\/>/);
+    // The field feeds come from the same record.
+    const math = (await page("/feeds/math.atom"))!;
+    assert.equal(math.status, 200);
+    assert.match(math.text, /Moth&#39;s result/);
+    assert.doesNotMatch((await page("/feeds/ml.atom"))!.text, /Moth/);
+    assert.equal(await page("/feeds/bogus.atom"), null);
+
+    // The private feed: the address on the page carries a token; without it, or with a stale one, nothing but a 404.
+    html = await (await get("/me")).text();
+    const feedUrl = html.match(/https:\/\/ecdysis\.me\/me\/feed\.xml\?a=[^<]+/)![0]!.replace(/&amp;/g, "&");
+    const q = new URL(feedUrl);
+    res = await w.me.handle(new Request(feedUrl), "/me/feed.xml", "9.9.9.9");
+    assert.equal(res.status, 200, "no cookie needed: the address is the key");
+    assert.equal(res.headers.get("content-type"), "application/atom+xml; charset=utf-8");
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    let xml = await res.text();
+    assert.match(xml, /<title>Your Ecdysis<\/title>/);
+    assert.match(xml, /Moth&#39;s result/, "a paper in every field, since none is chosen");
+    assert.match(xml, new RegExp(`<link href="${feedUrl.replace(/[?.&]/g, (c) => (c === "&" ? "&amp;" : `\\${c}`))}" rel="self"`));
+    assert.equal((await w.me.handle(new Request(`https://ecdysis.me/me/feed.xml?a=${q.searchParams.get("a")}&t=${"0".repeat(40)}`), "/me/feed.xml", ip)).status, 404);
+    assert.equal((await w.me.handle(new Request(`https://ecdysis.me/me/feed.xml?a=acct_nobody&t=${q.searchParams.get("t")}`), "/me/feed.xml", ip)).status, 404);
+    // Another verified operator's receipt on Dan's claim appears in his feed, saying whose claim it is.
+    const bee = await generateKeyPair();
+    assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Bee", publicKey: bee.publicKey, operatorId: "op-bee", models: ["gpt"] })).status, 201);
+    await w.v2.setTier("op-bee", "verified");
+    const signed = async (k: { publicKey: string; privateKey: string }, handle: string, payload: Record<string, Json>) => { const full: Json = { ...payload, agent: { handle, publicKey: k.publicKey }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") }; return { payload: full, signature: await signJson(k.privateKey, full) } as Json; };
+    const bundle = { repo: "https://github.com/example/rep", commit: "1".repeat(40), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }], runtimeMinutes: 5 };
+    const c1 = await w.v2.commitCheck(await signed(bee, "Bee", { protocol: "ecdysis/0.2", type: "check.commit", target: `${paperId}#C1`, kind: "replication", bundle }));
+    assert.equal(c1.status, 201, JSON.stringify(c1.body));
+    const r1 = await w.v2.fileResult(await signed(bee, "Bee", { protocol: "ecdysis/0.2", type: "check.result", commit: String((c1.body as Record<string, Json>)["id"]), outcome: "confirmed", outputs: { alpha: 1 }, crossCheck: null }));
+    assert.equal(r1.status, 201, JSON.stringify(r1.body));
+    xml = await (await w.me.handle(new Request(feedUrl), "/me/feed.xml", ip)).text();
+    assert.match(xml, /<title>Receipt: confirmed — replication of ecd:[^<]+ by Bee<\/title>/);
+    assert.match(xml, /On a claim of yours/);
+    assert.match(xml, /<category term="receipt"\/>/);
+    // Eve follows the claim: it shows in hers as a claim she follows; Dan's paper (math) does not, since she chose another field.
+    await w.accounts.savePreferences((await w.accounts.session(eve.session))!, { interests: { fields: ["ml"], topics: [], claims: [`${paperId}#C1`], agents: [] }, notifications: { digest: "off", alerts: [] }, profile: null, feed: { epoch: 0 } });
+    const eveFeed = (await (await get("/me", ec)).text()).match(/https:\/\/ecdysis\.me\/me\/feed\.xml\?a=[^<]+/)![0]!.replace(/&amp;/g, "&");
+    xml = await (await w.me.handle(new Request(eveFeed), "/me/feed.xml", ip)).text();
+    assert.match(xml, /On a claim you follow/);
+    assert.doesNotMatch(xml, /<category term="paper"\/>/);
+
+    // Reset: the old address stops working at once; the page shows a new one, which works.
+    res = await post("/me/feed/reset", { csrf });
+    assert.equal(res.status, 303);
+    assert.equal((await w.me.handle(new Request(feedUrl), "/me/feed.xml", ip)).status, 404, "the old address is dead");
+    const feedUrl2 = (await (await get("/me")).text()).match(/https:\/\/ecdysis\.me\/me\/feed\.xml\?a=[^<]+/)![0]!.replace(/&amp;/g, "&");
+    assert.notEqual(feedUrl2, feedUrl);
+    assert.equal((await w.me.handle(new Request(feedUrl2), "/me/feed.xml", ip)).status, 200);
+    assert.equal((await w.me.handle(new Request(feedUrl2, { method: "POST", headers: { origin: "https://ecdysis.me" } }), "/me/feed.xml", ip)).status, 405);
+
+    // Turning the profile off removes the page and frees the name; deleting the account would too.
+    res = await post("/me/profile", { csrf, action: "clear" });
+    assert.equal(res.status, 303);
+    assert.equal((await page("/u/dan-hulme"))!.status, 404);
+    assert.equal((await post("/me/profile", { csrf: ecsrf, action: "set", name: "dan-hulme" }, ec)).status, 303, "free for the taking");
+    assert.match((await page("/u/dan-hulme"))!.text, new RegExp(`operator ${(await w.accounts.session(eve.session))!.account.operatorId}`));
+    // Without accounts configured, there are no profiles at all.
+    assert.equal((await new PagesHandler(w.v2).handle("GET", "/u/dan-hulme"))!.status, 404);
+  });
 });
 
 describe("alert emails", () => {
@@ -394,7 +536,7 @@ describe("alert emails", () => {
     await w.v2.registerAgent({ constitution: ACK, handle: "Moth", publicKey: kp.publicKey, pairing: code }, "1.1.1.1");
     // Nothing ticked: nothing sent, whatever happens.
     assert.deepEqual(await notifier.run(), { sent: 0, skipped: 0, events: 0 });
-    await w.accounts.savePreferences(s, { interests: { fields: [], topics: [], claims: [], agents: [] }, notifications: { digest: "off", alerts: ["check.owed", "finding.against"] }, profile: null });
+    await w.accounts.savePreferences(s, { interests: { fields: [], topics: [], claims: [], agents: [] }, notifications: { digest: "off", alerts: ["check.owed", "finding.against"] }, profile: null, feed: { epoch: 0 } });
     // A check Moth owes, due within two days: one email, with a stop link and no text from anyone's paper.
     const sealedAt = w.now().toISOString();
     const log = (w.v2 as unknown as { o: { log: { append: (t: string, p: Json) => Promise<unknown> } } }).o.log;
@@ -442,10 +584,10 @@ describe("the digest", () => {
     // Dan follows maths; Eve follows nothing and chose weekly.
     const dan = await w.signIn("dan@example.org");
     const ds = (await w.accounts.session(dan.session))!;
-    await w.accounts.savePreferences(ds, { interests: { fields: ["math"], topics: [], claims: [], agents: [] }, notifications: { digest: "daily", alerts: [] }, profile: null });
+    await w.accounts.savePreferences(ds, { interests: { fields: ["math"], topics: [], claims: [], agents: [] }, notifications: { digest: "daily", alerts: [] }, profile: null, feed: { epoch: 0 } });
     const eve = await w.signIn("eve@example.org", "browser-ffffffffffffffffffffffffffffff", "3.3.3.3");
     const es = (await w.accounts.session(eve.session))!;
-    await w.accounts.savePreferences(es, { interests: { fields: [], topics: [], claims: [], agents: [] }, notifications: { digest: "weekly", alerts: [] }, profile: null });
+    await w.accounts.savePreferences(es, { interests: { fields: [], topics: [], claims: [], agents: [] }, notifications: { digest: "weekly", alerts: [] }, profile: null, feed: { epoch: 0 } });
     // The clock starts at 09:00 UTC on Saturday 3 October 2026. Nothing has happened: no email, and not again today.
     assert.deepEqual(await notifier.digest(), { sent: 0, skipped: 0 });
     // An unrelated agent publishes a maths paper with a hostile title.

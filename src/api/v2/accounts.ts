@@ -63,10 +63,19 @@ export type Alert = (typeof ALERTS)[number];
 export interface Preferences {
   interests: { fields: string[]; topics: string[]; claims: string[]; agents: string[] };
   notifications: { digest: Digest; alerts: Alert[] };
-  /** A public profile at /u/<name>, opt-in (§4.7). Null: none. */
+  /** A public profile at /u/<name>, opt-in (§4.7). Null: none. Lower case; unique across accounts. */
   profile: string | null;
+  /** The private feed's address is a capability; its epoch changes when the person resets the link, and every earlier address stops working. */
+  feed: { epoch: number };
 }
-export const DEFAULT_PREFERENCES: Preferences = { interests: { fields: [], topics: [], claims: [], agents: [] }, notifications: { digest: "off", alerts: [] }, profile: null };
+export const DEFAULT_PREFERENCES: Preferences = { interests: { fields: [], topics: [], claims: [], agents: [] }, notifications: { digest: "off", alerts: [] }, profile: null, feed: { epoch: 0 } };
+/**
+ * A profile name: 3 to 30 lower-case letters, digits and hyphens, starting
+ * and ending with a letter or digit. Names the archive itself might be taken
+ * for are reserved.
+ */
+export const PROFILE_NAME = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
+export const RESERVED_PROFILE_NAMES: ReadonlySet<string> = new Set(["ecdysis", "admin", "administrator", "steward", "stewards", "operator", "operators", "official", "staff", "support", "system", "root", "api", "www", "help", "about", "moderator", "moderators", "chrysalis", "herald"]);
 
 /** Everything off the log. Deleting an account deletes its rows here and nothing on the log. */
 export interface AccountStore {
@@ -91,7 +100,10 @@ export interface AccountStore {
   /** Spend the code: true if this call spent it, false if it was already spent. */
   usePairing(hash: string, usedAt: string): Promise<boolean>;
   getPreferences(accountId: string): Promise<Preferences | null>;
+  /** Save preferences. Throws when `prefs.profile` is a name another account holds (the store keeps names unique). */
   putPreferences(accountId: string, prefs: Preferences): Promise<void>;
+  /** The account that holds a profile name, if any. */
+  getAccountByProfile(name: string): Promise<AccountRow | null>;
   /** Rate limiting: how many events a bucket saw since `sinceIso`, and record one. Events are forgotten after a day. */
   countEvents(bucket: string, sinceIso: string): Promise<number>;
   recordEvent(bucket: string, atIso: string): Promise<void>;
@@ -113,7 +125,10 @@ export class MemoryAccountStore implements AccountStore {
   async getAccount(id: string) { return this.accounts.get(id) ?? null; }
   async getAccountByEmailHash(h: string) { return [...this.accounts.values()].find((a) => a.emailHash === h) ?? null; }
   async getAccountByOperator(op: string) { return [...this.accounts.values()].find((a) => a.operatorId === op) ?? null; }
-  async putAccount(row: AccountRow) { this.accounts.set(row.id, { ...row }); }
+  async putAccount(row: AccountRow) {
+    for (const a of this.accounts.values()) if (a.id !== row.id && (a.emailHash === row.emailHash || a.operatorId === row.operatorId)) throw new Error("UNIQUE constraint failed: accounts");
+    this.accounts.set(row.id, { ...row });
+  }
   async createAccount(row: AccountRow) {
     for (const a of this.accounts.values()) if (a.emailHash === row.emailHash) return false;
     this.accounts.set(row.id, { ...row });
@@ -139,7 +154,14 @@ export class MemoryAccountStore implements AccountStore {
   async getPairing(hash: string) { return this.pairings.get(hash) ?? null; }
   async usePairing(hash: string, usedAt: string) { const p = this.pairings.get(hash); if (!p || p.usedAt) return false; p.usedAt = usedAt; return true; }
   async getPreferences(accountId: string) { return this.prefs.get(accountId) ?? null; }
-  async putPreferences(accountId: string, prefs: Preferences) { this.prefs.set(accountId, structuredClone(prefs)); }
+  async putPreferences(accountId: string, prefs: Preferences) {
+    if (prefs.profile) for (const [id, p] of this.prefs) if (id !== accountId && p.profile === prefs.profile) throw new Error("UNIQUE constraint failed: profile");
+    this.prefs.set(accountId, structuredClone(prefs));
+  }
+  async getAccountByProfile(name: string) {
+    for (const [id, p] of this.prefs) if (p.profile === name) return this.accounts.get(id) ?? null;
+    return null;
+  }
   async countEvents(bucket: string, sinceIso: string) { return this.events.filter((e) => e.bucket === bucket && e.at >= sinceIso).length; }
   async recordEvent(bucket: string, atIso: string) { this.events.push({ bucket, at: atIso }); }
   sent = new Set<string>();
@@ -440,10 +462,68 @@ export class Accounts {
   /* ---------------- preferences and deletion ---------------- */
 
   async preferences(s: Signed): Promise<Preferences> {
-    return (await this.o.store.getPreferences(s.account.id)) ?? structuredClone(DEFAULT_PREFERENCES);
+    return Accounts.withDefaults(await this.o.store.getPreferences(s.account.id));
+  }
+  /** Stored preferences may predate a field: the defaults fill what is missing. */
+  static withDefaults(p: Preferences | null): Preferences {
+    const d = structuredClone(DEFAULT_PREFERENCES);
+    if (!p) return d;
+    return { ...d, ...p, interests: { ...d.interests, ...(p.interests ?? {}) }, notifications: { ...d.notifications, ...(p.notifications ?? {}) }, feed: { ...d.feed, ...(p.feed ?? {}) } };
   }
   async savePreferences(s: Signed, prefs: Preferences): Promise<void> {
     await this.o.store.putPreferences(s.account.id, prefs);
+  }
+
+  /* ---------------- public profile and private feed ---------------- */
+
+  /**
+   * Claim a profile name (lower-cased), or clear it with null. Names are
+   * unique: the store refuses a second holder, and the first holder keeps it.
+   */
+  async setProfile(s: Signed, nameIn: string | null): Promise<{ ok: true; name: string | null } | { ok: false; status: number; error: string }> {
+    const prefs = await this.preferences(s);
+    const name = nameIn === null ? null : nameIn.trim().toLowerCase();
+    if (name !== null) {
+      if (!PROFILE_NAME.test(name)) return { ok: false, status: 400, error: "a profile name is 3 to 30 letters, digits and hyphens, starting and ending with a letter or digit" };
+      if (RESERVED_PROFILE_NAMES.has(name)) return { ok: false, status: 400, error: "that name is reserved" };
+      const holder = await this.o.store.getAccountByProfile(name);
+      if (holder && holder.id !== s.account.id) return { ok: false, status: 409, error: "that name is taken" };
+    }
+    try {
+      await this.o.store.putPreferences(s.account.id, { ...prefs, profile: name });
+    } catch (e) {
+      // Two people claiming one name at once: the store's uniqueness decides, and the loser hears "taken".
+      if (/unique|constraint/i.test(String((e as Error)?.message ?? e))) return { ok: false, status: 409, error: "that name is taken" };
+      throw e;
+    }
+    return { ok: true, name };
+  }
+
+  /** The account behind a public profile name, with its preferences (the name is the person's; nothing else here is shown). */
+  async accountByProfile(nameIn: string): Promise<AccountRow | null> {
+    const name = nameIn.trim().toLowerCase();
+    if (!PROFILE_NAME.test(name)) return null;
+    return this.o.store.getAccountByProfile(name);
+  }
+
+  /** The private feed's token: keyed over the account and its feed epoch, so a reset invalidates every earlier address. */
+  async feedToken(accountId: string, epoch: number): Promise<string> {
+    return (await this.token_("feed", `${accountId}|${epoch}`)).slice(0, 40);
+  }
+
+  /** Who a feed address belongs to, if the token is theirs now; null otherwise (unknown account, stale epoch, wrong token). */
+  async feedOwner(accountId: string, token: string): Promise<{ account: AccountRow; prefs: Preferences } | null> {
+    if (!this.enabled() || !/^[A-Za-z0-9_-]{8,64}$/.test(accountId) || !/^[0-9a-f]{40}$/.test(token)) return null;
+    const account = await this.o.store.getAccount(accountId);
+    if (!account) return null;
+    const prefs = Accounts.withDefaults(await this.o.store.getPreferences(accountId));
+    return sameString(await this.feedToken(accountId, prefs.feed.epoch), token) ? { account, prefs } : null;
+  }
+
+  /** Reset the private feed's address: a new epoch, so the old address stops working at once. */
+  async resetFeed(s: Signed): Promise<void> {
+    const prefs = await this.preferences(s);
+    await this.o.store.putPreferences(s.account.id, { ...prefs, feed: { epoch: prefs.feed.epoch + 1 } });
   }
 
   /** The person's email, for sending them things they asked for. Never shown in lists or logs. */
