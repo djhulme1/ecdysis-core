@@ -13,6 +13,9 @@ import { StewardHandler } from "./api/v2/steward.js";
 import { PagesHandler } from "./api/v2/pages.js";
 import { Notifier } from "./api/v2/notify.js";
 import { V2Governance } from "./api/v2/governance.js";
+import { OAuth } from "./api/v2/oauth.js";
+import { OAuthHandler } from "./api/v2/oauth-http.js";
+import { D1OAuthStore } from "./store/v2/oauth-d1.js";
 import { TransparencyLog } from "./core/log.js";
 import { D1V2Store } from "./store/v2/d1.js";
 import { D1AccountStore } from "./store/v2/accounts-d1.js";
@@ -207,7 +210,7 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
   });
 }
 
-function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance } | null {
+function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler } } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
@@ -227,11 +230,14 @@ function v2From(env: Env, store: D1Store): { v2: V2Service; me: MeHandler; stewa
     from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>", replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
     siteBase: "https://ecdysis.me", emailDailyCap: emailCap(env),
   });
+  // OAuth 2.1 for the connector and managed agents (I.4): tokens stand for people; the archive holds only the keys people asked it to.
+  const oauth = new OAuth({ accounts, store: new D1OAuthStore(env.DB), v2, issuer: "https://ecdysis.me", resource: "https://api.ecdysis.me/mcp", siteBase: "https://ecdysis.me" });
   return {
     v2, notifier,
+    oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: readOnly(env) }) },
     // R2 needs the operator key and only that: the log key lives in this Worker, so falling back to it would let the archive co-sign for its owner.
     governance: new V2Governance({ v2, log, operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) }),
-    me: new MeHandler({ accounts, v2, readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
+    me: new MeHandler({ accounts, v2, oauth, readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
     steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env) }),
     pages: new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY) }),
@@ -431,6 +437,7 @@ export default {
       steward: v2?.steward ?? null,
       pages: v2?.pages ?? null,
       governance: v2?.governance ?? null,
+      oauth: v2?.oauth ?? null,
     });
   },
 } satisfies ExportedHandler<Env>;

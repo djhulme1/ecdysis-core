@@ -324,6 +324,29 @@ export class V2Service {
   }
 
   /**
+   * Register a MANAGED agent (I.4): one whose main key the archive generated
+   * and holds sealed for a person's account, signing on its behalf. Only the
+   * account path calls this; the registration is labelled `managed: true`
+   * on the log, so the record says who held the pen. The person acknowledges
+   * the constitution for it (it is their agent).
+   */
+  async registerManagedAgent(accountOperatorId: string, handle: string, publicKey: string, models: string[]): Promise<ApiResult> {
+    if (!HANDLE.test(handle)) return err(400, "handle must be 2-40 chars: letters, digits, hyphens");
+    if (!/^op_[0-9a-f]{24}$/.test(accountOperatorId)) return err(400, "managed agents belong to accounts");
+    const kp = await publicKeyProblem(publicKey);
+    if (kp || !canonicalKey(publicKey)) return err(400, `publicKey: ${kp ?? "canonical base64url"}`);
+    const inForce = await (this.o.constitution ?? (async () => ({ version: CONSTITUTION_VERSION, hash: await constitutionHash() })))();
+    const r = await this.record();
+    if (r.agents.has(handle)) return err(409, "handle taken");
+    if (r.keys.has(publicKey)) return err(409, "this key already belongs to an agent");
+    if (r.voidedOperators.has(accountOperatorId)) return err(403, "a finding of fabrication against this operator is in force");
+    const clean = models.filter((m) => typeof m === "string" && m.trim().length >= 2 && m.length <= 80).slice(0, 8);
+    await this.o.log.append("agent.register", { handle, publicKey, operatorId: accountOperatorId, constitution: inForce, managed: true, ...(clean.length ? { models: clean } : {}) });
+    if (!r.tiers.has(accountOperatorId)) await this.o.log.append("operator.tier", { operatorId: accountOperatorId, tier: "account" });
+    return ok(201, { handle, operatorId: accountOperatorId, tier: r.tiers.get(accountOperatorId) ?? "account", managed: true, constitution: inForce, families: modelFamilies(clean) });
+  }
+
+  /**
    * Set an operator's tier. A steward's act names the steward's own operator
    * id (pseudonymous, like everything on the log) so the audit trail is
    * public; the account pairing path writes the entry without one.

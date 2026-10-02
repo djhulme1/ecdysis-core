@@ -55,6 +55,8 @@ export interface McpContext {
   count?: ((apiPath: string, status: number, body: Json) => Promise<void>) | null;
   /** Extra tools (Ecdysis v2 adds its own set); listed and callable alongside the built-in ones, and they win on a name clash. */
   extraTools?: McpToolDef[];
+  /** The person a bearer token stands for (OAuth, v2), when the request carried one. Unlocks their managed agents; nothing else. */
+  principal?: { accountId: string; operatorId: string; clientId: string; scope: string } | null;
 }
 
 interface Annotations {
@@ -76,7 +78,7 @@ type ToolDef = {
 };
 
 /** A write's outcome: the HTTP status the same request would have had, and its body. */
-interface WriteResult {
+export interface WriteResult {
   mcpWrite: true;
   status: number;
   result: Json;

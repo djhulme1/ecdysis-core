@@ -175,6 +175,8 @@ export interface AgentState {
   revokedAt: string | null;
   /** The constitution version the agent acknowledged at registration (I.2). */
   constitution: string | null;
+  /** The archive holds this agent's main key and signs on its behalf (I.4): labelled, and destroyable by the person. */
+  managed: boolean;
 }
 
 export interface FindingState {
@@ -290,7 +292,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         const publicKey = str(p["publicKey"]);
         if (agents.has(handle) || keys.has(publicKey)) break; // first registration wins; a key belongs to one agent
         const ack = p["constitution"] as { version?: unknown } | undefined;
-        agents.set(handle, { operatorId: str(p["operatorId"]), publicKey, families: modelFamilies(p["models"] as string[] | undefined), checkKeys: [], revokedAt: null, constitution: typeof ack?.version === "string" ? ack.version : null });
+        agents.set(handle, { operatorId: str(p["operatorId"]), publicKey, families: modelFamilies(p["models"] as string[] | undefined), checkKeys: [], revokedAt: null, constitution: typeof ack?.version === "string" ? ack.version : null, managed: p["managed"] === true });
         keys.set(publicKey, { key: publicKey, handle, scope: "main", delegatedAt: e.ts, revokedAt: null, compromisedAt: null, compromiseSeq: null });
         break;
       }

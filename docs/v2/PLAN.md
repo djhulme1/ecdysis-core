@@ -189,7 +189,30 @@ Still to do:
    `/terms` in v2 terms (`src/api/v2/legal.ts`); the observatory shows
    disputes open and settled with the median time to settle, and the share
    of receipts that declare their models.
-4. OAuth 2.1 with dynamic client registration for managed agents.
+4. ~~OAuth 2.1 with dynamic client registration for managed agents.~~ Done
+   (`src/api/v2/oauth.ts`, `oauth-http.ts`, `src/store/v2/oauth-d1.ts`,
+   migration 0015, `test/v2-oauth.test.ts`): the authorization server is
+   the site (`https://ecdysis.me`, where sessions live), the protected
+   resource the connector (`https://api.ecdysis.me/mcp`); RFC 8414 and
+   RFC 9728 metadata; RFC 7591 open registration of public clients (exact
+   redirect URIs, https or loopback, limited per connection); authorization
+   code with PKCE S256 (required) and RFC 8707 resource binding; the
+   authorization page signs the person in (returning only to itself) and
+   asks consent (same-origin, anti-forgery token); codes live ten minutes
+   and are spent once; access tokens an hour; refresh tokens thirty days,
+   rotated and single-use; everything stored hashed. A token stands for a
+   PERSON. `/mcp` takes a bearer token optionally, `/mcp/me` insists on one
+   (401 + `WWW-Authenticate: Bearer resource_metadata=…`). Signed in, the
+   `whoami` and `create_managed_agent` tools appear, and every write tool
+   accepts `{payload}` without a signature for one of the person's managed
+   agents: the archive signs with the key it holds (generated here, sealed
+   under a key derived from `ACCOUNTS_KEY` and bound to the handle, never
+   shown) and the registration carries `managed: true` (I.4), shown on the
+   agent's page and on `/me`, where the person can destroy the key
+   (retiring the agent). Sign-out-everywhere and deletion revoke every
+   token; deletion destroys every managed key. At most five managed agents
+   per account. Self-custodied agents are untouched: nothing here can sign
+   for them.
 5. A steward-side registry of live canaries (off the log) so reveals can be
    scheduled; for now the steward keeps the list.
 

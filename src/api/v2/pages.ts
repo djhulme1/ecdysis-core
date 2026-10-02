@@ -146,7 +146,7 @@ export class PagesHandler {
       handle, operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", families: a.families,
       reliability: s.track.reliability.get(handle) ?? 0.5, credit: s.track.credit.get(handle) ?? 0,
       reports: s.track.reports.filter((x) => x.agent === handle && x.resolved !== null).length,
-      lapses: r.lapses.get(handle) ?? 0, checkKeys: a.checkKeys.length, retired: a.revokedAt !== null, voided: r.voidedOperators.has(a.operatorId),
+      lapses: r.lapses.get(handle) ?? 0, checkKeys: a.checkKeys.length, retired: a.revokedAt !== null, voided: r.voidedOperators.has(a.operatorId), managed: a.managed,
       papers: [...r.papers.values()].filter((p) => p.handle === handle && !isHeld(r, p.id)).sort((x, y) => y.seq - x.seq).map((p) => {
         const st = p.claims.map((ref) => s.claims.get(ref)?.status).filter((x): x is NonNullable<typeof x> => !!x);
         return { id: p.id, title: p.title, field: p.field, ts: p.ts, worst: st.length ? st.reduce((x, y) => (rank(x) < rank(y) ? x : y)) : null };

@@ -11,6 +11,8 @@ import { generateKeyPair } from "../../core/crypto.js";
 import { FIELDS } from "../../core/schema.js";
 import { Accounts, ALERTS, clearCookie, cookie, setCookie, type Alert, type Digest, type Preferences, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
+import type { OAuth } from "./oauth.js";
+import { NEXT_COOKIE, safeNext } from "./oauth-http.js";
 import { keyIssuedPage, linkSentPage, mePage, noticePage, pairingPage, signInPage, type MeAgent, type MeData, type MeFinding } from "../../web/me.js";
 
 export const ME_HEADERS: Record<string, string> = {
@@ -31,6 +33,8 @@ const CLAIM_REF = /^(ecd:[A-Za-z0-9:._-]{4,80}|ext:[0-9a-f]{16})#C[1-9][0-9]?$/;
 export interface MeOptions {
   accounts: Accounts;
   v2: V2Service;
+  /** OAuth and managed agents, when configured: the page offers them, and ending every session ends every token. */
+  oauth?: OAuth | null;
   /** Secure cookies (off only in local tests over http). */
   secure?: boolean;
   readOnly?: boolean;
@@ -111,7 +115,9 @@ export class MeHandler {
       if (!t) return this.redirect("/me");
       const r = await this.o.accounts.completeLink(t, browser, ip);
       if (!r.ok) return this.html(r.status, signInPage({ problem: r.error }));
-      return this.redirect("/me", [setCookie(SESSION_COOKIE, r.session, 30 * 24 * 3600, secure)]);
+      // Back to the authorization page an app sent the person from, if that is where they came from; nowhere else.
+      const next = safeNext(cookie(req.headers.get("cookie"), NEXT_COOKIE));
+      return this.redirect(next ?? "/me", [setCookie(SESSION_COOKIE, r.session, 30 * 24 * 3600, secure), ...(next ? [clearCookie(NEXT_COOKIE, secure)] : [])]);
     }
 
     if (!signed) {
@@ -131,7 +137,7 @@ export class MeHandler {
     if (!f || !(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.html(403, await this.dashboard(signed, null, "That form had expired. Please try again."));
     if (this.o.readOnly && path !== "/me/signout" && path !== "/me/signout-all") return this.html(503, noticePage("Not right now", "Ecdysis isn't taking changes at the moment. Please try again later."));
     // Keys, deletion and pairing (which lets whoever holds the code register agents under this operator) need a recent sign-in.
-    const needsStepUp = path === "/me/keys/issue" || path === "/me/keys/revoke" || path === "/me/delete" || path === "/me/pairing";
+    const needsStepUp = path === "/me/keys/issue" || path === "/me/keys/revoke" || path === "/me/delete" || path === "/me/pairing" || path === "/me/agents/managed" || path === "/me/agents/managed/destroy";
     if (needsStepUp && !this.o.accounts.fresh(signed)) return this.html(401, signInPage({ stepUp: true }));
 
     switch (path) {
@@ -140,7 +146,21 @@ export class MeHandler {
         return this.redirect("/me", [clearCookie(SESSION_COOKIE, secure)]);
       case "/me/signout-all":
         await this.o.accounts.signOutEverywhere(signed);
+        if (this.o.oauth) await this.o.oauth.revokeAll(signed.account.id);
         return this.redirect("/me", [clearCookie(SESSION_COOKIE, secure)]);
+      case "/me/agents/managed": {
+        if (!this.o.oauth) return this.html(404, noticePage("Not offered", "Managed agents are not offered on this deployment."));
+        const models = (f.get("models") ?? "").split(",").map((m) => m.trim()).filter(Boolean).slice(0, 8);
+        const r = await this.o.oauth.createManagedAgent(signed.account, (f.get("handle") ?? "").trim(), models);
+        if (r.status !== 201) return this.html(r.status, await this.dashboard(signed, null, `Couldn't create the agent: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
+        return this.redirect(`/me?ok=${encodeURIComponent(`Managed agent created. An app signed in as you can now act as it; the record labels it managed.`)}`);
+      }
+      case "/me/agents/managed/destroy": {
+        if (!this.o.oauth) return this.html(404, noticePage("Not offered", "Managed agents are not offered on this deployment."));
+        const r = await this.o.oauth.destroyManaged(signed, (f.get("handle") ?? "").trim());
+        if (r.status !== 200) return this.html(r.status, await this.dashboard(signed, null, `Couldn't destroy the key: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
+        return this.redirect(`/me?ok=${encodeURIComponent("The key is destroyed and the agent retired. What it signed stays on the record, labelled managed.")}`);
+      }
       case "/me/pairing":
         return this.html(200, pairingPage(await this.o.accounts.newPairingCode(signed)));
       case "/me/keys/issue": {
@@ -176,6 +196,11 @@ export class MeHandler {
       }
       case "/me/delete": {
         if (f.get("confirm") !== "delete") return this.html(400, await this.dashboard(signed, null, "Tick the box to confirm deletion."));
+        if (this.o.oauth) {
+          // Managed keys die with the account: nothing signs for a person who left.
+          await this.o.oauth.revokeAll(signed.account.id);
+          for (const m of await this.o.oauth.managedAgentsOf(signed.account.id)) if (!m.destroyedAt) await this.o.oauth.destroyManaged(signed, m.handle);
+        }
         await this.o.accounts.deleteAccount(signed);
         return this.html(200, noticePage("Account deleted", "Your email, sign-ins, pairing codes and settings are gone. Your operator id and your agents' signed work remain on the record.", "/"), [clearCookie(SESSION_COOKIE, secure)]);
       }
@@ -195,6 +220,7 @@ export class MeHandler {
       owed: [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "sealed" && !c.disowned).map((c) => ({ id: c.id, target: c.target, deadline: new Date(Date.parse(c.sealedAt ?? "") + 7 * 24 * 3600 * 1000).toISOString() })),
       claims: r.claims.filter((c) => r.papers.get(c.paper)?.handle === handle).length,
       receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "resulted" && !c.disowned).length,
+      managed: a.managed,
     }));
     const findings: MeFinding[] = r.findings.filter((f) => f.oddOperator === op).map((f) => ({ id: f.id, verdict: f.verdict, agent: f.oddAgent ?? "", decidedAt: f.decidedAt, inForce: f.inForce, reversed: f.reversed }));
     const prefs = await this.o.accounts.preferences(signed);
@@ -216,6 +242,7 @@ export class MeHandler {
     const data: MeData = {
       operatorId: op, tier: r.tiers.get(op) ?? "account", role: signed.account.role, agents, findings,
       email: email ? Accounts.maskEmail(email) : null,
+      managedOffered: !!this.o.oauth,
       insights: { claims: mine, disputes, queue, followed },
       prefs, csrf: await this.o.accounts.csrf(signed), fresh: this.o.accounts.fresh(signed), flash, problem,
     };

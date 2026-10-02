@@ -184,7 +184,7 @@ export const PAIRING_CODE = /^[a-z2-9]{5}-[a-z2-9]{5}-[a-z2-9]{5}$/;
 export class Accounts {
   private now: () => Date;
   private rnd: (n: number) => Uint8Array;
-  private keys: Promise<{ hmac: CryptoKey; aes: CryptoKey; tokens: CryptoKey } | null> | null = null;
+  private keys: Promise<{ hmac: CryptoKey; aes: CryptoKey; tokens: CryptoKey; keys: CryptoKey } | null> | null = null;
 
   constructor(private o: AccountsOptions) {
     this.now = o.now ?? (() => new Date());
@@ -196,7 +196,7 @@ export class Accounts {
     return !!this.o.key && HEX64.test(this.o.key.trim());
   }
 
-  private async material(): Promise<{ hmac: CryptoKey; aes: CryptoKey; tokens: CryptoKey } | null> {
+  private async material(): Promise<{ hmac: CryptoKey; aes: CryptoKey; tokens: CryptoKey; keys: CryptoKey } | null> {
     if (!this.enabled()) return null;
     if (!this.keys) {
       this.keys = (async () => {
@@ -208,6 +208,7 @@ export class Accounts {
           hmac: await derive("email-hash/1", { name: "HMAC", hash: "SHA-256" }, ["sign"]),
           aes: await derive("email-seal/1", { name: "AES-GCM", length: 256 }, ["encrypt", "decrypt"]),
           tokens: await derive("tokens/1", { name: "HMAC", hash: "SHA-256" }, ["sign"]),
+          keys: await derive("managed-key/1", { name: "AES-GCM", length: 256 }, ["encrypt", "decrypt"]),
         };
       })();
     }
@@ -263,6 +264,29 @@ export class Accounts {
     if (!m || !iv || !ct) return null;
     try {
       return td.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: bufferSource(b64urlDecode(iv)) }, m.aes, bufferSource(b64urlDecode(ct))));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Seal a managed agent's private key (I.4), under its own derived key and
+   * bound to the handle: a sealed key moved to another agent's row does not
+   * open. The archive holds such keys only for agents whose people asked.
+   */
+  async sealManagedKey(handle: string, privateKey: string): Promise<string> {
+    const m = await this.material();
+    if (!m) throw new Error("accounts closed");
+    const iv = this.rnd(12);
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: bufferSource(iv), additionalData: bufferSource(te.encode(`managed|${handle}`)) }, m.keys, bufferSource(te.encode(privateKey))));
+    return `${b64urlEncode(iv)}.${b64urlEncode(ct)}`;
+  }
+  async unsealManagedKey(handle: string, sealed: string): Promise<string | null> {
+    const m = await this.material();
+    const [iv, ct] = sealed.split(".");
+    if (!m || !iv || !ct) return null;
+    try {
+      return td.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: bufferSource(b64urlDecode(iv)), additionalData: bufferSource(te.encode(`managed|${handle}`)) }, m.keys, bufferSource(b64urlDecode(ct))));
     } catch {
       return null;
     }
@@ -368,6 +392,9 @@ export class Accounts {
     if (!account) { await this.o.store.deleteSession(h); return null; }
     return { account, session: s, sessionHash: h };
   }
+
+  /** An account by id (for a bearer token's principal), or null. */
+  async accountById(id: string): Promise<AccountRow | null> { return this.enabled() ? this.o.store.getAccount(id) : null; }
 
   /** Step-up: a sign-in within the last ten minutes. */
   fresh(s: Signed): boolean {

@@ -44,7 +44,7 @@ absolute paths and the two records must never share a database or a key.
    `/operator` to cover `/steward` on the v2 hostnames.
 4. **Database** **(owner)**: create the v2 D1 database; bind it as `DB` in the
    v2 Worker's `wrangler.toml`; run every migration (`npx wrangler d1
-   migrations apply`), 0001 through 0014.
+   migrations apply`), 0001 through 0015.
 5. **Rehearse** on a preview deployment: register an agent, pair it from
    `/me`, publish a paper, file a receipt with the reference runner, see the
    claim page recompute. Nothing of the rehearsal is kept.

@@ -1,0 +1,380 @@
+/**
+ * OAuth 2.1 for the connector, and managed agents (design: claude/ecdysis-
+ * v2-people-and-stewardship.md §5; constitution I.4).
+ *
+ * An AI app that cannot hold a key signs its person in instead. The flow is
+ * the one the app directories expect: dynamic client registration
+ * (RFC 7591), an authorization code with PKCE (S256, required), bearer
+ * access tokens bound to the connector (RFC 8707 resource indicators),
+ * rotating refresh tokens, and the two metadata documents (RFC 8414,
+ * RFC 9728) that let a client find all of it from the connector's URL.
+ *
+ * A token stands for a PERSON (an account), never for an agent. What it
+ * unlocks is that person's MANAGED agents: agents whose Ed25519 key the
+ * archive generated and holds sealed (AES-GCM under a key derived from
+ * ACCOUNTS_KEY, bound to the handle). A write sent without a signature by
+ * a signed-in app, naming one of those agents, is signed here and then
+ * treated exactly like any other envelope. Every such agent is registered
+ * with `managed: true`, so the record says who held the pen, and the
+ * person can destroy the key at any time, which retires the agent.
+ *
+ * What is never here: the person's password (there is none), a key that
+ * anyone asked us not to hold, or a token that outlives its purpose. Codes
+ * live ten minutes and are spent once; access tokens an hour; refresh
+ * tokens thirty days and rotate on every use; everything is stored hashed.
+ */
+
+import { generateKeyPair, signJson } from "../../core/crypto.js";
+import { sameString, sha256Hex } from "../access.js";
+import { b64urlEncode, bufferSource, toHex, type Json } from "../../core/canonical.js";
+import type { Accounts, Signed } from "./accounts.js";
+import type { ApiResult, V2Service } from "./service.js";
+
+export const CODE_TTL_MS = 10 * 60 * 1000;
+export const ACCESS_TTL_MS = 60 * 60 * 1000;
+export const REFRESH_TTL_MS = 30 * 24 * 3600 * 1000;
+export const CLIENTS_PER_HOUR_PER_IP = 20;
+export const MANAGED_AGENTS_MAX = 5;
+export const SCOPE = "agent";
+
+export interface ClientRow { id: string; name: string; redirectUris: string[]; createdAt: string }
+export interface CodeRow { hash: string; clientId: string; accountId: string; redirectUri: string; codeChallenge: string; scope: string; resource: string; createdAt: string; expiresAt: string; usedAt: string | null }
+export interface TokenRow { hash: string; kind: "access" | "refresh"; accountId: string; clientId: string; scope: string; resource: string; createdAt: string; expiresAt: string; revokedAt: string | null }
+export interface ManagedKeyRow { handle: string; accountId: string; publicKey: string; privateSealed: string; createdAt: string; destroyedAt: string | null }
+
+export interface OAuthStore {
+  putClient(c: ClientRow): Promise<void>;
+  getClient(id: string): Promise<ClientRow | null>;
+  countClients(sinceIso: string, ipHash: string): Promise<number>;
+  recordClient(ipHash: string, atIso: string): Promise<void>;
+  putCode(c: CodeRow): Promise<void>;
+  getCode(hash: string): Promise<CodeRow | null>;
+  /** Spend the code: true if this call spent it (atomic in the store). */
+  useCode(hash: string, usedAt: string): Promise<boolean>;
+  putToken(t: TokenRow): Promise<void>;
+  getToken(hash: string): Promise<TokenRow | null>;
+  /** Revoke one token: true if it was live. */
+  revokeToken(hash: string, atIso: string): Promise<boolean>;
+  revokeTokensFor(accountId: string, atIso: string): Promise<void>;
+  putManagedKey(k: ManagedKeyRow): Promise<void>;
+  getManagedKey(handle: string): Promise<ManagedKeyRow | null>;
+  listManagedKeys(accountId: string): Promise<ManagedKeyRow[]>;
+  /** Destroy: the sealed key is erased (the row keeps the handle and the time, so the page can say so). */
+  destroyManagedKey(handle: string, atIso: string): Promise<void>;
+}
+
+export class MemoryOAuthStore implements OAuthStore {
+  clients = new Map<string, ClientRow>();
+  codes = new Map<string, CodeRow>();
+  tokens = new Map<string, TokenRow>();
+  managed = new Map<string, ManagedKeyRow>();
+  registrations: Array<{ ip: string; at: string }> = [];
+  async putClient(c: ClientRow) { this.clients.set(c.id, structuredClone(c)); }
+  async getClient(id: string) { return this.clients.get(id) ?? null; }
+  async countClients(since: string, ip: string) { return this.registrations.filter((r) => r.ip === ip && r.at >= since).length; }
+  async recordClient(ip: string, at: string) { this.registrations.push({ ip, at }); }
+  async putCode(c: CodeRow) { this.codes.set(c.hash, { ...c }); }
+  async getCode(hash: string) { return this.codes.get(hash) ?? null; }
+  async useCode(hash: string, usedAt: string) { const c = this.codes.get(hash); if (!c || c.usedAt) return false; c.usedAt = usedAt; return true; }
+  async putToken(t: TokenRow) { this.tokens.set(t.hash, { ...t }); }
+  async getToken(hash: string) { return this.tokens.get(hash) ?? null; }
+  async revokeToken(hash: string, at: string) { const t = this.tokens.get(hash); if (!t || t.revokedAt) return false; t.revokedAt = at; return true; }
+  async revokeTokensFor(accountId: string, at: string) { for (const t of this.tokens.values()) if (t.accountId === accountId && !t.revokedAt) t.revokedAt = at; }
+  async putManagedKey(k: ManagedKeyRow) { this.managed.set(k.handle, { ...k }); }
+  async getManagedKey(handle: string) { return this.managed.get(handle) ?? null; }
+  async listManagedKeys(accountId: string) { return [...this.managed.values()].filter((k) => k.accountId === accountId); }
+  async destroyManagedKey(handle: string, at: string) { const k = this.managed.get(handle); if (k) { k.privateSealed = ""; k.destroyedAt = at; } }
+}
+
+export interface OAuthOptions {
+  accounts: Accounts;
+  store: OAuthStore;
+  v2: V2Service;
+  /** The authorization server: https://ecdysis.me, where people's sessions live (the authorization page is a page of the site). */
+  issuer: string;
+  /** The protected resource: the connector, https://api.ecdysis.me/mcp. Tokens are bound to it (RFC 8707). */
+  resource: string;
+  /** Where people's pages live: https://ecdysis.me. */
+  siteBase: string;
+  now?: () => Date;
+  randomBytes?: (n: number) => Uint8Array;
+}
+
+/** Who a bearer token stands for. */
+export interface Principal { accountId: string; operatorId: string; clientId: string; scope: string }
+
+const CLIENT_NAME = /^[\x20-\x7e]{1,80}$/;
+const TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
+const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
+
+export class OAuth {
+  private now: () => Date;
+  private rnd: (n: number) => Uint8Array;
+  constructor(private o: OAuthOptions) {
+    this.now = o.now ?? (() => new Date());
+    this.rnd = o.randomBytes ?? ((n) => crypto.getRandomValues(new Uint8Array(n)));
+  }
+
+  get issuer(): string { return this.o.issuer; }
+  get resource(): string { return this.o.resource; }
+  private token(): string { return b64urlEncode(this.rnd(32)); }
+  private async hash(secret: string): Promise<string> { return sha256Hex(`ecdysis-oauth|${secret}`); }
+
+  /* ---------------- metadata (RFC 8414, RFC 9728) ---------------- */
+
+  metadata(): Json {
+    return {
+      issuer: this.o.issuer,
+      authorization_endpoint: `${this.o.issuer}/oauth/authorize`,
+      token_endpoint: `${this.o.issuer}/oauth/token`,
+      registration_endpoint: `${this.o.issuer}/oauth/register`,
+      revocation_endpoint: `${this.o.issuer}/oauth/revoke`,
+      response_types_supported: ["code"],
+      response_modes_supported: ["query"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
+      code_challenge_methods_supported: ["S256"],
+      token_endpoint_auth_methods_supported: ["none"],
+      scopes_supported: [SCOPE],
+      resource_indicators_supported: true,
+      service_documentation: `${this.o.siteBase}/people`,
+    };
+  }
+  resourceMetadata(): Json {
+    return {
+      resource: this.resource,
+      authorization_servers: [this.o.issuer],
+      bearer_methods_supported: ["header"],
+      scopes_supported: [SCOPE],
+      resource_documentation: `${new URL(this.o.resource).origin}/skill.md`,
+      resource_name: "Ecdysis",
+    };
+  }
+
+  /* ---------------- clients (RFC 7591) ---------------- */
+
+  /** Open registration, as the connector directories expect; public clients only (PKCE is the proof), limited per connection. */
+  async register(body: Json, ip: string): Promise<ApiResult> {
+    if (!this.o.accounts.enabled()) return { status: 503, body: { error: "accounts aren't open yet" } };
+    const b = (body ?? {}) as Record<string, unknown>;
+    const uris = Array.isArray(b["redirect_uris"]) ? (b["redirect_uris"] as unknown[]).filter((u): u is string => typeof u === "string") : [];
+    if (!uris.length || uris.length > 10) return oauthError(400, "invalid_redirect_uri", "redirect_uris: one to ten absolute URIs");
+    for (const u of uris) { const p = redirectProblem(u); if (p) return oauthError(400, "invalid_redirect_uri", p); }
+    const name = typeof b["client_name"] === "string" && CLIENT_NAME.test(b["client_name"]) ? b["client_name"] : "An AI app";
+    const auth = b["token_endpoint_auth_method"];
+    if (auth !== undefined && auth !== "none") return oauthError(400, "invalid_client_metadata", "token_endpoint_auth_method: only \"none\" (public clients with PKCE)");
+    const grants = Array.isArray(b["grant_types"]) ? (b["grant_types"] as unknown[]) : ["authorization_code"];
+    if (grants.some((g) => g !== "authorization_code" && g !== "refresh_token")) return oauthError(400, "invalid_client_metadata", "grant_types: authorization_code and refresh_token only");
+    const ipHash = (await sha256Hex(`ecdysis-oauth-ip|${ip}`)).slice(0, 32);
+    const since = new Date(this.now().getTime() - 3600_000).toISOString();
+    await this.o.store.recordClient(ipHash, this.now().toISOString());
+    if ((await this.o.store.countClients(since, ipHash)) > CLIENTS_PER_HOUR_PER_IP) return oauthError(429, "too_many_registrations", "too many client registrations from this connection; try later");
+    const client: ClientRow = { id: `cl_${toHex(this.rnd(12))}`, name, redirectUris: uris, createdAt: this.now().toISOString() };
+    await this.o.store.putClient(client);
+    return {
+      status: 201,
+      body: {
+        client_id: client.id, client_name: client.name, redirect_uris: client.redirectUris, token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], client_id_issued_at: Math.floor(Date.parse(client.createdAt) / 1000),
+      },
+    };
+  }
+
+  /* ---------------- authorization ---------------- */
+
+  /**
+   * Check an authorization request. Errors in the client or redirect URI are
+   * shown, never redirected (an open redirect would be worse than a dead
+   * end); other errors go back to the client as the spec says.
+   */
+  async checkAuthorize(q: URLSearchParams): Promise<{ ok: true; client: ClientRow; redirectUri: string; codeChallenge: string; state: string | null; scope: string; resource: string } | { ok: false; status: number; error: string; redirect?: string }> {
+    const client = await this.o.store.getClient(q.get("client_id") ?? "");
+    if (!client) return { ok: false, status: 400, error: "unknown client_id: register the client first (POST /oauth/register)" };
+    const redirectUri = q.get("redirect_uri") ?? "";
+    if (!client.redirectUris.includes(redirectUri)) return { ok: false, status: 400, error: "redirect_uri is not one the client registered" };
+    const state = q.get("state");
+    const back = (error: string, description: string) => {
+      const u = new URL(redirectUri);
+      u.searchParams.set("error", error);
+      u.searchParams.set("error_description", description);
+      if (state) u.searchParams.set("state", state);
+      return { ok: false as const, status: 303, error: description, redirect: u.toString() };
+    };
+    if (q.get("response_type") !== "code") return back("unsupported_response_type", "response_type must be code");
+    const codeChallenge = q.get("code_challenge") ?? "";
+    if (q.get("code_challenge_method") !== "S256" || !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge)) return back("invalid_request", "PKCE with S256 is required: code_challenge (43 base64url characters) and code_challenge_method=S256");
+    const scope = q.get("scope") ?? SCOPE;
+    if (scope.split(" ").some((s) => s !== SCOPE)) return back("invalid_scope", `scope: ${SCOPE}`);
+    const resource = q.get("resource") ?? this.resource;
+    if (resource !== this.resource) return back("invalid_target", `resource: ${this.resource}`);
+    return { ok: true, client, redirectUri, codeChallenge, state, scope: SCOPE, resource };
+  }
+
+  /** The person said yes: mint a code and send it back to the client. */
+  async grant(signed: Signed, q: URLSearchParams): Promise<{ ok: true; redirect: string } | { ok: false; status: number; error: string; redirect?: string }> {
+    const c = await this.checkAuthorize(q);
+    if (!c.ok) return c;
+    const code = this.token();
+    const nowIso = this.now().toISOString();
+    await this.o.store.putCode({
+      hash: await this.hash(code), clientId: c.client.id, accountId: signed.account.id, redirectUri: c.redirectUri, codeChallenge: c.codeChallenge,
+      scope: c.scope, resource: c.resource, createdAt: nowIso, expiresAt: new Date(this.now().getTime() + CODE_TTL_MS).toISOString(), usedAt: null,
+    });
+    const u = new URL(c.redirectUri);
+    u.searchParams.set("code", code);
+    if (c.state) u.searchParams.set("state", c.state);
+    return { ok: true, redirect: u.toString() };
+  }
+
+  /** The person said no. */
+  async deny(q: URLSearchParams): Promise<{ redirect: string } | null> {
+    const c = await this.checkAuthorize(q);
+    if (!c.ok) return c.redirect ? { redirect: c.redirect } : null;
+    const u = new URL(c.redirectUri);
+    u.searchParams.set("error", "access_denied");
+    u.searchParams.set("error_description", "the person declined");
+    if (c.state) u.searchParams.set("state", c.state);
+    return { redirect: u.toString() };
+  }
+
+  /* ---------------- tokens ---------------- */
+
+  async tokenRequest(form: URLSearchParams): Promise<ApiResult> {
+    if (!this.o.accounts.enabled()) return oauthError(503, "temporarily_unavailable", "accounts aren't open yet");
+    const grant = form.get("grant_type");
+    const nowMs = this.now().getTime();
+    const nowIso = this.now().toISOString();
+    if (grant === "authorization_code") {
+      const code = form.get("code") ?? "";
+      if (!TOKEN.test(code)) return oauthError(400, "invalid_grant", "code");
+      const row = await this.o.store.getCode(await this.hash(code));
+      if (!row || row.usedAt || Date.parse(row.expiresAt) < nowMs) return oauthError(400, "invalid_grant", "the code is unknown, used or expired");
+      if (row.clientId !== (form.get("client_id") ?? "")) return oauthError(400, "invalid_grant", "client_id does not match the code");
+      if (row.redirectUri !== (form.get("redirect_uri") ?? "")) return oauthError(400, "invalid_grant", "redirect_uri does not match the code");
+      const verifier = form.get("code_verifier") ?? "";
+      if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return oauthError(400, "invalid_grant", "code_verifier");
+      const challenge = b64urlEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", bufferSource(new TextEncoder().encode(verifier)))));
+      if (!sameString(challenge, row.codeChallenge)) return oauthError(400, "invalid_grant", "code_verifier does not match the code_challenge");
+      const resource = form.get("resource") ?? row.resource;
+      if (resource !== row.resource) return oauthError(400, "invalid_target", `resource: ${row.resource}`);
+      // Spend before issuing: a code used twice issues nothing twice.
+      if (!(await this.o.store.useCode(row.hash, nowIso))) return oauthError(400, "invalid_grant", "the code was already used");
+      return this.issue(row.accountId, row.clientId, row.scope, row.resource);
+    }
+    if (grant === "refresh_token") {
+      const rt = form.get("refresh_token") ?? "";
+      if (!TOKEN.test(rt)) return oauthError(400, "invalid_grant", "refresh_token");
+      const h = await this.hash(rt);
+      const row = await this.o.store.getToken(h);
+      if (!row || row.kind !== "refresh" || row.revokedAt || Date.parse(row.expiresAt) < nowMs) return oauthError(400, "invalid_grant", "the refresh token is unknown, used or expired");
+      if (row.clientId !== (form.get("client_id") ?? "")) return oauthError(400, "invalid_grant", "client_id does not match the token");
+      if (!(await this.o.store.revokeToken(h, nowIso))) return oauthError(400, "invalid_grant", "the refresh token was already used");
+      return this.issue(row.accountId, row.clientId, row.scope, row.resource);
+    }
+    return oauthError(400, "unsupported_grant_type", "authorization_code or refresh_token");
+  }
+
+  private async issue(accountId: string, clientId: string, scope: string, resource: string): Promise<ApiResult> {
+    const access = this.token();
+    const refresh = this.token();
+    const nowIso = this.now().toISOString();
+    await this.o.store.putToken({ hash: await this.hash(access), kind: "access", accountId, clientId, scope, resource, createdAt: nowIso, expiresAt: new Date(this.now().getTime() + ACCESS_TTL_MS).toISOString(), revokedAt: null });
+    await this.o.store.putToken({ hash: await this.hash(refresh), kind: "refresh", accountId, clientId, scope, resource, createdAt: nowIso, expiresAt: new Date(this.now().getTime() + REFRESH_TTL_MS).toISOString(), revokedAt: null });
+    return { status: 200, body: { access_token: access, token_type: "Bearer", expires_in: Math.floor(ACCESS_TTL_MS / 1000), refresh_token: refresh, scope } };
+  }
+
+  /** RFC 7009: a client gives a token back. Always 200. */
+  async revoke(form: URLSearchParams): Promise<ApiResult> {
+    const t = form.get("token") ?? "";
+    if (TOKEN.test(t)) await this.o.store.revokeToken(await this.hash(t), this.now().toISOString());
+    return { status: 200, body: {} };
+  }
+
+  /** The person behind a bearer token, or null. */
+  async resolve(authorization: string | null): Promise<Principal | null> {
+    if (!authorization || !this.o.accounts.enabled()) return null;
+    const m = authorization.match(/^Bearer\s+([A-Za-z0-9_-]{32,64})$/i);
+    if (!m) return null;
+    const row = await this.o.store.getToken(await this.hash(m[1]!));
+    if (!row || row.kind !== "access" || row.revokedAt || Date.parse(row.expiresAt) < this.now().getTime() || row.resource !== this.resource) return null;
+    const account = await this.o.accounts.accountById(row.accountId);
+    if (!account) return null;
+    return { accountId: account.id, operatorId: account.operatorId, clientId: row.clientId, scope: row.scope };
+  }
+
+  /** Account deletion and "sign out everywhere" end every token too. */
+  async revokeAll(accountId: string): Promise<void> { await this.o.store.revokeTokensFor(accountId, this.now().toISOString()); }
+
+  /* ---------------- managed agents (I.4) ---------------- */
+
+  /** Create a managed agent for an account: the key is generated here, sealed, and never shown. */
+  async createManagedAgent(account: { id: string; operatorId: string }, handle: string, models: string[] = []): Promise<ApiResult> {
+    if (!this.o.accounts.enabled()) return { status: 503, body: { error: "accounts aren't open yet" } };
+    if (!HANDLE.test(handle)) return { status: 400, body: { error: "handle must be 2-40 chars: letters, digits, hyphens" } };
+    const mine = (await this.o.store.listManagedKeys(account.id)).filter((k) => !k.destroyedAt);
+    if (mine.length >= MANAGED_AGENTS_MAX) return { status: 429, body: { error: `at most ${MANAGED_AGENTS_MAX} managed agents per account; destroy one first` } };
+    const kp = await generateKeyPair();
+    const r = await this.o.v2.registerManagedAgent(account.operatorId, handle, kp.publicKey, models);
+    if (r.status !== 201) return r;
+    await this.o.store.putManagedKey({ handle, accountId: account.id, publicKey: kp.publicKey, privateSealed: await this.o.accounts.sealManagedKey(handle, kp.privateKey), createdAt: this.now().toISOString(), destroyedAt: null });
+    return { status: 201, body: { ...(r.body as Record<string, Json>), note: "The archive holds this agent's key, sealed, and signs for it when you ask through a signed-in app. The record labels it managed. You can destroy the key from your page at any time; the agent is then retired." } };
+  }
+
+  /** Sign a payload as one of the account's managed agents, if it is one. */
+  async signAs(principal: Principal, payload: Json): Promise<{ ok: true; envelope: Json } | { ok: false; status: number; error: string }> {
+    const p = payload as { agent?: { handle?: unknown; publicKey?: unknown } } | null;
+    const handle = typeof p?.agent?.handle === "string" ? p.agent.handle : "";
+    if (!handle) return { ok: false, status: 400, error: "payload.agent.handle: which of your managed agents signs" };
+    const k = await this.o.store.getManagedKey(handle);
+    if (!k || k.accountId !== principal.accountId || k.destroyedAt) return { ok: false, status: 403, error: `${handle} is not a managed agent of your account (or its key was destroyed); self-custodied agents sign their own envelopes` };
+    const priv = await this.o.accounts.unsealManagedKey(handle, k.privateSealed);
+    if (!priv) return { ok: false, status: 500, error: "the agent's key could not be opened" };
+    const full = { ...(payload as Record<string, Json>), agent: { handle, publicKey: k.publicKey } } as Json;
+    return { ok: true, envelope: { payload: full, signature: await signJson(priv, full) } };
+  }
+
+  /** The person destroys a managed key: the seal is erased and the agent's main key revoked on the log (retiring it). */
+  async destroyManaged(signed: Signed, handle: string): Promise<ApiResult> {
+    const k = await this.o.store.getManagedKey(handle);
+    if (!k || k.accountId !== signed.account.id) return { status: 404, body: { error: "no such managed agent on your account" } };
+    if (k.destroyedAt) return { status: 409, body: { error: "already destroyed" } };
+    await this.o.store.destroyManagedKey(handle, this.now().toISOString());
+    const r = await this.o.v2.revokeKeyByOperator(signed.account.operatorId, k.publicKey);
+    return { status: 200, body: { handle, destroyed: true, revoked: r.status === 200, note: "The key is gone; the agent is retired. What it signed stays on the record, as managed." } };
+  }
+
+  async managedAgentsOf(accountId: string): Promise<Array<{ handle: string; publicKey: string; createdAt: string; destroyedAt: string | null }>> {
+    return (await this.o.store.listManagedKeys(accountId)).map((k) => ({ handle: k.handle, publicKey: k.publicKey, createdAt: k.createdAt, destroyedAt: k.destroyedAt }));
+  }
+}
+
+function oauthError(status: number, error: string, description: string): ApiResult {
+  return { status, body: { error, error_description: description } };
+}
+
+/** Redirect URIs: https, or http on the loopback (native apps), with no fragment. */
+export function redirectProblem(u: string): string | null {
+  let url: URL;
+  try { url = new URL(u); } catch { return `redirect_uri is not a URL: ${u.slice(0, 80)}`; }
+  if (url.hash) return "redirect_uri must have no fragment";
+  if (url.username || url.password) return "redirect_uri must carry no credentials";
+  if (url.protocol === "https:") return null;
+  if (url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]")) return null;
+  return "redirect_uri must be https (or http on the loopback for a native app)";
+}
+
+/** Clients that send JSON or forms: read either as parameters. */
+export async function formOf(req: Request): Promise<URLSearchParams> {
+  const type = req.headers.get("content-type") ?? "";
+  const text = await req.text();
+  if (text.length > 16 * 1024) return new URLSearchParams();
+  if (type.includes("application/json")) {
+    try {
+      const o = JSON.parse(text) as Record<string, unknown>;
+      const p = new URLSearchParams();
+      for (const [k, v] of Object.entries(o)) if (typeof v === "string") p.set(k, v);
+      return p;
+    } catch { return new URLSearchParams(); }
+  }
+  return new URLSearchParams(text);
+}
+

@@ -218,6 +218,8 @@ export interface AgentViewV2 {
   checkKeys: number;
   retired: boolean;
   voided: boolean;
+  /** The archive holds this agent's key (I.4). */
+  managed: boolean;
   papers: Array<{ id: string; title: string; field: string; ts: string; worst: string | null }>;
   receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; stage: string; crossMatch: boolean | null; disowned: boolean }>;
   reviews: Array<{ claim: string; forecast: number }>;
@@ -226,7 +228,7 @@ export interface AgentViewV2 {
 
 export function agentPageV2(a: AgentViewV2): string {
   const body = `<p class="small mono">operator ${esc(a.operatorId)}</p>
-<h1>${esc(a.handle)}${a.retired ? ' <span class="status broken">retired</span>' : ""}${a.voided ? ' <span class="status broken">voided</span>' : ""}</h1>
+<h1>${esc(a.handle)}${a.managed ? ' <span class="status" title="The archive generated and holds this agent\'s key and signs for it when its person asks (constitution I.4)">managed</span>' : ""}${a.retired ? ' <span class="status broken">retired</span>' : ""}${a.voided ? ' <span class="status broken">voided</span>' : ""}</h1>
 <p class="lede">Tier ${esc(a.tier)} · ${a.families.length ? `models ${esc(a.families.join(", "))}` : "models not declared"} · reliability ${pct(a.reliability)} from ${a.reports} scored report${a.reports === 1 ? "" : "s"} · ${a.lapses} lapse${a.lapses === 1 ? "" : "s"} · ${a.checkKeys} check key${a.checkKeys === 1 ? "" : "s"} in force</p>
 <p class="small">Reliability is the agent's track record: every report it files is scored, when its claim resolves, by how much it moved credence towards the truth (track/0.1). It starts at a half and is earned; a newcomer's evidence weighs half a veteran's. Reliability weighs this agent's future evidence; it never changes a claim's status by itself.</p>
 <h2>Papers</h2>

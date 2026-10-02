@@ -30,6 +30,8 @@ import type { V2Service } from "./v2/service.js";
 import type { MeHandler } from "./v2/me.js";
 import { isStewardPath, type StewardHandler } from "./v2/steward.js";
 import type { PagesHandler } from "./v2/pages.js";
+import { OAuthHandler } from "./v2/oauth-http.js";
+import type { OAuth } from "./v2/oauth.js";
 import type { V2Governance } from "./v2/governance.js";
 import { agentMissingPage, agentPage } from "../web/agent.js";
 import { claimMissingPage, claimPage, claimStatusCode } from "../web/claim.js";
@@ -77,6 +79,8 @@ export interface RouteOptions {
   pages?: PagesHandler | null;
   /** Amendments under Article V, for v2. */
   governance?: V2Governance | null;
+  /** OAuth 2.1 for the connector and managed agents (v2). Present: /oauth/*, the well-known documents, bearer tokens on /mcp, and /mcp/me. */
+  oauth?: { logic: OAuth; http: OAuthHandler } | null;
 }
 
 /**
@@ -728,9 +732,14 @@ async function routeRequest(
   const reading = method === "GET" || method === "HEAD";
   // MCP is POST-shaped but read-only: it shares the read bucket and stays
   // up in read-only mode, like every other read surface.
-  const isMcp = path === "/mcp";
+  const isMcp = path === "/mcp" || path === "/mcp/me";
   if (!(await limiter.allow(isMcp ? "mcp" : reading ? "read" : "write", ip))) {
     return respond(429, { error: "rate limit exceeded; slow down" });
+  }
+  // OAuth for the connector (v2): metadata, registration, the authorization page, tokens.
+  if (OAuthHandler.owns(path)) {
+    if (!opts.oauth) return respond(404, { error: "OAuth is not configured on this deployment" });
+    return opts.oauth.http.handle(req, path, ip);
   }
 
   // The operator console has its own lock (Cloudflare Access, checked again
@@ -945,11 +954,19 @@ async function routeRequest(
         if (opts.waitUntil) opts.waitUntil(counting);
         else await counting;
       };
+      // A bearer token (OAuth, v2) names a person; /mcp/me insists on one and tells clients where to get it (RFC 9728).
+      const principal = opts.oauth ? await opts.oauth.logic.resolve(req.headers.get("authorization")) : null;
+      if (path === "/mcp/me" && !principal) {
+        const meta = opts.oauth ? `${opts.oauth.logic.issuer}/.well-known/oauth-protected-resource` : null;
+        return new Response(JSON.stringify({ error: "unauthorized", error_description: "this endpoint needs a bearer token from Ecdysis's OAuth sign-in; /mcp works without one" }), {
+          status: 401, headers: { ...JSON_HEADERS, "www-authenticate": meta ? `Bearer resource_metadata="${meta}"` : "Bearer" },
+        });
+      }
       const r = await handleMcp(body, {
         svc, host: safeHost(url), logKey: opts.sthPublicKey ?? null,
         doorbells: opts.doorbells ?? null, alerts: opts.alerts ?? null,
-        limiter, readOnly: !!opts.readOnly, count,
-        ...(opts.v2 ? { extraTools: v2Tools(opts.v2, ip, opts.governance ?? null) } : {}),
+        limiter, readOnly: !!opts.readOnly, count, principal,
+        ...(opts.v2 ? { extraTools: v2Tools(opts.v2, ip, opts.governance ?? null, opts.oauth?.logic ?? null) } : {}),
       });
       if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
       return respond(r.status, r.body);

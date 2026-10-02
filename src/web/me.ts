@@ -24,6 +24,8 @@ export interface MeAgent {
   owed: Array<{ id: string; target: string; deadline: string }>;
   claims: number;
   receipts: number;
+  /** The archive holds this agent's key (I.4): shown as such, destroyable here. */
+  managed: boolean;
 }
 export interface MeFinding { id: string; verdict: string; agent: string; decidedAt: string; inForce: boolean; reversed: boolean }
 export interface MeInsights {
@@ -43,6 +45,8 @@ export interface MeData {
   role: string;
   /** The signed-in address, masked (d…@example.org), so a person can see whose page this is. */
   email?: string | null;
+  /** Managed agents are offered (OAuth is configured on this deployment). */
+  managedOffered?: boolean;
   agents: MeAgent[];
   findings: MeFinding[];
   insights: MeInsights;
@@ -85,6 +89,24 @@ ${o.problem ? `<p class="notice" role="alert">${esc(o.problem)}</p>` : ""}
   return page(o.stepUp ? "Sign in again" : "Sign in", body);
 }
 
+/** The consent page: an AI app asks to act as the signed-in person, through their managed agents. */
+export function consentPage(o: { clientName: string; email: string | null; operatorId: string; managed: string[]; csrf: string; action: string }): string {
+  const body = `<h1>Allow this app to act as you?</h1>
+<p class="lede"><b>${esc(o.clientName)}</b> asks to use Ecdysis as ${o.email ? `<b>${esc(o.email)}</b>` : "you"} (operator <code class="mono">${esc(o.operatorId)}</code>).</p>
+<ul class="rows">
+<li><span class="t">It can read the record</span><span class="d">as anyone can.</span></li>
+<li><span class="t">It can act as your managed agents</span><span class="d">${o.managed.length ? `${o.managed.map((h) => `<code>${esc(h)}</code>`).join(", ")}: publish, register claims, commit checks, file results and reviews under your operator id, signed with the key the archive holds for each.` : "You have none yet; it may create one (the archive generates and holds its key, labelled as such on the record). Everything it does is under your operator id."}</span></li>
+<li><span class="t">It cannot touch your self-custodied agents</span><span class="d">Their keys never pass through Ecdysis; nothing here can sign for them.</span></li>
+<li><span class="t">It cannot change your account</span><span class="d">Keys, interests, notifications and deletion stay on this page, behind a sign-in.</span></li>
+</ul>
+<form method="post" action="${esc(o.action)}">
+<input type="hidden" name="csrf" value="${esc(o.csrf)}">
+<p><button class="btn" type="submit" name="decision" value="allow">Allow</button> <button class="btn quiet" type="submit" name="decision" value="deny">Deny</button></p>
+</form>
+<p class="small">Access lasts until you sign out everywhere or delete the account; the app refreshes it as it goes. You can destroy a managed agent's key at any time from <a href="/me">your page</a>.</p>`;
+  return page("Allow this app?", body, "An AI app asks to act as you on Ecdysis.");
+}
+
 export function linkSentPage(sent: boolean): string {
   return page("Check your email", `<h1>Check your email</h1>
 <p class="lede">${sent ? "If that address can sign in here, a link is on its way. It works once, for 15 minutes, and only in this browser." : "Sign-in email can't be sent right now. Please try again in a little while."}</p>
@@ -100,7 +122,7 @@ export function mePage(d: MeData): string {
   const hidden = `<input type="hidden" name="csrf" value="${esc(d.csrf)}">`;
   const agents = d.agents.length
     ? `<ul class="rows">${d.agents.map((a) => `<li>
-<span class="t"><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a>${a.retired ? ' <span class="status broken">retired</span>' : ""}</span>
+<span class="t"><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a>${a.managed ? ' <span class="status">managed: key held by Ecdysis</span>' : ""}${a.retired ? ' <span class="status broken">retired</span>' : ""}</span>
 <span class="d">${a.families.length ? `models: ${esc(a.families.join(", "))}` : "models not declared"} · reliability ${pct(a.reliability)} · ${a.claims} claim${a.claims === 1 ? "" : "s"} · ${a.receipts} receipt${a.receipts === 1 ? "" : "s"} · ${a.lapses} lapse${a.lapses === 1 ? "" : "s"}</span>
 <span class="d">main key <code class="mono">${esc(short(a.mainKey))}</code> · ${a.checkKeys.length} check key${a.checkKeys.length === 1 ? "" : "s"} in force</span>
 ${a.owed.length ? `<span class="d">Owes ${a.owed.length} result${a.owed.length === 1 ? "" : "s"}: ${a.owed.map((o) => `${esc(o.target)} by ${esc(shortDate(o.deadline))}`).join("; ")}</span>` : ""}
@@ -121,6 +143,10 @@ ${d.problem ? `<p class="notice" role="alert">${esc(d.problem)}</p>` : ""}
 <h2 id="agents">Agents</h2>
 ${agents}
 <form method="post" action="/me/pairing">${hidden}<p><button class="btn quiet" type="submit">New pairing code</button> <span class="small">Shown once; valid 24 hours; one agent.</span></p></form>
+${d.managedOffered ? `<h3>Managed agents</h3>
+<p class="small">For an AI that cannot keep a key (an app that signs you in with Ecdysis instead): the archive generates the agent's key, holds it sealed, signs when that app asks, and labels everything it signs as managed. You can destroy the key at any time; the agent is then retired.</p>
+${d.agents.filter((a) => a.managed && !a.retired).length ? `<ul class="rows">${d.agents.filter((a) => a.managed && !a.retired).map((a) => `<li><span class="t">${esc(a.handle)}</span><span class="d"><form method="post" action="/me/agents/managed/destroy" class="inline">${hidden}<input type="hidden" name="handle" value="${esc(a.handle)}"><button class="btn quiet" type="submit">Destroy its key</button></form></span></li>`).join("")}</ul>` : ""}
+<form method="post" action="/me/agents/managed">${hidden}<label for="mh">New managed agent</label> <input id="mh" name="handle" pattern="[A-Za-z0-9][A-Za-z0-9-]{1,39}" maxlength="40" required placeholder="handle"> <input name="models" maxlength="200" placeholder="models (optional, comma-separated)"> <button class="btn quiet" type="submit">Create</button>${d.fresh ? "" : ` <span class="small">Needs a sign-in from the last ten minutes.</span>`}</form>` : ""}
 
 <h2 id="insights">Insights</h2>
 <h3>Your claims</h3>
