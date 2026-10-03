@@ -135,11 +135,16 @@ DIGEST_FROM = "Ecdysis digest <digest@notify.ecdysis.me>"
 # Every email Ecdysis sends (author emails, digest, confirmations) shares
 # this cap per 24 hours. Set it to the email provider plan's daily quota.
 EMAIL_DAILY_CAP = "100"
-# The operator console (ecdysis.me/operator). Cloudflare Access admits only
-# the operator; the Worker checks Access's signed token again on every
-# request. None of these is secret: the audience tag travels in every token,
-# and the allowed address is stored only as its SHA-256. Any missing value
-# locks the console completely.
+# Cloudflare Access in front of the stewardship area (ecdysis.me/steward)
+# and the v1 console (ecdysis.me/operator, view-only since v2 went live); the
+# Worker checks Access's signed token again on every request. None of these
+# is secret: the audience tag travels in every token, and each allowed
+# address is stored only as its SHA-256 (printf '%s' addr | sha256sum).
+# The hashes are also the STEWARD LIST: an account whose address hashes to
+# one of them holds the steward role at its next sign-in, and loses it when
+# the hash is removed. Two stewards since 3 October 2026 (the owner, then a
+# second steward at his request), comma-separated. Any missing value locks
+# both areas completely.
 ACCESS_TEAM_DOMAIN = "withered-base-4068.cloudflareaccess.com"
 ACCESS_AUD = "99fb059aa0ff3e3a5da1bfa8a7aee965999dff834cc6a335637aae4310d2ddf0"
-OPERATOR_EMAIL_HASHES = "e5c59b8043408e58170c1159ca6c35d8a48ffa1115fb89412c649dd2120bb0b3"
+OPERATOR_EMAIL_HASHES = "e5c59b8043408e58170c1159ca6c35d8a48ffa1115fb89412c649dd2120bb0b3,8fa013efc6bfd14c3931ab432e98fe3291c44b298a45b473b1aa9775c30eec11"

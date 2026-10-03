@@ -270,3 +270,22 @@ describe("the operator console: the digest", () => {
     assert.match(ov, /skill\.md and llms\.txt reads/);
   });
 });
+
+describe("the operator console after the switchover", () => {
+  it("is view-only on a v2 deployment, and the steward list is every hash in OPERATOR_EMAIL_HASHES", async () => {
+    const { consoleReadOnly, accessFrom } = await import("../src/index.js");
+    // The console's actions belong to the v1 record, frozen at the switchover; stewardship is /steward.
+    assert.equal(consoleReadOnly({ ECDYSIS_V2: "1" }, false), true, "v2 live: view-only even when nothing is frozen");
+    assert.equal(consoleReadOnly({ ECDYSIS_V2: "0" }, false), false, "v1 alone: actions as before");
+    assert.equal(consoleReadOnly({}, true), true, "a frozen deployment is view-only as before");
+    // And view-only means every console action is turned away with the read-only notice, pages still served.
+    const ro = await world({ readOnly: true });
+    const r = await ro.post("/operator/emails/draft", { to: "author@example.edu", subject: "Your result was reproduced", kind: "replication", body: "A".repeat(80) });
+    assert.equal(r.headers.get("location"), "/operator/emails?m=read-only");
+    assert.equal(ro.sent.length, 0, "nothing was sent");
+    assert.equal((await ro.get("/operator/health")).status, 200, "the Health view stays readable");
+    // Two stewards: the second hash is read exactly as the first, lower-cased and trimmed; the same list admits them through Access.
+    const env = { ACCESS_TEAM_DOMAIN: "t.cloudflareaccess.com", ACCESS_AUD: "a".repeat(64), OPERATOR_EMAIL_HASHES: " E5C59B8043408E58170C1159CA6C35D8A48FFA1115FB89412C649DD2120BB0B3, 8fa013efc6bfd14c3931ab432e98fe3291c44b298a45b473b1aa9775c30eec11 " } as unknown as Parameters<typeof accessFrom>[0];
+    assert.deepEqual(accessFrom(env).emailHashes, ["e5c59b8043408e58170c1159ca6c35d8a48ffa1115fb89412c649dd2120bb0b3", "8fa013efc6bfd14c3931ab432e98fe3291c44b298a45b473b1aa9775c30eec11"]);
+  });
+});
