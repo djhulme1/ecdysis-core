@@ -22,7 +22,14 @@ import { analyticsPage, keyIssuedPage, linkSentPage, mePage, noticePage, pairing
 export const ME_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
   "x-content-type-options": "nosniff",
-  "referrer-policy": "no-referrer",
+  // Not "no-referrer": under that policy browsers send `Origin: null` on the
+  // page's OWN form posts (Fetch's "append a request Origin header"), which
+  // sameOrigin() below would refuse; the sign-in button then does nothing
+  // (seen in production on 3 Oct 2026, the first time anyone signed in).
+  // "same-origin" still sends nothing to any other site: these pages load no
+  // third-party resource at all (default-src 'none'), and a link out carries
+  // no referrer. The v1 console learnt the same lesson (src/api/operator.ts).
+  "referrer-policy": "same-origin",
   "strict-transport-security": "max-age=31536000; includeSubDomains",
   "cache-control": "no-store",
   "x-robots-tag": "noindex, nofollow",
@@ -55,13 +62,20 @@ export interface MeOptions {
  * every POST, so a missing or foreign one is a cross-site form or a script.
  * The anti-forgery token guards the signed-in forms; this guards the one
  * form that has no session yet (sign-in), and everything else twice.
+ *
+ * `Origin: null` is ambiguous: a browser sends it both for a cross-site form
+ * in a sandboxed frame (refuse) and for a same-origin form post from a page
+ * served with `Referrer-Policy: no-referrer` (fine). Sec-Fetch-Site, which
+ * no page can set or suppress, tells them apart; without it, null is refused,
+ * so the check fails closed. Our own pages no longer send no-referrer (see
+ * ME_HEADERS), so in practice Origin is the real one.
  */
 export function sameOrigin(req: Request): boolean {
   const url = new URL(req.url);
   const origin = req.headers.get("origin");
   const site = req.headers.get("sec-fetch-site");
   if (site && site !== "same-origin" && site !== "none") return false;
-  if (!origin) return site === "same-origin";
+  if (!origin || origin === "null") return site === "same-origin";
   return origin === `${url.protocol}//${url.host}`;
 }
 

@@ -218,6 +218,47 @@ describe("accounts (v2)", () => {
     assert.equal((un.body as Record<string, Json>)["tier"], "unverified");
   });
 
+  it("accepts its own form posts as real browsers send them, and refuses a null Origin unless the browser vouches for same-origin", async () => {
+    // Production, 3 Oct 2026: the first sign-in ever attempted was refused with "Not from here".
+    // The pages said Referrer-Policy: no-referrer, under which browsers send `Origin: null` on
+    // a page's OWN form posts; the check compared it with the site and refused. Two guards now:
+    // the pages send a same-origin referrer policy (so Origin is real), and a null Origin is
+    // judged by Sec-Fetch-Site, which no page can set or suppress.
+    const { sameOrigin } = await import("../src/api/v2/me.js");
+    const req = (h: Record<string, string>) => new Request("https://ecdysis.me/me/login", { method: "POST", headers: h });
+    assert.equal(sameOrigin(req({ origin: "https://ecdysis.me" })), true, "a real same origin");
+    assert.equal(sameOrigin(req({ origin: "https://ecdysis.me", "sec-fetch-site": "same-origin" })), true);
+    assert.equal(sameOrigin(req({ origin: "null", "sec-fetch-site": "same-origin" })), true, "Chrome under no-referrer: Origin null, but the browser says same-origin");
+    assert.equal(sameOrigin(req({ origin: "null", "sec-fetch-site": "cross-site" })), false, "a sandboxed cross-site frame: Origin null and the browser says so");
+    assert.equal(sameOrigin(req({ origin: "null" })), false, "Origin null with no Sec-Fetch-Site fails closed");
+    assert.equal(sameOrigin(req({})), false, "no Origin at all: a script, not a browser form");
+    assert.equal(sameOrigin(req({ "sec-fetch-site": "same-origin" })), true, "a browser that omits Origin but vouches for the site");
+    assert.equal(sameOrigin(req({ origin: "https://evil.example" })), false);
+    assert.equal(sameOrigin(req({ origin: "https://evil.example", "sec-fetch-site": "same-origin" })), false, "a lying Origin is not rescued by Sec-Fetch-Site");
+    assert.equal(sameOrigin(req({ origin: "https://ecdysis.me", "sec-fetch-site": "cross-site" })), false, "nor the other way round");
+    assert.equal(sameOrigin(req({ origin: "https://api.ecdysis.me" })), false, "a sibling host is another origin");
+
+    // The pages themselves: /me, /steward and the OAuth consent page all carry a referrer policy
+    // under which the browser sends the real Origin on their forms, and never no-referrer.
+    const w = world({ stewards: [await sha256Hex("daniel@example.org")] });
+    const ip = "1.1.1.1";
+    const me = await w.me.handle(new Request("https://ecdysis.me/me"), "/me", ip);
+    assert.equal(me.headers.get("referrer-policy"), "same-origin");
+    assert.match(me.headers.get("content-security-policy") ?? "", /default-src 'none'/, "and loads nothing from anywhere, so no referrer ever leaves the site");
+    const b = decodeURIComponent(me.headers.getSetCookie().find((x) => x.startsWith("ecd_b="))!.split(";")[0]!.slice(6));
+    // The sign-in form, posted exactly as Chrome did from the old page (Origin null + Sec-Fetch-Site same-origin): a link is sent.
+    const body = new URLSearchParams({ email: "daniel@example.org" }).toString();
+    const asChrome = await w.me.handle(new Request("https://ecdysis.me/me/login", { method: "POST", body, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(body.length), cookie: `ecd_b=${b}`, origin: "null", "sec-fetch-site": "same-origin", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" } }), "/me/login", ip);
+    const asChromeText = await asChrome.text();
+    assert.equal(asChrome.status, 200, asChromeText);
+    assert.match(asChromeText, /Check your email/);
+    assert.equal(w.sent.length, 1, "the sign-in link went out");
+    // And as a sandboxed cross-site frame would post it: refused, nothing sent.
+    const framed = await w.me.handle(new Request("https://ecdysis.me/me/login", { method: "POST", body, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(body.length), cookie: `ecd_b=${b}`, origin: "null", "sec-fetch-site": "cross-site" } }), "/me/login", ip);
+    assert.equal(framed.status, 403);
+    assert.equal(w.sent.length, 1);
+  });
+
   it("gives the steward role to the configured addresses and nobody else", async () => {
     const w = world({ stewards: [await sha256Hex("daniel@example.org")] });
     const d = await w.signIn("Daniel@Example.org");
