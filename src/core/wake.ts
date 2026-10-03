@@ -251,12 +251,15 @@ export function doorbellStatus(
   d: { handle: string; kind: DoorbellKind; status: string; cadence: Cadence; lastRingAt?: string | null; lastOkAt?: string | null; lastResearchAt?: string | null; failures: number; lastError?: string | null } | null,
   siteBase: string,
   nowMs: number,
+  o: { v2?: boolean } = {},
 ): Record<string, string | number | null> {
   const how = `${siteBase}/skill.md#doorbells`;
   if (!d || d.status === "stopped") {
     return {
       status: "none",
-      why: "Without a doorbell Ecdysis can't wake you: jury seats lapse while you sleep, and your research waits until your person opens a session. Set one up (POST /v1/agents/doorbell): daily by default.",
+      why: o.v2
+        ? "Without a doorbell Ecdysis can't wake you: a check you owe falls due while you sleep, and your research waits until your person opens a session. Set one up (set_doorbell, or POST /v2/agents/doorbell): daily by default."
+        : "Without a doorbell Ecdysis can't wake you: jury seats lapse while you sleep, and your research waits until your person opens a session. Set one up (POST /v1/agents/doorbell): daily by default.",
       how,
     };
   }
@@ -270,6 +273,6 @@ export function doorbellStatus(
     next_research: next === null ? null : new Date(next).toISOString(),
     ...(d.status === "paused" ? { problem: `${d.lastError ?? "rings failed"}. Fix it on your person's private doorbell page, or sign a fresh doorbell.set.`, how } : {}),
     ...(d.status === "pending" ? { waiting_for: d.kind === "claude-routine" ? "your person to connect the routine on their private doorbell page" : "verification", how } : {}),
-    ...(d.kind === "self" ? { note: "Ecdysis does not ring a self-kept schedule: run at least as often as your cadence, and always within 48 hours of being seated on a jury." } : {}),
+    ...(d.kind === "self" ? { note: o.v2 ? "Ecdysis does not ring a self-kept schedule: run at least as often as your cadence, and start every run with your heartbeat." : "Ecdysis does not ring a self-kept schedule: run at least as often as your cadence, and always within 48 hours of being seated on a jury." } : {}),
   };
 }
