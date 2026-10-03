@@ -170,3 +170,68 @@ describe("verify, don't trust (v2)", () => {
     assert.equal(review.payload["forecast"], 0.7);
   });
 });
+
+describe("the site after the switchover", () => {
+  it("serves agents the v2 index, moves v1's pages to where their subjects live, and hands out the v2 protocol from /kit", async () => {
+    const { route, MemoryRateLimiter } = await import("../src/api/router.js");
+    const { PagesHandler, V1_PAGE_MOVES, V1_ONLY_PAGES } = await import("../src/api/v2/pages.js");
+    const store = new MemoryStore();
+    const log = new TransparencyLog(store);
+    const logKey = await generateKeyPair();
+    const v2 = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
+    const v2svc = new V2Service({ log, store: v2, logPrivateKey: logKey.privateKey, screeners: [structuralScreener()] });
+    const v1svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
+    const limiter = new MemoryRateLimiter(1000);
+    const archive = "https://v1.ecdysis.me";
+    const pages = new PagesHandler(v2svc, { host: "api.ecdysis.me", archive });
+    const on = { v2: v2svc, pages, archive };
+
+    // The agents' index: v2's protocol and endpoints, and where the first record went. With v2 off it is v1's.
+    const index = async (opts: Record<string, unknown>) => { const r = await route(new Request("https://api.ecdysis.me/"), v1svc, limiter, opts); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
+    const v2index = await index(on);
+    assert.equal(v2index.status, 200);
+    assert.equal(v2index.body["protocol"], "ecdysis/0.2");
+    const endpoints = v2index.body["endpoints"] as string[];
+    assert.ok(endpoints.includes("POST /v2/agents/register") && endpoints.includes("GET /v2/record") && endpoints.includes("POST /v2/checks"), "v2's endpoints are listed");
+    assert.ok(!endpoints.some((e) => /^POST \/v1\//.test(e)), "no v1 write is offered: they answer 410");
+    assert.ok(endpoints.includes("GET /v1/log/sth"), "the log's endpoints keep their paths");
+    assert.deepEqual(v2index.body["v1"], { status: "archived", note: (v2index.body["v1"] as Record<string, Json>)["note"], archive });
+    assert.equal((await index({})).body["protocol"], "ecdysis/0.1", "v1 alone still describes itself");
+    assert.equal((await index({ v2: v2svc })).body["v1"] && ((await index({ v2: v2svc })).body["v1"] as Record<string, Json>)["archive"], undefined, "no archive named when none is configured");
+
+    // v1's pages under v2: permanent redirects, never v1's page rendered over v2's record.
+    const site = async (path: string) => route(new Request(`https://ecdysis.me${path}`, { headers: { accept: "text/html" } }), v1svc, limiter, on);
+    for (const [from, to] of Object.entries(V1_PAGE_MOVES)) {
+      const r = await site(from);
+      assert.equal(r.status, 301, from);
+      assert.equal(r.headers.get("location"), to, from);
+    }
+    for (const p of V1_ONLY_PAGES) {
+      const r = await site(p);
+      assert.equal(r.status, 301, p);
+      assert.equal(r.headers.get("location"), `${archive}${p}`, "a page only the first record has goes to the archive");
+    }
+    const noArchive = new PagesHandler(v2svc, { host: "api.ecdysis.me" });
+    assert.equal((await noArchive.handle("GET", "/apps"))!.headers.get("location"), "/", "without an archive, home");
+    assert.equal((await site("/review")).headers.get("location"), "/frontier");
+    assert.equal((await site("/submit")).headers.get("location"), "/people", "v2 has no paste-through: every write is the agent's own envelope");
+    for (const kept of ["/people", "/papers", "/frontier", "/observatory", "/connect", "/agents", "/governance", "/privacy"]) assert.equal((await site(kept)).status, 200, kept);
+
+    // /kit hands out the v2 protocol, with a hand-off line that asks for reach, not for JSON to paste; /sitemap.xml lists v2's pages only.
+    const kit = await (await site("/kit")).text();
+    assert.match(kit, /Ecdysis agent protocol, v0\.2/);
+    assert.match(kit, /allowlist api\.ecdysis\.me/);
+    assert.doesNotMatch(kit, /jury of other agents|href="\/submit"|ecdysis\.me\/submit/i, "nothing of v1's review or paste-through remains in the page's own words");
+    assert.match(kit, /raw\.githubusercontent\.com\/djhulme1\/ecdysis-core\/main\/docs\/v2\/skill\.md/);
+    const sitemap = await (await site("/sitemap.xml")).text();
+    assert.match(sitemap, /<loc>https:\/\/ecdysis\.me\/frontier<\/loc>/);
+    assert.match(sitemap, /<loc>https:\/\/ecdysis\.me\/kit<\/loc>/);
+    assert.doesNotMatch(sitemap, /\/review<|\/graph<|\/commons<|\/apps<|\/charter<|\/about</, "no moved page is advertised");
+    const kp = await generateKeyPair();
+    assert.equal((await v2svc.registerAgent({ constitution: ACK, handle: "Moth-2", publicKey: kp.publicKey, operatorId: "op-moth" })).status, 201);
+    const sign = async (payload: Json) => ({ payload, signature: await signJson(kp.privateKey, payload) }) as Json;
+    const pub = await v2svc.publishPaper(await sign({ protocol: "ecdysis/0.2", type: "paper", title: "A paper for the sitemap", abstract: "An abstract long enough to pass the structural screen, describing what was measured and how it was measured, in two paragraphs.\n\nA second paragraph closes it.", field: "math", methods: "Pre-registered; one seeded entry point.", claims: [{ text: "The sitemap lists every published paper by its identifier.", confidence: 0.7, test: "A published paper is missing from /sitemap.xml." }], builds_on: [], agent: { handle: "Moth-2", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    assert.equal(pub.status, 201, JSON.stringify(pub.body));
+    assert.match(await (await site("/sitemap.xml")).text(), new RegExp(`<loc>https://ecdysis\\.me/p/${String((pub.body as Record<string, Json>)["id"]).replace(/[.:]/g, "\\$&")}</loc>`), "published papers are listed");
+  });
+});

@@ -14,9 +14,11 @@ import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
 import { skillMdV2 } from "./skill.js";
 import { privacyPageV2, termsMdV2 } from "./legal.js";
-import { agentsPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js";
+import { agentsPageV2, kitPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js";
 import { connectPage } from "../../web/connect.js";
 import { mcpUrlFor } from "../../web/launch.js";
+import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
+import { escapeXml } from "../site.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
 import { agentPageV2, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
 
@@ -40,6 +42,30 @@ const BADGE = /^\/badge\/(paper|claim|agent)\/(.{1,120})\.svg$/;
 const SVG_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-type": "image/svg+xml; charset=utf-8", "cache-control": "public, max-age=300", "content-security-policy": "default-src 'none'" };
 const TEXT_404: Record<string, string> = { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" };
 const FEED_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-type": "application/atom+xml; charset=utf-8", "cache-control": "public, max-age=300" };
+
+/**
+ * v1's pages that have no place on a v2 site, and where each one's subject
+ * now lives. A v2 deployment answers these with a permanent redirect rather
+ * than rendering v1's page over v2's record: a jury queue, a preprint queue
+ * or a paste-through submission form would be empty or broken here, and
+ * would tell a visitor the wrong story. Pages whose subject exists only in
+ * the first record (the apps marketplace) go to the archive when there is one.
+ */
+export const V1_PAGE_MOVES: Readonly<Record<string, string>> = {
+  "/review": "/frontier", "/jury": "/frontier",
+  "/preprints": "/papers",
+  "/graph": "/observatory", "/dashboard": "/observatory",
+  "/commons": "/governance",
+  "/charter": "/people", "/submit": "/people",
+  "/about": "/", "/why": "/",
+};
+export const V1_ONLY_PAGES: ReadonlyArray<string> = ["/apps", "/marketplace"];
+
+/** The v2 site's pages for the sitemap; paper pages are appended from the record. */
+export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
+  "/", "/people", "/connect", "/agents", "/papers", "/frontier", "/observatory", "/governance", "/privacy",
+  "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/subscribe", "/kit",
+];
 
 export interface PagesOptions {
   host?: string;
@@ -108,6 +134,15 @@ export class PagesHandler {
     const frozen = async (subject: string) => isHeld(await this.v2.record(), subject);
     if (path === "/frontier") return html(200, frontierPageV2((await this.v2.frontier(25)).body as unknown as FrontierViewV2));
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
+    if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL_V2 }));
+    if (path === "/sitemap.xml") {
+      const ids = [...(await this.v2.record()).papers.keys()];
+      const urls = [...V2_SITEMAP_PAGES, ...ids.map((id) => `/p/${id}`)].map((u) => `  <url><loc>${escapeXml(`https://${site}${u}`)}</loc></url>`).join("\n");
+      return new Response(method === "HEAD" ? null : `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`, { status: 200, headers: { ...PAGE_HEADERS, "content-type": "application/xml; charset=utf-8" } });
+    }
+    // v1's pages, moved: a permanent redirect to where the subject lives now (see V1_PAGE_MOVES), never v1's page over v2's record.
+    const moved = V1_PAGE_MOVES[path] ?? (V1_ONLY_PAGES.includes(path) ? (this.o.archive ? `${this.o.archive}${path}` : "/") : null);
+    if (moved) return new Response(null, { status: 301, headers: { ...PAGE_HEADERS, location: moved } });
     const pm = path.match(PAPER);
     if (pm) {
       if (await frozen(pm[2] ? `${pm[1]}#${pm[2]}` : pm[1]!)) return html(451, frozenPageV2(pm[2] ? "claim" : "paper"));

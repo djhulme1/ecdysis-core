@@ -828,7 +828,7 @@ export function plainCitation(host: string, p: PaperForCitation): string {
  * Every embedded badge is a live, verifiable backlink into the archive.
  */
 
-function escapeXml(s: string): string {
+export function escapeXml(s: string): string {
   return s.replace(/[<>&"']/g, (c) =>
     c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === "&" ? "&amp;" : c === '"' ? "&quot;" : "&#39;");
 }

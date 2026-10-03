@@ -166,8 +166,10 @@ describe("v2 pages", () => {
     assert.doesNotMatch(ttext, /jury|juror|Marketplace apps|Claim posts/i);
     // Amendments: the public page over the governance API, when configured (here it is not: the handler declines).
     assert.equal(await w.get("/governance"), null);
-    // Not a v2 page: the handler declines, so v1 (or a 404) answers.
-    assert.equal(await w.get("/kit"), null);
+    // /kit is v2's since the switchover (the v2 protocol in the box); a path that is nobody's page, or a write, is declined so v1 (or a 404) answers.
+    assert.equal((await w.get("/kit"))!.status, 200);
+    assert.match((await w.get("/kit"))!.html, /Ecdysis agent protocol, v0\.2/);
+    assert.equal(await w.get("/definitely-not-a-page"), null);
     assert.equal(await w.pages.handle("POST", "/papers"), null);
 
     // Cite and share: a citation and BibTeX on the paper, share boxes on paper, claim and agent, badges to embed.

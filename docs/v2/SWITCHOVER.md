@@ -82,31 +82,45 @@ A4. **Deploy the archive**: run "Freeze v1" (`ref` = `main`'s commit from
     A2, `final_sth` = the head from A3). It verifies, deploys `ecdysis-v1`
     on the old database, and checks the archive serves the head verbatim
     and refuses writes.
-A5. **(owner)** Attach the hostname: dashboard → Workers & Pages →
-    `ecdysis-v1` → Settings → Domains & Routes → Add → Custom domain →
-    `v1.ecdysis.me`. Cloudflare creates the DNS record and certificate.
+A5. **Hostname**: `v1.ecdysis.me` is a custom domain in
+    `wrangler.v1-archive.toml`; the workflow's deploy creates the DNS record
+    and certificate (the owner's dashboard did not show the menu the first
+    draft of this step described). A custom domain disables the Worker's
+    workers.dev address, so the workflow's check goes to the custom domain.
     Check: `https://v1.ecdysis.me/v1/log/sth` is the final head;
     `https://v1.ecdysis.me/` shows the old record.
+
+**Done 3 Oct, 11:39–12:05 BST** on the owner's "freeze now". Final head:
+size 42, root `f680ed6d…dad62e96`, 10:42:44Z; `mirror/v1/final-sth.json`.
+Archive `ecdysis-v1` at https://v1.ecdysis.me (PR #3, workflow runs 1–3).
 
 ### Part B: v2's database and key (owner, dashboard and browser only)
 
 B1. **(owner)** Create the database: dashboard → Storage & Databases → D1 →
     Create → name `ecdysis-v2` → copy its **Database ID** (a UUID).
-B2. **(owner)** Make the new log key in a browser console (nothing installed;
-    the key never leaves the machine), with the one-liner in the owner's
-    document. It prints PUBLIC (59 characters, starts `MCowBQYDK2VwAyEA`)
-    and PRIVATE (64 characters, starts `MC4CAQAw`). Save both in the
-    password manager.
-B3. **(owner)** GitHub → repository → Settings → Secrets and variables →
-    Actions → **Variables** → New: `D1_V2_DATABASE_ID` = the UUID from B1;
-    `STH_V2_PUBLIC_KEY` = the PUBLIC half from B2.
-B4. **(owner)** Cloudflare → Workers & Pages → `ecdysis-core` → Settings →
-    Variables and Secrets → `STH_SIGNING_KEY_PKCS8` → Edit → paste the
-    PRIVATE half from B2 → Deploy. From this moment the (frozen) v1 Worker
-    at ecdysis.me signs heads with a key its pin does not match: harmless,
-    since it takes no writes and the archive at v1.ecdysis.me serves the
-    final head; and the v2 code about to deploy refuses writes until the
-    pin matches, which B3 arranged.
+B2. **(owner)** Make the new log key in the browser: a script-only page
+    (published to the owner as a private artifact) generates an Ed25519 pair
+    with WebCrypto, checks it signs and verifies, and shows PUBLIC (59
+    characters, starts `MCowBQYDK2VwAyEA`) and PRIVATE (64 characters,
+    starts `MC4CAQAw`). Nothing is installed; the key never leaves the
+    page. Save both in the password manager. (The owner was on a phone; a
+    console one-liner was the first draft of this step.)
+B3. **Pin the public values** in `wrangler.toml` on `v2` (PR): the database
+    id and `STH_PUBLIC_KEY`. Nothing secret is in them; the Deploy
+    workflow's gate accepts the pinned values (repository variables
+    `D1_V2_DATABASE_ID` / `STH_V2_PUBLIC_KEY` remain as the fallback), and
+    the live check reads `vars.STH_V2_PUBLIC_KEY`.
+B4. **(owner)** Cloudflare → `ecdysis-core` → Settings → Variables and
+    Secrets → `STH_SIGNING_KEY_PKCS8` → Edit → paste the PRIVATE half from
+    B2 → Deploy. From this moment the (frozen) v1 Worker at ecdysis.me
+    signs heads with a key its pin does not match: harmless, since it
+    takes no writes and the archive at v1.ecdysis.me serves the final
+    head; and the v2 code about to deploy refuses writes until the pin
+    matches, which B3 arranged.
+
+**Done 3 Oct, 12:15–12:27 BST.** Database `91f347ac-7635-4f48-9a3b-d7dea171d2b1`;
+log key `MCowBQYDK2VwAyEACQKUaC27eF_XhkCw06IrJJ7eLSW7GtT_IzwaNiNCRPc`
+(PR #4 pinned the database, bbcb620 the key).
 
 ### Part C: v2 goes live (session)
 
@@ -120,15 +134,33 @@ C2. **Checks**: `/v1/log/sth` signature verifies against the new public key
     Health page shows "Log key matches its pin: yes"; the landing page
     links to v1.ecdysis.me; `npm run check:live` (read mode) passes.
 
+**Done 3 Oct, 12:32 BST** (PR #5, deploy d4f3434): head size 0 signed by
+the new key; registration 503 "before genesis"; pages 200. Note for the
+next reader: a browser cache of two minutes (`max-age=120`) can show the
+old landing page for a moment after the deploy.
+
 ### Part D: genesis (owner signs; session files)
 
-D1. **(owner)** Sign the adoption with the OPERATOR key, on your machine. The
-    signing helper in the desktop workspace signs the canonical JSON
+D1. **(owner)** Sign the adoption with the OPERATOR key, in your browser. A
+    self-contained page (no outside code, no network; published to the
+    owner as a private artifact) takes the operator private key, signs the
+    canonical JSON
     `{"hash":"b8079a55…ab17f","op":"adopt","ts":"<now, ISO-8601 UTC>","version":"2.0.0"}`
-    (keys sorted, no whitespace) and prints only the signature; the
-    session runs it as a black box with your go-ahead. Within the hour,
+    (keys sorted, no whitespace) with the browser's own Ed25519, verifies
+    the signature against the operator PUBLIC key before showing it, and
+    gives one line: `adopt ts=… signature=…`. The owner pastes that line to
+    the session, which within the hour sends
     `POST https://api.ecdysis.me/v2/constitution/adopt` with
     `{version, hash, ts, signature}`. Entry 0 of the v2 log.
+    (The first draft had the session run the desktop workspace's signing
+    helper as a black box. That helper, `sign.mjs`, holds Chrysalis-1's
+    key, not the operator's, so the archive answered 401; and a session
+    may not run the operator key at all. The browser page is the route.)
+
+**Done 3 Oct, 12:54 BST.** Entry 0: `constitution.adopt` v2.0.0, hash
+`b8079a55…ab17f`, by founder, signed `2026-10-03T11:53:32Z`, recorded
+`11:54:19Z`; head size 1, root `77245578…ed9ce`, verifies against the v2
+log key. The record is open.
 D2. **(owner)** Sign in at `https://ecdysis.me/me` (the steward role follows
     from the configured address hashes). Check `/steward` admits you and
     nobody else.
@@ -157,9 +189,9 @@ D4. **Check**: `npm run check:live` against the new API; the observatory
 
 No private key leaves the owner's machine or passes through a session: the
 new log key is made in his browser and typed into his dashboard; the
-operator key signs through the helper as a black box that returns only a
+operator key signs in his browser, in a page that returns only a
 signature. No hazard decision is made by anyone but the owner, signed with
-the operator key: on his machine, the signing helper signs
+the operator key: the same kind of page signs
 `{"decision":"release"|"reject","op":"hazard","subject":"<id>","ts":"<now, ISO-8601 UTC>"}`
 (canonical JSON: sorted keys) with the operator key, and the signature goes
 within the hour to `POST https://api.ecdysis.me/v2/hazard/decision` as

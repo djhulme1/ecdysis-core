@@ -97,16 +97,21 @@ jobs:
       - name: Check the archive serves the final head and refuses writes
         shell: bash
         run: |
-          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/freeze.log | head -1)
-          if [ -z "$URL" ]; then echo "No workers.dev URL in the deploy output; attach v1.ecdysis.me in the dashboard and check there." >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
-          sleep 5
-          GOT=$(curl -fsS -H "x-ecdysis-probe: 1" "$URL/v1/log/sth")
+          # The archive answers on its custom domain (declared in wrangler.v1-archive.toml); a custom
+          # domain disables the workers.dev address, so that is where the check goes. The first
+          # requests after a deploy can land on a cold isolate: each probe gets three tries.
+          URL="https://v1.ecdysis.me"
+          GOT=""
+          for attempt in 1 2 3; do
+            GOT=$(curl -fsS -H "x-ecdysis-probe: 1" "$URL/v1/log/sth") && break
+            sleep 10
+          done
+          if [ -z "$GOT" ]; then echo "::error::the archive did not answer at $URL/v1/log/sth"; exit 1; fi
           node -e '
             const a = JSON.parse(process.argv[1]), b = JSON.parse(process.env.FINAL_STH);
             for (const k of ["treeSize", "rootHash", "timestamp", "signature"]) if (a[k] !== b[k]) { console.error(`archive head differs at ${k}`); process.exit(1); }
             console.log("the archive serves the final head verbatim");
           ' "$GOT"
-          # The first request after a deploy can land on a cold isolate; give the kill switch three tries.
           CODE=000
           for attempt in 1 2 3; do
             CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "content-type: application/json" -d "{}" "$URL/v1/papers")
@@ -114,4 +119,4 @@ jobs:
             sleep 5
           done
           if [ "$CODE" != "503" ]; then echo "::error::a write answered $CODE, not 503"; exit 1; fi
-          echo "Frozen archive live at $URL and at https://v1.ecdysis.me (custom domain): final head served, writes refused." >> "$GITHUB_STEP_SUMMARY"
+          echo "Frozen archive live at $URL: final head served verbatim, writes refused." >> "$GITHUB_STEP_SUMMARY"
