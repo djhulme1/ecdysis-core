@@ -123,6 +123,8 @@ export class StewardHandler {
     const r = await this.o.v2.record();
     const csrf = await this.o.accounts.csrf(signed);
     const fresh = this.o.accounts.fresh(signed);
+    // Shown at the top of every page: who is signed in, in steward mode.
+    const who = await this.o.accounts.emailOf(signed.account);
     switch (path) {
       case "/steward": {
         const s = await this.o.v2.scores();
@@ -143,7 +145,7 @@ export class StewardHandler {
           canariesDue: this.o.canaries ? await this.o.canaries.due() : null,
           disputes: all.filter((c) => c.dispute > 0).length,
           queue: all.filter((c) => c.status !== "established" && c.status !== "refuted").sort((a, b) => b.valueOfChecking - a.valueOfChecking).slice(0, 10).map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, use: c.use })),
-        }, flash, problem));
+        }, flash, problem, who));
       }
       case "/steward/people": {
         const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80);
@@ -159,7 +161,7 @@ export class StewardHandler {
         if (q) rows = rows.filter((x) => x.operatorId.includes(q) || x.agents.some((a) => a.handle.toLowerCase().includes(q.toLowerCase())));
         rows = rows.slice(0, 100);
         for (const row of rows) row.account = !!(await this.o.accounts.accountForOperator(row.operatorId));
-        return this.html(200, peoplePage({ rows, q, csrf, fresh }, flash, problem));
+        return this.html(200, peoplePage({ rows, q, csrf, fresh }, flash, problem, who));
       }
       case "/steward/agents": {
         const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80).toLowerCase();
@@ -183,7 +185,7 @@ export class StewardHandler {
         else if (only === "owing") rows = rows.filter((x) => x.owed > 0);
         const families: Record<string, number> = {};
         for (const a of r.agents.values()) for (const f of a.families.length ? a.families : ["undeclared"]) families[f] = (families[f] ?? 0) + 1;
-        return this.html(200, agentsPage({ rows: rows.slice(0, 200), total: r.agents.size, q, only, families }, flash, problem));
+        return this.html(200, agentsPage({ rows: rows.slice(0, 200), total: r.agents.size, q, only, families }, flash, problem, who));
       }
       case "/steward/evidence": {
         const s = await this.o.v2.scores();
@@ -193,18 +195,18 @@ export class StewardHandler {
           return { ref: c.ref, credence: c.credence, dispute: c.dispute, status: c.status, receipts: rs.length, disputedReceipts: rs.filter((x) => (r.checks.get(x.id)?.disputedBy.length ?? 0) > 0).length };
         });
         const anchors = [...r.anchors].map(([claim, confirmed]) => ({ claim, confirmed }));
-        return this.html(200, evidencePage({ findings, disputes, anchors, csrf, fresh }, flash, problem));
+        return this.html(200, evidencePage({ findings, disputes, anchors, csrf, fresh }, flash, problem, who));
       }
       case "/steward/canaries": {
         if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
-        return this.html(200, canariesPage({ rows: await this.o.canaries.list(), csrf, fresh, now: this.now().toISOString() }, flash, problem));
+        return this.html(200, canariesPage({ rows: await this.o.canaries.list(), csrf, fresh, now: this.now().toISOString() }, flash, problem, who));
       }
       case "/steward/controls":
-        return this.html(200, controlsPage({ switches: await this.o.v2.settingsView(), csrf, fresh, readOnly: !!this.o.readOnly }, flash, problem));
+        return this.html(200, controlsPage({ switches: await this.o.v2.settingsView(), csrf, fresh, readOnly: !!this.o.readOnly }, flash, problem, who));
       case "/steward/content":
-        return this.html(200, contentPage({ holds: await this.o.v2.holds(100) }, flash, problem));
+        return this.html(200, contentPage({ holds: await this.o.v2.holds(100) }, flash, problem, who));
       case "/steward/audit":
-        return this.html(200, auditPage({ rows: await this.o.v2.audit(200) }, flash, problem));
+        return this.html(200, auditPage({ rows: await this.o.v2.audit(200) }, flash, problem, who));
       default:
         return this.html(404, refusedPage("There is nothing at that address."));
     }
