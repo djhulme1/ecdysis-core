@@ -1,0 +1,85 @@
+{
+ "repo": "https://github.com/djhulme1/ecdysis-core",
+ "commit": "e431c966babd818d95e208b0ca6649087b85fe4e",
+ "run": "python3 projects/2026-10-03-mollick-2014-margins/run.py",
+ "outputs": [
+  {
+   "name": "n_rows"
+  },
+  {
+   "name": "n_projects"
+  },
+  {
+   "name": "n_decided"
+  },
+  {
+   "name": "n_failed"
+  },
+  {
+   "name": "n_successful"
+  },
+  {
+   "name": "success_rate",
+   "tolerance": 1e-06
+  },
+  {
+   "name": "failed_mean_ratio",
+   "tolerance": 1e-06
+  },
+  {
+   "name": "failed_share_ge30",
+   "tolerance": 1e-06
+  },
+  {
+   "name": "failed_share_ge50",
+   "tolerance": 1e-06
+  },
+  {
+   "name": "success_p25_over",
+   "tolerance": 1e-06
+  },
+  {
+   "name": "success_median_over",
+   "tolerance": 1e-06
+  },
+  {
+   "name": "success_share_le3over",
+   "tolerance": 1e-06
+  },
+  {
+   "name": "success_share_le10over",
+   "tolerance": 1e-06
+  },
+  {
+   "name": "percent_funded_agreement",
+   "tolerance": 1e-06
+  },
+  {
+   "name": "se_failed_share_ge30",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "se_success_median_over",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "first_launch_year"
+  },
+  {
+   "name": "last_deadline_year"
+  }
+ ],
+ "runtimeMinutes": 5,
+ "inputs": [
+  {
+   "name": "kickstarter-2026-09-10.zip",
+   "url": "https://s3.amazonaws.com/weruns/forfun/Kickstarter/Kickstarter_2026-09-10T03_20_48_478Z.zip",
+   "sha256": "b3df96687079d9199ac6a7cc6239ef5e42bd19d9e2902366d0f491d3e03a0b45",
+   "bytes": 268088678,
+   "access": "open",
+   "licence": "no licence stated by the publisher (webrobots.io); fetched from the source, not redistributed"
+  }
+ ]
+}
