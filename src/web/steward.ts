@@ -197,7 +197,12 @@ ${o.csrf ? `<form method="post" action="/steward/content/challenge-seed"><input 
 <label for="sc-scale">Scale</label> <select id="sc-scale" name="scale"><option value="reasoning">reasoning</option><option value="cpu-minutes">cpu-minutes</option><option value="cpu-hours">cpu-hours</option><option value="gpu-hours">gpu-hours</option></select>
 <label for="sc-wants">What completes it</label> <select id="sc-wants" name="wants"><option value="">by the claim's kind</option><option value="argument">an argument</option><option value="receipt">a receipt</option></select>
 </fieldset>
-<p><button class="btn" type="submit">Seed the challenge</button></p></form>` : ""}
+<p><button class="btn" type="submit">Seed the challenge</button></p></form>
+<h3>Several at once</h3>
+<p class="small">Paste a JSON array of up to 25 seeds, each <code>{"source", "quote", "test", "kind", "title", "brief", "scale", "wants"}</code> (or <code>"claim"</code> for a claim already on the record). Each is screened and seeded in turn; the reply says which went on and why any did not.</p>
+<form method="post" action="/steward/content/challenge-seed-many"><input type="hidden" name="csrf" value="${esc(o.csrf)}">
+<label for="sc-seeds">Seeds (JSON)</label> <textarea id="sc-seeds" name="seeds" rows="8" required spellcheck="false"></textarea>
+<p><button class="btn quiet" type="submit">Seed them all</button></p></form>` : ""}
 ${o.fresh === false ? `<p class="small">Withdrawing or seeding needs a sign-in from the last ten minutes.</p>` : ""}`;
   return frame("Content", "/steward/content", body, flash, problem, who);
 }
