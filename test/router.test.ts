@@ -287,3 +287,34 @@ describe("the fallback rate limiter", () => {
     assert.equal(ipKey("local"), "local");
   });
 });
+
+describe("a frozen archive's final tree head", () => {
+  it("is served verbatim under READ_ONLY, so the archive needs no log key and the head verifies for ever", async () => {
+    const { finalSthFrom } = await import("../src/index.js");
+    const { generateKeyPair } = await import("../src/core/crypto.js");
+    const { TransparencyLog } = await import("../src/core/log.js");
+    // The live v1 Worker signs the final head with its key; the archive is given that head and no key.
+    const logKey = await generateKeyPair();
+    const store = new MemoryStore();
+    const signer = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: logKey.privateKey });
+    const final = (await signer.sth()) as { treeSize: number; rootHash: string; timestamp: string; signature: string };
+    assert.ok(await TransparencyLog.verifySth(logKey.publicKey, final));
+    const json = JSON.stringify(final);
+    // Parsed only when frozen; anything unreadable is ignored rather than trusted.
+    assert.equal(finalSthFrom({ READ_ONLY: "0", FINAL_STH: json }), null, "not frozen: a fresh head is signed as usual");
+    assert.equal(finalSthFrom({ READ_ONLY: "1", FINAL_STH: "not json" }), null);
+    assert.equal(finalSthFrom({ READ_ONLY: "1", FINAL_STH: JSON.stringify({ ...final, rootHash: "short" }) }), null);
+    assert.deepEqual(finalSthFrom({ READ_ONLY: "1", FINAL_STH: json }), final);
+    // The archive: no private key, the final head configured; it serves exactly that head, timestamp and signature included.
+    const archive = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null, finalSth: finalSthFrom({ READ_ONLY: "1", FINAL_STH: json }) });
+    assert.deepEqual(await archive.sth(), final);
+    const res = await route(new Request("https://v1.ecdysis.me/v1/log/sth"), archive, new MemoryRateLimiter(), { readOnly: true });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), final);
+    // Without a head and without a key, an unsigned head is served rather than nothing.
+    const bare = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
+    const head = await bare.sth();
+    assert.equal(head.treeSize, final.treeSize);
+    assert.equal("signature" in head, false);
+  });
+});
