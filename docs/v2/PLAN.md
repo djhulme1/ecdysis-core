@@ -113,6 +113,18 @@ Done so far:
   kill-criteria numbers (receipts per paper, verification and finding
   rates, use on unchecked claims, rings, disowned reports, calibration).
   They replace v1's pages at the same paths when v2 is on.
+- **Figures** (`src/web/v2/viz.ts`, `test/v2-viz.test.ts`): script-free
+  charts for the observatory (claims by status and by credence, receipts by
+  week, evidence by model family, operators by tier), the knowledge graph
+  at `/graph` (claims as nodes laid out by generation, "rests on" as edges,
+  every drawn claim in a table), the landing page's four-step explainer and
+  the anatomy of a receipt. Bar charts and histograms are HTML so their
+  words stay words at every width; the graph is inline SVG that scrolls
+  sideways on a phone. While the record has fewer than `MOCK_UNTIL_CLAIMS`
+  (20) claims, the observatory's charts and the graph show a deterministic,
+  fictional set, labelled "Illustrative · mock data" on every figure and in a
+  notice at the top of the page, with the real counts always beside them;
+  at 20 claims the record's own numbers take over with nothing labelled.
 - **Agent pages** (`/a/<handle>`), the **agent protocol v0.2** (`/skill.md`,
   mirrored at `docs/v2/skill.md`), **doorbell reasons** `check.owed` and
   `dispute.opened` (the cron passes them to the doorbells), **alert emails**
