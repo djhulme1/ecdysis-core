@@ -1,6 +1,7 @@
 /**
- * credence/0.2 — one score per claim, moved only by evidence (Ecdysis v2;
- * design: claude/ecdysis-v2-design.md §5; sanity check §5).
+ * credence/0.3 — one score per claim, moved only by evidence (Ecdysis v2;
+ * design: claude/ecdysis-v2-design.md §5; sanity check §5; arguments:
+ * claude/ecdysis-conceptual-claims-design.md).
  *
  *   ℓ(c) = logit(q̃) + Σ_o w_o·e_o,   p = σ(ℓ)
  *   q̃    = ε + (1 − ε)·[½ + ρ_a(q − ½)]·Π_f p(f)
@@ -96,10 +97,32 @@
  * needs confirming replications from two DECLARED model families and two
  * distinct verified operators.
  *
+ * ARGUMENTS (credence/0.3; arguments.ts). A claim is EMPIRICAL or CONCEPTUAL.
+ * Settled arguments move credence too, through `arguments` in the options:
+ *   upheld counterexample (conceptual)   status refuted; log-odds −counterexampleStep
+ *   upheld contradiction with an         credence capped at 1 − (its credence) while it
+ *     ESTABLISHED claim                  stays established; status contested
+ *   upheld logical gap / unsupported     −upheldStep × the arguer's tier weight, one per
+ *     premise                            operator
+ *   upheld statistical / methodological  the author's calibration ρ_a is multiplied by
+ *     flaw (empirical)                   methodologyFactor per assessment: the stated
+ *                                        confidence counts for less, nothing moves
+ *                                        towards false
+ *   a refuting argument DISMISSED        +corroborationStep per distinct VERIFIED arguer,
+ *                                        all corroboration capped at corroborationCap
+ * Verified arguers' effects count towards the verified sum (statuses); others
+ * join the unverified pool under its cap. A conceptual claim's status is
+ * refuted (counterexample) → contested (contradiction cap) → supported
+ * (dismissed attacks from supportedAttacks verified arguers and credence at
+ * the supported bar) → unchecked; never established. A contradiction cap is
+ * applied in a second pass, so claims resting on a capped claim see the cap.
+ *
  * Pure and deterministic: the same inputs give the same numbers anywhere.
  */
 
-export const CREDENCE_V2_VERSION = "credence/0.2";
+import { ARGUMENT_PARAMS, type ClaimArgumentsInput, type ClaimKind } from "./arguments.js";
+
+export const CREDENCE_V2_VERSION = "credence/0.3";
 
 export const CREDENCE_V2_PARAMS = {
   /** A confirming replication: 4:1 evidence. */
@@ -175,6 +198,8 @@ export interface ClaimInput {
   calibration?: number;
   /** A registered claim from human literature: taken at face value by what rests on it until verified evidence counts against it. */
   external?: boolean;
+  /** arguments/0.1: empirical (a receipt can repeat its test) or conceptual (its test names a refuter in words). Absent: empirical. */
+  kind?: ClaimKind;
   /** Claims this one relies on (extends or method), Ecdysis claims and registered external ones alike. Unregistered sources are not listed. */
   foundations: string[];
   /** Log order. Foundations always come earlier. */
@@ -225,6 +250,8 @@ export interface CredenceV2Options {
   voided?: (e: EvidenceInput) => boolean;
   /** Revealed canaries (design §7): claim ref → true if its known outcome confirms it. They resolve a claim for the calibration record, whatever the evidence says. */
   anchors?: Map<string, boolean>;
+  /** arguments/0.1: what each claim's SETTLED arguments do to it (arguments.ts, argumentEffects), by claim ref. Absent: none. */
+  arguments?: Map<string, ClaimArgumentsInput>;
 }
 
 export interface CountedItem {
@@ -262,6 +289,12 @@ export interface ClaimV2 {
   paper: string;
   /** A registered claim from human literature. */
   external: boolean;
+  /** arguments/0.1: empirical or conceptual. */
+  kind: ClaimKind;
+  /** An upheld contradiction with an established claim caps this one's credence here (1 − that claim's credence); null when none applies. */
+  cap: number | null;
+  /** Settled arguments counted against and for this claim, and open ones awaiting checks. */
+  arguments: { upheld: number; dismissed: number; open: number; methodology: number; counterexample: boolean };
   /** The calibration ρ_a the prior used: given, or derived from the author's record of earlier resolved claims. */
   calibration: number;
   prior: number;
@@ -520,9 +553,47 @@ function raisedFoundationFactor(x: Pick<ClaimV2, "external" | "credence" | "cred
 }
 
 /**
+ * Settled arguments' log-odds on a claim (arguments/0.1). Verified arguers'
+ * effects count towards the verified sum, which the statuses are tested
+ * against; other arguers' upheld attacks are capped on their own at the
+ * unverified cap. Corroboration (dismissed attacks) counts from verified
+ * arguers only, capped.
+ */
+export function sumArguments(a: ClaimArgumentsInput | undefined): { verified: number; other: number } {
+  if (!a) return { verified: 0, other: 0 };
+  const A = ARGUMENT_PARAMS;
+  let verified = 0;
+  let other = 0;
+  for (const x of a.upheldAttacks) {
+    const v = -A.upheldStep * P.tier[x.tier];
+    if (x.tier === "verified") verified += v; else other += v;
+  }
+  const corroboration = a.dismissedAttacks.filter((x) => x.tier === "verified").length * A.corroborationStep;
+  verified += Math.min(A.corroborationCap, corroboration);
+  if (a.refuted) verified -= A.counterexampleStep;
+  return { verified, other: Math.max(-P.unverifiedCap, other) };
+}
+
+/**
+ * A conceptual claim's status: refuted by an upheld counterexample; contested
+ * under a contradiction cap; supported once attacks from enough distinct
+ * verified arguers have been dismissed and the verified credence clears the
+ * supported bar; else unchecked. Never established.
+ */
+export function conceptualStatusOf(credenceVerified: number, a: ClaimArgumentsInput | undefined, capped: boolean): ClaimStatusV2 {
+  if (a?.refuted) return "refuted";
+  if (capped) return "contested";
+  const dismissed = a ? a.dismissedAttacks.filter((x) => x.tier === "verified").length : 0;
+  return dismissed >= ARGUMENT_PARAMS.supportedAttacks && credenceVerified >= P.supportedFrom ? "supported" : "unchecked";
+}
+
+/**
  * Every claim's credence, use, dispute and status, and what would raise it
  * most. Claims are processed in log order, each with all its evidence, so
- * a claim's prior uses its foundations' current credence.
+ * a claim's prior uses its foundations' current credence. Contradiction
+ * caps need the cited claims' numbers, so the computation runs twice when
+ * any applies: the first pass finds the caps, the second applies them where
+ * every dependant can see them.
  */
 export function computeCredenceV2(
   claims: ClaimInput[],
@@ -530,6 +601,22 @@ export function computeCredenceV2(
   uses: UseInput[],
   o: CredenceV2Options = {},
 ): Map<string, ClaimV2> {
+  const first = credencePass(claims, evidence, uses, o, new Map());
+  const caps = new Map<string, number>();
+  for (const c of claims) {
+    const a = o.arguments?.get(c.ref);
+    if (!a || a.contradictions.length === 0) continue;
+    let cap = Infinity;
+    for (const ref of a.contradictions) {
+      const cited = first.get(ref);
+      if (cited && ref !== c.ref && cited.status === "established") cap = Math.min(cap, 1 - cited.credence);
+    }
+    if (cap < Infinity) caps.set(c.ref, Math.max(1e-6, cap));
+  }
+  return caps.size ? credencePass(claims, evidence, uses, o, caps) : first;
+}
+
+function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: UseInput[], o: CredenceV2Options, caps: Map<string, number>): Map<string, ClaimV2> {
   const byClaim = new Map<string, EvidenceInput[]>();
   for (const e of evidence) byClaim.set(e.claim, [...(byClaim.get(e.claim) ?? []), e]);
   const useBy = new Map<string, Map<string, number>>();
@@ -557,29 +644,43 @@ export function computeCredenceV2(
   for (const c of sorted) {
     if (pendingSeq !== null && c.seq !== pendingSeq) flush();
     pendingSeq = c.seq;
+    const kind: ClaimKind = c.kind === "conceptual" ? "conceptual" : "empirical";
+    const args = o.arguments?.get(c.ref);
     const found = c.foundations.map((ref) => out.get(ref)).filter((x): x is ClaimV2 => !!x);
-    const calibration = c.calibration ?? calibrationOf(record.get(c.authorOperator) ?? []);
+    // arguments/0.1: each upheld methodological assessment halves the weight of the author's stated confidence.
+    const calibration = (c.calibration ?? calibrationOf(record.get(c.authorOperator) ?? [])) * ARGUMENT_PARAMS.methodologyFactor ** (args?.methodology ?? 0);
     const prior = priorOf(c.stated, calibration, found.map(foundationFactor));
     const ev = sumEvidence(byClaim.get(c.ref) ?? [], c.authorOperator, o);
-    const logOdds = clampLogOdds(logit(prior) + ev.sum);
-    const credence = sigma(logOdds);
-    const credenceVerified = sigma(clampLogOdds(logit(prior) + ev.sumVerified));
+    const arg = sumArguments(args);
+    const cap = caps.get(c.ref) ?? null;
+    const capped = (p: number) => (cap === null ? p : Math.min(p, cap));
+    const total = ev.sum + arg.verified + arg.other;
+    const credence = capped(sigma(clampLogOdds(logit(prior) + total)));
+    const logOdds = logit(credence);
+    const credenceVerified = capped(sigma(clampLogOdds(logit(prior) + ev.sumVerified + arg.verified)));
     const use = [...(useBy.get(c.ref)?.values() ?? [])].reduce((x, y) => x + y, 0);
     const threshold = thresholdOf(use);
-    const statusAt = (bar: number) => statusOf({
-      credence: credenceVerified, sReplication: ev.sReplication, fReplication: ev.fReplication, threshold: bar,
-      confirmingReplication: ev.confirmingReplication, failingReplication: ev.failingReplication,
-      confirmingFamilies: familyCount(ev.confirmingFamilies), confirmingOperators: ev.confirmingOperators,
-      foundationRefuted: found.some((x) => x.status === "refuted"),
-    });
+    const foundationRefuted = found.some((x) => x.status === "refuted");
+    const statusAt = (bar: number): ClaimStatusV2 => {
+      if (kind === "conceptual") return conceptualStatusOf(credenceVerified, args, cap !== null);
+      const st = statusOf({
+        credence: credenceVerified, sReplication: ev.sReplication, fReplication: ev.fReplication, threshold: bar,
+        confirmingReplication: ev.confirmingReplication, failingReplication: ev.failingReplication,
+        confirmingFamilies: familyCount(ev.confirmingFamilies), confirmingOperators: ev.confirmingOperators,
+        foundationRefuted,
+      });
+      // An upheld contradiction with an established claim leaves an empirical claim contested too, unless the evidence already refutes it.
+      return cap !== null && st !== "refuted" ? "contested" : st;
+    };
     const status = statusAt(threshold);
     // Resolved at the bar for zero use: a citation raises what a claim must clear to READ established, never what a record is judged against.
     const resolved = resolutionOf(statusAt(thresholdOf(0)), o.anchors?.get(c.ref));
     if (resolved !== null && c.calibration === undefined && c.authorOperator) pending.push({ op: c.authorOperator, stated: c.stated, truth: resolved });
     const dispute = disputeOf(ev.s, ev.f);
-    sums.set(c.ref, ev.sum);
+    sums.set(c.ref, total);
     out.set(c.ref, {
-      ref: c.ref, paper: c.paper, external: c.external === true, calibration, prior, logOdds, credence, credenceVerified, s: ev.s, f: ev.f, dispute, use, threshold, status, resolved,
+      ref: c.ref, paper: c.paper, external: c.external === true, kind, cap, calibration, prior, logOdds, credence, credenceVerified, s: ev.s, f: ev.f, dispute, use, threshold, status, resolved,
+      arguments: { upheld: args?.upheldAttacks.length ?? 0, dismissed: args?.dismissedAttacks.length ?? 0, open: args?.open ?? 0, methodology: args?.methodology ?? 0, counterexample: args?.refuted ?? false },
       reproduced: ev.reproduced,
       families: [...ev.confirmingFamilies].filter((x) => x !== "?").sort(),
       valueOfChecking: (use + 0.5) * credence * (1 - credence),

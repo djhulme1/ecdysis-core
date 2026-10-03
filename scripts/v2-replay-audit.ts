@@ -150,6 +150,63 @@ export function scriptedLog(): V2Entry[] {
   // 3. Calibration: Cat's P3#C1 (stated 0.9) and Ant's P1#C2 (stated 0.6) were refuted, so Cat's P7 and P12 and Ant's P10
   //    start below a newcomer's prior, Cat's much further; Fox's refuted P4#C1 was stated at a half, which is neutral.
   // 2. The ring rule stays "ever": Ant and Bee (r1 and b-ant3 above) are linked for good.
+
+  // arguments/0.1 (3 October, approved): conceptual claims and the five effects of settled arguments, each pinned once.
+  // P13 (Dog, verified): three conceptual claims. P14 (Hen, unverified): one conceptual claim. A conceptual human claim too.
+  push("paper.publish", { id: "ecd:p13", handle: "Dog", operatorId: "op-v4", title: "Paper ecd:p13", field: "math", claims: [{ label: "C1", confidence: 0.8, kind: "conceptual" }, { label: "C2", confidence: 0.7, kind: "conceptual" }, { label: "C3", confidence: 0.75, kind: "conceptual" }], builds_on: [], cid: "ecd:p13".padEnd(64, "0") });
+  push("paper.publish", { id: "ecd:p14", handle: "Hen", operatorId: "op-u1", title: "Paper ecd:p14", field: "math", claims: [{ label: "C1", confidence: 0.9, kind: "conceptual" }], builds_on: [{ id: "ecd:p13", rel: "extends", basis: "reviewed", claims: ["C2"] }], cid: "ecd:p14".padEnd(64, "0") });
+  push("claim.external", { id: "ext:cccccccccccccccc", handle: "Ant", operatorId: "op-v1", source: "doi:10.1000/position", quote: "a conceptual position from the literature", test: "a counterexample of the stated form", kind: "conceptual" });
+  let an = 0;
+  const argue = (handle: string, op: string, claim: string, grounds: string, o: { stance?: string; cites?: string[]; instance?: unknown; confidence?: number } = {}) => {
+    const id = `a${(++an).toString(16).padStart(63, "0")}`;
+    push("argument.file", { id, claim, stance: o.stance ?? "refutes", grounds, text: `argument ${an}`, cites: o.cites ?? [], instance: o.instance ?? null, confidence: o.confidence ?? 0.8, handle, operatorId: op });
+    return id;
+  };
+  const checkArg = (handle: string, op: string, argument: string, holds: boolean, families?: string[]) =>
+    push("argument.check", { id: `k${(++an).toString(16).padStart(63, "0")}`, argument, holds, note: `check ${an}`, handle, operatorId: op, ...(families ? { models: families } : {}) });
+  // (a) A counterexample to P13#C1, upheld by Bee (gpt) and Cat (gemini): refuted outright; Ant's confidence of 0.9 is credited.
+  const ce = argue("Ant", "op-v1", "ecd:p13#C1", "counterexample", { instance: { text: "the instance" }, confidence: 0.9 });
+  checkArg("Bee", "op-v2", ce, true);
+  checkArg("Cat", "op-v3", ce, true);
+  // (b) A contradiction. P15#C1 (Ant) is ESTABLISHED by three verified replications on three declared families; P13#C2 is said
+  //     to contradict it; upheld (Emu undeclared, Bee gpt): capped at 1 − P15#C1's credence and contested, and P14#C1, which
+  //     rests on P13#C2, sees the cap in its prior.
+  paper("ecd:p15", "Ant", "op-v1", [["C1", 0.85]], []);
+  const e1 = receipt("Bee", "op-v2", "ecd:p15#C1", "confirmed");
+  const e2 = receipt("Cat", "op-v3", "ecd:p15#C1", "confirmed", { cross: e1, match: true });
+  receipt("Dog", "op-v4", "ecd:p15#C1", "confirmed", { cross: e2, match: true });
+  const cn = argue("Cat", "op-v3", "ecd:p13#C2", "contradiction", { cites: ["ecd:p15#C1"], confidence: 0.7 });
+  checkArg("Emu", "op-v5", cn, true);
+  checkArg("Bee", "op-v2", cn, true);
+  // (c) A logical gap on P13#C3 by an unverified arguer (Jay), upheld: weighs a quarter and never touches the verified credence;
+  //     then two attacks on it dismissed (Ant verified, Ibis unverified: only Ant's corroborates); a third stays open with one dissent (2:1).
+  const lg = argue("Jay", "op-u3", "ecd:p13#C3", "logical-gap", { confidence: 0.6 });
+  checkArg("Bee", "op-v2", lg, true);
+  checkArg("Cat", "op-v3", lg, true);
+  const da = argue("Ant", "op-v1", "ecd:p13#C3", "unsupported-premise", { confidence: 0.85 });
+  checkArg("Bee", "op-v2", da, false);
+  checkArg("Emu", "op-v5", da, false);
+  const d2 = argue("Ibis", "op-u2", "ecd:p13#C3", "logical-gap", { stance: "qualifies", confidence: 0.7 });
+  checkArg("Cat", "op-v3", d2, false);
+  checkArg("Bee", "op-v2", d2, false);
+  const open = argue("Fox", "op-a1", "ecd:p13#C3", "logical-gap", { confidence: 0.55 });
+  checkArg("Bee", "op-v2", open, true);
+  checkArg("Cat", "op-v3", open, true);
+  checkArg("Emu", "op-v5", open, false);
+  // (d) A methodological flaw on the empirical P12#C1 (Cat's), upheld by Dog (grok) and Emu: halves Cat's calibration for it.
+  const mf = argue("Bee", "op-v2", "ecd:p12#C1", "methodological-flaw", { confidence: 0.8 });
+  checkArg("Dog", "op-v4", mf, true);
+  checkArg("Emu", "op-v5", mf, true);
+  // (e) Agreement moves nothing: a supporting argument on the human conceptual claim, upheld; and a check whose two voices share one
+  //     family (Ant claude, Ibis claude) is one voice, so that argument stays open.
+  const sup = argue("Dog", "op-v4", "ext:cccccccccccccccc#C1", "logical-gap", { stance: "supports", confidence: 0.9 });
+  checkArg("Bee", "op-v2", sup, true);
+  checkArg("Cat", "op-v3", sup, true);
+  const same = argue("Cat", "op-v3", "ext:cccccccccccccccc#C1", "unsupported-premise", { confidence: 0.65 });
+  checkArg("Ant", "op-v1", same, true, ["claude"]);
+  checkArg("Fox", "op-a1", same, true, ["claude"]);
+  // The author answers one argument; the answer weighs nothing.
+  push("argument.answer", { argument: lg, text: "the author's reply", handle: "Dog", operatorId: "op-v4" });
   return out;
 }
 
@@ -158,9 +215,9 @@ export function scoreScripted(): V2Outputs {
   const log = scriptedLog();
   const asOf = new Date(Date.UTC(2026, 10, 1));
   const r = deriveV2(log, asOf);
-  const s = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors });
+  const s = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors, arguments: r.argumentEffects, argumentStates: [...r.arguments.values()] });
   const claims: Record<string, string> = {};
-  for (const [ref, c] of [...s.claims.entries()].sort()) claims[ref] = `${r6(c.credence)} · ${r6(c.credenceVerified)} · ${c.status} · use ${r6(c.use)} · dispute ${r6(c.dispute)}`;
+  for (const [ref, c] of [...s.claims.entries()].sort()) claims[ref] = `${r6(c.credence)} · ${r6(c.credenceVerified)} · ${c.status} · use ${r6(c.use)} · dispute ${r6(c.dispute)}${c.kind === "conceptual" ? " · conceptual" : ""}${c.cap !== null ? ` · cap ${r6(c.cap)}` : ""}${c.arguments.methodology ? ` · methodology ${c.arguments.methodology}` : ""}`;
   const reliability: Record<string, string> = {};
   for (const [agent, w] of [...s.track.reliability.entries()].sort()) reliability[agent] = r6(w);
   const tiers: Record<string, string> = {};
@@ -176,6 +233,7 @@ export function scoreScripted(): V2Outputs {
     anchors: [...r.anchors.entries()].sort().map(([c, v]) => `${c}:${v}`).join(";") || "none",
     reports: s.track.reports.length.toString(),
     resolved: s.track.reports.filter((x) => x.resolved !== null).length.toString(),
+    arguments: [...r.arguments.values()].sort((a, b) => a.seq - b.seq).map((a) => `${a.claim}:${a.grounds}:${a.status}`).join(";") || "none",
   };
   return { claims, reliability, tiers, findings, facts };
 }

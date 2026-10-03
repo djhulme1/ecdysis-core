@@ -25,16 +25,27 @@
  * 2δ√(p(1 − p)), so telling a liar from an honest agent takes about
  * 2z²p(1 − p)/δ² resolved reports. This is the slow, universal net;
  * receipts are the fast, provable one.
+ *
+ * Arguments (arguments/0.1) are scored the same way, against their own
+ * settlement rather than the claim's: an argument is a forecast about
+ * itself (the arguer's `confidence` that it holds, from a neutral ½), and a
+ * check is a forecast at checkConfidence (holds) or 1 − checkConfidence
+ * (does not), judged against the settlement WITHOUT that checker's operator,
+ * so nobody settles their own report. Agents who attack conceptual claims
+ * well build a record; agents who file rhetoric build a bad one.
  */
 
+import { ARGUMENT_PARAMS, settleArgument, type ArgumentState, type ClaimArgumentsInput } from "./arguments.js";
 import {
   clampLogOdds,
   computeCredenceV2,
+  conceptualStatusOf,
   familyCount,
   logit,
   resolutionOf,
   sigma,
   statusOf,
+  sumArguments,
   sumEvidence,
   thresholdOf,
   type ClaimInput,
@@ -43,7 +54,7 @@ import {
   type UseInput,
 } from "./credence.js";
 
-export const TRACK_VERSION = "track/0.1";
+export const TRACK_VERSION = "track/0.2";
 
 export const TRACK_PARAMS = {
   /**
@@ -98,6 +109,38 @@ export interface TrackOptions {
    * nothing marks it, so it is scored like any other claim until then.
    */
   anchors?: Map<string, boolean>;
+  /** arguments/0.1: each claim's settled arguments' effects (credence/0.3 applies them). */
+  arguments?: Map<string, ClaimArgumentsInput>;
+  /** arguments/0.1: every argument with its checks, to score arguers and checkers against each settlement. */
+  argumentStates?: ArgumentState[];
+}
+
+/**
+ * Credit for arguments and their checks (arguments/0.1). An arguer's
+ * confidence is scored from ½ against the settlement; each checker's
+ * `holds` is scored at checkConfidence against the settlement reached
+ * without that checker's operator (leave-one-operator-out), so a check
+ * never resolves itself. Disowned reports, open arguments and voided
+ * operators score nothing.
+ */
+export function scoreArguments(args: ReadonlyArray<ArgumentState>, voidedOperators?: Set<string>, fabricators?: Set<string>): ScoredReport[] {
+  const out: ScoredReport[] = [];
+  const A = ARGUMENT_PARAMS;
+  for (const a of args) {
+    if (a.status === "open") continue;
+    const t: 0 | 1 = a.status === "upheld" ? 1 : 0;
+    if (!a.disowned && !voidedOperators?.has(a.operatorId) && !fabricators?.has(a.handle)) {
+      out.push({ id: a.id, agent: a.handle, claim: a.claim, seq: a.seq, before: 0.5, after: a.confidence, resolved: t, credit: marketCredit(0.5, a.confidence, t) });
+    }
+    for (const c of a.checks) {
+      if (c.disowned || voidedOperators?.has(c.operatorId) || fabricators?.has(c.handle)) continue;
+      const without = settleArgument(a.checks.filter((x) => x.operatorId !== c.operatorId));
+      if (without.status === "open" || without.status !== a.status) { out.push({ id: c.id, agent: c.handle, claim: a.claim, seq: c.seq, before: 0.5, after: c.holds ? A.checkConfidence : 1 - A.checkConfidence, resolved: null, credit: 0 }); continue; }
+      const after = c.holds ? A.checkConfidence : 1 - A.checkConfidence;
+      out.push({ id: c.id, agent: c.handle, claim: a.claim, seq: c.seq, before: 0.5, after, resolved: t, credit: marketCredit(0.5, after, t) });
+    }
+  }
+  return out;
 }
 
 /** The improvement a move from p to p′ made, once the truth T is known. */
@@ -129,7 +172,10 @@ export function scoreTrackRecord(
     const r = neutral.get(c.ref);
     if (!r) continue;
     const items = (byClaim.get(c.ref) ?? []).filter((e) => !voided(e)).sort((a, b) => a.seq - b.seq);
-    const base = logit(r.prior);
+    // Settled arguments are a standing term on the claim's log-odds (credence/0.3): every report is scored on top of it.
+    const args = o.arguments?.get(c.ref);
+    const argSum = sumArguments(args);
+    const base = logit(r.prior) + argSum.verified + argSum.other;
     const foundationRefuted = r.foundations.some((x) => x.status === "refuted");
     for (const [k, item] of items.entries()) {
       const prefix = items.slice(0, k);
@@ -140,12 +186,16 @@ export function scoreTrackRecord(
       const without = sumEvidence(items.filter((e) => e.operatorId !== item.operatorId), c.authorOperator, opts);
       // Resolved against the bar at zero use (τ0), never τ(U): use raises the bar a claim must clear to READ established,
       // but a citation must not change what anyone's report is scored against (use never moves credence; §2).
-      const status = statusOf({
-        credence: sigma(clampLogOdds(base + without.sumVerified)), sReplication: without.sReplication, fReplication: without.fReplication, threshold: thresholdOf(0),
-        confirmingReplication: without.confirmingReplication, failingReplication: without.failingReplication,
-        confirmingFamilies: familyCount(without.confirmingFamilies), confirmingOperators: without.confirmingOperators,
-        foundationRefuted,
-      });
+      // A conceptual claim resolves by argument (an upheld counterexample), never by replication; its reviews are scored against that.
+      const verifiedBase = logit(r.prior) + argSum.verified;
+      const status = r.kind === "conceptual"
+        ? conceptualStatusOf(sigma(clampLogOdds(verifiedBase + without.sumVerified)), args, r.cap !== null)
+        : statusOf({
+          credence: sigma(clampLogOdds(verifiedBase + without.sumVerified)), sReplication: without.sReplication, fReplication: without.fReplication, threshold: thresholdOf(0),
+          confirmingReplication: without.confirmingReplication, failingReplication: without.failingReplication,
+          confirmingFamilies: familyCount(without.confirmingFamilies), confirmingOperators: without.confirmingOperators,
+          foundationRefuted,
+        });
       const resolved = resolutionOf(status, o.anchors?.get(c.ref));
       reports.push({
         id: item.id, agent: item.agent, claim: c.ref, seq: item.seq, before, after, resolved,
@@ -153,6 +203,7 @@ export function scoreTrackRecord(
       });
     }
   }
+  for (const rep of scoreArguments(o.argumentStates ?? [], o.voidedOperators, o.fabricators)) reports.push(rep);
   const credit = new Map<string, number>();
   for (const rep of reports) credit.set(rep.agent, (credit.get(rep.agent) ?? 0) + rep.credit);
   for (const [agent, n] of o.lapses ?? []) credit.set(agent, (credit.get(agent) ?? 0) - n * TRACK_PARAMS.lapse);
@@ -173,10 +224,10 @@ export function computeV2(
   o: TrackOptions = {},
 ): { claims: Map<string, ClaimV2>; track: TrackRecord } {
   const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent) || !!o.voidedOperators?.has(e.operatorId);
-  const neutral = computeCredenceV2(claims, evidence, uses, { vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided, anchors: o.anchors });
+  const neutral = computeCredenceV2(claims, evidence, uses, { vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided, anchors: o.anchors, arguments: o.arguments });
   const track = scoreTrackRecord(claims, evidence, neutral, o);
   const weighed = computeCredenceV2(claims, evidence, uses, {
-    vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided, anchors: o.anchors,
+    vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided, anchors: o.anchors, arguments: o.arguments,
     reliability: (a) => track.reliability.get(a) ?? 0.5,
   });
   return { claims: weighed, track };

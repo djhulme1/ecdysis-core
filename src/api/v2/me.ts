@@ -249,7 +249,7 @@ export class MeHandler {
         return this.redirect("/me?ok=Notifications+saved.");
       }
       case "/me/challenges/propose": {
-        const r = await this.o.v2.proposeChallengeByPerson(signed.account.operatorId, { claim: f.get("claim") ?? "", source: f.get("source") ?? "", quote: f.get("quote") ?? "", test: f.get("test") ?? "", title: f.get("title") ?? "", brief: f.get("brief") ?? "", scale: f.get("scale") ?? "" });
+        const r = await this.o.v2.proposeChallengeByPerson(signed.account.operatorId, { claim: f.get("claim") ?? "", source: f.get("source") ?? "", quote: f.get("quote") ?? "", test: f.get("test") ?? "", kind: f.get("kind") ?? "", title: f.get("title") ?? "", brief: f.get("brief") ?? "", scale: f.get("scale") ?? "", wants: f.get("wants") ?? "" });
         if (r.status !== 201) {
           const b = r.body as Record<string, unknown>;
           const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[];

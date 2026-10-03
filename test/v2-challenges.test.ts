@@ -81,8 +81,8 @@ describe("challenges: the core", () => {
   it("validates the brief's shape, derives a status from the record, and ranks the board by the frontier's number", () => {
     assert.deepEqual(challengeTextProblems({ title: "Short", brief: "x", scale: "petaflops", claim: "nonsense" }), [
       "title: 8 to 120 characters",
-      "brief: 40 to 1500 characters: why this claim is worth checking and how it could be checked at the stated scale from public data or code",
-      "scale: cpu-minutes, cpu-hours, gpu-hours",
+      "brief: 40 to 1500 characters: why this claim is worth checking and how it could be checked at the stated scale from public data or code, or by argument",
+      "scale: cpu-minutes, cpu-hours, gpu-hours, reasoning",
       "claim: a claim ref on the record (ecd:…#C<n> or ext:…#C1)",
     ]);
     assert.deepEqual(challengeTextProblems({ title: "A fine title", brief: "a".repeat(40), scale: "gpu-hours", claim: "ecd:0123456789abcdef#C12" }), []);
@@ -139,7 +139,7 @@ describe("challenges: proposing, the board, taking up, withdrawing", () => {
 
     // The board, as data: three open challenges, ranked by value per minute, every brief verbatim (data for an agent, escaped on pages).
     const board = w.b(await w.svc.challenges());
-    assert.equal(board["version"], "challenges/0.1");
+    assert.equal(board["version"], "challenges/0.2");
     const list = board["challenges"] as Array<Record<string, Json>>;
     assert.equal(list.length, 3);
     assert.ok(list.every((c) => c["status"] === "open"));
@@ -158,7 +158,7 @@ describe("challenges: proposing, the board, taking up, withdrawing", () => {
     assert.match(r.html, /<h2 id="challenges">Challenges<\/h2>/);
     assert.match(r.html, /Check this &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     assert.doesNotMatch(r.html, /<script>alert|<img src=x onerror=/);
-    assert.match(r.html, /<span class="status open" title="nobody has filed a receipt on the claim since it was proposed">open<\/span>/);
+    assert.match(r.html, /<span class="status open" title="nobody has filed a receipt \(or, for a conceptual claim, an argument\) on the claim since it was proposed">open<\/span>/);
     r = (await w.page("/challenges"))!;
     assert.equal(r.status, 200);
     assert.match(r.html, /<span class="stat-v">3<\/span><span class="stat-l">open<\/span>/);
@@ -319,7 +319,7 @@ describe("challenges: proposing, the board, taking up, withdrawing", () => {
       return { isError: !!b.result.isError, text: b.result.content[0]!.text, body: JSON.parse(b.result.content[0]!.text) as Record<string, unknown> };
     };
     const got = await call("get_challenges", { all: true });
-    assert.equal(got.body["version"], "challenges/0.1");
+    assert.equal(got.body["version"], "challenges/0.2");
     assert.ok((got.body["challenges"] as Array<Record<string, unknown>>).some((c) => c["status"] === "withdrawn"), "all=true lists the withdrawn one");
     const proposed = await call("propose_challenge", { envelope: await w.sign("Bee", { protocol: "ecdysis/0.2", type: "challenge.propose", claim: c1, title: "Through the connector: a brief", brief: w.BRIEF, scale: "cpu-hours" }) });
     assert.equal(proposed.isError, false, proposed.text);

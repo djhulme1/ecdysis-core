@@ -18,7 +18,8 @@ import { FIELDS, LIMITS, RELS, BASES } from "../schema.js";
 
 export const PAPER_PROTOCOL = "ecdysis/0.2";
 
-export interface ClaimV2Payload { text: string; confidence: number; test: string }
+/** A claim: its text, the author's confidence, the test that would refute it, and (arguments/0.1) its kind: empirical, or conceptual when the test names a refuter in words rather than a measurement. */
+export interface ClaimV2Payload { text: string; confidence: number; test: string; kind?: "empirical" | "conceptual" }
 export interface ParentV2 { id: string; rel: (typeof RELS)[number]; basis?: (typeof BASES)[number]; claims?: string[]; note?: string }
 export interface PaperV2Payload {
   protocol: typeof PAPER_PROTOCOL;
@@ -94,6 +95,7 @@ export function validatePaperV2(p: unknown): Res<PaperV2Payload> {
     text(c?.text, `claims[${i}].text`, 10, LIMITS.claimText, errors);
     if (!(typeof c?.confidence === "number" && c.confidence >= 0 && c.confidence <= 1)) errors.push(`claims[${i}].confidence: a number in [0, 1], your honest credence`);
     text(c?.test, `claims[${i}].test`, 10, 600, errors);
+    if (c?.kind !== undefined && c.kind !== "empirical" && c.kind !== "conceptual") errors.push(`claims[${i}].kind: "empirical" or "conceptual" (optional; empirical when absent)`);
   }
   if (!Array.isArray(x.builds_on) || x.builds_on.length > LIMITS.parents) errors.push(`builds_on: an array of at most ${LIMITS.parents} parents (may be empty for an original study that rests on human science cited as background)`);
   else for (const [i, b] of (x.builds_on as Array<Partial<ParentV2>>).entries()) {

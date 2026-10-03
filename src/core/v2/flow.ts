@@ -27,6 +27,11 @@
  *   key.revoke         {handle, key, compromisedAt?}            immediate; a compromise time disowns later reports
  *   canary.reveal      {claim, outcome}                         a steward reveals a canary's known truth (design §7)
  *   constitution.adopt {version, hash, ts, signature}           the founder adopts the constitution under R2 (genesis)
+ *   argument.file      {id, claim, stance, grounds, text, cites, instance, confidence, handle, operatorId, models?, key?}  arguments/0.1
+ *   argument.check     {id, argument, holds, note, handle, operatorId, models?, key?}
+ *   argument.answer    {argument, text, handle, operatorId}
+ *
+ * Paper claims and external claims may carry kind: "conceptual" (arguments/0.1); absent means empirical.
  *
  * check.result may carry seedInsensitive: true when the same bundle gave
  * exactly the same outputs under a different seed earlier; the bundle then
@@ -82,19 +87,22 @@
 
 import { modelFamilies, type ClaimInput, type EvidenceInput, type Tier, type UseInput } from "./credence.js";
 import { APPEAL_MS } from "./receipts.js";
-import { CHALLENGE_SCALES, type ChallengeScale, type ChallengeState } from "./challenges.js";
+import { CHALLENGE_SCALES, CHALLENGE_WANTS, type ChallengeScale, type ChallengeState, type ChallengeWants } from "./challenges.js";
+import { argumentEffects, GROUNDS, settleArgument, STANCES, type ArgumentCheckState, type ArgumentState, type ClaimArgumentsInput, type ClaimKind, type Grounds, type Stance } from "./arguments.js";
 
 export type V2EntryType =
   | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
   | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "finding.decide" | "finding.reverse" | "review.file"
   | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt"
-  | "challenge.propose" | "challenge.withdraw";
+  | "challenge.propose" | "challenge.withdraw"
+  | "argument.file" | "argument.check" | "argument.answer";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
   "check.commit", "check.seal", "check.result", "check.lapse", "finding.decide", "finding.reverse", "review.file",
   "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release", "constitution.adopt",
   "challenge.propose", "challenge.withdraw",
+  "argument.file", "argument.check", "argument.answer",
 ];
 
 export interface V2Entry {
@@ -219,7 +227,13 @@ export interface V2Record {
   papers: Map<string, PaperState>;
   claims: ClaimInput[];
   /** External claims, by id. */
-  external: Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string }>;
+  external: Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string; kind: ClaimKind }>;
+  /** Arguments (arguments/0.1), by id, with their checks, answer and settled status. */
+  arguments: Map<string, ArgumentState>;
+  /** Arguments by claim ref, in log order. */
+  argumentsByClaim: Map<string, ArgumentState[]>;
+  /** What each claim's settled arguments do to its credence (credence/0.3). */
+  argumentEffects: Map<string, ClaimArgumentsInput>;
   /** Challenges (challenges/0.1), by id, in log order; withdrawn ones stay, marked. */
   challenges: Map<string, ChallengeState>;
   checks: Map<string, CheckState>;
@@ -278,8 +292,11 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const keys = new Map<string, KeyState>();
   const papers = new Map<string, PaperState>();
   const claims: ClaimInput[] = [];
-  const external = new Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string }>();
+  const external = new Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string; kind: ClaimKind }>();
   const challenges = new Map<string, ChallengeState>();
+  const args = new Map<string, ArgumentState>();
+  const argChecks: Array<ArgumentCheckState & { argument: string }> = [];
+  const kindOf = (v: unknown): ClaimKind => (v === "conceptual" ? "conceptual" : "empirical");
   const checks = new Map<string, CheckState>();
   const findings: FindingState[] = [];
   const uses: UseInput[] = [];
@@ -367,7 +384,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
           const ref = `${id}#${label}`;
           claimAuthorOp.set(ref, op);
           refs.push(ref);
-          claims.push({ ref, paper: id, authorOperator: op, stated: Math.min(1, Math.max(0, num(c["confidence"], 0.5))), foundations: [...foundations], seq: e.seq });
+          claims.push({ ref, paper: id, authorOperator: op, stated: Math.min(1, Math.max(0, num(c["confidence"], 0.5))), kind: kindOf(c["kind"]), foundations: [...foundations], seq: e.seq });
         }
         papers.set(id, { id, cid: str(p["cid"]), handle: str(p["handle"]), operatorId: op, title: str(p["title"]), field: str(p["field"]), claims: refs, families: paperFamilies.get(id) ?? [], seq: e.seq, ts: e.ts });
         break;
@@ -375,12 +392,12 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
       case "claim.external": {
         const id = str(p["id"]);
         const op = str(p["operatorId"]);
-        external.set(id, { source: str(p["source"]), quote: str(p["quote"]), test: str(p["test"]), handle: str(p["handle"]), operatorId: op });
+        external.set(id, { source: str(p["source"]), quote: str(p["quote"]), test: str(p["test"]), handle: str(p["handle"]), operatorId: op, kind: kindOf(p["kind"]) });
         const ref = `${id}#C1`;
         // The registrant is not the author: human science has no operator here. A neutral prior of ½; nobody's own evidence is
         // excluded; and papers resting on it take it at face value until verified evidence counts against it (credence.ts).
         claimAuthorOp.set(ref, "");
-        claims.push({ ref, paper: id, authorOperator: "", stated: 0.5, calibration: 0, external: true, foundations: [], seq: e.seq });
+        claims.push({ ref, paper: id, authorOperator: "", stated: 0.5, calibration: 0, external: true, kind: kindOf(p["kind"]), foundations: [], seq: e.seq });
         break;
       }
       case "challenge.propose": {
@@ -391,9 +408,10 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         const op = str(p["operatorId"]);
         if (!id || challenges.has(id) || !claims.some((c) => c.ref === claim) || !(CHALLENGE_SCALES as readonly string[]).includes(scale) || !op) break;
         const handle = str(p["handle"]);
+        const wants = (CHALLENGE_WANTS as readonly string[]).includes(str(p["wants"])) ? (str(p["wants"]) as ChallengeWants) : (claims.find((c) => c.ref === claim)?.kind === "conceptual" ? "argument" : "receipt");
         challenges.set(id, {
-          id, claim, title: str(p["title"]), brief: str(p["brief"]), scale: scale as ChallengeScale,
-          proposer: p["proposer"] === "person" || !handle ? { kind: "person", operatorId: op } : { kind: "agent", handle, operatorId: op },
+          id, claim, title: str(p["title"]), brief: str(p["brief"]), scale: scale as ChallengeScale, wants,
+          proposer: p["proposer"] === "steward" ? { kind: "steward", operatorId: op } : p["proposer"] === "person" || !handle ? { kind: "person", operatorId: op } : { kind: "agent", handle, operatorId: op },
           seq: e.seq, ts: e.ts, withdrawn: null,
         });
         break;
@@ -500,6 +518,44 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         });
         break;
       }
+      case "argument.file": {
+        // arguments/0.1: the claim must be on the record (the service checks before writing; a hostile entry naming nothing is dropped).
+        const id = str(p["id"]);
+        const claim = str(p["claim"]);
+        const handle = str(p["handle"]);
+        const stance = str(p["stance"]);
+        const grounds = str(p["grounds"]);
+        if (!id || args.has(id) || !claimAuthorOp.has(claim) || !(STANCES as readonly string[]).includes(stance) || !(GROUNDS as readonly string[]).includes(grounds) || !handle) break;
+        const declared = modelFamilies(p["models"] as string[] | undefined);
+        const inst = p["instance"];
+        args.set(id, {
+          id, claim, stance: stance as Stance, grounds: grounds as Grounds, text: str(p["text"]),
+          cites: Array.isArray(p["cites"]) ? (p["cites"] as unknown[]).filter((c): c is string => typeof c === "string") : [],
+          instance: inst && typeof inst === "object" && !Array.isArray(inst) ? (inst as ArgumentState["instance"]) : null,
+          handle, operatorId: str(p["operatorId"]), tier: "unverified", families: declared.length ? declared : (agents.get(handle)?.families ?? []),
+          confidence: Math.min(1 - 1e-6, Math.max(1e-6, num(p["confidence"], 0.5))), seq: e.seq, ts: e.ts,
+          key: str(p["key"]) || (agents.get(handle)?.publicKey ?? ""), disowned: false, checks: [], answer: null, status: "open", settledSeq: null,
+        });
+        break;
+      }
+      case "argument.check": {
+        const a = args.get(str(p["argument"]));
+        const handle = str(p["handle"]);
+        if (!a || !handle || typeof p["holds"] !== "boolean") break;
+        const declared = modelFamilies(p["models"] as string[] | undefined);
+        argChecks.push({
+          id: str(p["id"]) || `argcheck:${e.seq}`, argument: a.id, handle, operatorId: str(p["operatorId"]), tier: "unverified", holds: p["holds"] as boolean, note: str(p["note"]),
+          families: declared.length ? declared : (agents.get(handle)?.families ?? []), seq: e.seq, ts: e.ts,
+          key: str(p["key"]) || (agents.get(handle)?.publicKey ?? ""), disowned: false,
+        });
+        break;
+      }
+      case "argument.answer": {
+        const a = args.get(str(p["argument"]));
+        if (!a || a.answer) break;
+        a.answer = { handle: str(p["handle"]), operatorId: str(p["operatorId"]), text: str(p["text"]), seq: e.seq, ts: e.ts };
+        break;
+      }
     }
   }
 
@@ -556,6 +612,34 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const tierOf = (op: string): Tier => tiers.get(op) ?? "unverified";
   for (const u of uses) u.tier = tierOf(u.operatorId);
 
+  // Arguments (arguments/0.1), now that tiers are known: disowned reports count for nothing; checks settle each argument;
+  // the settled arguments' effects on each claim are what credence/0.3 applies. Arguments on frozen claims feed no number.
+  for (const a of args.values()) {
+    a.tier = tierOf(a.operatorId);
+    a.disowned = disownedAt(a.key, a.ts);
+  }
+  for (const c of argChecks) {
+    const a = args.get(c.argument);
+    if (!a) continue;
+    c.tier = tierOf(c.operatorId);
+    c.disowned = disownedAt(c.key, c.ts);
+    a.checks.push(c);
+  }
+  const argumentsByClaim = new Map<string, ArgumentState[]>();
+  for (const a of [...args.values()].sort((x, y) => x.seq - y.seq)) {
+    const settled = settleArgument(a.checks);
+    a.status = settled.status;
+    a.settledSeq = settled.settledSeq;
+    argumentsByClaim.set(a.claim, [...(argumentsByClaim.get(a.claim) ?? []), a]);
+  }
+  const frozenRef = (ref: string) => held.has(ref) || (ref.indexOf("#") > 0 && held.has(ref.slice(0, ref.indexOf("#"))));
+  const argumentEffectsByClaim = new Map<string, ClaimArgumentsInput>();
+  for (const [ref, list] of argumentsByClaim) {
+    if (frozenRef(ref)) continue;
+    const kind = claims.find((c) => c.ref === ref)?.kind ?? "empirical";
+    argumentEffectsByClaim.set(ref, argumentEffects(list.filter((a) => !held.has(a.id)), kind));
+  }
+
   // Cross-checks, now that tiers are known: only a VERIFIED operator's cross-check verifies or disputes a receipt (and so can open a
   // finding); a disowned cross-check does neither. Others are kept to be shown, never to decide.
   for (const { later, earlier } of crossChecks) {
@@ -602,5 +686,5 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, constitution };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, constitution, arguments: args, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
 }

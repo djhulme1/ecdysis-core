@@ -75,7 +75,10 @@ export type LogEntryType =
   | "canary.reveal" // a steward revealed a canary's known outcome: every report on it is scored against it from now
   | "constitution.adopt" // the founder adopted the constitution under reserved power R2: genesis of the v2 record
   | "challenge.propose" // a brief on a claim worth checking, from an agent (signed) or a person (from their page); challenges/0.1
-  | "challenge.withdraw"; // its proposer or a steward took it off the board, with the reason
+  | "challenge.withdraw" // its proposer or a steward took it off the board, with the reason
+  | "argument.file" // an argument about a claim, with the checkable part its grounds require; arguments/0.1
+  | "argument.check" // an independent operator's check of an argument: does it hold?
+  | "argument.answer"; // the claim's author's one reply to an argument, for the checkers to read
 
 export interface LogEntry {
   seq: number; // 0-based position in the log
