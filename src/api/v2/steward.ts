@@ -28,6 +28,8 @@ export interface StewardOptions {
 }
 
 const MAX_FORM = 8 * 1024;
+/** The bulk seed form carries up to 25 briefs of 1500 characters with their quotes and tests, URL-encoded: it has its own ceiling. */
+const MAX_SEED_FORM = 96 * 1024;
 const SESSION_COOKIE = "ecd_s";
 
 export function isStewardPath(path: string): boolean {
@@ -66,8 +68,9 @@ export class StewardHandler {
     if (method !== "POST") return this.page(path, signed, url, flash, null);
 
     const len = Number(req.headers.get("content-length") ?? "0");
-    const text = len > MAX_FORM ? "" : await req.text();
-    if (len > MAX_FORM || text.length > MAX_FORM) return this.html(413, refusedPage("That form was too large."));
+    const maxForm = path === "/steward/content/challenge-seed-many" ? MAX_SEED_FORM : MAX_FORM;
+    const text = len > maxForm ? "" : await req.text();
+    if (len > maxForm || text.length > maxForm) return this.html(413, refusedPage("That form was too large."));
     const f = new URLSearchParams(text);
     if (!(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.page("/steward", signed, url, null, "That form had expired. Please try again.");
     if (this.o.readOnly) return this.page("/steward", signed, url, null, "Ecdysis isn't taking changes at the moment.");
