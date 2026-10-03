@@ -82,16 +82,19 @@
 
 import { modelFamilies, type ClaimInput, type EvidenceInput, type Tier, type UseInput } from "./credence.js";
 import { APPEAL_MS } from "./receipts.js";
+import { CHALLENGE_SCALES, type ChallengeScale, type ChallengeState } from "./challenges.js";
 
 export type V2EntryType =
   | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
   | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "finding.decide" | "finding.reverse" | "review.file"
-  | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt";
+  | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt"
+  | "challenge.propose" | "challenge.withdraw";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
   "check.commit", "check.seal", "check.result", "check.lapse", "finding.decide", "finding.reverse", "review.file",
   "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release", "constitution.adopt",
+  "challenge.propose", "challenge.withdraw",
 ];
 
 export interface V2Entry {
@@ -213,6 +216,8 @@ export interface V2Record {
   claims: ClaimInput[];
   /** External claims, by id. */
   external: Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string }>;
+  /** Challenges (challenges/0.1), by id, in log order; withdrawn ones stay, marked. */
+  challenges: Map<string, ChallengeState>;
   checks: Map<string, CheckState>;
   findings: FindingState[];
   evidence: EvidenceInput[];
@@ -269,6 +274,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const papers = new Map<string, PaperState>();
   const claims: ClaimInput[] = [];
   const external = new Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string }>();
+  const challenges = new Map<string, ChallengeState>();
   const checks = new Map<string, CheckState>();
   const findings: FindingState[] = [];
   const uses: UseInput[] = [];
@@ -370,6 +376,26 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         // excluded; and papers resting on it take it at face value until verified evidence counts against it (credence.ts).
         claimAuthorOp.set(ref, "");
         claims.push({ ref, paper: id, authorOperator: "", stated: 0.5, calibration: 0, external: true, foundations: [], seq: e.seq });
+        break;
+      }
+      case "challenge.propose": {
+        // A brief on a claim. The claim must be on the record by now (the service checks before writing; a hostile entry naming nothing is dropped).
+        const id = str(p["id"]);
+        const claim = str(p["claim"]);
+        const scale = str(p["scale"]);
+        const op = str(p["operatorId"]);
+        if (!id || challenges.has(id) || !claims.some((c) => c.ref === claim) || !(CHALLENGE_SCALES as readonly string[]).includes(scale) || !op) break;
+        const handle = str(p["handle"]);
+        challenges.set(id, {
+          id, claim, title: str(p["title"]), brief: str(p["brief"]), scale: scale as ChallengeScale,
+          proposer: p["proposer"] === "person" || !handle ? { kind: "person", operatorId: op } : { kind: "agent", handle, operatorId: op },
+          seq: e.seq, ts: e.ts, withdrawn: null,
+        });
+        break;
+      }
+      case "challenge.withdraw": {
+        const ch = challenges.get(str(p["id"]));
+        if (ch && !ch.withdrawn) ch.withdrawn = { ts: e.ts, by: p["by"] === "steward" ? "steward" : "proposer", reason: str(p["reason"]) };
         break;
       }
       case "check.commit": {
@@ -563,5 +589,5 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, constitution };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, constitution };
 }

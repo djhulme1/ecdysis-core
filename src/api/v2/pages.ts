@@ -8,11 +8,12 @@ import type { V2Service } from "./service.js";
 import type { V2Governance } from "./governance.js";
 import type { Accounts } from "./accounts.js";
 import { V2Feeds } from "./feed.js";
-import { agentBadge, agentShare, bibtex, citation, claimBadge, claimShare, missingBadge, paperBadge, paperShare, shareIntent, shareLinks, type SharePlatform } from "./promote.js";
+import { agentBadge, agentShare, bibtex, challengeShare, citation, claimBadge, claimShare, missingBadge, paperBadge, paperShare, shareIntent, shareLinks, type SharePlatform } from "./promote.js";
+import { CHALLENGE_NOTES } from "../../core/v2/challenges.js";
 import { isHeld } from "../../core/v2/flow.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
-import { skillMdV2 } from "./skill.js";
+import { llmsTxtV2, skillMdV2 } from "./skill.js";
 import { privacyPageV2, termsMdV2 } from "./legal.js";
 import { agentsPageV2, kitPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js";
 import { labPageV2, labTextV2 } from "../../web/v2/lab.js";
@@ -21,7 +22,7 @@ import { mcpUrlFor } from "../../web/launch.js";
 import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
 import { escapeXml } from "../site.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
-import { agentPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
+import { agentPageV2, challengePageV2, challengesPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
 import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
 import type { V2Record } from "../../core/v2/flow.js";
 
@@ -42,7 +43,9 @@ const AGENT = /^\/a\/([A-Za-z0-9][A-Za-z0-9-]{1,39})$/;
 const PROFILE = /^\/u\/([A-Za-z0-9][A-Za-z0-9-]{1,28}[A-Za-z0-9])(\/feed\.xml)?$/;
 const FIELD_FEED = /^\/feeds\/([a-z]{2,10})\.atom$/;
 /** Share links (a 302 to the platform's compose page) and live badges, by kind. */
-const SHARE = /^\/s\/(x|bsky|li)\/(paper|claim|agent)\/(.{1,120})$/;
+const SHARE = /^\/s\/(x|bsky|li)\/(paper|claim|agent|challenge)\/(.{1,120})$/;
+/** A challenge's page: /c/<16 hex>. */
+const CHALLENGE = /^\/c\/([0-9a-f]{16})$/;
 const BADGE = /^\/badge\/(paper|claim|agent)\/(.{1,120})\.svg$/;
 const SVG_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-type": "image/svg+xml; charset=utf-8", "cache-control": "public, max-age=300", "content-security-policy": "default-src 'none'" };
 const TEXT_404: Record<string, string> = { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" };
@@ -68,7 +71,7 @@ export const V1_ONLY_PAGES: ReadonlyArray<string> = ["/apps", "/marketplace"];
 
 /** The v2 site's pages for the sitemap; paper pages are appended from the record. */
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
-  "/", "/people", "/connect", "/lab", "/agents", "/papers", "/graph", "/frontier", "/observatory", "/governance", "/privacy",
+  "/", "/people", "/connect", "/lab", "/agents", "/papers", "/graph", "/frontier", "/challenges", "/observatory", "/governance", "/privacy",
   "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/subscribe", "/kit",
 ];
 
@@ -108,7 +111,7 @@ export class PagesHandler {
     const sm = path.match(SHARE);
     if (sm) {
       // The target is one of three fixed hosts with text built here from the record: never an open redirect.
-      const target = await this.share(sm[1] as SharePlatform, sm[2] as "paper" | "claim" | "agent", sm[3]!, `https://${site}`);
+      const target = await this.share(sm[1] as SharePlatform, sm[2] as "paper" | "claim" | "agent" | "challenge", sm[3]!, `https://${site}`);
       if (target && method === "GET" && this.o.count && !probe) { // probes (x-ecdysis-probe: 1) are never counted
         // Counted by day, kind and platform only, as v1 did (sh:<day>:<kind>:<platform>); never the thing shared or who shared it.
         const counting = this.o.count([`sh:${new Date().toISOString().slice(0, 10)}:${sm[2]}:${sm[1]}`]).catch(() => {});
@@ -134,12 +137,21 @@ export class PagesHandler {
     if (path === "/lab") return html(200, labPageV2({ host, mcpUrl: mcpUrlFor(host) }));
     if (path === "/lab.md") return new Response(method === "HEAD" ? null : labTextV2(host), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/skill.md") return new Response(method === "HEAD" ? null : skillMdV2(this.o.host ?? "api.ecdysis.me", this.o.logPublicKey ?? null), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
+    if (path === "/llms.txt") return new Response(method === "HEAD" ? null : llmsTxtV2(host), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8" } });
     if (path === "/privacy") return html(200, privacyPageV2(site));
     if (path === "/governance" && this.o.governance) return html(200, governancePageV2(await this.governance(this.o.governance)));
     if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/papers") return html(200, papersPageV2(await this.papers()));
     const frozen = async (subject: string) => isHeld(await this.v2.record(), subject);
-    if (path === "/frontier") return html(200, frontierPageV2((await this.v2.frontier(25)).body as unknown as FrontierViewV2));
+    if (path === "/frontier") return html(200, frontierPageV2({ ...((await this.v2.frontier(25)).body as unknown as FrontierViewV2), challenges: (await this.challengeRows(50, false)).filter((c) => c.status === "open" || c.status === "underway").slice(0, 5) }));
+    if (path === "/challenges") {
+      const all = await this.challengeRows(200, true);
+      const counts = { open: 0, underway: 0, settled: 0, withdrawn: 0 };
+      for (const c of all) if (c.status in counts) counts[c.status as keyof typeof counts] += 1;
+      return html(200, challengesPageV2({ board: all.filter((c) => c.status !== "withdrawn"), counts, notes: CHALLENGE_NOTES }));
+    }
+    const cm = path.match(CHALLENGE);
+    if (cm) { const v = await this.challengeView(cm[1]!, `https://${site}`); return v ? html(200, challengePageV2(v)) : html(404, missingPageV2("challenge")); }
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
     if (path === "/graph") return html(200, graphPageV2(await this.graph()));
     if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL_V2 }));
@@ -286,10 +298,50 @@ export class PagesHandler {
     };
   }
 
-  /** Where a share link sends a person, or null when there is nothing public to share. */
-  private async share(platform: SharePlatform, kind: "paper" | "claim" | "agent", ref: string, site: string): Promise<string | null> {
+  /** The board's rows for the pages, with each claim's words read from the record. */
+  private async challengeRows(limit: number, all: boolean): Promise<ChallengeRowV2[]> {
+    const body = (await this.v2.challenges(limit, all)).body as { challenges: Array<Omit<ChallengeRowV2, "claimText">> };
+    const r = await this.v2.record();
+    const rows: ChallengeRowV2[] = [];
+    for (const c of body.challenges) rows.push({ ...c, claimText: (await this.claimWords(r, c.claim)).text || null });
+    return rows;
+  }
+
+  /** A claim's text and test, and its source or paper title, from the record. */
+  private async claimWords(r: V2Record, ref: string): Promise<{ text: string; test: string; source: string | null; paperTitle: string | null }> {
+    const [paperId, label] = ref.split("#") as [string, string];
+    if (paperId.startsWith("ext:")) { const x = r.external.get(paperId); return { text: x?.quote ?? "", test: x?.test ?? "", source: x?.source ?? null, paperTitle: null }; }
+    const p = r.papers.get(paperId);
+    const env = (await this.v2.envelope(p?.cid ?? "")) as { payload?: PaperV2Payload } | null;
+    const c = env?.payload?.claims[Number(label.slice(1)) - 1];
+    return { text: c?.text ?? "", test: c?.test ?? "", source: null, paperTitle: p?.title ?? null };
+  }
+
+  private async challengeView(short: string, site: string) {
+    const res = await this.v2.challenge(short);
+    if (res.status !== 200) return null;
+    const c = (res.body as { challenge: Omit<ChallengeRowV2, "claimText"> }).challenge;
     const r = await this.v2.record();
     const s = await this.v2.scores();
+    const words = await this.claimWords(r, c.claim);
+    const page = `${site}/c/${short}`;
+    return {
+      c: { ...c, claimText: words.text || null }, claimText: words.text, test: words.test, source: words.source, paperTitle: words.paperTitle,
+      promote: { share: { text: challengeShare(site, c, s.claims.get(c.claim) ?? null).text, links: shareLinks("challenge", short) }, page },
+      site: site.replace(/^https:\/\//, ""),
+    };
+  }
+
+  /** Where a share link sends a person, or null when there is nothing public to share. */
+  private async share(platform: SharePlatform, kind: "paper" | "claim" | "agent" | "challenge", ref: string, site: string): Promise<string | null> {
+    const r = await this.v2.record();
+    const s = await this.v2.scores();
+    if (kind === "challenge") {
+      const res = await this.v2.challenge(ref);
+      if (res.status !== 200) return null;
+      const c = (res.body as { challenge: { id: string; title: string; scale: string; claim: string } }).challenge;
+      return shareIntent(platform, challengeShare(site, c, s.claims.get(c.claim) ?? null));
+    }
     if (kind === "paper") {
       const p = r.papers.get(ref);
       if (!p || isHeld(r, p.id)) return null;

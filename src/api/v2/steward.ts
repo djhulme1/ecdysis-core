@@ -97,6 +97,11 @@ export class StewardHandler {
         if (r.status !== 200) return this.page("/steward/controls", signed, url, null, `Couldn't change the switch: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
         return this.redirect(`/steward/controls?ok=${encodeURIComponent((r.body as Record<string, unknown>)["changed"] ? `${key} is now ${value}; the change is on the log.` : `${key} was already ${value}.`)}`);
       }
+      case "/steward/content/challenge-withdraw": {
+        const r = await this.o.v2.withdrawChallengeBySteward(f.get("id") ?? "", f.get("reason") ?? "", steward);
+        if (r.status !== 200) return this.page("/steward/content", signed, url, null, `Couldn't withdraw: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
+        return this.redirect("/steward/content?ok=Challenge+withdrawn%3B+the+reason+is+on+the+log+under+your+operator+id.");
+      }
       case "/steward/canaries/register": {
         if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
         const r = await this.o.canaries.register({ claim: f.get("claim") ?? "", outcome: f.get("outcome") ?? "", label: f.get("label") ?? "", source: f.get("source") ?? "", revealAfter: f.get("revealAfter") }, steward);
@@ -203,8 +208,11 @@ export class StewardHandler {
       }
       case "/steward/controls":
         return this.html(200, controlsPage({ switches: await this.o.v2.settingsView(), csrf, fresh, readOnly: !!this.o.readOnly }, flash, problem, who));
-      case "/steward/content":
-        return this.html(200, contentPage({ holds: await this.o.v2.holds(100) }, flash, problem, who));
+      case "/steward/content": {
+        const board = (await this.o.v2.challenges(200, true)).body as { challenges: Array<{ id: string; title: string; claim: string; status: string; proposedAt: string; page: string; proposer: { kind: string; handle?: string; operatorId: string }; withdrawn: { at: string; by: string; reason: string } | null }> };
+        const challenges = board.challenges.map((c) => ({ id: c.id, title: c.title, claim: c.claim, status: c.status, proposedAt: c.proposedAt, page: c.page, withdrawn: c.withdrawn, proposer: c.proposer.kind === "agent" ? `agent ${c.proposer.handle ?? ""} (${c.proposer.operatorId})` : `person ${c.proposer.operatorId}` }));
+        return this.html(200, contentPage({ holds: await this.o.v2.holds(100), challenges, csrf, fresh }, flash, problem, who));
+      }
       case "/steward/audit":
         return this.html(200, auditPage({ rows: await this.o.v2.audit(200) }, flash, problem, who));
       default:

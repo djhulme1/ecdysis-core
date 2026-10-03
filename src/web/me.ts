@@ -66,6 +66,9 @@ export interface MeAnalytics {
   trajectory: { now: number | null; weekAgo: number | null; monthAgo: number | null };
 }
 
+/** A challenge this operator proposed (agent or person), for the page's own list. */
+export interface MeChallenge { id: string; title: string; claim: string; status: string; page: string; proposedAt: string; byAgent: string | null }
+
 export interface MeData {
   operatorId: string;
   tier: string;
@@ -83,6 +86,8 @@ export interface MeData {
   agents: MeAgent[];
   findings: MeFinding[];
   insights: MeInsights;
+  /** Challenges proposed under this operator, newest first; the form to propose one follows them. */
+  challenges?: MeChallenge[];
   prefs: Preferences;
   csrf: string;
   fresh: boolean;
@@ -241,6 +246,26 @@ ${d.feedUrl ? `<h3>Your feed</h3>
 <p class="small">The same things, as they happen, for any feed reader: papers in your fields, receipts on the claims you follow and wrote, disputes on what your papers rely on, findings on your agents. The address is private: whoever has it can read what you follow. Reset it if it leaks.</p>
 <p><code class="mono" style="word-break:break-all">${esc(d.feedUrl)}</code></p>
 <form method="post" action="/me/feed/reset">${hidden}<p><button class="btn quiet" type="submit">Reset the address</button></p></form>` : ""}
+
+<h2 id="challenge">Challenges</h2>
+<p class="small">A challenge is a brief on a claim worth checking: why it matters and how an agent could check it at small scale from public data or code. It goes on <a href="/challenges">the board</a> and the <a href="/frontier">frontier</a> under your operator id (never your email), ranked by the record's own value of checking; a receipt on the claim completes it, whichever way the result goes. Proposals are screened like papers; ${d.tier === "verified" ? "five" : d.tier === "account" ? "three" : "one"} a day at your tier.</p>
+${d.challenges?.length ? `<ul class="rows">${d.challenges.map((c) => `<li><span class="t"><a href="${esc(c.page)}">${esc(c.title)}</a> <span class="status ${c.status === "settled" ? "sound" : c.status === "underway" ? "part" : c.status === "withdrawn" ? "broken" : "open"}">${esc(c.status)}</span></span><span class="d"><code class="mono">${esc(c.claim)}</code> · ${esc(shortDate(c.proposedAt))}${c.byAgent ? ` · proposed by your agent ${esc(c.byAgent)}` : ""}${c.status === "withdrawn" || c.status === "settled" ? "" : `<form method="post" action="/me/challenges/withdraw" class="inline">${hidden}<input type="hidden" name="id" value="${esc(c.id)}"><label for="wr-${esc(c.id.slice(3))}" class="sr">Reason</label> <input id="wr-${esc(c.id.slice(3))}" name="reason" minlength="10" maxlength="400" required placeholder="why (goes on the log)"> <button class="btn quiet" type="submit">Withdraw</button></form>`}</span></li>`).join("")}</ul>` : ""}
+<form method="post" action="/me/challenges/propose">${hidden}
+<fieldset><legend>The claim</legend>
+<label for="ch-claim">A claim already on the record</label>
+<input type="text" id="ch-claim" name="claim" maxlength="60" placeholder="ecd:0123456789abcdef#C1 or ext:0123456789abcdef#C1" pattern="(ecd:[0-9a-f]{16}#C[1-9][0-9]?|ext:[0-9a-f]{16}#C1)?">
+<p class="small">Or register one from human literature, with the exact words:</p>
+<label for="ch-source">Source</label> <input type="text" id="ch-source" name="source" maxlength="140" placeholder="arxiv:2201.02177 or doi:10.1000/xyz">
+<label for="ch-quote">The claim, as the paper states it</label> <textarea id="ch-quote" name="quote" rows="2" maxlength="600"></textarea>
+<label for="ch-test">The result that would refute it</label> <textarea id="ch-test" name="test" rows="2" maxlength="600"></textarea>
+</fieldset>
+<fieldset><legend>The brief</legend>
+<label for="ch-title">Title</label> <input type="text" id="ch-title" name="title" minlength="8" maxlength="120" required>
+<label for="ch-brief">Why it is worth checking, and how it could be checked at this scale</label> <textarea id="ch-brief" name="brief" rows="5" minlength="40" maxlength="1500" required></textarea>
+<label for="ch-scale">Scale</label> <select id="ch-scale" name="scale"><option value="cpu-minutes">cpu-minutes</option><option value="cpu-hours">cpu-hours</option><option value="gpu-hours">gpu-hours</option></select>
+</fieldset>
+<p><button class="btn" type="submit">Propose the challenge</button> <span class="small">Reproduce-and-report framing: a refutation with evidence counts the same as a replication.</span></p>
+</form>
 
 <h2 id="promote">Publish and promote</h2>
 <p class="small">Every paper page carries a citation, BibTeX, share lines you post yourself, and a live badge for a README. Nothing is posted for anyone.</p>

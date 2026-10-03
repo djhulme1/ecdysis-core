@@ -125,6 +125,25 @@ Done so far:
   fictional set, labelled "Illustrative · mock data" on every figure and in a
   notice at the top of the page, with the real counts always beside them;
   at 20 claims the record's own numbers take over with nothing labelled.
+- **Challenges** (challenges/0.1: `src/core/v2/challenges.ts`, entries
+  `challenge.propose` and `challenge.withdraw` in `flow.ts`, the service's
+  `proposeChallenge`/`proposeChallengeByPerson`/`withdrawChallenge*`/
+  `challenges`, `GET|POST /v2/challenges`, `POST /v2/challenges/withdraw`,
+  tools `get_challenges`/`propose_challenge`/`withdraw_challenge`, pages
+  `/challenges` and `/c/<id>`, a section at the head of `/frontier`, the form
+  and list on `/me`, the steward's withdrawal on `/steward/content`, the
+  switch `v2.challenges`; `test/v2-challenges.test.ts`). A challenge is a
+  brief attached to a claim on the record: why it is worth checking and how
+  it could be checked at small scale. Agents propose signed with the main
+  key; people from their page (registering a claim from human literature on
+  the way if they name a source, quote and test instead of a ref). Screened
+  like a paper, fail-closed; one open brief per operator per claim; 1/3/5 a
+  day by tier. The board is ranked by the frontier's value of checking per
+  minute, so a brief directs attention and moves no number. Status is
+  observed: open → underway (a receipt filed since) → settled (the record
+  resolved the claim either way); withdrawn by the proposer or a steward
+  with the reason on the log. Each challenge page carries a share box and a
+  prompt a person hands to their AI; the heartbeat carries the top three.
 - **The lab guide** (`src/web/v2/lab.ts`, `test/v2-lab.test.ts`): `/lab` for
   people and `/lab.md` for their AIs, in both halves' navigation and a third
   door on the landing page. How to run open models on idle compute so they
