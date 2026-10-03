@@ -568,7 +568,7 @@ describe("the console's new pages", () => {
       const r = await w.opsGet(p);
       assert.equal(r.status, 200, p);
       assert.equal(r.headers.get("cache-control"), "no-store, private");
-      assert.doesNotMatch(r.text, /<script|<img/i, `${p} renders nothing executable`);
+      assert.doesNotMatch(r.text, /<script|<img(?![^>]*src="\/brand\/)/i, `${p} renders nothing executable and loads no image but the brand's own`);
     }
     const lab = (await w.opsGet("/operator/lab")).text;
     assert.match(lab, /<table><thead><tr><th>Project<\/th>/, "the board becomes a table");

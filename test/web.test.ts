@@ -160,9 +160,13 @@ describe("design primitives", () => {
     const hostile = specimenLabel({ id: "javascript:alert(1)", title: "<img src=x onerror=1>", agent: "a", fieldLabel: "ml", ts: "" });
     assert.ok(!hostile.includes("<img"), "titles are escaped");
     assert.ok(!hostile.includes('href="/p/javascript'), "non-platform ids are never linked");
+    // Five marks, none carried by colour alone (brand kit, 3 Oct 2026): filled, outlined, dashed, the one orange, crossed.
     assert.equal(statusTone("established"), "sound");
+    assert.equal(statusTone("supported"), "part");
+    assert.equal(statusTone("unchecked"), "open");
+    assert.equal(statusTone("contested"), "risk", "contested is the one status that takes the accent: it asks for attention");
     assert.equal(statusTone("refuted"), "broken");
-    for (const s of ["supported", "unchecked", "contested", null]) assert.equal(statusTone(s), "risk", "only established is shown as sound");
+    assert.equal(statusTone(null), "open", "anything unknown reads as unchecked");
     assert.deepEqual(Object.keys(STATUS_MEANING).sort(), ["contested", "established", "refuted", "supported", "unchecked"]);
     const one = specimenLabel({ id: "ecd:2610.abcdef", title: "T", agent: "a", fieldLabel: "ml", ts: "", counts: { established: 1 } });
     assert.match(one, /status sound">established</, "a one-claim paper shows its claim's status");
@@ -203,5 +207,41 @@ describe("one story across the site and the protocol", () => {
     const missing = await route(get(`/pp/${"0".repeat(64)}`), s, limiter());
     assert.equal(missing.status, 404);
     assert.match(await missing.text(), /No such preprint/);
+  });
+});
+
+describe("the brand (kit of 3 Oct 2026)", () => {
+  it("serves the kit's SVGs unchanged, puts the lockup and the person's page in every header, and never types the brand name as the logo", async () => {
+    const { BRAND_ASSETS, LOGO_HORIZONTAL_LIGHT, LOGO_HORIZONTAL_DARK, LOGO_SYMBOL, FAVICON_SVG, brandLockup, BRAND } = await import("../src/web/brand.js");
+    const { shell, CSS } = await import("../src/web/design.js");
+    // The assets are the kit's: the emblem's three fixed tints, the wordmark path shared by the light and dark lockups, nothing else changed.
+    for (const tint of [BRAND.signalOrange, BRAND.wingMid, BRAND.wingPale]) for (const svg of [LOGO_HORIZONTAL_LIGHT, LOGO_HORIZONTAL_DARK, LOGO_SYMBOL, FAVICON_SVG]) assert.ok(svg.includes(`fill="${tint}"`), `${tint} in every asset`);
+    assert.equal(LOGO_HORIZONTAL_LIGHT.replace('<g fill="#242629"', '<g fill="#F7F8FA"'), LOGO_HORIZONTAL_DARK, "the dark lockup is the light one with soft-white lettering");
+    assert.ok(LOGO_HORIZONTAL_LIGHT.includes('viewBox="0 0 740 190"') && LOGO_SYMBOL.includes('viewBox="0 0 540 258"') && FAVICON_SVG.includes('viewBox="0 0 64 64"'));
+    assert.deepEqual(Object.keys(BRAND_ASSETS).sort(), ["/brand/ecdysis-horizontal-dark.svg", "/brand/ecdysis-horizontal-light.svg", "/brand/ecdysis-symbol.svg", "/favicon.svg"]);
+    for (const a of Object.values(BRAND_ASSETS)) { assert.equal(a.type, "image/svg+xml; charset=utf-8"); assert.doesNotMatch(a.body, /<script|on[a-z]+=/i, "no script in an image"); }
+    // The lockup: light and dark by the reader's colour scheme, the kit's alt for a home link, proportions kept (width and height in the 740:190 ratio).
+    const lock = brandLockup();
+    assert.match(lock, /<source media="\(prefers-color-scheme: dark\)" srcset="\/brand\/ecdysis-horizontal-dark\.svg">/);
+    assert.match(lock, /<img class="lockup" src="\/brand\/ecdysis-horizontal-light\.svg" alt="Ecdysis home" width="740" height="190"/);
+    assert.match(lock, /<img class="symbol" src="\/brand\/ecdysis-symbol\.svg" alt="" [^>]*aria-hidden="true"/, "the small-screen symbol is decorative beside the lockup");
+    // Every page: the lockup is the home link, the top bar holds People, Agents and Your Ecdysis, the favicon is the kit's.
+    const page = shell({ title: "T", description: "d", half: "people", body: "<p>x</p>" });
+    assert.match(page, /<a class="brand" href="\/"><picture>/);
+    assert.match(page, /<nav class="halves" aria-label="Site"><span class="seg"><a href="\/people" aria-current="true">People<\/a><a href="\/agents">Agents<\/a><\/span><a class="me" href="\/me">Your Ecdysis<\/a><\/nav>/);
+    assert.match(page, /<link rel="icon" href="\/favicon\.svg" type="image\/svg\+xml">/);
+    assert.match(shell({ title: "T", description: "d", half: "me", body: "" }), /<a class="me" href="\/me" aria-current="true">Your Ecdysis<\/a>/, "on the person's own pages the top bar says so");
+    assert.doesNotMatch(page, /class="brand"[^<]*<svg|>ecdysis</, "the brand name is never typed as the logo");
+    // The palette is the kit's and only the kit's: soft white, ink, signal orange; ink on orange buttons; the old amber, teal, violet and vermillion are gone.
+    assert.match(CSS, /--ground:#F7F8FA;--card:#FFFFFF;--ink:#242629/);
+    assert.match(CSS, /--accent:#FF8A24;--on-accent:#242629/);
+    assert.match(CSS, /@media \(prefers-color-scheme:dark\)\{:root\{--ground:#242629;--card:#2C2F33;--ink:#F7F8FA/);
+    for (const gone of ["#93560A", "#00806B", "#6345C1", "#CC3D17", "#F3F5F4", "#1F1A14"]) assert.ok(!CSS.includes(gone), `${gone} is gone`);
+    assert.doesNotMatch(CSS, /gradient/, "no gradients");
+    // Interactive targets are 44px, focus is visible, motion is respected.
+    assert.match(CSS, /\.halves \.seg a\{[^}]*min-height:44px/);
+    assert.match(CSS, /\.btn\{[^}]*min-height:44px/);
+    assert.match(CSS, /:focus-visible\{outline:2px solid var\(--ink\);outline-offset:4px\}/);
+    assert.match(CSS, /prefers-reduced-motion:reduce/);
   });
 });

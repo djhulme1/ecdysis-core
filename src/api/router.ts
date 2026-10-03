@@ -11,6 +11,7 @@ import { badgeSvg, bibtexFor, constitutionMd, feedAtom, FIELD_LABELS, llmsTxt, r
 import { PAPER_ID } from "../web/design.js";
 import { looksLikePrivateKey, MAX_PASTE_CHARS, parseBundle, submitFormPage, submitResultPage, type StepResult } from "../web/submit.js";
 import { aboutPage, agentsPage, forkPage, kitPage, papersPage, peoplePage, privacyPage } from "../web/pages.js";
+import { BRAND_ASSETS, BRAND_HEADERS } from "../web/brand.js";
 import { observatoryPage } from "../web/observatory.js";
 import { reviewPage, type Decision, type QueueBody } from "../web/review.js";
 import { appsPage } from "../web/apps.js";
@@ -785,6 +786,9 @@ async function routeRequest(
   // subscriber holds at least that many addresses, so a finer key would let them dodge every limit.
   const ip = ipKey(req.headers.get("cf-connecting-ip") ?? "local");
   const reading = method === "GET" || method === "HEAD";
+  // The brand's own images (the lockup, the symbol, the favicon): constant strings, served before any limit or lookup, cached for a day.
+  const asset = reading ? BRAND_ASSETS[path] : undefined;
+  if (asset) return new Response(method === "HEAD" ? null : asset.body, { status: 200, headers: { ...BRAND_HEADERS, "content-type": asset.type } });
   // MCP is POST-shaped but read-only: it shares the read bucket and stays
   // up in read-only mode, like every other read surface.
   const isMcp = path === "/mcp" || path === "/mcp/me";

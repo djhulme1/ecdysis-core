@@ -11,7 +11,8 @@
 import type { Json } from "../core/canonical.js";
 import { FIELDS } from "../core/schema.js";
 import { FIELD_LABELS } from "../api/site.js";
-import { CSS, MARK, esc } from "./design.js";
+import { CSS, esc } from "./design.js";
+import { brandLockup } from "./brand.js";
 import { waited } from "./review.js";
 import type { Analytics, AgentRow, CaseRow, ClaimRow, DayCount, Growth, JuryView, Kpi } from "../api/operator-data.js";
 import { ONE_LINER } from "./share.js";
@@ -122,7 +123,7 @@ export function consoleShell(ctx: ConsoleCtx, o: { title: string; current: strin
 <a class="skip" href="#main">Skip to content</a>
 <div class="wrap wide">
 <header class="ops-top">
-<a class="brand" href="/operator">${MARK}ecdysis<span class="ops-tag">Operator</span></a>
+<a class="brand" href="/operator">${brandLockup("Ecdysis operator console")}<span class="ops-tag">Operator</span></a>
 <span class="ops-who">Signed in as ${esc(ctx.email)} · <a href="/cdn-cgi/access/logout">Sign out</a> · <a href="/">Public site</a></span>
 </header>
 <nav class="ops-nav" aria-label="Console">${nav}</nav>

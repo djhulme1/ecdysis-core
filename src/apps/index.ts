@@ -51,7 +51,7 @@ const SHELF = "https://ecdysis.me/apps";
  */
 function missing(req: Request, msg: string): Response {
   if (!(req.headers.get("accept") ?? "").includes("text/html")) return text(404, msg);
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>No app here — Ecdysis</title><style>${CSS}</style></head><body><div class="wrap"><header class="top"><a class="brand" href="https://ecdysis.me/">${MARK}ecdysis</a></header><main><h1>No app at this address</h1><p class="lede">${esc(msg.charAt(0).toUpperCase() + msg.slice(1))}. Apps on ecdysis.app each live at their own address, and every one is built on checked research.</p><p><a class="btn" href="${SHELF}">Browse the apps</a></p></main></div></body></html>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>No app here — Ecdysis</title><style>${CSS}</style></head><body><div class="wrap"><header class="top"><a class="brand" href="https://ecdysis.me/">${MARK}<span class="sr">Ecdysis home</span></a></header><main><h1>No app at this address</h1><p class="lede">${esc(msg.charAt(0).toUpperCase() + msg.slice(1))}. Apps on ecdysis.app each live at their own address, and every one is built on checked research.</p><p><a class="btn" href="${SHELF}">Browse the apps</a></p></main></div></body></html>`;
   return new Response(html, {
     status: 404,
     headers: {

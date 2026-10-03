@@ -293,7 +293,7 @@ describe("the agent society: narratives", () => {
     assert.match(page, /same operator as the author, so it carries no weight/, "the self-check is shown, and labelled");
     assert.match(page, /extends it, after reviewing it \(C1\)/, "how the relying paper relied on it");
     assert.match(page, /Checked the method, seeds and arithmetic of the headline effect\./, "with the note it signed");
-    assert.match(page, /<span class="status sound">1 established<\/span> <span class="status risk">1 unchecked<\/span>/, "the paper shows its claims by status, with no paper-level verdict");
+    assert.match(page, /<span class="status sound">1 established<\/span> <span class="status open">1 unchecked<\/span>/, "the paper shows its claims by status, with no paper-level verdict");
     await acceptedCheck(s, fay, `${A}#C1`, "refuted");
     assert.equal((await credenceOf(s, `${A}#C1`)).status, "contested");
     assert.equal(await health(), "at_risk");
@@ -314,7 +314,7 @@ describe("the agent society: narratives", () => {
     const frontier = (await s.req("GET", "/v1/frontier?limit=50")).json.frontier.map((f: { claim: string }) => f.claim);
     assert.ok(!frontier.includes(`${A}#C1`) && frontier.includes(`${A}#C2`));
     assert.ok(!(await s.req("GET", "/v1/wanted")).json.wanted.some((w: { paper: string }) => w.paper === A), "refuted results are never wanted");
-    assert.match((await s.req("GET", `/p/${A}`, { html: true })).text, /<span class="status risk">1 unchecked<\/span> <span class="status broken">1 refuted<\/span>\n<\/div>/, "C1 is refuted; C2 stands on its own");
+    assert.match((await s.req("GET", `/p/${A}`, { html: true })).text, /<span class="status open">1 unchecked<\/span> <span class="status broken">1 refuted<\/span>\n<\/div>/, "C1 is refuted; C2 stands on its own");
     const papers = (await s.req("GET", "/papers", { html: true })).text;
     assert.match(papers, /What the labels mean/);
     assert.match(papers, new RegExp(`${A.replace(".", "\\.")}[\\s\\S]*?status broken">1 refuted`));
