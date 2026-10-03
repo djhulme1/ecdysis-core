@@ -22,7 +22,7 @@ import { structuralScreener } from "../src/core/hazard.js";
 import { TransparencyLog } from "../src/core/log.js";
 import type { Json } from "../src/core/canonical.js";
 import {
-  lastSlot, nextResearch, parseRoutine, researchDue, RINGS_PER_DAY, slotOffset, webhookProblem,
+  lastSlot, nextResearch, parseRoutine, researchDue, RINGS_PER_DAY, slotOffset, webhookProblem, type RingReason,
 } from "../src/core/wake.js";
 
 const T0 = Date.UTC(2026, 9, 2, 9, 0, 0);
@@ -644,5 +644,70 @@ describe("the router", () => {
     const day = new Date().toISOString().slice(0, 10);
     const counts = await w.store.listAccessPrefix("f");
     assert.ok(counts.some((c) => c.id === "funnel:doorbell:200") && counts.some((c) => c.id === `fd:${day}:doorbell:ok`), JSON.stringify(counts.map((c) => c.id)));
+  });
+});
+
+describe("v2 reasons through the doorbells", () => {
+  it("rings an owed check once a day while it is owed, and a dispute on what the agent relies on once", async () => {
+    const w = await world();
+    await connected(w);
+    w.calls.length = 0;
+    const extra = new Map<string, RingReason[]>();
+    const bells = w.make({ extraReasons: async (handles) => new Map([...extra].filter(([h]) => handles.includes(h))) });
+    const due = new Date(w.now + 36 * HOUR).toISOString();
+    extra.set("Moth-1", [{ event: "check.owed", case: "c".repeat(64), target: "ext:0123456789abcdef#C1", due }, { event: "dispute.opened", case: "ecd:2610.abcd#C2", credence: 0.52 }]);
+    w.tick(2 * HOUR);
+    let r = await bells.notify();
+    assert.equal(r.rung, 1);
+    assert.deepEqual(events(w.calls[0]!), ["check.owed", "dispute.opened"], "owed first, then the dispute");
+    const text = String(w.calls[0]!.body.text);
+    assert.ok(text.includes("check.owed") && text.includes("ext:0123456789abcdef#C1") && text.includes("/v2/receipts/" + "c".repeat(64)));
+    assert.ok(text.includes("dispute.opened") && text.includes("ecd:2610.abcd#C2"));
+    // Two hours on: still owed, same day, same dispute: nothing new to say.
+    w.tick(2 * HOUR);
+    r = await bells.notify();
+    assert.equal(r.rung, 0);
+    // The deadline's day changes as it approaches? No: the claim is keyed by the deadline's date, which is fixed; a different owed check rings.
+    extra.set("Moth-1", [{ event: "check.owed", case: "d".repeat(64), target: "ext:0123456789abcdef#C1", due }]);
+    w.tick(2 * HOUR);
+    r = await bells.notify();
+    assert.equal(r.rung, 1);
+    assert.deepEqual(events(w.calls.at(-1)!), ["check.owed"]);
+  });
+});
+
+describe("v2 agents' doorbells", () => {
+  it("an agent on the v2 log sets and stops its doorbell with its main key over /v2; a check key cannot; v1's path is gone", async () => {
+    const w = await world();
+    // The agent exists on the v2 log only: v1's agents table knows nothing of it.
+    const main = await generateKeyPair();
+    const runner = await generateKeyPair();
+    const resolveAgent = async (handle: string) => (handle === "Moth-2" ? { publicKey: main.publicKey } : null);
+    const bells = w.make({ resolveAgent });
+    const envelope = async (kp: KeyPairB64, extra: Record<string, Json>, protocol = "ecdysis/0.2") => {
+      const payload = { protocol, agent: { handle: "Moth-2", publicKey: kp.publicKey }, ts: iso(w.now), ...extra } as Json;
+      return { payload, signature: await signJson(kp.privateKey, payload) } as Json;
+    };
+    const limiter = new MemoryRateLimiter(1000);
+    const post = async (path: string, body: Json) => {
+      const r = await route(new Request(`https://api.ecdysis.me${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), w.svc, limiter, { doorbells: bells, v2: {} as never });
+      return { status: r.status, body: (await r.json()) as Record<string, Json> };
+    };
+    assert.equal((await post("/v1/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self", cadence: "daily" }))).status, 410, "v1 takes no writes with v2 on");
+    const byRunner = await post("/v2/agents/doorbell", await envelope(runner, { type: "doorbell.set", kind: "self", cadence: "daily" }));
+    assert.equal(byRunner.status, 401, "a check key, which lives where foreign code runs, sets no doorbell");
+    const set = await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self", cadence: "daily" }));
+    assert.equal(set.status, 200, JSON.stringify(set.body));
+    assert.equal(set.body["status"], "active");
+    assert.equal((await w.store.getDoorbell("Moth-2"))!.kind, "self");
+    assert.equal((await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self" }, "ecdysis/0.1"))).status, 200, "the v1 protocol string is still accepted");
+    assert.equal((await post("/v2/agents/doorbell", await envelope(runner, { type: "doorbell.stop" }))).status, 401, "nor stops one");
+    const stop = await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.stop" }));
+    assert.equal(stop.status, 200);
+    assert.equal((await w.store.getDoorbell("Moth-2"))!.status, "stopped");
+    assert.equal((await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self" }))).status, 200, "and set again");
+    const nobody = await generateKeyPair();
+    const payload = { protocol: "ecdysis/0.2", agent: { handle: "Nobody", publicKey: nobody.publicKey }, ts: iso(w.now), type: "doorbell.set", kind: "self" } as Json;
+    assert.equal((await post("/v2/agents/doorbell", { payload, signature: await signJson(nobody.privateKey, payload) })).status, 401, "unknown to the log: refused");
   });
 });

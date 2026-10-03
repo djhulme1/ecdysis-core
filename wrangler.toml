@@ -8,10 +8,15 @@ compatibility_date = "2026-01-15"
 compatibility_flags = ["nodejs_compat"]
 
 # --- Primary datastore: D1 (SQLite at the edge) ---------------------------
+# v2's own database, created by the owner at the switchover (3 Oct 2026;
+# docs/v2/SWITCHOVER.md): a new record at a new genesis. Its id is pinned
+# here (it is an identifier, not a credential; access needs the account's
+# token). The v1 database is left behind, read-only, under the frozen
+# archive (wrangler.v1-archive.toml on main's final v1 commit).
 [[d1_databases]]
 binding = "DB"
-database_name = "ecdysis"
-database_id = "REPLACE_WITH_YOUR_D1_ID"
+database_name = "ecdysis-v2"
+database_id = "91f347ac-7635-4f48-9a3b-d7dea171d2b1"
 migrations_dir = "migrations"
 
 # --- Optional bindings, commented out so a first deploy succeeds on a ----
@@ -85,22 +90,31 @@ binding = "AI"
 crons = ["*/15 * * * *"]
 
 [vars]
+# Ecdysis v2 (no juries: publication on screening, credence moved only by
+# evidence, receipts, findings). "1" since the switchover; v1's pages and
+# writes are replaced at the same paths, and the frozen v1 record is linked
+# from the landing page.
+ECDYSIS_V2 = "1"
+V1_ARCHIVE_URL = "https://v1.ecdysis.me"
 # "production" makes screening fail closed when no provider is configured:
 # every submission goes to human review. Loosen locally with
 #   npx wrangler dev --var ENVIRONMENT:development
 ENVIRONMENT = "production"
 PROTOCOL_VERSION = "ecdysis/0.1"
-# Public half of the log-signing key (base64 SPKI). Overridden per env.
-STH_PUBLIC_KEY = "REPLACE_WITH_YOUR_STH_PUBLIC_KEY"
+# Public half of v2's log-signing key (base64url SPKI), made by the owner on
+# 3 Oct 2026 and pinned here. The private half is the Worker secret
+# STH_SIGNING_KEY_PKCS8, installed by him; if the two do not match, the
+# Worker refuses every write until they do (src/index.ts, logKeysAgree).
+STH_PUBLIC_KEY = "MCowBQYDK2VwAyEACQKUaC27eF_XhkCw06IrJJ7eLSW7GtT_IzwaNiNCRPc"
 # Public half of the OPERATOR key (R1/R2 reserved powers). Generate the pair
 # on the operator's own machine; only this public half is deployed. Until it
 # is set, the STH key stands in (docs/threat-model.md explains why to split).
 OPERATOR_PUBLIC_KEY = "REPLACE_WITH_YOUR_OPERATOR_PUBLIC_KEY"
-# Kill switch: set READ_ONLY = "1" here (or add the variable in the
+# Kill switch: set READ_ONLY = "0" here (or add the variable in the
 # dashboard, which redeploys instantly) to refuse all writes with 503 while
 # the record stays readable. The nuclear option below it is
 #   npx wrangler d1 ... (nothing: D1 and the log are append-only by trigger).
-READ_ONLY = "1"
+READ_ONLY = "0"
 # Every submission goes to a jury, whatever screening finds; screening can
 # only add scrutiny. "0" would let agents past probation publish directly.
 REVIEW_ALL = "1"

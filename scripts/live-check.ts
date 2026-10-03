@@ -11,7 +11,7 @@
  *   MODE              read | full            (default read)
  *   STH_PUBLIC_KEY    repo-pinned log key; signature checks warn if unset
  *   MIRROR            "1" appends a verified tree head to MIRROR_FILE
- *   MIRROR_FILE       default mirror/sth-history.jsonl
+ *   MIRROR_FILE       default mirror/sth-history.jsonl (the workflow sets mirror/v2/sth-history.jsonl)
  *
  * Exit code: 0 all pass (warns allowed), 1 any failure.
  */
@@ -20,6 +20,7 @@ import { dirname } from "node:path";
 import { generateKeyPair, signJson, verifyJson } from "../src/core/crypto.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { constitutionHash, CONSTITUTION_VERSION } from "../src/core/constitution.js";
+import { recomputeV2 } from "../src/api/v2/recompute.js";
 import type { Json } from "../src/core/canonical.js";
 
 const BASE = (process.env.ECDYSIS_URL ?? "https://api.ecdysis.me").replace(/\/+$/, "");
@@ -48,6 +49,20 @@ async function hit(path: string, init: RequestInit = {}, timeoutMs = 15_000): Pr
 }
 
 interface Sth { treeSize: number; rootHash: string; timestamp: string; signature: string }
+
+/** Is the deployment serving Ecdysis v2? (Its pages, protocol and write paths differ; the log is the same.) */
+async function detectV2(): Promise<boolean> {
+  try {
+    const r = await hit("/v2/frontier");
+    if (r.status !== 200) return false;
+    const b = (await r.json()) as { version?: string };
+    return b.version === "credence/0.2";
+  } catch {
+    return false;
+  }
+}
+const V2 = await detectV2();
+console.log(`deployment serves ${V2 ? "v2 (receipts, credence/0.2)" : "v1"}`);
 
 async function readChecks(): Promise<Sth | null> {
   const localHash = await constitutionHash();
@@ -78,11 +93,9 @@ async function readChecks(): Promise<Sth | null> {
   }
 
   // --- the two halves -----------------------------------------------------
-  for (const [path, needle] of [
-    ["/people", "skill.md and follow it"],
-    ["/agents", "/skill.md"],
-    ["/papers", "Papers"],
-  ] as const) {
+  for (const [path, needle] of (V2
+    ? [["/people", "Put your AI to work on science"], ["/agents", "/skill.md"], ["/papers", "Papers"], ["/frontier", "Frontier"], ["/observatory", "Observatory"]]
+    : [["/people", "skill.md and follow it"], ["/agents", "/skill.md"], ["/papers", "Papers"]]) as ReadonlyArray<readonly [string, string]>) {
     try {
       const r = await hit(path, { headers: { accept: "text/html" } });
       const html = await r.text();
@@ -95,7 +108,7 @@ async function readChecks(): Promise<Sth | null> {
 
   // --- machine onboarding -------------------------------------------------
   for (const [path, needle] of [
-    ["/skill.md", "/v1/agents/register"],
+    ["/skill.md", V2 ? "/v2/agents/register" : "/v1/agents/register"],
     ["/llms.txt", "skill.md"],
   ] as const) {
     try {
@@ -160,10 +173,12 @@ async function readChecks(): Promise<Sth | null> {
   try {
     const r = await hit("/skill.md");
     const t = await r.text();
-    record("protocol explains doorbells", r.status === 200 && t.includes("## Doorbells") && t.includes("/v1/agents/doorbell") ? "pass" : "fail");
+    record("protocol explains doorbells", r.status === 200 && t.includes("## Doorbells") && t.includes(V2 ? "/v2/agents/doorbell" : "/v1/agents/doorbell") ? "pass" : "fail");
   } catch (e) {
     record("protocol explains doorbells", "fail", String(e));
   }
+
+  if (V2) await readChecksV2();
   try {
     const r = await hit(`/doorbell/${"0".repeat(32)}/${"0".repeat(64)}`, { headers: { accept: "text/html" } });
     const csp = r.headers.get("content-security-policy") ?? "";
@@ -224,6 +239,76 @@ async function readChecks(): Promise<Sth | null> {
   return sth;
 }
 
+/** v2's own surfaces: the numbers recompute from the log, the frozen stay frozen, v1 takes no writes, the private areas stay private. */
+async function readChecksV2() {
+  try {
+    const r = await hit("/v2/credence");
+    const b = (await r.json()) as { version?: string; claims?: unknown[] };
+    record("GET /v2/credence (credence/0.2)", r.status === 200 && b.version === "credence/0.2" && Array.isArray(b.claims) ? "pass" : "fail", `${b.claims?.length ?? "?"} claims`);
+  } catch (e) {
+    record("GET /v2/credence (credence/0.2)", "fail", String(e));
+  }
+  try {
+    // Verify, don't trust: every served credence recomputed here from nothing but the public log.
+    const report = await recomputeV2(async <T>(path: string): Promise<T> => {
+      const r = await hit(path, { headers: { accept: "application/json" } }, 30_000);
+      if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+      return (await r.json()) as T;
+    });
+    record("every served credence recomputes from the public log", report.mismatches.length === 0 ? "pass" : "fail",
+      `${report.entries} entries, ${report.compared} claims compared${report.mismatches.length ? `: ${report.mismatches.slice(0, 3).join("; ")}` : ""}`);
+  } catch (e) {
+    record("every served credence recomputes from the public log", "fail", String(e));
+  }
+  for (const [path, check] of [
+    ["/v2/holds", (b: Record<string, unknown>) => Array.isArray(b["holds"])],
+    ["/v2/governance", (b: Record<string, unknown>) => b["version"] === "governance/0.2"],
+    ["/v2/frontier", (b: Record<string, unknown>) => Array.isArray(b["checking"]) && Array.isArray(b["disputes"]) && Array.isArray(b["unsettled"])],
+  ] as const) {
+    try {
+      const r = await hit(path);
+      const b = (await r.json()) as Record<string, unknown>;
+      record(`GET ${path}`, r.status === 200 && check(b) ? "pass" : "fail", `status ${r.status}`);
+    } catch (e) {
+      record(`GET ${path}`, "fail", String(e));
+    }
+  }
+  try {
+    const r = await hit("/v1/agents/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ handle: "probe", publicKey: "x", operatorId: "op-live-check" }) });
+    record("v1 takes no writes (410)", r.status === 410 ? "pass" : "fail", `status ${r.status}`);
+  } catch (e) {
+    record("v1 takes no writes (410)", "fail", String(e));
+  }
+  try {
+    const r = await hit("/v2/hazard/decision", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject: "x", decision: "release", signature: "nope" }) });
+    record("R1 refuses anything but the operator key's signature", r.status === 401 || r.status === 501 ? "pass" : "fail", `status ${r.status}`);
+  } catch (e) {
+    record("R1 refuses anything but the operator key's signature", "fail", String(e));
+  }
+  try {
+    const r = await hit("/me", { headers: { accept: "text/html" } });
+    const privatePage = r.headers.get("cache-control") === "no-store" && /noindex/.test(r.headers.get("x-robots-tag") ?? "");
+    record("/me answers (open or closed), privately", (r.status === 200 || r.status === 503) && privatePage ? "pass" : "fail", `status ${r.status}${r.status === 503 ? " (accounts closed: ACCOUNTS_KEY unset)" : ""}`);
+  } catch (e) {
+    record("/me answers (open or closed), privately", "fail", String(e));
+  }
+  try {
+    const r = await hit("/steward", { headers: { accept: "text/html" } });
+    record("/steward refuses the public", r.status === 401 || r.status === 403 || r.status === 404 ? "pass" : "fail", `status ${r.status}`);
+  } catch (e) {
+    record("/steward refuses the public", "fail", String(e));
+  }
+  for (const path of ["/privacy", "/terms"] as const) {
+    try {
+      const r = await hit(path, { headers: { accept: "text/html" } });
+      const t = await r.text();
+      record(`${path} speaks v2`, r.status === 200 && !/jury|juror/i.test(t) && /receipt/i.test(t) ? "pass" : "fail", `status ${r.status}`);
+    } catch (e) {
+      record(`${path} speaks v2`, "fail", String(e));
+    }
+  }
+}
+
 /** Append-only external mirror: verify consistency with the last recorded head. */
 async function mirrorStep(sth: Sth) {
   let prev: { treeSize: number; rootHash: string } | null = null;
@@ -275,6 +360,48 @@ async function mirrorStep(sth: Sth) {
       writeFileSync(MIRROR_FILE, (existsSync(MIRROR_FILE) ? readFileSync(MIRROR_FILE, "utf8") : "") + line + "\n");
       record("mirror: verified head appended", "pass", MIRROR_FILE);
     }
+  }
+}
+
+/** Full mode, v2: the write path's refusals, with nothing left on the record (no probe agent is registered: v2's log is the record). */
+async function writeChecksV2() {
+  const kp = await generateKeyPair();
+  const localHash = await constitutionHash();
+  try {
+    const r = await hit("/v2/agents/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ handle: `probe-${Date.now().toString(36)}`, publicKey: kp.publicKey, operatorId: "op-live-check" }) });
+    record("v2 registration without constitution ack → 428", r.status === 428 ? "pass" : "fail", `status ${r.status}`);
+  } catch (e) {
+    record("v2 registration without constitution ack → 428", "fail", String(e));
+  }
+  try {
+    const r = await hit("/v2/agents/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ handle: "probe", publicKey: kp.publicKey, operatorId: "op_" + "0".repeat(24), constitution: { version: CONSTITUTION_VERSION, hash: localHash } }) });
+    record("v2 registration under an account's operator id without a code → 400", r.status === 400 ? "pass" : "fail", `status ${r.status}`);
+  } catch (e) {
+    record("v2 registration under an account's operator id without a code → 400", "fail", String(e));
+  }
+  try {
+    const payload: Json = { protocol: "ecdysis/0.2", type: "paper", title: "Live-check probe: an unknown agent must be refused", abstract: "Operational probe filed by the platform's own live-check against the v2 write path. The agent is not registered, so this must be refused before anything is read.", field: "other", claims: [{ text: "An unregistered agent cannot publish on Ecdysis v2.", confidence: 0.99, test: "This probe is published." }], builds_on: [], agent: { handle: `probe-${Date.now().toString(36)}`, publicKey: kp.publicKey }, ts: new Date().toISOString() };
+    const r = await hit("/v2/papers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ payload, signature: await signJson(kp.privateKey, payload) }) });
+    record("v2 paper by an unknown agent → 404", r.status === 404 ? "pass" : "fail", `status ${r.status}`);
+    const r2 = await hit("/v2/papers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ payload, signature: "not-a-signature" }) });
+    record("v2 malformed signature refused", r2.status === 401 || r2.status === 404 || r2.status === 400 ? "pass" : "fail", `status ${r2.status}`);
+  } catch (e) {
+    record("v2 paper by an unknown agent → 404", "fail", String(e));
+  }
+  try {
+    const r = await hit("/v2/papers", { method: "POST", headers: { "content-type": "application/json" }, body: `{"filler":"${"x".repeat(70 * 1024)}"}` });
+    record("oversize body → 413", r.status === 413 ? "pass" : "fail", `status ${r.status}`);
+  } catch (e) {
+    record("oversize body → 413", "fail", String(e));
+  }
+  // LAST: the burst, so tripping the limiter cannot poison earlier checks.
+  try {
+    const burst = await Promise.all(Array.from({ length: 80 }, () => hit("/v2/frontier", {}, 10_000).then((r) => r.status).catch(() => 0)));
+    const limited = burst.filter((s) => s === 429).length;
+    const failed = burst.filter((s) => s === 0 || s >= 500).length;
+    record("rate limiter answers a burst", failed === 0 ? (limited > 0 ? "pass" : "warn") : "fail", `${limited}/80 limited, ${failed} errored`);
+  } catch (e) {
+    record("rate limiter answers a burst", "fail", String(e));
   }
 }
 
@@ -427,7 +554,7 @@ async function writeChecks() {
 const sth = await readChecks();
 // Mirror before any full-mode burst, so the burst's 429s cannot starve it.
 if (MIRROR && sth) await mirrorStep(sth);
-if (MODE === "full") await writeChecks();
+if (MODE === "full") await (V2 ? writeChecksV2() : writeChecks());
 
 const fails = results.filter((r) => r.status === "fail");
 const warns = results.filter((r) => r.status === "warn");

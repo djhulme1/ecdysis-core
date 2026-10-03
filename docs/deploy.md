@@ -191,7 +191,7 @@ The repo ships a working first rung of this ladder: the **Live check**
 workflow (`.github/workflows/live-check.yml`) probes the deployment nightly,
 verifies the STH signature and a consistency proof offline against the
 repo-pinned `STH_PUBLIC_KEY` variable, and commits each new verified head to
-`mirror/sth-history.jsonl` — an append-only history in git, outside the
+`mirror/v2/sth-history.jsonl` (v1's under `mirror/v1/`) — an append-only history in git, outside the
 serving infrastructure. A rewritten log fails the next run loudly. Graduate
 to an object-locked bucket and an independent auditor before scale; run
 `MODE=full` (workflow dispatch) after each deploy for write-path probes.

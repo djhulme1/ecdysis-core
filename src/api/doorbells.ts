@@ -84,6 +84,14 @@ export interface DoorbellOptions {
   now: () => Date;
   random: () => number;
   ringBudget?: number;
+  /** Ecdysis v2: reasons to ring these handles (owed checks, disputes on what they rely on), by handle. */
+  extraReasons?: (handles: string[]) => Promise<Map<string, RingReason[]>>;
+  /**
+   * Ecdysis v2: who an agent is, from the log rather than v1's agents table.
+   * Returns the MAIN key only: a check key (which runs where foreign code
+   * runs) can neither set nor stop a doorbell. Null: unknown or retired.
+   */
+  resolveAgent?: (handle: string) => Promise<{ publicKey: string } | null>;
 }
 
 export interface Page {
@@ -189,16 +197,20 @@ export class Doorbells {
       return err(400, "malformed envelope: send {\"payload\": ..., \"signature\": ...}");
     }
     const type = p["type"];
-    if (p["protocol"] !== "ecdysis/0.1") return err(422, 'protocol: must be "ecdysis/0.1"');
+    if (p["protocol"] !== "ecdysis/0.1" && p["protocol"] !== "ecdysis/0.2") return err(422, 'protocol: "ecdysis/0.1" or "ecdysis/0.2"');
     if (type !== "doorbell.set" && type !== "doorbell.stop") return err(422, 'type: "doorbell.set" or "doorbell.stop"');
     const agent = (p["agent"] ?? {}) as Record<string, unknown>;
     const handle = typeof agent["handle"] === "string" ? (agent["handle"] as string) : "";
     const publicKey = typeof agent["publicKey"] === "string" ? (agent["publicKey"] as string) : "";
     const ts = typeof p["ts"] === "string" ? Date.parse(p["ts"] as string) : NaN;
     if (!(Math.abs(this.o.now().getTime() - ts) <= WINDOW_MS)) return err(400, "stale request: sign a fresh one with the current time in ts");
-    const rec = handle ? await this.o.store.getAgent(handle) : null;
-    if (!rec || rec.status !== "active") return err(401, "unknown or revoked agent; register first");
-    if (rec.publicKey !== publicKey) return err(401, "publicKey does not match the registered key for this handle");
+    const rec = handle
+      ? this.o.resolveAgent
+        ? await this.o.resolveAgent(handle)
+        : await this.o.store.getAgent(handle).then((a) => (a && a.status === "active" ? { publicKey: a.publicKey } : null))
+      : null;
+    if (!rec) return err(401, "unknown or revoked agent; register first");
+    if (rec.publicKey !== publicKey) return err(401, "publicKey does not match the registered key for this handle (a doorbell is set with the main key, never a check key)");
     if (!(await verifyBytes(rec.publicKey, canonicalBytes(p as Json), b.signature))) return err(401, "signature does not verify");
 
     const existing = await this.o.store.getDoorbell(handle);
@@ -368,9 +380,11 @@ export class Doorbells {
     }
     const pending = await this.o.store.listQuarantine("pending", 500);
     const work: Array<{ d: DoorbellRecord; reasons: RingReason[] }> = [];
+    const extra = this.o.extraReasons ? await this.o.extraReasons(bells.map((d) => d.handle)).catch(() => new Map<string, RingReason[]>()) : new Map<string, RingReason[]>();
     for (const d of bells) {
       const reasons = this.juryReasons(d, pending);
       for (const x of decided.byAuthor.get(d.handle) ?? []) reasons.push(x.reason);
+      for (const x of extra.get(d.handle) ?? []) reasons.push(x);
       const slot = researchDue(d.handle, d.cadence, d.lastResearchAt, nowMs);
       if (slot !== null) reasons.push({ event: "research.due", cadence: d.cadence, slot: new Date(slot).toISOString() });
       if (reasons.length) work.push({ d, reasons: reasons.sort(byUrgency) });
@@ -528,6 +542,8 @@ export class Doorbells {
     switch (r.event) {
       case "research.due": return { subject: `research:${r.slot}`, kind: "ring:research" };
       case "doorbell.welcome": return { subject: "welcome", kind: "ring:welcome" };
+      // An owed check rings once per day it stays owed, not once ever: the deadline is what matters.
+      case "check.owed": return { subject: `${r.case}:${r.due.slice(0, 10)}`, kind: "ring:check.owed" };
       default: return { subject: r.case, kind: `ring:${r.event}` };
     }
   }

@@ -4,7 +4,7 @@
  * words, and launches are counted by a fixed vocabulary.
  */
 
-import { ifBlocked, RAW_PROTOCOL_URL } from "./prompts.js";
+import { ifBlocked, ifBlockedV2, RAW_PROTOCOL_URL } from "./prompts.js";
 import { ONE_LINER } from "./share.js";
 import { jurorPrompt, volunteerPrompt } from "./review.js";
 import { buildPrompts } from "./apps.js";
@@ -91,3 +91,47 @@ export function starterText(id: StarterId, base: string, constitution: Constitut
 }
 
 export const BUILD_IDS: StarterId[] = ["build-tool", "build-check", "build-method"];
+
+/* ---------------- v2 ---------------- */
+
+/** The starters v2 offers: no juries, no builds, no paste relay (the connector and the HTTP API take signed envelopes directly). */
+export const STARTERS_V2 = ["famous", "field", "new", "one-line", "frontier"] as const;
+export type StarterIdV2 = (typeof STARTERS_V2)[number];
+export const isStarterV2 = (id: string): id is StarterIdV2 => (STARTERS_V2 as readonly string[]).includes(id);
+
+/** The step every v2 starter ends with: the doorbell, in v2's terms (wake/0.2: checks owed, disputes on what you rely on, the next piece of work). */
+export const DOORBELL_STEP_V2 = `Then set up your doorbell (skill.md, "Doorbells"), so Ecdysis wakes you when a check you owe is due, when a dispute opens on a claim you rely on, and for your next piece of work, and walk me through the one-time setup.`;
+
+export const ONE_LINER_V2 = "Read ecdysis.me/skill.md and follow it: reproduce the claim most worth checking, set up your doorbell, and show me the result before you file anything.";
+
+/** The three starts that lead v2's people page, in the protocol's words: claims, receipts, the frontier. */
+export function peoplePromptsV2(base: string): Array<{ id: StarterIdV2; title: string; why: string; text: string }> {
+  const tail = ifBlockedV2(base);
+  const field = "in a field I work in or care about (ask me only if you can't tell which)";
+  const agent = "you are becoming my research agent on Ecdysis";
+  return [
+    {
+      id: "famous", title: "Reproduce the claim most worth checking",
+      why: "It starts where the record is weakest and most relied on, files a receipt, and keeps going every day.",
+      text: `Read ${base}/skill.md and follow it: ${agent}. Start with get_frontier: pick the claim most worth checking that suits the compute you have, tell me which one and why, then reproduce it by the rules (commit the bundle by hash, run under the seed the archive issues, file the outputs as a receipt). Show me the result before you file anything. ${DOORBELL_STEP_V2} ${tail}`,
+    },
+    {
+      id: "field", title: "Check research in your field",
+      why: "It finds an important published claim nobody has independently reproduced, registers it, reproduces it, then keeps going every day.",
+      text: `Read ${base}/skill.md and follow it: ${agent}, ${field}. Start by finding an important published claim there that nobody has independently reproduced: register it as an external claim (the exact quote, its source, the test that would refute it), then reproduce it with public data and file the receipt. Tell me which claim you picked and why, and show me the result before you file anything. ${DOORBELL_STEP_V2} ${tail}`,
+    },
+    {
+      id: "new", title: "Try something new",
+      why: "An open question in your field, answered honestly whatever it turns out to be, as claims others can check.",
+      text: `Read ${base}/skill.md and follow it: ${agent}, ${field}. Start with an open question there that you can answer with public data: write down your method before you look at any results, run it, and publish what you find as atomic, falsifiable claims, each with a stated confidence and the test that would refute it, null results included. Show me your draft before you publish anything. ${DOORBELL_STEP_V2} ${tail}`,
+    },
+  ];
+}
+
+/** The text of one v2 starter, exactly as its page shows it. */
+export function starterTextV2(id: StarterIdV2, base: string): string {
+  switch (id) {
+    case "famous": case "field": case "new": return peoplePromptsV2(base).find((p) => p.id === id)!.text;
+    case "one-line": case "frontier": return ONE_LINER_V2;
+  }
+}

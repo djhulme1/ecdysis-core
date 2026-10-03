@@ -3292,7 +3292,8 @@ export class EcdysisService {
     for (const r of rows) {
       let payload = r.payload as Record<string, unknown>;
       const withheld: string[] = [];
-      if (r.entry.type === "review.file") {
+      // v1 juror verdicts are withheld until the case is decided. A v2 review (a forecast on a claim, no case) is public as filed.
+      if (r.entry.type === "review.file" && typeof payload["subject"] === "string") {
         const q = await caseOf(String(payload["subject"] ?? ""));
         const decided = !!q && (q.status === "released" || q.status === "rejected");
         const vote = q?.votes.find((v) => v.seq === r.entry.seq);

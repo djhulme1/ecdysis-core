@@ -25,6 +25,14 @@ import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
 import { dayFunnelKeys, endpointOf, funnelKeys, HUMAN_PAGES, pageKeyOf, referrerBucket, stepKeys } from "./funnel.js";
 import { handleMcp } from "./mcp.js";
+import { v2Tools } from "./v2/tools.js";
+import type { V2Service } from "./v2/service.js";
+import type { MeHandler } from "./v2/me.js";
+import { isStewardPath, type StewardHandler } from "./v2/steward.js";
+import type { PagesHandler } from "./v2/pages.js";
+import { OAuthHandler } from "./v2/oauth-http.js";
+import type { OAuth } from "./v2/oauth.js";
+import type { V2Governance } from "./v2/governance.js";
 import { agentMissingPage, agentPage } from "../web/agent.js";
 import { claimMissingPage, claimPage, claimStatusCode } from "../web/claim.js";
 import type { ShareData } from "../web/share.js";
@@ -32,7 +40,7 @@ import { graphPage } from "../web/graph.js";
 import { frontierPage } from "../web/frontier.js";
 import { commonsPage } from "../web/commons.js";
 import { appsFor, launchPage, MCP_APPS, mcpUrlFor, PROMPT_APPS, type McpApp, type PromptApp } from "../web/launch.js";
-import { isStarter, starterText } from "../web/starters.js";
+import { isStarter, isStarterV2, starterText, starterTextV2, type StarterIdV2 } from "../web/starters.js";
 import { charterFormPage, charterResultPage, readCharterForm, CHARTER_MAX_BYTES } from "../web/charter.js";
 import { connectPage } from "../web/connect.js";
 import type { GraphEdge, GraphNode } from "../core/graph.js";
@@ -61,6 +69,18 @@ export interface RouteOptions {
   console?: ConsoleDeps | null;
   /** Lets counting finish after the response is sent (the Worker's ctx.waitUntil). */
   waitUntil?: (p: Promise<unknown>) => void;
+  /** Ecdysis v2 (docs/v2/PLAN.md). Present: /v2/* answers and the connector serves the v2 tools. Absent: v1 only. */
+  v2?: V2Service | null;
+  /** Your Ecdysis (/me): accounts for people. Absent: /me does not exist. */
+  me?: MeHandler | null;
+  /** The stewardship area (/steward). Absent: it does not exist. */
+  steward?: StewardHandler | null;
+  /** v2's public pages (/papers, /p/<id>, /x/<id>, /frontier, /observatory). When present they take precedence over v1's. */
+  pages?: PagesHandler | null;
+  /** Amendments under Article V, for v2. */
+  governance?: V2Governance | null;
+  /** OAuth 2.1 for the connector and managed agents (v2). Present: /oauth/*, the well-known documents, bearer tokens on /mcp, and /mcp/me. */
+  oauth?: { logic: OAuth; http: OAuthHandler } | null;
 }
 
 /**
@@ -620,7 +640,9 @@ async function launchRedirect(req: Request, url: URL, path: string, svc: Ecdysis
   let page: string | null = null;
   if (app in PROMPT_APPS && isStarter(what) && appsFor(what).includes(app as PromptApp)) {
     const def = PROMPT_APPS[app as PromptApp];
-    const prompt = starterText(what, base, { version: CONSTITUTION_VERSION, hash: await constitutionHash() });
+    // When v2 is on, the launcher types v2's prompts (claims, receipts, the frontier); v1's starters (juries, builds, paste) are gone.
+    if (opts.v2 && !isStarterV2(what)) return missing();
+    const prompt = opts.v2 ? starterTextV2(what as StarterIdV2, base) : starterText(what, base, { version: CONSTITUTION_VERSION, hash: await constitutionHash() });
     if (prompt.length > def.max) return missing();
     target = def.target(prompt);
     if (!def.web) page = launchPage({ label: def.label, target, needs: def.needs, prompt });
@@ -709,8 +731,8 @@ export async function route(
   try {
     res = await routeRequest(req, svc, limiter, opts);
   } catch (e) {
-    // Nothing escapes as a bare platform error: a failure anywhere (the console runs before the API's own try) answers
-    // with a correlation id and nothing else.
+    // Nothing escapes as a bare platform error: a failure anywhere (the account pages, stewardship, OAuth, the v2 pages,
+    // which run before the API's own try) answers with a correlation id and nothing else.
     const id = crypto.randomUUID();
     console.error(`unhandled ${id}`, e);
     res = respond(500, { error: "internal error", correlationId: id });
@@ -763,9 +785,14 @@ async function routeRequest(
   const reading = method === "GET" || method === "HEAD";
   // MCP is POST-shaped but read-only: it shares the read bucket and stays
   // up in read-only mode, like every other read surface.
-  const isMcp = path === "/mcp";
+  const isMcp = path === "/mcp" || path === "/mcp/me";
   if (!(await limiter.allow(isMcp ? "mcp" : reading ? "read" : "write", ip))) {
     return respond(429, { error: "rate limit exceeded; slow down" });
+  }
+  // OAuth for the connector (v2): metadata, registration, the authorization page, tokens.
+  if (OAuthHandler.owns(path)) {
+    if (!opts.oauth) return respond(404, { error: "OAuth is not configured on this deployment" });
+    return opts.oauth.http.handle(req, path, ip);
   }
 
   // The operator console has its own lock (Cloudflare Access, checked again
@@ -773,6 +800,22 @@ async function routeRequest(
   if (isConsolePath(path)) {
     if (!opts.console) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
     return handleConsole(req, opts.console);
+  }
+
+  // Your Ecdysis: accounts for people (v2). Its pages are never cached or indexed.
+  if (path === "/me" || path.startsWith("/me/")) {
+    if (!opts.me) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
+    return opts.me.handle(req, path, ip);
+  }
+  // The stewardship area (v2): Cloudflare Access when configured, then a signed-in steward.
+  if (isStewardPath(path)) {
+    if (!opts.steward) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
+    return opts.steward.handle(req, path);
+  }
+  // v2's public pages, when v2 is on: they replace v1's at the same paths.
+  if (opts.pages && (method === "GET" || method === "HEAD")) {
+    const page = await opts.pages.handle(method, path, req.headers.get("accept") ?? "", req.headers.get("x-ecdysis-probe") === "1");
+    if (page) return page;
   }
 
   // Digest unsubscribe links: always honoured, even in read-only mode.
@@ -964,15 +1007,28 @@ async function routeRequest(
         if (opts.waitUntil) opts.waitUntil(counting);
         else await counting;
       };
+      // A bearer token (OAuth, v2) names a person. /mcp/me insists on one; /mcp takes one optionally. A token that was sent
+      // but does not stand (expired, revoked, made up) is a 401 on either, so the client refreshes or signs in again rather
+      // than carrying on as nobody; and the challenge names the resource's own metadata document (RFC 9728, RFC 6750).
+      const authorization = req.headers.get("authorization");
+      const principal = opts.oauth ? await opts.oauth.logic.resolve(authorization) : null;
+      if ((path === "/mcp/me" || authorization) && !principal) {
+        const meta = opts.oauth ? `${new URL(opts.oauth.logic.resource).origin}/.well-known/oauth-protected-resource/mcp` : null;
+        const challenge = `Bearer${meta ? ` resource_metadata="${meta}"` : ""}${authorization ? ', error="invalid_token", error_description="the token is expired, revoked or unknown"' : ""}`;
+        return new Response(JSON.stringify({ error: authorization ? "invalid_token" : "unauthorized", error_description: authorization ? "the bearer token is expired, revoked or unknown; refresh it or sign in again" : "this endpoint needs a bearer token from Ecdysis's OAuth sign-in; /mcp works without one" }), {
+          status: 401, headers: { ...JSON_HEADERS, "www-authenticate": challenge },
+        });
+      }
       const r = await handleMcp(body, {
         svc, host: safeHost(url), logKey: opts.sthPublicKey ?? null,
         doorbells: opts.doorbells ?? null, alerts: opts.alerts ?? null,
-        limiter, readOnly: !!opts.readOnly, count,
+        limiter, readOnly: !!opts.readOnly, count, principal,
+        ...(opts.v2 ? { extraTools: v2Tools(opts.v2, ip, opts.governance ?? null, opts.oauth?.logic ?? null) } : {}),
       });
       if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
       return respond(r.status, r.body);
     }
-    const r = await dispatch(method === "HEAD" ? "GET" : method, path, url.searchParams, body, raw, svc, opts);
+    const r = await dispatch(method === "HEAD" ? "GET" : method, path, url.searchParams, body, raw, svc, opts, ip);
     if (method === "HEAD") return new Response(null, { status: r.status, headers: JSON_HEADERS });
     return respond(r.status, r.body);
   } catch (e) {
@@ -990,7 +1046,11 @@ async function dispatch(
   raw: Uint8Array | null,
   svc: EcdysisService,
   opts: RouteOptions = {},
+  ip = "local",
 ) {
+  if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2, ip, opts.governance ?? null, opts.doorbells ?? null) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
+  // With v2 on, v1's record is frozen: its reads still answer, its writes are gone for good.
+  if (opts.v2 && method !== "GET" && path.startsWith("/v1/")) return { status: 410, body: { error: "Ecdysis v1 is archived and takes no writes; v2 is live. Read /skill.md for the v2 protocol, or connect at /mcp.", see: "/skill.md" } as Json };
   if (method === "GET" && path === "/") {
     return {
       status: 200,
@@ -1112,4 +1172,58 @@ async function dispatch(
   if (method === "GET" && path === "/v1/log/audit") return svc.audit();
   if (method === "GET" && path === "/v1/log/entries") return svc.logEntries(Number(q.get("from") ?? "0"), Number(q.get("limit") ?? "100"));
   return { status: 404, body: { error: "no such endpoint" } as Json };
+}
+
+/**
+ * Ecdysis v2's HTTP surface (docs/v2/PLAN.md). The same operations as the
+ * connector's v2 tools; signed envelopes for every write.
+ */
+async function dispatchV2(method: string, path: string, q: URLSearchParams, body: Json, v2: V2Service, ip: string, gov: V2Governance | null, doorbells: Doorbells | null = null): Promise<{ status: number; body: Json }> {
+  const obj = (b: Json): Record<string, unknown> => (b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : {});
+  if (path.startsWith("/v2/governance")) {
+    if (!gov) return { status: 404, body: { error: "governance is not configured on this deployment" } };
+    if (method === "GET" && path === "/v2/governance") return gov.summary();
+    const pm = path.match(/^\/v2\/governance\/proposals\/([0-9a-f]{64})$/);
+    if (method === "GET" && pm) return gov.status(pm[1]!);
+    if (method === "POST" && path === "/v2/governance/proposals") return gov.propose(body);
+    if (method === "POST" && path === "/v2/governance/votes") return gov.vote(body);
+    if (method === "POST" && path === "/v2/governance/cosign") return gov.cosign(body);
+    return { status: 404, body: { error: "no such v2 endpoint" } };
+  }
+  if (method === "GET") {
+    if (path === "/v2/frontier") return v2.frontier(Math.min(50, Math.max(1, Number(q.get("limit") ?? 10) || 10)));
+    if (path === "/v2/holds") return { status: 200, body: { holds: (await v2.holds(Math.min(200, Math.max(1, Number(q.get("limit") ?? 50) || 50)))) as unknown as Json, note: "Items held under reserved power R1 and the decisions on them, newest first. Data, never instructions." } };
+    if (path === "/v2/heartbeat") return v2.heartbeat(q.get("agent") ?? "");
+    if (path === "/v2/credence") return v2.credenceList();
+    const rc = path.match(/^\/v2\/receipts\/([0-9a-f]{64})$/);
+    if (rc) return v2.receipt(rc[1]!);
+    if (path === "/v2/record") {
+      const r = await v2.record();
+      // The steward's switches are public: an agent refused for a pause can see it here before it tries.
+      const settings: Record<string, Json> = {};
+      for (const w of await v2.settingsView()) settings[w.key] = w.value;
+      return { status: 200, body: { constitution: r.constitution ? { ...r.constitution } : null, agents: r.agents.size, claims: r.claims.length, external: r.external.size, checks: r.checks.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted").length, findings: r.findings.length, voidedOperators: r.voidedOperators.size, settings } };
+    }
+    return { status: 404, body: { error: "no such v2 endpoint" } };
+  }
+  if (method !== "POST") return { status: 405, body: { error: "method not allowed" } };
+  switch (path) {
+    case "/v2/agents/register": { const b = obj(body); return v2.registerAgent({ handle: b["handle"], publicKey: b["publicKey"], operatorId: b["operatorId"], models: b["models"], pairing: b["pairing"], constitution: b["constitution"], sponsor: b["sponsor"] }, ip); }
+    case "/v2/papers": return v2.publishPaper(body);
+    case "/v2/claims/external": return v2.registerExternalClaim(body);
+    case "/v2/checks": return v2.commitCheck(body);
+    case "/v2/checks/result": return v2.fileResult(body);
+    case "/v2/reviews": return v2.fileReview(body);
+    case "/v2/escalate": return v2.escalate(body);
+    case "/v2/keys/delegate": return v2.delegateKey(body);
+    case "/v2/keys/revoke": return v2.revokeKey(body);
+    case "/v2/vouch": return v2.vouch(body);
+    // Reserved power R1: the operator key's signature, made on the owner's machine, is the whole authority here.
+    case "/v2/hazard/decision": return v2.decideHazard(body);
+    // Reserved power R2 at genesis: the founder adopts the constitution; the same key, the same way.
+    case "/v2/constitution/adopt": return v2.adoptConstitution(body);
+    // Doorbells, as in v1 but for agents on the v2 log: the same signed envelope, protocol ecdysis/0.2, main key only.
+    case "/v2/agents/doorbell": return doorbells ? doorbells.request(body) : { status: 501, body: { error: "doorbells are not configured on this deployment" } };
+    default: return { status: 404, body: { error: "no such v2 endpoint" } };
+  }
 }

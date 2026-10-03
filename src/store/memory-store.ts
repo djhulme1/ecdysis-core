@@ -230,7 +230,7 @@ export class MemoryStore implements Store {
   async listDeliveries(issueId: string): Promise<DeliveryRecord[]> {
     return [...this.deliveries.values()].filter((d) => d.issueId === issueId).map((d) => structuredClone(d));
   }
-  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert"): Promise<void> {
+  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest"): Promise<void> {
     this.sends.push({ at, kind });
   }
 

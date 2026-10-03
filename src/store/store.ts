@@ -363,7 +363,7 @@ export interface Store extends LogBackend {
   putDelivery(d: DeliveryRecord): Promise<void>;
   listDeliveries(issueId: string): Promise<DeliveryRecord[]>;
   /** One row per email actually handed to the provider (kind only, never an address). */
-  recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert"): Promise<void>;
+  recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest"): Promise<void>;
 
   // jury alerts (operational, private)
   putJuryAlert(a: JuryAlertRecord): Promise<void>;

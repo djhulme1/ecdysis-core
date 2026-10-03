@@ -53,6 +53,10 @@ export interface McpContext {
   readOnly?: boolean;
   /** Counts a write's outcome under the same funnel names as the HTTP API. */
   count?: ((apiPath: string, status: number, body: Json) => Promise<void>) | null;
+  /** Extra tools (Ecdysis v2 adds its own set); listed and callable alongside the built-in ones, and they win on a name clash. */
+  extraTools?: McpToolDef[];
+  /** The person a bearer token stands for (OAuth, v2), when the request carried one. Unlocks their managed agents; nothing else. */
+  principal?: { accountId: string; operatorId: string; clientId: string; scope: string } | null;
 }
 
 interface Annotations {
@@ -63,6 +67,7 @@ interface Annotations {
   openWorldHint: boolean;
 }
 
+export type McpToolDef = ToolDef;
 type ToolDef = {
   name: string;
   title: string;
@@ -73,7 +78,7 @@ type ToolDef = {
 };
 
 /** A write's outcome: the HTTP status the same request would have had, and its body. */
-interface WriteResult {
+export interface WriteResult {
   mcpWrite: true;
   status: number;
   result: Json;
@@ -517,6 +522,21 @@ const TOOLS: ToolDef[] = [
   },
 ];
 
+/** The built-in tools plus any extra set, extras first so that a v2 tool of the same name replaces a v1 one. */
+/** v1 tools that have no place once v2 is on: juries, preprints, builds, v1 submission. */
+const V1_ONLY = new Set(["get_challenges", "get_preprints", "get_jurors", "get_standing", "get_marketplace", "get_wanted_builds", "get_review_queue", "get_jury_packet", "get_case_reasons", "get_practice_case", "answer_practice_case", "submit_paper", "submit_replication", "jury_alerts", "list_papers", "get_paper"]);
+
+function toolsFor(ctx: McpContext): ToolDef[] {
+  if (!ctx.extraTools?.length) return TOOLS;
+  const names = new Set(ctx.extraTools.map((t) => t.name));
+  return [...ctx.extraTools, ...TOOLS.filter((t) => !names.has(t.name) && !V1_ONLY.has(t.name))];
+}
+
+/** A write's outcome as the dispatcher expects it (v2 tools use this). */
+export function writeResult(status: number, result: Json): WriteResult {
+  return { mcpWrite: true, status, result };
+}
+
 function rpcError(id: number | string | null, code: number, message: string): Json {
   return { jsonrpc: "2.0", id: id ?? null, error: { code, message } } as unknown as Json;
 }
@@ -549,14 +569,14 @@ async function handleOne(msg: RpcRequest, ctx: McpContext): Promise<Json | null>
       return {
         jsonrpc: "2.0", id,
         result: {
-          tools: TOOLS.map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations: { title, ...annotations } })),
+          tools: toolsFor(ctx).map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations: { title, ...annotations } })),
         },
       } as unknown as Json;
     case "tools/call": {
       const params = msg.params ?? {};
       const name = str(params["name"]);
       const args = (params["arguments"] ?? {}) as Record<string, unknown>;
-      const tool = TOOLS.find((t) => t.name === name);
+      const tool = toolsFor(ctx).find((t) => t.name === name);
       if (!tool) return rpcError(id, -32602, `no such tool: ${name}`);
       const missing = missingArgs(tool, args);
       if (missing.length) {

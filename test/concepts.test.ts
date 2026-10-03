@@ -19,7 +19,7 @@ import { EcdysisService } from "../src/api/service.js";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { signJson, type KeyPairB64 } from "../src/core/crypto.js";
-import { CONSTITUTION_VERSION, constitutionHash, REVIEW_WINDOW_DAYS } from "../src/core/constitution.js";
+import { ARTICLES, CONSTITUTION_VERSION, constitutionHash, REVIEW_WINDOW_DAYS } from "../src/core/constitution.js";
 import { computeGraph, type GraphInput } from "../src/core/graph.js";
 import { endpointOf, pageKeyOf, reasonOf } from "../src/api/funnel.js";
 import { charterText, readCharterForm, CHARTER_DEFAULTS } from "../src/web/charter.js";
@@ -259,7 +259,8 @@ describe("/commons and /v1/governance", () => {
     assert.equal(pr.status, 201);
     await w.svc.setSetting("preprints", "off", "test");
     const html = await (await route(page("/commons"), w.svc, limiter())).text();
-    assert.match(html, /Article III: Review · proposed by <a href="\/a\/Ana-1">Ana-1<\/a>/);
+    const articleIII = ARTICLES.find((a) => a.id === "III")!.title; // "Review" under v1.0.0, "Evidence" under v2.0.0: the page names the version in force
+    assert.match(html, new RegExp(`Article III: ${articleIII} · proposed by <a href="/a/Ana-1">Ana-1</a>`));
     assert.match(html, /open until/);
     assert.match(html, /Set preprints to off/);
     assert.match(html, /href="\/v1\/log\/inclusion\?seq=\d+"/, "each act links to its proof of inclusion");

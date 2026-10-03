@@ -343,7 +343,7 @@ export class D1Store implements Store {
       providerId: (r["provider_id"] as string | null) ?? null, error: (r["error"] as string | null) ?? null,
     }));
   }
-  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert"): Promise<void> {
+  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest"): Promise<void> {
     await this.db.prepare("INSERT INTO email_sends (at, kind) VALUES (?1, ?2)").bind(at, kind).run();
   }
 

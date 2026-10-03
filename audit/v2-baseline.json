@@ -1,0 +1,57 @@
+{
+ "claims": {
+  "ecd:p1#C1": "0.854164 · 0.879913 · supported · use 2.750000 · dispute 0.000000",
+  "ecd:p1#C2": "0.182505 · 0.182505 · refuted · use 0.500000 · dispute 0.000000",
+  "ecd:p10#C1": "0.863251 · 0.863251 · supported · use 0.000000 · dispute 0.235312",
+  "ecd:p10#C2": "0.591040 · 0.591040 · unchecked · use 0.000000 · dispute 0.000000",
+  "ecd:p11#C1": "0.426328 · 0.426328 · contested · use 0.000000 · dispute 0.000000",
+  "ecd:p12#C1": "0.680046 · 0.680046 · contested · use 0.000000 · dispute 0.666667",
+  "ecd:p2#C1": "0.784185 · 0.784185 · supported · use 1.000000 · dispute 0.000000",
+  "ecd:p3#C1": "0.196063 · 0.196063 · refuted · use 0.500000 · dispute 0.000000",
+  "ecd:p4#C1": "0.166926 · 0.124560 · refuted · use 0.000000 · dispute 0.000000",
+  "ecd:p5#C1": "0.786819 · 0.783347 · unchecked · use 0.000000 · dispute 0.000000",
+  "ecd:p6#C1": "0.210286 · 0.210286 · contested · use 0.000000 · dispute 0.000000",
+  "ecd:p7#C1": "0.505591 · 0.505591 · unchecked · use 0.000000 · dispute 0.000000",
+  "ecd:p8#C1": "0.522811 · 0.522811 · unchecked · use 0.000000 · dispute 0.000000",
+  "ecd:p9#C1": "0.522811 · 0.522811 · unchecked · use 0.000000 · dispute 0.000000",
+  "ext:0123456789abcdef#C1": "0.830189 · 0.830189 · supported · use 1.000000 · dispute 0.000000",
+  "ext:aaaaaaaaaaaaaaaa#C1": "0.332371 · 0.332371 · refuted · use 1.000000 · dispute 0.000000",
+  "ext:fedcba9876543210#C1": "0.710557 · 0.710557 · supported · use 0.000000 · dispute 0.000000"
+ },
+ "reliability": {
+  "Ant": "0.500000",
+  "Bee": "0.500000",
+  "Cat": "0.501267",
+  "Dog": "0.503081",
+  "Emu": "0.500000",
+  "Fox": "0.500000",
+  "Gnu": "0.493932",
+  "Hen": "0.500000",
+  "Ibis": "0.475021",
+  "Jay": "0.000000",
+  "Kiwi": "0.500000"
+ },
+ "tiers": {
+  "op-a1": "verified",
+  "op-a2": "account",
+  "op-v1": "verified",
+  "op-v2": "verified",
+  "op-v3": "verified",
+  "op-v4": "verified",
+  "op-v5": "verified"
+ },
+ "findings": {
+  "f1": "fabrication · odd op-u3 · in force",
+  "f2": "irreproducible · odd op-a2 · reversed"
+ },
+ "facts": {
+  "voided": "op-u3",
+  "rings": "op-v1~op-v2",
+  "lapses": "Ibis:1",
+  "disowned": "1",
+  "held": "ecd:p6#C1",
+  "anchors": "ext:fedcba9876543210#C1:false",
+  "reports": "25",
+  "resolved": "5"
+ }
+}

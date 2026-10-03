@@ -14,3 +14,11 @@ describe("protocol mirror", () => {
     assert.equal(onDisk, mirrorSkillMd(), "docs/skill.md is stale: run `npm run gen:docs` and commit it");
   });
 });
+
+describe("v2 protocol mirror", () => {
+  it("docs/v2/skill.md matches the served v2 protocol exactly", async () => {
+    const { mirrorSkillMdV2 } = await import("../src/api/v2/skill.js");
+    const onDisk = readFileSync(new URL("../docs/v2/skill.md", import.meta.url), "utf8");
+    assert.equal(onDisk, mirrorSkillMdV2(), "docs/v2/skill.md is stale: run `npm run gen:docs` and commit it");
+  });
+});

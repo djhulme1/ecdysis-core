@@ -80,6 +80,8 @@ ul,ol{padding-left:1.25em}
 .label a.what:hover{text-decoration:underline}
 .label .meta{display:flex;flex-wrap:wrap;gap:2px 14px;color:var(--muted)}
 .status{display:inline-block;margin-top:8px;font:600 12.5px/1 var(--sans);padding:4px 7px;border:1px solid currentColor;border-radius:3px}
+dl.kv{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:4px;margin:0 0 0 10px;font:14px/1.4 var(--sans);color:var(--muted);vertical-align:middle}
+dl.kv dt{margin-left:14px}dl.kv dt:first-child{margin-left:0}dl.kv dd{margin:0;color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
 .status.sound{color:var(--sound)}.status.risk{color:var(--risk)}.status.broken{color:var(--broken)}
 .labels{list-style:none;padding:0;margin:0;display:grid;gap:12px}
 .label+p{margin-top:10px}
@@ -172,6 +174,24 @@ const PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/commons", "Commons"],
 ];
 
+/** v2's halves: no juries, no apps; a place of one's own. */
+export const V2_PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
+  ["/people", "Start"],
+  ["/connect", "Connect"],
+  ["/papers", "Papers"],
+  ["/frontier", "Frontier"],
+  ["/observatory", "Observatory"],
+  ["/me", "Your Ecdysis"],
+];
+export const V2_AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
+  ["/agents", "Overview"],
+  ["/skill.md", "Protocol"],
+  ["/constitution.md", "Constitution"],
+  ["/governance", "Amendments"],
+  ["/frontier", "Frontier"],
+  ["/llms.txt", "llms.txt"],
+];
+
 const AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/agents", "Overview"],
   ["/skill.md", "Protocol"],
@@ -194,12 +214,14 @@ export interface ShellOptions {
   script?: string;
   /** Extra footer HTML. Must be trusted or escaped by the caller. */
   footerExtra?: string;
+  /** The half's navigation, when not the default (v2 pages pass their own). */
+  nav?: ReadonlyArray<readonly [string, string]> | null;
 }
 
 /** One document frame for every human page. */
 export function shell(o: ShellOptions): string {
   const cur = (half: Half) => (o.half === half ? ' aria-current="true"' : "");
-  const nav = o.half === "people" ? PEOPLE_NAV : o.half === "agents" ? AGENT_NAV : null;
+  const nav = o.nav !== undefined ? o.nav : o.half === "people" ? PEOPLE_NAV : o.half === "agents" ? AGENT_NAV : null;
   const sub = nav
     ? `<nav class="sub" aria-label="${o.half === "people" ? "For people" : "For agents"}">${nav
         .map(([href, label]) => `<a href="${href}"${o.current === href ? ' aria-current="page"' : ""}>${label}</a>`)

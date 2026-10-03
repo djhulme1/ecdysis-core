@@ -6,6 +6,22 @@
 
 import { EcdysisService, PREPRINT_DAILY_CAP } from "./api/service.js";
 import { BUCKET_LIMITS, MemoryRateLimiter, route, type RateLimiter } from "./api/router.js";
+import { V2Cache, V2Service } from "./api/v2/service.js";
+import { Accounts } from "./api/v2/accounts.js";
+import { MeHandler } from "./api/v2/me.js";
+import { StewardHandler } from "./api/v2/steward.js";
+import { PagesHandler } from "./api/v2/pages.js";
+import { Notifier } from "./api/v2/notify.js";
+import { V2Governance } from "./api/v2/governance.js";
+import { OAuth } from "./api/v2/oauth.js";
+import { OAuthHandler } from "./api/v2/oauth-http.js";
+import { V2Feeds } from "./api/v2/feed.js";
+import { CanaryRegistry } from "./api/v2/canaries.js";
+import { D1CanaryStore } from "./store/v2/canaries-d1.js";
+import { D1OAuthStore } from "./store/v2/oauth-d1.js";
+import { TransparencyLog } from "./core/log.js";
+import { D1V2Store } from "./store/v2/d1.js";
+import { D1AccountStore } from "./store/v2/accounts-d1.js";
 import { D1Store } from "./store/d1-store.js";
 import { R2BlobStore } from "./store/blob.js";
 import {
@@ -19,6 +35,7 @@ import { accessConfigured, type AccessConfig } from "./api/access.js";
 import type { ConsoleDeps } from "./api/operator.js";
 import type { Switch } from "./web/operator.js";
 import type { Store } from "./store/store.js";
+import { signJson, verifyJson } from "./core/crypto.js";
 import type { SignedTreeHead } from "./core/log.js";
 
 export interface Env {
@@ -41,6 +58,14 @@ export interface Env {
    * keeping the record readable and auditable. Delete or set "0" to resume.
    */
   READ_ONLY?: string;
+  /**
+   * Ecdysis v2 (docs/v2/PLAN.md): "1" serves v2 (pages, /v2/*, the v2
+   * connector tools) from this deployment. On since the switchover of
+   * 3 October 2026, with v2's own database and log key.
+   */
+  ECDYSIS_V2?: string;
+  /** Where the frozen v1 record lives after the switchover (https://v1.ecdysis.me); linked from v2's landing page when set. */
+  V1_ARCHIVE_URL?: string;
   /**
    * A frozen archive's final signed tree head, as JSON ({treeSize, rootHash,
    * timestamp, signature}): served verbatim at /v1/log/sth instead of a
@@ -95,6 +120,15 @@ export interface Env {
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
   OPERATOR_EMAIL_HASHES?: string;
+  /**
+   * Secret: 32 random bytes as 64 hex characters, keying the account store
+   * (v2): emails are kept as an HMAC under it for lookup and sealed under it
+   * for sending. Unset or unreadable: accounts are closed (fail closed).
+   * openssl rand -hex 32 | npx wrangler secret put ACCOUNTS_KEY
+   */
+  ACCOUNTS_KEY?: string;
+  /** Sender for sign-in links; defaults to accounts@notify.ecdysis.me. */
+  ACCOUNTS_FROM?: string;
   /**
    * Cloudflare's rate-limiting bindings (wrangler.toml, [[ratelimits]]): one
    * limit per binding, per key, per Cloudflare location, shared by every
@@ -228,6 +262,69 @@ function serviceFrom(env: Env, store: Store = new D1Store(env.DB)): EcdysisServi
   });
 }
 
+/** Ecdysis v2, when switched on: the same log and database, the v2 tables, the log key as the sealer. */
+/** Accounts for people (v2), present whenever v2 is; closed without ACCOUNTS_KEY. */
+function accountsFrom(env: Env, store: D1AccountStore): Accounts {
+  return new Accounts({
+    store,
+    key: env.ACCOUNTS_KEY ?? null,
+    // The email pause switch covers sign-in links too: paused, accounts can still be used but not entered.
+    send: env.HERALD_API_KEY && !emailPaused(env) ? resendSender(env.HERALD_API_KEY) : null,
+    from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>",
+    replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
+    siteBase: "https://ecdysis.me",
+    stewardEmailHashes: accessFrom(env).emailHashes,
+  });
+}
+
+/**
+ * One per isolate: the v2 log's rows and the records derived from them. The
+ * handlers below are built per request (they are cheap); the cache is not, so
+ * the log is read once and extended, and a burst of requests derives the
+ * record once a minute rather than once a request.
+ */
+const V2_CACHE = new V2Cache();
+
+function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env)): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler } } | null {
+  if (env.ECDYSIS_V2 !== "1") return null;
+  const accountStore = new D1AccountStore(env.DB);
+  const accounts = accountsFrom(env, accountStore);
+  const log = new TransparencyLog(store);
+  const v2 = new V2Service({
+    log,
+    cache: V2_CACHE,
+    store: new D1V2Store(env.DB, store),
+    logPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
+    screeners: screenersFrom(env),
+    pairing: (code, ip) => accounts.consumePairing(code, ip),
+    // R1 needs the operator key and only that (never the log key, which lives in this Worker).
+    operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY),
+  });
+  const notifier = new Notifier({
+    accounts, accountStore, ledger: store, v2,
+    send: env.HERALD_API_KEY && !emailPaused(env) ? resendSender(env.HERALD_API_KEY) : null,
+    from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>", replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
+    siteBase: "https://ecdysis.me", emailDailyCap: emailCap(env),
+  });
+  // OAuth 2.1 for the connector and managed agents (I.4): tokens stand for people; the archive holds only the keys people asked it to.
+  const oauth = new OAuth({ accounts, store: new D1OAuthStore(env.DB), v2, issuer: "https://ecdysis.me", resource: "https://api.ecdysis.me/mcp", siteBase: "https://ecdysis.me" });
+  // R2 needs the operator key and only that: the log key lives in this Worker, so falling back to it would let the archive co-sign for its owner.
+  const governance = new V2Governance({ v2, log, operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY), closedElectorates: V2_CACHE.closedElectorates });
+  return {
+    v2, notifier,
+    oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },
+    governance,
+    me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
+    // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
+    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }) }),
+    pages: new PagesHandler(v2, {
+      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null,
+      count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
+      ...(waitUntil ? { waitUntil } : {}),
+    }),
+  };
+}
+
 /** The preprint cap from configuration; anything unreadable keeps the default. */
 function preprintCap(env: Env): number {
   const n = Number(env.PREPRINT_DAILY_CAP);
@@ -287,7 +384,7 @@ function alertsFrom(env: Env, store: Store): JuryAlerts {
   });
 }
 
-function doorbellsFrom(env: Env, store: Store): Doorbells {
+function doorbellsFrom(env: Env, store: Store, v2: V2Service | null = null): Doorbells {
   return new Doorbells({
     store,
     siteBase: "https://ecdysis.me",
@@ -297,6 +394,12 @@ function doorbellsFrom(env: Env, store: Store): Doorbells {
     readOnly: readOnly(env),
     now: () => new Date(),
     random: csprng,
+    // v2 adds its own reasons to ring (owed checks, disputes on what an agent relies on) and its agents live on the log,
+    // not in v1's table: a doorbell is theirs to set with the main key only.
+    ...(v2 ? {
+      extraReasons: (handles: string[]) => v2.ringReasons(handles),
+      resolveAgent: async (handle: string) => { const a = (await v2.record()).agents.get(handle); return a && !a.revokedAt ? { publicKey: a.publicKey } : null; },
+    } : {}),
   });
 }
 
@@ -309,15 +412,46 @@ export function accessFrom(env: Env): AccessConfig {
   };
 }
 
+let KEY_AGREEMENT: Promise<boolean> | null = null;
+/**
+ * Once per isolate: the installed log key must be the other half of the
+ * pinned public key. If it is not (a key swapped by mistake, or the new
+ * key installed before the pin was changed at a switchover), every write
+ * is refused as if the kill switch were on: a seal or a head the pinned
+ * key cannot verify must never be made. Nothing to compare (no pin, or no
+ * key) passes: unsigned heads are a known state, not a mismatch.
+ */
+export async function logKeysAgree(env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "STH_PUBLIC_KEY">): Promise<boolean> {
+  const pub = realKey(env.STH_PUBLIC_KEY);
+  const prv = env.STH_SIGNING_KEY_PKCS8;
+  if (!pub || !prv) return true;
+  if (!KEY_AGREEMENT) {
+    KEY_AGREEMENT = (async () => {
+      try {
+        const probe = { op: "key-check" };
+        return await verifyJson(pub, probe, await signJson(prv, probe));
+      } catch {
+        return false;
+      }
+    })();
+  }
+  return KEY_AGREEMENT;
+}
+/** Tests only: forget the cached answer. */
+export function resetKeyAgreement(): void {
+  KEY_AGREEMENT = null;
+}
+
 /** DOORBELL_KEY must be 32 bytes, as 64 hex characters or base64; anything else seals nothing. */
 const bellKeyReadable = (k: string) => /^[0-9a-fA-F]{64}$/.test(k.trim()) || /^[A-Za-z0-9+/_-]{43}=?$/.test(k.trim());
 
 /** The switches the console's Health page shows, read from this deployment's configuration. */
-function switchesFrom(env: Env, access: AccessConfig): Switch[] {
+function switchesFrom(env: Env, access: AccessConfig, keysAgree = true): Switch[] {
   const on = (ok: boolean, yes: string, no: string, note?: string): Pick<Switch, "ok" | "value" | "note"> => ({ ok, value: ok ? yes : no, ...(note ? { note } : {}) });
   return [
     { name: "Console lock (Cloudflare Access)", ...on(accessConfigured(access), "configured", "not configured", "Team domain, audience tag and allowed address hashes.") },
     { name: "Read-only kill switch", ...on(!readOnly(env), "off", "ON", "READ_ONLY: when on, every write is refused.") },
+    { name: "Log key matches its pin", ...on(keysAgree, "yes", "NO: writes refused", "The installed signing key must be the other half of STH_PUBLIC_KEY; until it is, every write is refused.") },
     { name: "Every submission to a jury", ...on(env.REVIEW_ALL !== "0", "yes", "no", "REVIEW_ALL") },
     { name: "Preprints", ok: true, value: preprintCap(env) === 0 ? "off" : `up to ${preprintCap(env)} per operator a day`, note: "PREPRINT_DAILY_CAP: 0 switches preprints off; papers still go to their jury." },
     { name: "Safety classifier", ...on(!!env.AI, "Workers AI", "absent: fail-closed screening", env.SCREENING_MODEL || GUARD_MODEL) },
@@ -341,7 +475,8 @@ function switchesFrom(env: Env, access: AccessConfig): Switch[] {
 export default {
   /**
    * The cron (wrangler.toml [triggers]) enforces jury seat deadlines, tops up
-   * thin panels (Article III.4) and erases stale unconfirmed digest signups.
+   * thin panels (Article III.4), erases stale unconfirmed digest signups and,
+   * when v2 is on, seals orphaned commitments and lapses overdue checks.
    * Each run is recorded for the operator console. The kill switch stops it.
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -359,15 +494,22 @@ export default {
           console.error("jury alerts failed", e);
           return { drawn: 0, reminders: 0 };
         });
-        const rang = await doorbellsFrom(env, store).notify().catch((e) => {
+        const v2 = v2From(env, store);
+        const rang = await doorbellsFrom(env, store, v2?.v2 ?? null).notify().catch((e) => {
           console.error("doorbells failed", e);
           return { rung: 0, failed: 0, paused: 0, waiting: 0, error: String((e as Error)?.message ?? e).slice(0, 200) };
         });
-        if (r.cases || purged || sent.drawn || sent.reminders || rang.rung || rang.failed) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent, doorbells: rang }));
+        // v2: seal any commitment whose seal never reached the log, and lapse sealed checks past their deadline.
+        const swept = v2 ? await v2.v2.sweepLapses().catch((e) => { console.error("v2 sweep failed", e); return { lapsed: [] as string[], sealed: [] as string[] }; }) : { lapsed: [], sealed: [] };
+        // v2: alert emails people asked for, once each, within the shared daily cap.
+        const alerted = v2 ? await v2.notifier.run().catch((e) => { console.error("v2 alerts failed", e); return { sent: 0, skipped: 0, events: 0 }; }) : { sent: 0, skipped: 0, events: 0 };
+        const digested = v2 ? await v2.notifier.digest().catch((e) => { console.error("v2 digest failed", e); return { sent: 0, skipped: 0 }; }) : { sent: 0, skipped: 0 };
+        if (r.cases || purged || sent.drawn || sent.reminders || rang.rung || rang.failed || swept.lapsed.length || swept.sealed.length) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent, doorbells: rang, v2: swept }));
         await store.putOpsState("cron:last", {
           ok: true, ...r, purged, alertsDrawn: sent.drawn, alertsReminders: sent.reminders,
           doorbellsRung: rang.rung, doorbellsFailed: rang.failed, doorbellsPaused: rang.paused, doorbellsWaiting: rang.waiting,
           ...("error" in rang ? { doorbellsError: rang.error } : {}),
+          v2Lapsed: swept.lapsed.length, v2Sealed: swept.sealed.length, v2AlertsSent: alerted.sent, v2DigestsSent: digested.sent,
         }, at);
       } catch (e) {
         console.error("cron failed", e);
@@ -383,17 +525,22 @@ export default {
     const newsletter = newsletterFrom(env, store);
     const alerts = alertsFrom(env, store);
     const access = accessFrom(env);
+    // A log key that does not match its pin freezes every write, as the kill switch would: nothing the pinned key cannot verify is ever signed.
+    const keysAgree = await logKeysAgree(env);
+    if (!keysAgree) console.error("log key mismatch: STH_SIGNING_KEY_PKCS8 is not the other half of STH_PUBLIC_KEY; writes are refused");
+    const frozen = readOnly(env) || !keysAgree;
+    const v2 = v2From(env, store, (p) => ctx.waitUntil(p), frozen);
     const consoleDeps: ConsoleDeps = {
       svc, store, herald, newsletter, access,
-      readOnly: readOnly(env),
-      switches: switchesFrom(env, access),
+      readOnly: frozen,
+      switches: switchesFrom(env, access, keysAgree),
       heraldFrom: env.HERALD_FROM || "Ecdysis <herald@notify.ecdysis.me>",
       digestFrom: env.DIGEST_FROM || "Ecdysis digest <digest@notify.ecdysis.me>",
       replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
     };
     return route(req, svc, limiterFrom(env), {
       sthPublicKey: realKey(env.STH_PUBLIC_KEY),
-      readOnly: readOnly(env),
+      readOnly: frozen,
       herald,
       newsletter,
       alerts,
@@ -401,6 +548,12 @@ export default {
       openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE ?? null,
       console: consoleDeps,
       waitUntil: (p) => ctx.waitUntil(p),
+      v2: v2?.v2 ?? null,
+      me: v2?.me ?? null,
+      steward: v2?.steward ?? null,
+      pages: v2?.pages ?? null,
+      governance: v2?.governance ?? null,
+      oauth: v2?.oauth ?? null,
     });
   },
 } satisfies ExportedHandler<Env>;
