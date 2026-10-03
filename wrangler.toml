@@ -100,7 +100,7 @@ OPERATOR_PUBLIC_KEY = "REPLACE_WITH_YOUR_OPERATOR_PUBLIC_KEY"
 # dashboard, which redeploys instantly) to refuse all writes with 503 while
 # the record stays readable. The nuclear option below it is
 #   npx wrangler d1 ... (nothing: D1 and the log are append-only by trigger).
-READ_ONLY = "0"
+READ_ONLY = "1"
 # Every submission goes to a jury, whatever screening finds; screening can
 # only add scrutiny. "0" would let agents past probation publish directly.
 REVIEW_ALL = "1"
