@@ -20,6 +20,7 @@ import { generateKeyPair, signJson, verifyJson, type KeyPairB64 } from "../src/c
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { TransparencyLog } from "../src/core/log.js";
+import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import type { Json } from "../src/core/canonical.js";
 import {
   lastSlot, nextResearch, parseRoutine, researchDue, RINGS_PER_DAY, slotOffset, webhookProblem, type RingReason,
@@ -709,5 +710,47 @@ describe("v2 agents' doorbells", () => {
     const nobody = await generateKeyPair();
     const payload = { protocol: "ecdysis/0.2", agent: { handle: "Nobody", publicKey: nobody.publicKey }, ts: iso(w.now), type: "doorbell.set", kind: "self" } as Json;
     assert.equal((await post("/v2/agents/doorbell", { payload, signature: await signJson(nobody.privateKey, payload) })).status, 401, "unknown to the log: refused");
+  });
+});
+
+describe("the Worker's doorbell wiring", () => {
+  it("builds the request path's doorbells with v2's resolver, so an agent that exists only on the log can set one with its main key and not with a check key", async () => {
+    const { doorbellsFrom } = await import("../src/index.js");
+    const store = new MemoryStore();
+    const logKey = await generateKeyPair();
+    const log = new TransparencyLog(store, () => new Date());
+    const v2store = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
+    const v2 = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, screeners: [structuralScreener()] });
+    const main = await generateKeyPair();
+    const check = await generateKeyPair();
+    assert.equal((await v2.registerAgent({ constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() }, handle: "Moth-3", publicKey: main.publicKey, operatorId: "op-m" })).status, 201);
+    const ts = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const delegate = { protocol: "ecdysis/0.2", type: "key.delegate", key: check.publicKey, scope: "reports", agent: { handle: "Moth-3", publicKey: main.publicKey }, ts: ts() } as Json;
+    assert.equal((await v2.delegateKey({ payload: delegate, signature: await signJson(main.privateKey, delegate) })).status, 201);
+    const envelope = async (kp: KeyPairB64, extra: Record<string, Json>) => {
+      const payload = { protocol: "ecdysis/0.2", agent: { handle: "Moth-3", publicKey: kp.publicKey }, ts: ts(), ...extra } as Json;
+      return { payload, signature: await signJson(kp.privateKey, payload) } as Json;
+    };
+    const env = { STH_SIGNING_KEY_PKCS8: logKey.privateKey };
+    // Without v2 the resolver looks in v1's agents table, which knows no v2 agent: this is the live failure of 3 October.
+    const withoutV2 = await doorbellsFrom(env, store, null).request(await envelope(main, { type: "doorbell.set", kind: "self", cadence: "daily" }));
+    assert.equal(withoutV2.status, 401);
+    assert.match(String((withoutV2.body as Record<string, Json>)["error"]), /unknown or revoked agent/);
+    // Wired as the Worker now wires it, the main key sets a doorbell, a check key cannot, and a stranger is unknown.
+    const bells = doorbellsFrom(env, store, v2);
+    const set = await bells.request(await envelope(main, { type: "doorbell.set", kind: "self", cadence: "daily" }));
+    assert.equal(set.status, 200, JSON.stringify(set.body));
+    assert.equal((set.body as Record<string, Json>)["status"], "active");
+    const byCheck = await bells.request(await envelope(check, { type: "doorbell.set", kind: "self" }));
+    assert.equal(byCheck.status, 401);
+    assert.match(String((byCheck.body as Record<string, Json>)["error"]), /never a check key/);
+    const nobody = await generateKeyPair();
+    const stranger = { protocol: "ecdysis/0.2", agent: { handle: "Nobody", publicKey: nobody.publicKey }, ts: ts(), type: "doorbell.set", kind: "self" } as Json;
+    assert.equal((await bells.request({ payload: stranger, signature: await signJson(nobody.privateKey, stranger) })).status, 401);
+    // The public heartbeat reports the doorbell without exposing anything but kind, status and cadence.
+    const hb = await v2.heartbeat("Moth-3");
+    assert.equal(hb.status, 200);
+    const d = (hb.body as Record<string, Json>)["doorbell"];
+    if (d !== undefined && d !== null) assert.deepEqual(Object.keys(d as Record<string, Json>).sort().filter((k) => !["kind", "status", "cadence", "next_research", "lastRingAt", "note"].includes(k)), []);
   });
 });
