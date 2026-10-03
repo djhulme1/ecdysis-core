@@ -312,7 +312,7 @@ describe("the stewardship area", () => {
     let html = await (await w.get("/steward/controls", d.session)).text();
     assert.match(html, /<code class="mono">v2\.publishing<\/code>/);
     assert.match(html, /never \(default\)/);
-    assert.equal((html.match(/<span class="status sound">open<\/span>/g) ?? []).length, 5, "five switches, all open");
+    assert.equal((html.match(/<span class="status sound">open<\/span>/g) ?? []).length, 6, "six switches, all open");
     const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
     assert.match(await (await w.post("/steward/controls/set", { csrf, setting: "v2.nonsense", value: "paused" }, d.session)).text(), /no such switch/);
     assert.match(await (await w.post("/steward/controls/set", { csrf, setting: "v2.publishing", value: "closed" }, d.session)).text(), /is one of: open, paused/);
@@ -380,5 +380,46 @@ describe("the stewardship area", () => {
     assert.doesNotMatch(html, /action="\/steward\/content/, "no form acts on a hold");
     assert.equal((await w.post("/steward/content/release", { csrf: "x" }, d.session)).status, 200, "no such act exists; the page shows a problem and nothing changes");
     assert.equal((await w.svc.holds()).filter((h) => h.open).length, 1);
+  });
+
+  it("content: a steward sees every challenge and can withdraw one with a reason, which goes on the log and the audit trail under the steward's operator id", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    const pub = await w.svc.publishPaper(await w.sign("Ant", {
+      protocol: "ecdysis/0.2", type: "paper", title: "A paper to challenge",
+      abstract: "An abstract long enough to pass the structural screen, describing what was measured and how it was measured, in two paragraphs.\n\nA second paragraph closes it.",
+      field: "math", methods: "Pre-registered; one seeded entry point.",
+      claims: [{ text: "The first claim holds in the stated regime.", confidence: 0.7, test: "The quantity lies outside the interval in a fresh run." }], builds_on: [],
+    }));
+    assert.equal(pub.status, 201, JSON.stringify(pub.body));
+    const claim = `${w.idOf(pub)}#C1`;
+    const brief = "Recompute the headline number from the paper's public data with the stated weighting and report whether it survives; cpu-minutes, analysis only.";
+    const proposed = await w.svc.proposeChallenge(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "challenge.propose", claim, title: `A hostile brief <script>alert(1)</script>`, brief, scale: "cpu-minutes" }));
+    assert.equal(proposed.status, 201, JSON.stringify(proposed.body));
+    const id = w.idOf(proposed);
+    const d = await w.signIn("daniel@example.org");
+    let html = await (await w.get("/steward/content", d.session)).text();
+    assert.match(html, /<h2>Challenges<\/h2>/);
+    assert.match(html, /A hostile brief &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    assert.doesNotMatch(html, /<script>alert/);
+    assert.match(html, /agent Bee \(op-b\)/);
+    assert.match(html, /<form method="post" action="\/steward\/content\/challenge-withdraw">/);
+    const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    let res = await w.post("/steward/content/challenge-withdraw", { csrf, id, reason: "short" }, d.session);
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /Couldn&#39;t withdraw: reason: 10 to 400 characters/);
+    assert.equal([...(await w.svc.record()).challenges.values()][0]!.withdrawn, null);
+    res = await w.post("/steward/content/challenge-withdraw", { csrf, id, reason: "The brief tries to instruct the agents that read it; the claim itself stands." }, d.session);
+    assert.equal(res.status, 303);
+    assert.match(res.headers.get("location")!, /^\/steward\/content\?ok=/);
+    const ch = [...(await w.svc.record()).challenges.values()][0]!;
+    assert.equal(ch.withdrawn?.by, "steward");
+    const steward = d.account.operatorId;
+    assert.ok((await w.svc.audit()).some((a) => a.type === "challenge.withdraw" && a.by === "steward" && a.steward === steward), "on the audit trail, by the steward's operator id");
+    html = await (await w.get("/steward/content", d.session)).text();
+    assert.match(html, /withdrawn<br><span class="small">by steward: The brief tries to instruct/);
+    assert.doesNotMatch(html, /action="\/steward\/content\/challenge-withdraw"/, "nothing left to withdraw");
+    assert.equal((await w.svc.challenges()).body && ((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]!.length, 0, "off the board");
   });
 });

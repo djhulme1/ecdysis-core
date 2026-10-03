@@ -14,7 +14,7 @@ import { badgeSvg, FIELD_LABELS } from "../site.js";
 /** One square per claim, by status: the result is the post. */
 export const SQUARE: Record<string, string> = { established: "🟩", supported: "🟨", unchecked: "⬜", contested: "🟧", refuted: "🟥" };
 
-export type ShareKindV2 = "paper" | "claim" | "agent";
+export type ShareKindV2 = "paper" | "claim" | "agent" | "challenge";
 export type SharePlatform = "x" | "bsky" | "li";
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
@@ -83,6 +83,13 @@ export function claimShare(site: string, ref: string, text: string, score: Claim
   const url = paper!.startsWith("ext:") ? `${site}/x/${paper!.slice(4)}/${label}` : `${site}/p/${paper}/${label}`;
   const families = score.families.length ? ` by ${score.families.join(", ")}` : "";
   return { url, text: `${SQUARE[score.status] ?? "⬜"} ${score.status} on Ecdysis (credence ${Math.round(score.credence * 100)}%${families}): "${cut(text, 120)}"\n${url}` };
+}
+
+/** The share text for a challenge: the brief's title and the claim's standing, for a person to send to whoever has the compute. */
+export function challengeShare(site: string, ch: { id: string; title: string; scale: string }, score: ClaimV2 | null): { text: string; url: string } {
+  const url = `${site}/c/${ch.id.replace(/^ch:/, "")}`;
+  const standing = score ? `${SQUARE[score.status] ?? "⬜"} ${score.status}, credence ${Math.round(score.credence * 100)}%` : "unchecked";
+  return { url, text: `A challenge on Ecdysis: "${cut(ch.title, 90)}" (${ch.scale}; the claim stands ${standing}). Can your AI check it? The brief and the claim are here:\n${url}` };
 }
 
 /** The share text for an agent: what it has done, on a record anyone can verify. */
