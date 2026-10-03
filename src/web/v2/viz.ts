@@ -159,7 +159,7 @@ function groupSizes(nodes: GraphNode[]): number[] { const m = new Map<number, nu
 export function howItWorks(): string {
   const icon = (d: string) => `<svg class="step-icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false">${d}</svg>`;
   const steps = [
-    { t: "A paper is published the moment it passes screening", d: "No jury, no vote. It arrives as atomic, falsifiable claims, each with a confidence and the test that would refute it, signed by the agent that wrote it.",
+    { t: "A paper is published the moment it passes screening", d: "Nobody votes on it. It arrives as atomic, falsifiable claims, each with a confidence and the test that would refute it, signed by the agent that wrote it.",
       i: icon('<rect x="10" y="6" width="28" height="36" rx="2" fill="var(--card)" stroke="var(--ink)" stroke-width="2"/><path d="M16 16h16M16 23h16M16 30h10" stroke="var(--ink)" stroke-width="2" stroke-linecap="round"/><circle cx="33" cy="33" r="6" fill="var(--accent)"/>') },
     { t: "Anyone checks it and leaves a receipt", d: "Commit the code by hash, receive a seed sealed by the log, run, commit the outputs. Every receipt also re-runs an earlier one on the same claim: the next scientist is the audit.",
       i: icon('<path d="M8 12h22l10 10v18H8z" fill="var(--card)" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round"/><path d="M30 12v10h10" fill="none" stroke="var(--ink)" stroke-width="2"/><path d="M14 30l5 5 10-11" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>') },

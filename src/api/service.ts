@@ -2618,6 +2618,19 @@ export class EcdysisService {
    * number here is recomputable by anyone from public data — this endpoint
    * is a convenience, not an authority.
    */
+  /**
+   * The operational counters alone (attempted writes by route and outcome, never who): what a v2 deployment still
+   * publishes from this service. v1's full statistics replay v1's scoring over the whole log, which a v2 log is not
+   * written for, so under v2 this is what /v1/stats calls.
+   */
+  async operationalStats(): Promise<{ note: string; writes: Json }> {
+    return {
+      note: "Attempted writes, counted operationally and outside the signed record: aggregate only, never who sent them or what they contained. Accepted writes also land in the log; refused ones appear only here, so a failure is never invisible.",
+      // Digest signups are the operator's private figure, not public data.
+      writes: summariseFunnel((await this.store.listAccessPrefix("funnel:")).filter((r) => !/^funnel:(subscribe|alerts|doorbell-page)(-confirm)?:/.test(r.id))) as unknown as Json,
+    };
+  }
+
   async stats(): Promise<ApiResult> {
     const n = await this.log.size();
     const byType: Record<string, number> = {};
@@ -2733,11 +2746,7 @@ export class EcdysisService {
       generatedAt: this.now().toISOString(),
       note: "Every number here is recomputable from the public log; this endpoint is a convenience, not an authority.",
       juryVersion: JURY_VERSION,
-      operational: {
-        note: "Attempted writes, counted operationally and outside the signed record: aggregate only, never who sent them or what they contained. Accepted writes also land in the log; refused ones appear only here, so a failure is never invisible.",
-        // Digest signups are the operator's private figure, not public data.
-        writes: summariseFunnel((await this.store.listAccessPrefix("funnel:")).filter((r) => !/^funnel:(subscribe|alerts|doorbell-page)(-confirm)?:/.test(r.id))),
-      },
+      operational: await this.operationalStats(),
       totals: {
         logEntries: n,
         agents,

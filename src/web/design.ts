@@ -280,7 +280,7 @@ const PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/commons", "Commons"],
 ];
 
-/** v2's halves: no juries, no apps; a place of one's own. */
+/** v2's halves: no review queue, no apps; a place of one's own. */
 export const V2_PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/people", "Start"],
   ["/connect", "Connect"],

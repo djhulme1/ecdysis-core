@@ -43,8 +43,8 @@ import { b64urlDecode, b64urlEncode, bufferSource, canonicalBytes, fromHex, type
 import { signJson, verifyBytes } from "../core/crypto.js";
 import { SEAT_DEADLINE_MS } from "../core/jury.js";
 import {
-  CADENCES, DEFAULT_CADENCE, DUE_REMINDER_MS, KINDS, PAUSE_AFTER_FAILURES, RING_SPACING_MS, RINGS_PER_DAY, RINGS_PER_SWEEP,
-  ROUTINE_FIRE, ROUTINE_TOKEN_RE, SESSION_URL_RE, SETUP_LINK_TTL_MS, WAKE_PROTOCOL, byUrgency, doorbellStatus, nextResearch, parsePastedRoutine, parseRoutine,
+  CADENCES, DEFAULT_CADENCE, DUE_REMINDER_MS, KINDS, OWED_ONLY, PAUSE_AFTER_FAILURES, RING_SPACING_MS, RINGS_PER_DAY, RINGS_PER_SWEEP,
+  ROUTINE_FIRE, ROUTINE_TOKEN_RE, SESSION_URL_RE, SETUP_LINK_TTL_MS, WAKE_PROTOCOL, byUrgency, cadenceIn, cadenceOut, doorbellStatus, nextResearch, parsePastedRoutine, parseRoutine,
   researchDue, ringPayload, ringText, routinePrompt, slotOffset, webhookProblem, type Cadence, type DoorbellKind, type RingReason,
 } from "../core/wake.js";
 import { esc, shell } from "../web/design.js";
@@ -92,6 +92,8 @@ export interface DoorbellOptions {
    * runs) can neither set nor stop a doorbell. Null: unknown or retired.
    */
   resolveAgent?: (handle: string) => Promise<{ publicKey: string } | null>;
+  /** Ecdysis v2 is on: there are no juries, so every word to people and agents is v2's, and v1's jury reasons are never looked for. */
+  v2?: boolean;
 }
 
 export interface Page {
@@ -126,6 +128,12 @@ const CADENCE_NAME: Record<Cadence, string> = {
   daily: "Daily research, plus jury duty whenever it is called",
   weekly: "Weekly research, plus jury duty whenever it is called",
   "jury-only": "Jury duty only, whenever it is called",
+};
+/** v2 has no juries: a ring is for a check falling due, a dispute on what the agent relies on, or research. The "jury-only" value stays for compatibility and means owed work only. */
+const CADENCE_NAME_V2: Record<Cadence, string> = {
+  daily: "Daily research, plus whenever a check it owes falls due or a claim it relies on is disputed",
+  weekly: "Weekly research, plus whenever a check it owes falls due or a claim it relies on is disputed",
+  "jury-only": "Only when a check it owes falls due or a claim it relies on is disputed",
 };
 
 /** 32 key bytes from hex or base64 (either alphabet), or null. */
@@ -187,9 +195,17 @@ export class Doorbells {
     this.fetch = o.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
+  private get v2(): boolean { return !!this.o.v2; }
+  /** The cadence names this deployment speaks. */
+  private get cadences(): string[] { return CADENCES.map((c) => cadenceOut(c, this.v2)); }
+  private cadenceWord(c: Cadence): string { return cadenceOut(c, this.v2); }
+  private cadenceName(c: Cadence): string { return (this.v2 ? CADENCE_NAME_V2 : CADENCE_NAME)[c]; }
+  /** What rings besides research, in a sentence fragment. */
+  private get besides(): string { return this.v2 ? "whenever a check you owe falls due or a claim you rely on is disputed" : "whenever you are drawn for a jury"; }
+
   /** How this agent is woken, as its public heartbeat may say it: kind, status and cadence, never an address, a token or a link. */
   async statusFor(handle: string, o: { v2?: boolean } = {}): Promise<Record<string, string | number | null>> {
-    return doorbellStatus(await this.o.store.getDoorbell(handle), this.o.siteBase, this.o.now().getTime(), o);
+    return doorbellStatus(await this.o.store.getDoorbell(handle), this.o.siteBase, this.o.now().getTime(), { v2: o.v2 ?? this.v2 });
   }
 
   /* ---------------- the signed API: POST /v1/agents/doorbell ---------------- */
@@ -228,10 +244,10 @@ export class Doorbells {
     if (this.o.readOnly) return err(503, "Ecdysis is read-only right now: doorbells can be stopped but not set; try again later");
     const kind = p["kind"];
     if (typeof kind !== "string" || !(KINDS as readonly string[]).includes(kind)) return err(422, `kind: one of ${KINDS.join(", ")}`);
-    // Left out, the cadence stays what the person last chose (daily for a first doorbell).
-    const cadenceIn = p["cadence"] ?? existing?.cadence ?? DEFAULT_CADENCE;
-    if (typeof cadenceIn !== "string" || !(CADENCES as readonly string[]).includes(cadenceIn)) return err(422, `cadence: one of ${CADENCES.join(", ")} (default ${DEFAULT_CADENCE})`);
-    const cadence = cadenceIn as Cadence;
+    // Left out, the cadence stays what the person last chose (daily for a first doorbell). v2 agents may say "owed-only".
+    const cadenceGiven = cadenceIn(p["cadence"] ?? existing?.cadence ?? DEFAULT_CADENCE);
+    if (typeof cadenceGiven !== "string" || !(CADENCES as readonly string[]).includes(cadenceGiven)) return err(422, `cadence: one of ${this.cadences.join(", ")} (default ${DEFAULT_CADENCE})`);
+    const cadence = cadenceGiven as Cadence;
 
     if (kind === "claude-routine") {
       if (!(await this.sealing())) return err(503, "this deployment can't store routine tokens yet; use a webhook or your own schedule for now");
@@ -240,7 +256,7 @@ export class Doorbells {
         const d = { ...this.freshLink(existing, nowIso), cadence };
         await this.o.store.putDoorbell(d);
         return ok(200, {
-          status: "active", kind, cadence, for_your_person: this.link(d),
+          status: "active", kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
           note: "Your routine is already connected and ringing. The link is new (the old one no longer works): on it your person can change the cadence, replace the token, or stop the doorbell.",
           next_research: this.nextResearchIso(d),
         });
@@ -248,11 +264,11 @@ export class Doorbells {
       const d = this.fresh(handle, "claude-routine", cadence, nowIso, existing);
       await this.o.store.putDoorbell(d);
       return ok(202, {
-        status: "pending", kind, cadence, for_your_person: this.link(d),
+        status: "pending", kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
         link_expires: new Date(Date.parse(d.setupIssuedAt) + SETUP_LINK_TTL_MS).toISOString(),
         next: "Give your person this link. On it, in four steps, once, they make a Claude routine that runs as you and paste back its API trigger URL and token in one box. Ecdysis then rings the routine: " +
-          `${cadence === "jury-only" ? "whenever you are drawn for a jury" : `${cadence} for research, and whenever you are drawn for a jury`}. The link is theirs alone and works for seven days: never publish it.`,
-        routine_prompt: routinePrompt(handle, this.o.siteBase, this.o.apiBase),
+          `${cadence === "jury-only" ? this.besides : `${cadence} for research, and ${this.besides}`}. The link is theirs alone and works for seven days: never publish it.`,
+        routine_prompt: routinePrompt(handle, this.o.siteBase, this.o.apiBase, this.v2),
         routine_needs: "Your private key in an environment variable named ECDYSIS_KEY. If your person has connected Ecdysis to Claude (https://ecdysis.me/connect), the routine reaches Ecdysis through the connector and needs no network settings; otherwise its environment must allow ecdysis.me and api.ecdysis.me (Custom, with the default list kept). Tell your person where your key is so they can copy it there themselves; never show it in a chat.",
       });
     }
@@ -275,7 +291,7 @@ export class Doorbells {
       const d: DoorbellRecord = { ...this.fresh(handle, "webhook", cadence, nowIso, existing), status: "active", url: url as string, lastOkAt: nowIso };
       await this.o.store.putDoorbell(d);
       return ok(200, {
-        status: "active", kind, cadence, for_your_person: this.link(d),
+        status: "active", kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
         rings: "Ecdysis POSTs {payload, signature} to your webhook. Check the signature against the log key (GET /v1/log/sth), that payload.for is you and that payload.at is within 15 minutes, and ignore an id you have seen; then fetch your heartbeat and act under your own instructions.",
         next_research: this.nextResearchIso(d),
       });
@@ -285,8 +301,8 @@ export class Doorbells {
     const d: DoorbellRecord = { ...this.fresh(handle, "self", cadence, nowIso, existing), status: "active" };
     await this.o.store.putDoorbell(d);
     return ok(200, {
-      status: "active", kind, cadence, for_your_person: this.link(d),
-      note: `Ecdysis won't ring you: your own schedule must wake you ${cadence === "weekly" ? "at least weekly" : "at least daily"}, and always within 48 hours of being seated on a jury (seats lapse then). Start every run with your heartbeat. If your platform can be woken from outside, a Claude routine or a webhook lets Ecdysis wake you the moment you are needed.`,
+      status: "active", kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
+      note: `Ecdysis won't ring you: your own schedule must wake you ${cadence === "weekly" ? "at least weekly" : "at least daily"}, and ${this.v2 ? "always before a check you owe falls due (a lapse costs your record)" : "always within 48 hours of being seated on a jury (seats lapse then)"}. Start every run with your heartbeat. If your platform can be woken from outside, a Claude routine or a webhook lets Ecdysis wake you the moment you are needed.`,
     });
   }
 
@@ -308,11 +324,11 @@ export class Doorbells {
     if (this.o.readOnly) return this.view(503, "Not right now", `<p>Ecdysis isn't taking changes at the moment, so this doorbell can be stopped but not changed. Please try again later.</p>`);
     if (d.status === "stopped") return this.view(409, "This doorbell is stopped", `<p>Ask your AI to set it up again: you'll get a fresh link.</p>`);
     if (action === "cadence") {
-      const c = form.get("cadence") ?? "";
-      if (!(CADENCES as readonly string[]).includes(c)) return this.panel(d, "Choose how often.");
+      const c = cadenceIn(form.get("cadence") ?? "");
+      if (typeof c !== "string" || !(CADENCES as readonly string[]).includes(c)) return this.panel(d, "Choose how often.");
       const next = { ...d, cadence: c as Cadence, updatedAt: nowIso };
       await this.o.store.putDoorbell(next);
-      return this.panel(next, null, `Saved: ${CADENCE_NAME[next.cadence].toLowerCase()}.`);
+      return this.panel(next, null, `Saved: ${this.cadenceName(next.cadence).toLowerCase()}.`);
     }
     if (action === "connect" && d.kind === "claude-routine") return this.connect(d, form, nowIso);
     return this.panel(d, "That didn't do anything. Use one of the buttons below.");
@@ -326,13 +342,13 @@ export class Doorbells {
     const pasted = parsePastedRoutine([form.get("pasted") ?? "", form.get("url") ?? "", form.get("token") ?? ""].join("\n"));
     const routineId = pasted.routineId ?? parseRoutine(form.get("url") ?? "");
     const token = pasted.token;
-    const cadenceIn = form.get("cadence") ?? d.cadence;
-    const cadence = ((CADENCES as readonly string[]).includes(cadenceIn) ? cadenceIn : d.cadence) as Cadence;
+    const cadenceGiven = cadenceIn(form.get("cadence") ?? d.cadence);
+    const cadence = (typeof cadenceGiven === "string" && (CADENCES as readonly string[]).includes(cadenceGiven) ? cadenceGiven : d.cadence) as Cadence;
     if (pasted.apiKey) {
       return this.panel(d, "That contains an Anthropic API key, not a routine token, so nothing was used or kept. Don't paste it anywhere: a routine's token comes from its API trigger (Generate token), and starts with sk-ant-oat01-.");
     }
     if (!routineId && !token) return this.panel(d, "Paste the routine's URL and its token, both from Claude's API trigger dialog.");
-    if (!routineId) return this.panel(d, "The routine's URL is missing: copy it from the API trigger dialog too (https://api.anthropic.com/v1/claude_code/routines/trig_…/fire).");
+    if (!routineId) return this.panel(d, "The token arrived but the routine's URL is missing. It is in the same API trigger dialog as the token, and on the routine's page under its API trigger: a line like https://api.anthropic.com/v1/claude_code/routines/trig_…/fire. Paste the URL and the token together.");
     if (!token || !ROUTINE_TOKEN_RE.test(token)) return this.panel(d, "The token is missing: press Generate token in the API trigger dialog and copy it too. It starts with sk-ant-oat01-.");
     if (!(await this.sealing())) return this.view(503, "Not available yet", `<p>This deployment can't store routine tokens yet, so nothing was kept. Ask your AI to use a webhook or its own schedule for now.</p>`);
     if (!(await this.claimSlot(d.handle, "connect", CONNECT_PER_HOUR, nowIso))) {
@@ -340,7 +356,7 @@ export class Doorbells {
     }
     // The first ring proves the token: nothing is kept until it has fired the routine.
     const trial: DoorbellRecord = { ...d, routineId, cadence };
-    const reasons: RingReason[] = [{ event: "doorbell.welcome" }, ...this.juryReasons(trial, await this.o.store.listQuarantine("pending", 500))];
+    const reasons: RingReason[] = [{ event: "doorbell.welcome" }, ...(this.v2 ? [] : this.juryReasons(trial, await this.o.store.listQuarantine("pending", 500)))];
     const slot = researchDue(trial.handle, cadence, d.lastResearchAt, this.o.now().getTime());
     if (slot !== null) reasons.push({ event: "research.due", cadence, slot: new Date(slot).toISOString() });
     const claimed = await this.claimReasons(trial.handle, reasons, nowIso);
@@ -378,12 +394,12 @@ export class Doorbells {
     await this.purgeDaily(nowIso);
     const bells = (await this.o.store.listDoorbells(20000)).filter((d) => d.status === "active" && d.kind !== "self");
     const active = new Map(bells.map((d) => [d.handle, d] as const));
-    const decided = await this.decisions(active, nowMs);
+    const decided = this.v2 ? { byAuthor: new Map<string, Array<{ seq: number; reason: RingReason }>>(), scanned: 0 } : await this.decisions(active, nowMs);
     if (!bells.length) {
-      await this.saveCursor(decided.scanned, nowIso);
+      if (!this.v2) await this.saveCursor(decided.scanned, nowIso);
       return out;
     }
-    const pending = await this.o.store.listQuarantine("pending", 500);
+    const pending = this.v2 ? [] : await this.o.store.listQuarantine("pending", 500);
     const work: Array<{ d: DoorbellRecord; reasons: RingReason[] }> = [];
     const extra = this.o.extraReasons ? await this.o.extraReasons(bells.map((d) => d.handle)).catch(() => new Map<string, RingReason[]>()) : new Map<string, RingReason[]>();
     for (const d of bells) {
@@ -427,9 +443,11 @@ export class Doorbells {
         ringsDay: today, ringsToday: (w.d.ringsDay === today ? w.d.ringsToday : 0) + 1, pause,
       });
     }
-    // The decision cursor waits for decisions still owed to a doorbell that can ring.
-    const owed = [...decided.byAuthor.entries()].filter(([h]) => undelivered.has(h)).flatMap(([, xs]) => xs.map((x) => x.seq));
-    await this.saveCursor(owed.length ? Math.min(...owed) : decided.scanned, nowIso);
+    // The decision cursor waits for decisions still owed to a doorbell that can ring (v1 only: v2 has no jury decisions).
+    if (!this.v2) {
+      const owed = [...decided.byAuthor.entries()].filter(([h]) => undelivered.has(h)).flatMap(([, xs]) => xs.map((x) => x.seq));
+      await this.saveCursor(owed.length ? Math.min(...owed) : decided.scanned, nowIso);
+    }
     return out;
   }
 
@@ -443,7 +461,7 @@ export class Doorbells {
     const next = d.cadence === "jury-only" ? null : nextResearch(d.handle, d.cadence, research ? at : d.lastResearchAt, now.getTime());
     const payload = ringPayload({
       handle: d.handle, at, id: hex(this.o.random, 4), reasons, apiBase: this.o.apiBase,
-      nextResearchAt: next === null ? null : new Date(next).toISOString(),
+      nextResearchAt: next === null ? null : new Date(next).toISOString(), v2: this.v2,
     });
     const envelope = { payload, signature: await signJson(this.o.sthPrivateKey, payload as unknown as Json) };
     if (d.kind === "webhook") return d.url ? this.postWebhook(d.url, envelope as unknown as Json) : { ok: false, permanent: true, error: "no webhook address" };
@@ -453,7 +471,7 @@ export class Doorbells {
     if (!routineId || !token) return { ok: false, permanent: true, error: "the routine's token can't be read: connect the routine again" };
     const text = ringText({
       handle: d.handle, at, reasons, siteBase: this.o.siteBase, apiBase: this.o.apiBase,
-      nextResearchAt: payload.next_research, signed: JSON.stringify(envelope),
+      nextResearchAt: payload.next_research, signed: JSON.stringify(envelope), v2: this.v2,
     });
     return this.fireRoutine(routineId, token, text);
   }
@@ -766,13 +784,13 @@ export class Doorbells {
     const state = `<div class="state ${tone}" role="status"><b>${esc(word)}</b><dl>
 <dt>Agent</dt><dd>${esc(d.handle)}</dd>
 <dt>Woken by</dt><dd>${esc(KIND_NAME[d.kind])}</dd>
-<dt>How often</dt><dd>${esc(CADENCE_NAME[d.cadence])}${off !== null && d.kind !== "self" ? ` (research at about ${esc(UTC_TIME(off))} UTC${d.cadence === "weekly" ? ` on ${esc(WEEKDAYS[new Date(off).getUTCDay()]!)}` : " each day"})` : ""}</dd>
+<dt>How often</dt><dd>${esc(this.cadenceName(d.cadence))}${off !== null && d.kind !== "self" ? ` (research at about ${esc(UTC_TIME(off))} UTC${d.cadence === "weekly" ? ` on ${esc(WEEKDAYS[new Date(off).getUTCDay()]!)}` : " each day"})` : ""}</dd>
 ${d.kind === "self" ? "" : `<dt>Last ring</dt><dd>${esc(UTC_WHEN(d.lastRingAt))}${d.lastOkAt && d.lastOkAt === d.lastRingAt ? session : d.lastRingAt ? " (it failed)" : ""}</dd>
-<dt>Next research</dt><dd>${esc(next ? UTC_WHEN(next) : d.cadence === "jury-only" ? "none: jury duty only" : "once connected")}</dd>`}
+<dt>Next research</dt><dd>${esc(next ? UTC_WHEN(next) : d.cadence === "jury-only" ? (this.v2 ? "none: owed work only" : "none: jury duty only") : "once connected")}</dd>`}
 </dl></div>`;
     const cadenceRadios = (current: Cadence) => `<div class="opts">${CADENCES.map((c) =>
-      `<label class="opt"><input type="radio" name="cadence" value="${c}"${c === current ? " checked" : ""}> ${esc(CADENCE_NAME[c])}${c === DEFAULT_CADENCE ? " (recommended)" : ""}</label>`).join("")}</div>`;
-    const prompt = routinePrompt(d.handle, this.o.siteBase, this.o.apiBase);
+      `<label class="opt"><input type="radio" name="cadence" value="${esc(this.cadenceWord(c))}"${c === current ? " checked" : ""}> ${esc(this.cadenceName(c))}${c === DEFAULT_CADENCE ? " (recommended)" : ""}</label>`).join("")}</div>`;
+    const prompt = routinePrompt(d.handle, this.o.siteBase, this.o.apiBase, this.v2);
     // A working doorbell folds its setup away; one that needs connecting shows it in full.
     const folded = d.status === "active";
     const connect = d.kind === "claude-routine" && d.status !== "stopped" && linkLive ? `
@@ -781,16 +799,16 @@ ${folded ? `<details><summary>Replace the routine or its token</summary>` : `<h2
 <ol>
 <li><b>Make the routine.</b> Open <a href="https://claude.ai/code/routines" rel="noopener noreferrer">claude.ai/code/routines</a>, press <b>New routine</b> and name it <b>Ecdysis ${esc(d.handle)}</b>. Paste these as its instructions:<div class="prompt"><p class="why">Click inside the box once to select everything, then copy.</p><pre class="pt kit">${esc(prompt)}</pre></div>Under repositories choose any private GitHub repository of yours. An empty one is fine: your AI keeps its notes and drafts there.</li>
 <li><b>Give it its key.</b> Open the environment's settings (the cloud icon, then the settings icon) and add one line under <b>Environment variables</b>: <code>ECDYSIS_KEY=</code> followed by your AI's private key. Your AI tells you where its key is: paste it there and nowhere else. If you have connected Ecdysis to Claude (<a href="/connect#claude">one minute, once</a>), that is all. If not, also set <b>Network access</b> to <b>Custom</b> and allow <code>ecdysis.me</code> and <code>api.ecdysis.me</code>, keeping <b>Also include default list of common package managers</b> ticked.</li>
-<li><b>Add the API trigger.</b> Under <b>Select a trigger</b> choose <b>API</b>, then press <b>Create</b>. Open the routine's menu, choose <b>Edit</b> and open the API trigger: press <b>Generate token</b>. Claude shows the URL and the token; the token only once.</li>
-<li><b>Paste them here</b>, both together, in any order.</li>
+<li><b>Add the API trigger.</b> Under <b>Select a trigger</b> choose <b>API</b>, then press <b>Create</b>. Open the routine's menu, choose <b>Edit</b> and open the API trigger: press <b>Generate token</b>. The dialog shows two things: the routine's URL (it ends in <code>/fire</code> and is also in the sample command) and the token, which it shows only once.</li>
+<li><b>Paste both here</b>, together, in any order: the URL and the token. If you copied only the token, the URL is still in that dialog, or the routine's page shows it under its API trigger.</li>
 </ol>
 <form method="post"><input type="hidden" name="action" value="connect">
 <label for="pasted">The routine's URL and token</label>
 <textarea id="pasted" name="pasted" required maxlength="4000" rows="4" autocomplete="off" spellcheck="false" placeholder="https://api.anthropic.com/v1/claude_code/routines/trig_…/fire&#10;sk-ant-oat01-…"></textarea>
 <fieldset><legend>How often Ecdysis rings it</legend>${cadenceRadios(d.cadence)}</fieldset>
 <p><button class="btn" type="submit">Connect and ring it once</button></p>
-<p class="small">The first ring starts a run straight away, so you can see it work. Ecdysis keeps the token encrypted, uses it only to start this routine, and never shows it again. Each run uses your Claude plan's usage: usually one run a day, and at most ${RINGS_PER_DAY} a day however many jury seats come in.</p>
-<p class="small"><b>Rather not paste a token?</b> In step 3 choose a <b>Schedule</b> trigger (daily) instead, and tell your AI. It records that it keeps its own schedule, and still serves on juries within a day; Ecdysis just can't wake it early.</p>
+<p class="small">The first ring starts a run straight away, so you can see it work. Ecdysis keeps the token encrypted, uses it only to start this routine, and never shows it again. Each run uses your Claude plan's usage: usually one run a day, and at most ${RINGS_PER_DAY} a day however much ${this.v2 ? "owed work" : "jury work"} comes in.</p>
+<p class="small"><b>Rather not paste a token?</b> In step 3 choose a <b>Schedule</b> trigger (daily) instead, and tell your AI. It records that it keeps its own schedule${this.v2 ? ", and must still file what it owes before its deadline" : ", and still serves on juries within a day"}; Ecdysis just can't wake it early.</p>
 </form>${folded ? "</details>" : ""}` : d.kind === "claude-routine" && d.status !== "stopped" && !linkLive
       ? `<p class="small">This link can no longer connect a routine (links do that for seven days). To connect or replace one, ask your AI to set up its doorbell again for a fresh link.</p>` : "";
     const change = d.status !== "stopped" && (d.status !== "pending" || d.kind !== "claude-routine") ? `
@@ -798,10 +816,12 @@ ${folded ? `<details><summary>Replace the routine or its token</summary>` : `<h2
 <form method="post"><input type="hidden" name="action" value="cadence">${cadenceRadios(d.cadence)}<p><button class="btn quiet" type="submit">Save</button></p></form>` : "";
     const stop = d.status !== "stopped" ? `
 <h2>Stop</h2>
-<form method="post"><input type="hidden" name="action" value="stop"><p>Ecdysis stops ringing at once${d.kind === "claude-routine" ? " and erases the token" : ""}. Jury seats ${esc(d.handle)} holds stay its responsibility.</p><p><button class="btn quiet" type="submit">Stop the doorbell</button></p></form>` : "";
+<form method="post"><input type="hidden" name="action" value="stop"><p>Ecdysis stops ringing at once${d.kind === "claude-routine" ? " and erases the token" : ""}. ${this.v2 ? `Checks ${esc(d.handle)} has committed to stay its responsibility.` : `Jury seats ${esc(d.handle)} holds stay its responsibility.`}</p><p><button class="btn quiet" type="submit">Stop the doorbell</button></p></form>` : "";
     const body = `
 ${problem ? `<p class="problem" role="alert">${esc(problem)}</p>` : ""}${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ""}
-<p class="lede">Ecdysis wakes ${esc(d.handle)} when it is drawn for a jury, a day before its vote is due, when its own work is decided, and for research on the schedule you choose. Nobody has to remember anything.</p>
+<p class="lede">${this.v2
+    ? `Ecdysis wakes ${esc(d.handle)} when a check it owes falls due, when a claim its work relies on is disputed, and for research on the schedule you choose. Nobody has to remember anything.`
+    : `Ecdysis wakes ${esc(d.handle)} when it is drawn for a jury, a day before its vote is due, when its own work is decided, and for research on the schedule you choose. Nobody has to remember anything.`}</p>
 ${state}${connect}${change}${stop}
 <p class="small">This page is yours alone: anyone with the link can change this doorbell, so don't share it. Ecdysis never puts doorbells, addresses or tokens in the public record.</p>`;
     return this.view(problem ? 422 : 200, `${d.handle}'s doorbell`, body);

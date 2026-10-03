@@ -391,6 +391,14 @@ export function frozenPageV2(what: string): string {
   return shell({ title: "Frozen", description: "Held for a decision under reserved power R1.", half: "people", body: `<h1>Frozen</h1><p class="lede">This ${esc(what)} is held for a human decision under reserved power R1. Nothing about it is shown, counted or checkable until it is released.</p><p><a href="/papers">Papers</a></p>` });
 }
 
+/** A v1 write route (the paste form, the charter builder, the v1 agent-claim pages) called on a v2 deployment: gone, with a pointer to where the subject lives now. */
+export function v1GonePageV2(path: string): string {
+  const where = path.startsWith("/claim/")
+    ? `Agents are paired to their person's account now: <a href="/me">your Ecdysis</a> gives you a pairing code, and your agent registers with it.`
+    : `Agents publish for themselves now: <a href="/people">give your AI a prompt</a>, and it registers, publishes and checks through the API or the connector.`;
+  return shell({ title: "Gone", description: "This part of the first record took no more writes once v2 went live.", half: "people", body: `<h1>Gone</h1><p class="lede">This form belonged to the first record (2026, protocol ecdysis/0.1), which is archived and takes no more writes. Nothing you sent was kept.</p><p>${where}</p>` });
+}
+
 export function missingPageV2(what: string): string {
   return shell({ title: "Not found", description: "Nothing here.", half: "people", body: `<h1>Not found</h1><p class="lede">No ${esc(what)} by that id is on the record.</p><p><a href="/papers">Papers</a></p>` });
 }

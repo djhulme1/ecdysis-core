@@ -31,6 +31,7 @@ import type { V2Service } from "./v2/service.js";
 import type { MeHandler } from "./v2/me.js";
 import { isStewardPath, type StewardHandler } from "./v2/steward.js";
 import type { PagesHandler } from "./v2/pages.js";
+import { v1GonePageV2 as v1GonePage } from "../web/v2/pages.js";
 import { OAuthHandler } from "./v2/oauth-http.js";
 import type { OAuth } from "./v2/oauth.js";
 import type { V2Governance } from "./v2/governance.js";
@@ -825,6 +826,11 @@ async function routeRequest(
     const page = await opts.pages.handle(method, path, req.headers.get("accept") ?? "", req.headers.get("x-ecdysis-probe") === "1");
     if (page) return page;
   }
+  // With v2 on, v1's person-facing writes are gone with the rest of v1's writes: the paste route, the charter builder and the
+  // v1 agent-claim pages. Each answers a plain page pointing at where the subject lives now, and nothing reaches v1's tables.
+  if (opts.v2 && method === "POST" && (path === "/submit" || path === "/charter" || path.startsWith("/claim/"))) {
+    return new Response(v1GonePage(path), { status: 410, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
+  }
 
   // Digest unsubscribe links: always honoured, even in read-only mode.
   const nunsub = path.match(/^\/u\/n\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
@@ -1086,7 +1092,7 @@ async function dispatch(
         ],
         v1: {
           status: "archived",
-          note: "The v1 record (juries, protocol ecdysis/0.1) was frozen at the switchover to v2 and takes no writes here (410). Its final signed tree head and every page are kept at the archive.",
+          note: "The v1 record (protocol ecdysis/0.1) was frozen at the switchover to v2 and takes no writes here (410). Its final signed tree head and every page are kept at the archive.",
           ...(opts.archive ? { archive: opts.archive } : {}),
         },
       } as Json,
@@ -1130,7 +1136,20 @@ async function dispatch(
     // Under v2 the only board is v2's (challenges/0.1): the old path serves it, so a reader of v1's protocol lands on the live one.
     return opts.v2 ? opts.v2.challenges(50, false) : { status: 200, body: challengesBody() as unknown as Json };
   }
-  if (method === "GET" && path === "/v1/stats") return svc.stats();
+  if (method === "GET" && path === "/v1/stats") {
+    if (!opts.v2) return svc.stats();
+    // Under v2 the v1 statistics (its review queue, its outcomes) are history; what remains useful here is the operational
+    // block (attempted writes by route and outcome, never who sent them) and the v2 record's own counts.
+    // v1's full statistics are not computed: they replay v1's scoring over a log v2 writes in its own shapes.
+    const r = await opts.v2.record();
+    const stats: Record<string, Json> = {
+      generatedAt: new Date().toISOString(), protocol: "ecdysis/0.2",
+      note: "Every number here is recomputable from the public log; this endpoint is a convenience, not an authority. The record's numbers are at /v2/record and /v2/credence.",
+      operational: (await svc.operationalStats()) as unknown as Json,
+      record: { papers: r.papers.size, claims: r.claims.length, externalClaims: r.external.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted" && !c.disowned).length, agents: r.agents.size, challenges: r.challenges.size, findings: r.findings.length },
+    };
+    return { status: 200, body: stats as Json };
+  }
   if (method === "POST" && path === "/v1/agents/register") return svc.registerAgent(body);
   if (method === "POST" && path === "/v1/papers") return svc.submitPaper(body);
   if (method === "POST" && path === "/v1/replications") return svc.submitReplication(body);
@@ -1212,7 +1231,15 @@ async function dispatch(
     return svc.consistency(Number(q.get("first") ?? "-1"), Number(q.get("second") ?? "-1"));
   }
   if (method === "GET" && path === "/v1/log/audit") return svc.audit();
-  if (method === "GET" && path === "/v1/log/entries") return svc.logEntries(Number(q.get("from") ?? "0"), Number(q.get("limit") ?? "100"));
+  if (method === "GET" && path === "/v1/log/entries") {
+    const r = await svc.logEntries(Number(q.get("from") ?? "0"), Number(q.get("limit") ?? "100"));
+    // The v2 log withholds nothing: receipts' outputs are kept off the log (/v2/receipts/:id says when they are revealed), and every payload on it is shown in full.
+    if (opts.v2 && r.status === 200) {
+      const entries: Record<string, Json> = { ...(r.body as Record<string, Json>), withheld: "Nothing on the v2 log is withheld: every payload is shown in full. Receipts' outputs live off the log and are revealed by /v2/receipts/:id once cross-checked or after thirty days." };
+      return { status: 200, body: entries as Json };
+    }
+    return r;
+  }
   return { status: 404, body: { error: "no such endpoint" } as Json };
 }
 
