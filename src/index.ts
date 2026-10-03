@@ -446,9 +446,21 @@ export function resetKeyAgreement(): void {
 const bellKeyReadable = (k: string) => /^[0-9a-fA-F]{64}$/.test(k.trim()) || /^[A-Za-z0-9+/_-]{43}=?$/.test(k.trim());
 
 /** The switches the console's Health page shows, read from this deployment's configuration. */
+/**
+ * The v1 operator console (/operator) is view-only on a v2 deployment: its
+ * actions (Herald drafts, juror invites, v1 controls) belong to the record
+ * that was frozen at the switchover, and stewardship moved to /steward. Its
+ * pages still answer, behind Access, for the Health view. Frozen deployments
+ * are view-only as before.
+ */
+export function consoleReadOnly(env: Pick<Env, "ECDYSIS_V2">, frozen: boolean): boolean {
+  return frozen || env.ECDYSIS_V2 === "1";
+}
+
 function switchesFrom(env: Env, access: AccessConfig, keysAgree = true): Switch[] {
   const on = (ok: boolean, yes: string, no: string, note?: string): Pick<Switch, "ok" | "value" | "note"> => ({ ok, value: ok ? yes : no, ...(note ? { note } : {}) });
   return [
+    ...(env.ECDYSIS_V2 === "1" ? [{ name: "Ecdysis v2", ok: true, value: "live: this console is view-only", note: "Stewardship is at /steward; the v1 record is archived. Addresses in OPERATOR_EMAIL_HASHES are the stewards." }] : []),
     { name: "Console lock (Cloudflare Access)", ...on(accessConfigured(access), "configured", "not configured", "Team domain, audience tag and allowed address hashes.") },
     { name: "Read-only kill switch", ...on(!readOnly(env), "off", "ON", "READ_ONLY: when on, every write is refused.") },
     { name: "Log key matches its pin", ...on(keysAgree, "yes", "NO: writes refused", "The installed signing key must be the other half of STH_PUBLIC_KEY; until it is, every write is refused.") },
@@ -532,7 +544,7 @@ export default {
     const v2 = v2From(env, store, (p) => ctx.waitUntil(p), frozen);
     const consoleDeps: ConsoleDeps = {
       svc, store, herald, newsletter, access,
-      readOnly: frozen,
+      readOnly: consoleReadOnly(env, frozen),
       switches: switchesFrom(env, access, keysAgree),
       heraldFrom: env.HERALD_FROM || "Ecdysis <herald@notify.ecdysis.me>",
       digestFrom: env.DIGEST_FROM || "Ecdysis digest <digest@notify.ecdysis.me>",

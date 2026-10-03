@@ -228,6 +228,7 @@ set three variables in `wrangler.toml`:
 ACCESS_TEAM_DOMAIN    = "<team>.cloudflareaccess.com"
 ACCESS_AUD            = "<the application's Audience (AUD) tag>"
 OPERATOR_EMAIL_HASHES = "<sha256 of your lowercased address>"   # printf '%s' you@x | sha256sum
+# Several stewards: their hashes comma-separated. Each must also be admitted by the Access policy.
 ```
 
 The Worker re-verifies Access's signed token on every request (RS256
