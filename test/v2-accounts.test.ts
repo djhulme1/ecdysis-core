@@ -10,6 +10,7 @@ import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
+import { structuralScreener } from "../src/core/hazard.js";
 import { Accounts, LINKS_PER_HOUR, MemoryAccountStore, PAIRING_ATTEMPTS_PER_HOUR, SIGNUPS_PER_HOUR } from "../src/api/v2/accounts.js";
 import { MeHandler } from "../src/api/v2/me.js";
 import { sha256Hex } from "../src/api/access.js";
@@ -41,7 +42,7 @@ function world(o: { key?: string | null; stewards?: string[]; send?: boolean } =
   const logStore = new MemoryStore();
   const log = new TransparencyLog(logStore, now);
   const v2store = new MemoryV2Store(() => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
-  const v2 = new V2Service({ log, store: v2store, logPrivateKey: LOG_KEY.privateKey, now, pairing: (code, ip) => accounts.consumePairing(code, ip) });
+  const v2 = new V2Service({ log, store: v2store, logPrivateKey: LOG_KEY.privateKey, now, screeners: [structuralScreener()], pairing: (code, ip) => accounts.consumePairing(code, ip) });
   const governance = new V2Governance({ v2, log, operatorPublicKey: null, now });
   const feeds = new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" });
   const me = new MeHandler({ accounts, v2, governance, feeds, secure: false });
@@ -627,6 +628,11 @@ describe("challenges from a person's page", () => {
     assert.equal(res.status, 400);
     assert.match(await res.text(), /Couldn&#39;t propose the challenge: invalid challenge \(brief: 40 to 1500 characters/);
     assert.equal((await w.v2.record()).challenges.size, 0);
+    // The quote carries an encoded blob: screening refuses it before anything is written, and the page names the finding.
+    res = await post("/me/challenges/propose", { csrf, claim: "", source: "arxiv:1706.03762", quote: `Attention alone reaches 28.4 BLEU ${"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo".repeat(8)}`, test: "BLEU below 27 with the stated setup.", title: "Does attention alone reach 28.4 BLEU?", brief: "Train the base model on the public WMT14 data with the paper's stated setup and report BLEU with its uncertainty; gpu-hours, every choice stated.", scale: "gpu-hours" });
+    assert.equal(res.status, 451);
+    assert.match(await res.text(), /Couldn&#39;t propose the challenge: screening asked for a human look; a short text is not held for one, so reword it or send the work as a paper \(encoded-blob: long encoded run inside prose fields\)\./);
+    assert.equal((await w.v2.record()).external.size, 0, "the claim was not registered on the way");
     // A good one: the external claim is registered under the operator id with no agent handle, and the brief attached.
     res = await post("/me/challenges/propose", { csrf, claim: "", source: "arxiv:1706.03762", quote: "Attention alone reaches 28.4 BLEU on WMT14 En-De.", test: "BLEU below 27 with the stated setup.", title: "Does attention alone reach 28.4 BLEU?", brief: "Train the base model on the public WMT14 data with the paper's stated setup and report BLEU with its uncertainty; gpu-hours, every choice stated.", scale: "gpu-hours" });
     assert.equal(res.status, 303, await res.text());

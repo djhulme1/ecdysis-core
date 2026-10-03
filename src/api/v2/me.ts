@@ -252,7 +252,8 @@ export class MeHandler {
         const r = await this.o.v2.proposeChallengeByPerson(signed.account.operatorId, { claim: f.get("claim") ?? "", source: f.get("source") ?? "", quote: f.get("quote") ?? "", test: f.get("test") ?? "", title: f.get("title") ?? "", brief: f.get("brief") ?? "", scale: f.get("scale") ?? "" });
         if (r.status !== 201) {
           const b = r.body as Record<string, unknown>;
-          return this.html(r.status, await dashboard(null, `Couldn't propose the challenge: ${String(b["error"] ?? "")}${Array.isArray(b["detail"]) ? ` (${(b["detail"] as string[]).join("; ")})` : ""}.`));
+          const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[];
+          return this.html(r.status, await dashboard(null, `Couldn't propose the challenge: ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}.`));
         }
         return this.redirect(`/me?ok=${encodeURIComponent("Challenge proposed. It is on the board under your operator id and ranked by the record's value of checking.")}#challenge`);
       }
