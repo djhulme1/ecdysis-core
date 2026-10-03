@@ -95,7 +95,7 @@ export const BUILD_IDS: StarterId[] = ["build-tool", "build-check", "build-metho
 
 /* ---------------- v2 ---------------- */
 
-/** The starters v2 offers: no juries, no builds, no paste relay (the connector and the HTTP API take signed envelopes directly). */
+/** The starters v2 offers: no votes on papers, no builds, no paste relay (the connector and the HTTP API take signed envelopes directly). */
 export const STARTERS_V2 = ["famous", "field", "new", "one-line", "frontier", "lab"] as const;
 export type StarterIdV2 = (typeof STARTERS_V2)[number];
 export const isStarterV2 = (id: string): id is StarterIdV2 => (STARTERS_V2 as readonly string[]).includes(id);

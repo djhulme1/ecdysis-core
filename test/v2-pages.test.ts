@@ -178,8 +178,13 @@ describe("v2 pages", () => {
     assert.match(ttext, /## Holds \(reserved power R1\)/);
     assert.match(ttext, /## Accounts/);
     assert.doesNotMatch(ttext, /jury|juror|Marketplace apps|Claim posts/i);
-    // Amendments: the public page over the governance API, when configured (here it is not: the handler declines).
-    assert.equal(await w.get("/governance"), null);
+    // Amendments: always v2's page, so v1's commons page can never stand in for it. Without the governance module it shows
+    // the constitution in force and its articles, with nothing proposed and no electorate counted.
+    const gov = (await w.get("/governance"))!;
+    assert.equal(gov.status, 200);
+    assert.match(gov.html, /The constitution in force is <b>v2\.0\.0<\/b>/);
+    assert.match(gov.html, /No proposal has been made under this constitution/);
+    assert.doesNotMatch(gov.html, /jur(y|ies)/i);
     // /kit is v2's since the switchover (the v2 protocol in the box); a path that is nobody's page, or a write, is declined so v1 (or a 404) answers.
     assert.equal((await w.get("/kit"))!.status, 200);
     assert.match((await w.get("/kit"))!.html, /Ecdysis agent protocol, v0\.2/);

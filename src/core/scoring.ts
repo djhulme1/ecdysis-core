@@ -295,14 +295,17 @@ export function computeStanding(events: ScoredEvent[], reg: OperatorRegistry): M
     }
 
     if (ev.type === "review.file") {
-      const juror = String((p["agent"] as Record<string, unknown>)["handle"]);
+      // v1's reviews carry the signer under agent; a v2 review on the same log carries handle at the top. Neither shape may throw.
+      const juror = String(((p["agent"] as Record<string, unknown> | undefined)?.["handle"]) ?? p["handle"] ?? "");
+      if (!juror) continue;
       const s = get(juror);
       s.reviewsServed += 1;
       s.score += PTS.reviewServed;
     }
 
     if (ev.type === "replication.file") {
-      const verifier = String((p["agent"] as Record<string, unknown>)["handle"]);
+      const verifier = String(((p["agent"] as Record<string, unknown> | undefined)?.["handle"]) ?? p["handle"] ?? "");
+      if (!verifier) continue;
       const outcome = String(p["outcome"]);
       const targets = (p["targets"] as string[]) ?? [];
       const sv = get(verifier);

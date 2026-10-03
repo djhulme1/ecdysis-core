@@ -22,7 +22,7 @@ import { connectPage } from "../../web/connect.js";
 import { mcpUrlFor } from "../../web/launch.js";
 import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
 import { escapeXml } from "../site.js";
-import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
+import { ARTICLES, CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
 import { agentPageV2, challengePageV2, challengesPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
 import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
 import type { V2Record } from "../../core/v2/flow.js";
@@ -55,7 +55,7 @@ const FEED_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-type": 
 /**
  * v1's pages that have no place on a v2 site, and where each one's subject
  * now lives. A v2 deployment answers these with a permanent redirect rather
- * than rendering v1's page over v2's record: a jury queue, a preprint queue
+ * than rendering v1's page over v2's record: v1's review queue, a preprint queue
  * or a paste-through submission form would be empty or broken here, and
  * would tell a visitor the wrong story. Pages whose subject exists only in
  * the first record (the apps marketplace) go to the archive when there is one.
@@ -69,6 +69,8 @@ export const V1_PAGE_MOVES: Readonly<Record<string, string>> = {
   "/about": "/", "/why": "/",
 };
 export const V1_ONLY_PAGES: ReadonlyArray<string> = ["/apps", "/marketplace"];
+/** v1 page families with no v2 subject: preprints under review and the agent-claim pages. They go to the archive when there is one, else home. */
+export const V1_ONLY_PREFIXES: ReadonlyArray<string> = ["/pp/", "/claim/"];
 
 /** The v2 site's pages for the sitemap; paper pages are appended from the record. */
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
@@ -141,7 +143,8 @@ export class PagesHandler {
     if (path === "/skill.md") return new Response(method === "HEAD" ? null : skillMdV2(this.o.host ?? "api.ecdysis.me", this.o.logPublicKey ?? null), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/llms.txt") return new Response(method === "HEAD" ? null : llmsTxtV2(host), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8" } });
     if (path === "/privacy") return html(200, privacyPageV2(site));
-    if (path === "/governance" && this.o.governance) return html(200, governancePageV2(await this.governance(this.o.governance)));
+    // Always v2's page, even on a deployment without the governance module: v1's commons page must never stand in for it.
+    if (path === "/governance") return html(200, governancePageV2(this.o.governance ? await this.governance(this.o.governance) : await this.governanceStatic()));
     if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/papers") return html(200, papersPageV2(await this.papers()));
     const frozen = async (subject: string) => isHeld(await this.v2.record(), subject);
@@ -163,7 +166,8 @@ export class PagesHandler {
       return new Response(method === "HEAD" ? null : `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`, { status: 200, headers: { ...PAGE_HEADERS, "content-type": "application/xml; charset=utf-8" } });
     }
     // v1's pages, moved: a permanent redirect to where the subject lives now (see V1_PAGE_MOVES), never v1's page over v2's record.
-    const moved = V1_PAGE_MOVES[path] ?? (V1_ONLY_PAGES.includes(path) ? (this.o.archive ? `${this.o.archive}${path}` : "/") : null);
+    const v1Only = V1_ONLY_PAGES.includes(path) || V1_ONLY_PREFIXES.some((p) => path.startsWith(p));
+    const moved = V1_PAGE_MOVES[path] ?? (v1Only ? (this.o.archive && /^\/[A-Za-z0-9/_.:%-]*$/.test(path) ? `${this.o.archive}${path}` : "/") : null);
     if (moved) return new Response(null, { status: 301, headers: { ...PAGE_HEADERS, location: moved } });
     const pm = path.match(PAPER);
     if (pm) {
@@ -193,6 +197,11 @@ export class PagesHandler {
         yes: Number(p["yesOperators"] ?? 0), no: Number(p["noOperators"] ?? 0), eligible: Number(p["eligibleOperators"] ?? 0), reason: String(p["reason"] ?? ""), enactedIn: typeof p["enactedIn"] === "string" ? p["enactedIn"] : null,
       })),
     };
+  }
+
+  /** The constitution's standing with no governance module to count electors or proposals: the text, its articles, nothing proposed. */
+  private async governanceStatic(): Promise<GovernanceViewV2> {
+    return { version: CONSTITUTION_VERSION, hash: await constitutionHash(), eligibleOperators: 0, rules: {}, articles: ARTICLES.map((a) => ({ id: a.id, title: a.title, entrenched: a.entrenched })), proposals: [] };
   }
 
   private async landing(site: string) {

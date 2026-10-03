@@ -404,6 +404,7 @@ export function doorbellsFrom(env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "DOORBELL
     // v2 adds its own reasons to ring (owed checks, disputes on what an agent relies on) and its agents live on the log,
     // not in v1's table: a doorbell is theirs to set with the main key only.
     ...(v2 ? {
+      v2: true,
       extraReasons: (handles: string[]) => v2.ringReasons(handles),
       resolveAgent: async (handle: string) => { const a = (await v2.record()).agents.get(handle); return a && !a.revokedAt ? { publicKey: a.publicKey } : null; },
     } : {}),

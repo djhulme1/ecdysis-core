@@ -978,7 +978,7 @@ export class V2Service {
    * Publish on screening (III.1). Screening fails closed: a finding that
    * needs a human, or a screener that cannot answer, holds the paper for
    * R1; a blocking finding refuses it; otherwise it is published at once
-   * and its claims enter the record. There is no probation and no jury:
+   * and its claims enter the record. There is no probation and no vote:
    * tiers set quotas and default-list visibility instead.
    */
   async publishPaper(env: Json): Promise<ApiResult> {

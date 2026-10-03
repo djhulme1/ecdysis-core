@@ -5,7 +5,7 @@
  *   ℓ(c) = logit(q̃) + Σ_o w_o·e_o,   p = σ(ℓ)
  *   q̃    = ε + (1 − ε)·[½ + ρ_a(q − ½)]·Π_f p(f)
  *
- * credence/0.1 without jury acceptance (β was added to every accepted
+ * credence/0.1 without v1's acceptance step (β was added to every accepted
  * claim alike, so it carried no information between claims), with the
  * evidence redefined around receipts:
  *
