@@ -1,0 +1,20 @@
+{
+  "failed_mean_ratio": 0.096545,
+  "failed_share_ge30": 0.11072,
+  "failed_share_ge50": 0.044758,
+  "first_launch_year": 2009,
+  "last_deadline_year": 2026,
+  "n_decided": 138189,
+  "n_failed": 45981,
+  "n_projects": 157331,
+  "n_rows": 194160,
+  "n_successful": 92208,
+  "percent_funded_agreement": 1,
+  "se_failed_share_ge30": 0.001378,
+  "se_success_median_over": 0.002437,
+  "success_median_over": 0.246556,
+  "success_p25_over": 0.0584,
+  "success_rate": 0.66726,
+  "success_share_le10over": 0.335969,
+  "success_share_le3over": 0.164649
+}
