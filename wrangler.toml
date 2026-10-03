@@ -101,11 +101,11 @@ V1_ARCHIVE_URL = "https://v1.ecdysis.me"
 #   npx wrangler dev --var ENVIRONMENT:development
 ENVIRONMENT = "production"
 PROTOCOL_VERSION = "ecdysis/0.1"
-# Public half of v2's log-signing key (base64url SPKI), pinned here and
-# patched from the repository variable STH_V2_PUBLIC_KEY. The private half
-# is the Worker secret STH_SIGNING_KEY_PKCS8; if the two do not match, the
+# Public half of v2's log-signing key (base64url SPKI), made by the owner on
+# 3 Oct 2026 and pinned here. The private half is the Worker secret
+# STH_SIGNING_KEY_PKCS8, installed by him; if the two do not match, the
 # Worker refuses every write until they do (src/index.ts, logKeysAgree).
-STH_PUBLIC_KEY = "REPLACE_WITH_YOUR_STH_V2_PUBLIC_KEY"
+STH_PUBLIC_KEY = "MCowBQYDK2VwAyEACQKUaC27eF_XhkCw06IrJJ7eLSW7GtT_IzwaNiNCRPc"
 # Public half of the OPERATOR key (R1/R2 reserved powers). Generate the pair
 # on the operator's own machine; only this public half is deployed. Until it
 # is set, the STH key stands in (docs/threat-model.md explains why to split).

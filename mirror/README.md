@@ -18,7 +18,7 @@ Two records, two files:
 v2 (the live record), Ed25519 as base64url of the DER SPKI encoding:
 
 ```
-REPLACE_WITH_YOUR_STH_V2_PUBLIC_KEY
+MCowBQYDK2VwAyEACQKUaC27eF_XhkCw06IrJJ7eLSW7GtT_IzwaNiNCRPc
 ```
 
 v1 (the frozen record):
