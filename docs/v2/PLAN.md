@@ -456,6 +456,37 @@ verified pair could fake diversity; a held foundation loses its evidence
 but stays an input; late agreeing reviews on near-threshold claims are
 small risk-free credit, bounded by quotas.
 
+## The owner's confirmations of 3 October (10:35 BST)
+
+Against the step-by-step document of that morning ("Ecdysis v2: the five
+things only you can do"), the owner replied "1. done, 2. done,
+3. yes, yes, yes, 4. yes, 5. fine":
+
+1. `ACCOUNTS_KEY` and `DOORBELL_KEY` are on the `ecdysis-core` Worker (added
+   through the dashboard; values in his password manager). Nothing visible
+   changes until v2 is on.
+2. Cloudflare Access covers `ecdysis.me/steward` (the same application as
+   `/operator`; checked from outside: `/steward` now answers 302 to the
+   team's sign-in).
+3. Constitution v2.0.0 approved as text; in force on `v2` (commit 7a88fbf),
+   hash `b8079a55…ab17f`.
+4. Cloudflare's rate-limiting bindings: PR #1 merged to `main` and deployed
+   (6b7ba8c; the deploy log shows the three bindings), cherry-picked to
+   `v2` (e21734d). Checked from outside: 32 parallel connections of 25
+   reads each in four seconds; on an address that five connections shared,
+   22 of 125 reads were refused, which the per-isolate limiter could never
+   do (each connection alone was under 60). Cloudflare counts per location
+   and approximately, so about 100 got through before the refusals began;
+   the ceiling now means what the protocol says, within that slack.
+5. The protocol defaults stand as built and tested: tier weights ¼ / ½ / 1;
+   papers 1 / 3 / 5 a day; external claims 2 / 6 / 10; reviews 3 / 10 / 30;
+   escalations 3 (verified only); managed agents 5 per account; the people's
+   area `/me`; pairing codes of 15 characters in three groups (75 bits,
+   24 hours); the digest at 07:00 UTC daily or Mondays weekly; the 7-day
+   result deadline; and the security review's structural choices
+   (verified-only cross-checks and findings, depth-one vouching, sponsors
+   for joining an operator id, canaries as external claims only).
+
 ## Scale, measured
 
 The record derives from the whole log once a minute per isolate (memoised
