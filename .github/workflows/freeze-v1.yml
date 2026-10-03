@@ -1,0 +1,111 @@
+name: Freeze v1
+
+# The switchover's first move (docs/v2/SWITCHOVER.md): deploy the v1 record
+# as a SEPARATE, frozen Worker (ecdysis-v1) from main's final v1 commit, on
+# the OLD database, with the kill switch on and the FINAL signed tree head
+# baked in, so the archive needs no private key and its head verifies for
+# ever against the pinned public key. Run once, by hand. The hostname
+# (v1.ecdysis.me) is attached to the new Worker by the owner in the
+# dashboard afterwards.
+#
+# Inputs:
+#   ref        the commit to deploy: main's final v1 commit (READ_ONLY already "1" there)
+#   final_sth  the final head, as the live /v1/log/sth returned it after the
+#              freeze: {"treeSize":…,"rootHash":"…","timestamp":"…","signature":"…"}
+#
+# The workflow verifies the head against the pinned public key BEFORE
+# deploying anything, and refuses to deploy a head that does not verify or
+# whose size does not match the live log.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "The commit of the final v1 state (main's last v1 commit)"
+        required: true
+        default: "main"
+        type: string
+      final_sth:
+        description: "The final signed tree head, as JSON, exactly as /v1/log/sth returned it"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freeze-v1
+  cancel-in-progress: false
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+      STH_PUBLIC_KEY: ${{ vars.STH_PUBLIC_KEY }}
+      OPERATOR_PUBLIC_KEY: ${{ vars.OPERATOR_PUBLIC_KEY }}
+      FINAL_STH: ${{ inputs.final_sth }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Refuse to run without the configuration
+        run: |
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID D1_DATABASE_ID STH_PUBLIC_KEY OPERATOR_PUBLIC_KEY FINAL_STH; do
+            if [ -z "${!v}" ]; then echo "::error::$v is not set"; exit 1; fi
+          done
+
+      - name: Verify the final head against the pinned public key and the live log
+        shell: bash
+        run: |
+          node --import tsx -e '
+            const { TransparencyLog } = await import("./src/core/log.ts");
+            const sth = JSON.parse(process.env.FINAL_STH);
+            const ok = await TransparencyLog.verifySth(process.env.STH_PUBLIC_KEY, sth);
+            if (!ok) { console.error("the final head does not verify against STH_PUBLIC_KEY"); process.exit(1); }
+            const live = await (await fetch("https://api.ecdysis.me/v1/log/sth", { headers: { "x-ecdysis-probe": "1" } })).json();
+            if (live.treeSize !== sth.treeSize || live.rootHash !== sth.rootHash) { console.error(`the live log (size ${live.treeSize}, root ${live.rootHash}) is not the head given (size ${sth.treeSize}, root ${sth.rootHash}): freeze first, then take the head again`); process.exit(1); }
+            console.log(`final head verifies: size ${sth.treeSize}, root ${sth.rootHash}, at ${sth.timestamp}`);
+          '
+
+      - name: Patch the archive configuration
+        shell: bash
+        run: |
+          sed -i "s/REPLACE_WITH_YOUR_D1_ID/$D1_DATABASE_ID/" wrangler.v1-archive.toml
+          sed -i "s/REPLACE_WITH_YOUR_STH_PUBLIC_KEY/$STH_PUBLIC_KEY/" wrangler.v1-archive.toml
+          sed -i "s/REPLACE_WITH_YOUR_OPERATOR_PUBLIC_KEY/$OPERATOR_PUBLIC_KEY/" wrangler.v1-archive.toml
+          # A TOML literal string: the head's JSON goes in verbatim (it contains no three quotes in a row).
+          node -e '
+            const fs = require("fs");
+            const toml = fs.readFileSync("wrangler.v1-archive.toml", "utf8").replace("REPLACE_WITH_FINAL_STH", JSON.stringify(JSON.parse(process.env.FINAL_STH)));
+            fs.writeFileSync("wrangler.v1-archive.toml", toml);
+          '
+          grep -c "REPLACE_WITH" wrangler.v1-archive.toml && { echo "::error::a placeholder survived"; exit 1; } || true
+
+      - name: Deploy the frozen archive
+        shell: bash
+        run: npx wrangler deploy -c wrangler.v1-archive.toml | tee /tmp/freeze.log
+
+      - name: Check the archive serves the final head and refuses writes
+        shell: bash
+        run: |
+          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/freeze.log | head -1)
+          if [ -z "$URL" ]; then echo "No workers.dev URL in the deploy output; attach v1.ecdysis.me in the dashboard and check there." >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          sleep 5
+          GOT=$(curl -fsS -H "x-ecdysis-probe: 1" "$URL/v1/log/sth")
+          node -e '
+            const a = JSON.parse(process.argv[1]), b = JSON.parse(process.env.FINAL_STH);
+            for (const k of ["treeSize", "rootHash", "timestamp", "signature"]) if (a[k] !== b[k]) { console.error(`archive head differs at ${k}`); process.exit(1); }
+            console.log("the archive serves the final head verbatim");
+          ' "$GOT"
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "content-type: application/json" -d "{}" "$URL/v1/papers")
+          if [ "$CODE" != "503" ]; then echo "::error::a write answered $CODE, not 503"; exit 1; fi
+          echo "Frozen archive live at $URL: final head served, writes refused. Attach v1.ecdysis.me to the Worker ecdysis-v1 in the dashboard." >> "$GITHUB_STEP_SUMMARY"
