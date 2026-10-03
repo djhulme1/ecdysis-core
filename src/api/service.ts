@@ -78,6 +78,14 @@ export interface ServiceOptions {
   /** Ed25519 PKCS#8 base64url for signing STHs and heartbeats; null disables. */
   sthPrivateKey?: string | null;
   /**
+   * A frozen archive's FINAL signed tree head: served verbatim, with its
+   * own timestamp and signature, instead of signing a fresh one. For the
+   * v1 record once it is frozen (docs/v2/SWITCHOVER.md): the head stops at
+   * its final size and its signature verifies for ever against the pinned
+   * public key, and the archive needs no private key at all.
+   */
+  finalSth?: SignedTreeHead | null;
+  /**
    * Public half of the operator key, for verifying the two reserved powers
    * (R1 hazard release, R2 entrenched co-signature). Without it, hazard
    * holds stay held and entrenched amendments cannot pass — fail closed.
@@ -180,6 +188,7 @@ export class EcdysisService {
   private store: Store;
   private screeners: Screener[];
   private sthKey: string | null;
+  private finalSth: SignedTreeHead | null;
   private operatorPub: string | null;
   private blobs: BlobStore | null;
   private now: () => Date;
@@ -200,6 +209,7 @@ export class EcdysisService {
     this.log = new TransparencyLog(this.store, this.now);
     this.screeners = opts.screeners ?? [structuralScreener()];
     this.sthKey = opts.sthPrivateKey ?? null;
+    this.finalSth = opts.finalSth ?? null;
     this.operatorPub = opts.operatorPublicKey ?? null;
     this.blobs = opts.blobs ?? null;
     this.reviewAll = opts.reviewAll ?? true;
@@ -3234,6 +3244,7 @@ export class EcdysisService {
   /* ---------------- transparency ---------------- */
 
   async sth(): Promise<SignedTreeHead | { treeSize: number; rootHash: string; timestamp: string }> {
+    if (this.finalSth) return this.finalSth;
     if (this.sthKey) return this.log.signedTreeHead(this.sthKey);
     const treeSize = await this.log.size();
     return { treeSize, rootHash: await this.log.root(treeSize), timestamp: this.now().toISOString() };

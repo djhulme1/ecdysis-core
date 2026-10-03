@@ -36,6 +36,7 @@ import type { ConsoleDeps } from "./api/operator.js";
 import type { Switch } from "./web/operator.js";
 import type { Store } from "./store/store.js";
 import { signJson, verifyJson } from "./core/crypto.js";
+import type { SignedTreeHead } from "./core/log.js";
 
 export interface Env {
   DB: D1Database;
@@ -58,13 +59,21 @@ export interface Env {
    */
   READ_ONLY?: string;
   /**
-   * Ecdysis v2 (docs/v2/PLAN.md): "1" serves /v2/* and the v2 connector
-   * tools from this deployment. Off by default; the switchover to a fresh
-   * database and a new log key is the owner's act.
+   * Ecdysis v2 (docs/v2/PLAN.md): "1" serves v2 (pages, /v2/*, the v2
+   * connector tools) from this deployment. On since the switchover of
+   * 3 October 2026, with v2's own database and log key.
    */
   ECDYSIS_V2?: string;
   /** Where the frozen v1 record lives after the switchover (https://v1.ecdysis.me); linked from v2's landing page when set. */
   V1_ARCHIVE_URL?: string;
+  /**
+   * A frozen archive's final signed tree head, as JSON ({treeSize, rootHash,
+   * timestamp, signature}): served verbatim at /v1/log/sth instead of a
+   * freshly signed one, so the archive needs no log key. Read only when
+   * READ_ONLY is on; anything unreadable is ignored (a fresh head, or an
+   * unsigned one without a key, is served instead).
+   */
+  FINAL_STH?: string;
   /** Secret: wrangler secret put STH_SIGNING_KEY_PKCS8 */
   STH_SIGNING_KEY_PKCS8?: string;
   /** Secret: JSON array of {pattern, flags, category, severity} rules,
@@ -225,12 +234,27 @@ function realKey(v: string | undefined): string | null {
   return v && v.length > 16 && !v.startsWith("REPLACE") ? v : null;
 }
 
+/** The final tree head of a frozen archive, when configured and readable; null otherwise. */
+export function finalSthFrom(env: Pick<Env, "READ_ONLY" | "FINAL_STH">): SignedTreeHead | null {
+  if (!readOnly(env) || !env.FINAL_STH) return null;
+  try {
+    const v = JSON.parse(env.FINAL_STH) as Partial<SignedTreeHead>;
+    if (typeof v.treeSize === "number" && Number.isInteger(v.treeSize) && v.treeSize >= 0 && typeof v.rootHash === "string" && /^[0-9a-f]{64}$/.test(v.rootHash) && typeof v.timestamp === "string" && Number.isFinite(Date.parse(v.timestamp)) && typeof v.signature === "string" && v.signature.length > 0) {
+      return { treeSize: v.treeSize, rootHash: v.rootHash, timestamp: v.timestamp, signature: v.signature };
+    }
+  } catch {
+    // unreadable: fall through
+  }
+  return null;
+}
+
 function serviceFrom(env: Env, store: Store = new D1Store(env.DB)): EcdysisService {
   const sthPublicKey = realKey(env.STH_PUBLIC_KEY);
   return new EcdysisService({
     store,
     screeners: screenersFrom(env),
     sthPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
+    finalSth: finalSthFrom(env),
     operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY) ?? sthPublicKey,
     blobs: env.BLOBS ? new R2BlobStore(env.BLOBS) : null,
     reviewAll: env.REVIEW_ALL !== "0",
@@ -307,7 +331,7 @@ function preprintCap(env: Env): number {
   return env.PREPRINT_DAILY_CAP !== undefined && Number.isInteger(n) && n >= 0 ? n : PREPRINT_DAILY_CAP;
 }
 
-const readOnly = (env: Env) => env.READ_ONLY === "1" || env.READ_ONLY?.toLowerCase() === "true";
+const readOnly = (env: Pick<Env, "READ_ONLY">) => env.READ_ONLY === "1" || env.READ_ONLY?.toLowerCase() === "true";
 
 const csprng = () => crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32;
 const emailCap = (env: Env) => {

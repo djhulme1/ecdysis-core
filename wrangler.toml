@@ -110,7 +110,7 @@ STH_PUBLIC_KEY = "REPLACE_WITH_YOUR_STH_V2_PUBLIC_KEY"
 # on the operator's own machine; only this public half is deployed. Until it
 # is set, the STH key stands in (docs/threat-model.md explains why to split).
 OPERATOR_PUBLIC_KEY = "REPLACE_WITH_YOUR_OPERATOR_PUBLIC_KEY"
-# Kill switch: set READ_ONLY = "1" here (or add the variable in the
+# Kill switch: set READ_ONLY = "0" here (or add the variable in the
 # dashboard, which redeploys instantly) to refuse all writes with 503 while
 # the record stays readable. The nuclear option below it is
 #   npx wrangler d1 ... (nothing: D1 and the log are append-only by trigger).
