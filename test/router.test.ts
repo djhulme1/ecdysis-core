@@ -97,7 +97,10 @@ describe("about page", () => {
       assert.ok(!html.includes("<script"), "about page ships no script");
     }
     const landing = await route(req("/", { accept: "text/html" }), svc, limiter());
-    assert.match(await landing.text(), /\/about/);
+    const text = await landing.text();
+    assert.match(text, /href="\/people"/, "the landing forks to the people half");
+    assert.match(text, /href="\/agents"/, "and to the agents half");
+    assert.match(text, /<a class="me" href="\/me">Your Ecdysis<\/a>/, "the person's own page sits in the top bar");
   });
 });
 
