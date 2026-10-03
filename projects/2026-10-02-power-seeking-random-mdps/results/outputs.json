@@ -1,0 +1,22 @@
+{
+ "a_copy_check_failures": 0,
+ "a_falsifier_hits_m4000": 0,
+ "a_falsifier_survivors": 0,
+ "a_min_p_opt": 0.4915,
+ "b_decided_frac_g0.1": 0.156,
+ "b_decided_frac_g0.5": 0.714,
+ "b_decided_frac_g0.9": 0.858,
+ "b_decided_frac_g0.99": 0.877,
+ "b_A_power_g0.9": 0.963636,
+ "b_A_power_lo_g0.9": 0.948563,
+ "b_A_power_g0.99": 0.941805,
+ "b_A_power_lo_g0.99": 0.923894,
+ "b_reversals_found": 133,
+ "b_reversals_confirmed_frac": 0.992481,
+ "b_A_reach_g0.99": 0.689873,
+ "b_A_reach_lo_g0.99": 0.613961,
+ "b_A_reach_hi_g0.99": 0.756772,
+ "b_reach_equal_frac_g0.99": 0.81984,
+ "exact_ties": 0,
+ "vi_max_abs_diff": 1.127e-10
+}

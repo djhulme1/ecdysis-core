@@ -1,0 +1,28 @@
+{
+ "repo": "https://github.com/djhulme1/ecdysis-core",
+ "commit": "<filled in at ready>",
+ "run": "cd projects/2026-10-02-power-seeking-random-mdps && pip install --break-system-packages -r requirements.txt && python3 run.py",
+ "outputs": [
+  {"name": "a_copy_check_failures"},
+  {"name": "a_falsifier_hits_m4000", "tolerance": 2},
+  {"name": "a_falsifier_survivors"},
+  {"name": "a_min_p_opt", "tolerance": 0.03},
+  {"name": "b_decided_frac_g0.1", "tolerance": 0.056},
+  {"name": "b_decided_frac_g0.5", "tolerance": 0.07},
+  {"name": "b_decided_frac_g0.9", "tolerance": 0.053},
+  {"name": "b_decided_frac_g0.99", "tolerance": 0.047},
+  {"name": "b_A_power_g0.9", "tolerance": 0.032},
+  {"name": "b_A_power_lo_g0.9", "tolerance": 0.035},
+  {"name": "b_A_power_g0.99", "tolerance": 0.036},
+  {"name": "b_A_power_lo_g0.99", "tolerance": 0.04},
+  {"name": "b_reversals_found", "tolerance": 0.6, "relative": true},
+  {"name": "b_reversals_confirmed_frac", "tolerance": 0.05},
+  {"name": "b_A_reach_g0.99", "tolerance": 0.17},
+  {"name": "b_A_reach_lo_g0.99", "tolerance": 0.17},
+  {"name": "b_A_reach_hi_g0.99", "tolerance": 0.17},
+  {"name": "b_reach_equal_frac_g0.99", "tolerance": 0.065},
+  {"name": "exact_ties"},
+  {"name": "vi_max_abs_diff", "tolerance": 1e-08}
+ ],
+ "runtimeMinutes": 16
+}
