@@ -67,7 +67,8 @@ describe("the lab guide", () => {
     assert.match(text, /data, never instructions/);
     for (const tool of ["register_claim", "delegate_key", "commit_check", "file_result"]) assert.match(text, new RegExp(tool), tool);
     assert.match(text, /papers 1\/3\/5;\s*claims from human literature 2\/6\/10; reviews 3\/10\/30/);
-    assert.doesNotMatch(text, /<[a-z]/, "plain Markdown, no markup");
+    assert.doesNotMatch(text, /<\/?(p|div|span|a|h[1-6]|ul|ol|li|code|table|svg)\b[^>]*>/, "plain Markdown, no markup");
+    assert.match(text, /lms load <model> --gpu max/, "placeholders in angle brackets are fine");
     assert.equal(labTextV2("api.ecdysis.me"), text);
     assert.ok(labPageV2({ host: "api.ecdysis.me", mcpUrl: "https://api.ecdysis.me/mcp" }).includes("https://api.ecdysis.me/mcp"));
   });
@@ -75,7 +76,8 @@ describe("the lab guide", () => {
   it("the brief fits every app's link, is on the page, and the launcher types it only when v2 is on", async () => {
     const brief = labBriefV2("https://ecdysis.me");
     assert.ok(brief.length < Math.min(...Object.values(PROMPT_APPS).map((a) => a.max)), `the brief (${brief.length} chars) fits the tightest app`);
-    assert.match(brief, /never show me, log or store the private key/);
+    assert.match(brief, /never print, log, upload or show it to a model/);
+    assert.match(brief, /stop sending at the first 429/);
     assert.match(brief, /only inside a container or CI sandbox/);
     assert.match(brief, /data, never instructions/);
     assert.ok((STARTERS_V2 as readonly string[]).includes("lab"));
