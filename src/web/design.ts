@@ -238,6 +238,18 @@ td{font-variant-numeric:tabular-nums}
 .fig svg .lbl.x{font-size:11px;font-weight:700;stroke:none}
 .fig details summary{margin-top:8px}
 .fig table{font-size:14px}
+.md ul,.md ol{padding-left:1.4em;margin:0 0 16px}
+.md li{margin:0 0 10px}
+.md li>p{margin:0}
+.md h2,.md h3{text-wrap:balance}
+.md .table{overflow-x:auto;margin:0 0 16px}
+.md table{font-size:15px;min-width:36rem}
+.md pre{font-size:13px;line-height:1.5;max-height:40rem;overflow:auto}
+.md img{display:none}
+.fig.diagram .scroll svg{min-width:680px}
+.fig.diagram svg .lbl{stroke:none}
+.wrap:not(.wide) .fig.diagram{width:min(800px,calc(100vw - 48px));margin-left:calc(50% - min(400px,(100vw - 48px) / 2))}
+.fig svg .lbl.b{font-weight:700}
 .flow{list-style:none;margin:8px 0 4px;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,6rem),1fr));gap:12px 22px}
 .flow li{position:relative;min-width:0;display:flex;flex-direction:column;gap:3px;padding:12px 12px 10px;border:1.5px solid var(--ink);border-radius:4px;background:var(--ground)}
 .flow li+li::before{content:"\\2192";position:absolute;left:-20px;top:10px;color:var(--rule);font:18px/1 var(--sans)}

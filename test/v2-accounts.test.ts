@@ -10,6 +10,7 @@ import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
+import { structuralScreener } from "../src/core/hazard.js";
 import { Accounts, LINKS_PER_HOUR, MemoryAccountStore, PAIRING_ATTEMPTS_PER_HOUR, SIGNUPS_PER_HOUR } from "../src/api/v2/accounts.js";
 import { MeHandler } from "../src/api/v2/me.js";
 import { sha256Hex } from "../src/api/access.js";
@@ -41,7 +42,7 @@ function world(o: { key?: string | null; stewards?: string[]; send?: boolean } =
   const logStore = new MemoryStore();
   const log = new TransparencyLog(logStore, now);
   const v2store = new MemoryV2Store(() => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
-  const v2 = new V2Service({ log, store: v2store, logPrivateKey: LOG_KEY.privateKey, now, pairing: (code, ip) => accounts.consumePairing(code, ip) });
+  const v2 = new V2Service({ log, store: v2store, logPrivateKey: LOG_KEY.privateKey, now, screeners: [structuralScreener()], pairing: (code, ip) => accounts.consumePairing(code, ip) });
   const governance = new V2Governance({ v2, log, operatorPublicKey: null, now });
   const feeds = new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" });
   const me = new MeHandler({ accounts, v2, governance, feeds, secure: false });
@@ -603,6 +604,63 @@ describe("accounts (v2)", () => {
     assert.match((await page("/u/dan-hulme"))!.text, new RegExp(`operator ${(await w.accounts.session(eve.session))!.account.operatorId}`));
     // Without accounts configured, there are no profiles at all.
     assert.equal((await new PagesHandler(w.v2).handle("GET", "/u/dan-hulme"))!.status, 404);
+  });
+});
+
+describe("challenges from a person's page", () => {
+  it("proposes one from the form (registering a claim from human literature on the way), lists it, withdraws it; the log holds the operator id and never the email", async () => {
+    const w = world();
+    const dan = await w.signIn("dan@example.org");
+    const cookies = { ecd_b: "browser-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ecd_s: dan.session };
+    const get = (path: string) => w.me.handle(new Request(`https://ecdysis.me${path}`, { headers: { cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join("; ") } }), path.split("?")[0]!, "1.1.1.1");
+    const post = (path: string, form: Record<string, string>) => {
+      const p = new URLSearchParams(form).toString();
+      return w.me.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join("; "), origin: "https://ecdysis.me" } }), path, "1.1.1.1");
+    };
+    let html = await (await get("/me")).text();
+    assert.match(html, /<h2 id="challenge">Challenges<\/h2>/);
+    assert.match(html, /three a day at your tier/, "an account holder's quota is named");
+    assert.match(html, /<form method="post" action="\/me\/challenges\/propose">/);
+    const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    const operatorId = dan.account.operatorId;
+    // The brief is too short: the problem is named and nothing is written.
+    let res = await post("/me/challenges/propose", { csrf, claim: "", source: "arxiv:1706.03762", quote: "Attention alone reaches 28.4 BLEU on WMT14 En-De.", test: "BLEU below 27 with the stated setup.", title: "Does attention alone reach 28.4 BLEU?", brief: "too short", scale: "gpu-hours" });
+    assert.equal(res.status, 400);
+    assert.match(await res.text(), /Couldn&#39;t propose the challenge: invalid challenge \(brief: 40 to 1500 characters/);
+    assert.equal((await w.v2.record()).challenges.size, 0);
+    // The quote carries an encoded blob: screening refuses it before anything is written, and the page names the finding.
+    res = await post("/me/challenges/propose", { csrf, claim: "", source: "arxiv:1706.03762", quote: `Attention alone reaches 28.4 BLEU ${"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo".repeat(8)}`, test: "BLEU below 27 with the stated setup.", title: "Does attention alone reach 28.4 BLEU?", brief: "Train the base model on the public WMT14 data with the paper's stated setup and report BLEU with its uncertainty; gpu-hours, every choice stated.", scale: "gpu-hours" });
+    assert.equal(res.status, 451);
+    assert.match(await res.text(), /Couldn&#39;t propose the challenge: screening asked for a human look; a short text is not held for one, so reword it or send the work as a paper \(encoded-blob: long encoded run inside prose fields\)\./);
+    assert.equal((await w.v2.record()).external.size, 0, "the claim was not registered on the way");
+    // A good one: the external claim is registered under the operator id with no agent handle, and the brief attached.
+    res = await post("/me/challenges/propose", { csrf, claim: "", source: "arxiv:1706.03762", quote: "Attention alone reaches 28.4 BLEU on WMT14 En-De.", test: "BLEU below 27 with the stated setup.", title: "Does attention alone reach 28.4 BLEU?", brief: "Train the base model on the public WMT14 data with the paper's stated setup and report BLEU with its uncertainty; gpu-hours, every choice stated.", scale: "gpu-hours" });
+    assert.equal(res.status, 303, await res.text());
+    assert.match(res.headers.get("location")!, /^\/me\?ok=Challenge%20proposed/);
+    const rec = await w.v2.record();
+    assert.equal(rec.challenges.size, 1);
+    const ch = [...rec.challenges.values()][0]!;
+    assert.deepEqual(ch.proposer, { kind: "person", operatorId });
+    assert.equal(rec.external.get(ch.claim.split("#")[0]!)?.operatorId, operatorId);
+    assert.equal(rec.external.get(ch.claim.split("#")[0]!)?.handle, "");
+    for (const row of await w.v2.logRows()) assert.ok(!JSON.stringify(row.payload).includes("dan@example.org"), "no email on the log");
+    html = await (await get("/me")).text();
+    assert.match(html, /Does attention alone reach 28\.4 BLEU\?<\/a> <span class="status open">open<\/span>/);
+    assert.match(html, /<form method="post" action="\/me\/challenges\/withdraw" class="inline">/);
+    // The board and the challenge page show it, by operator id.
+    const board = await (await w.pages.handle("GET", "/challenges"))!.text();
+    assert.match(board, /proposed by a person <span class="mono">op_[0-9a-f]{11}…<\/span>/);
+    assert.doesNotMatch(board, /dan@example\.org/);
+    assert.equal((await w.pages.handle("GET", ch.id.replace(/^ch:/, "/c/")))!.status, 200);
+    // Withdrawing needs a reason; then it is off the board and the page says so.
+    res = await post("/me/challenges/withdraw", { csrf, id: ch.id, reason: "short" });
+    assert.equal(res.status, 400);
+    res = await post("/me/challenges/withdraw", { csrf, id: ch.id, reason: "Proposed in haste; a sharper brief is coming." });
+    assert.equal(res.status, 303);
+    assert.equal([...(await w.v2.record()).challenges.values()][0]!.withdrawn?.by, "proposer");
+    html = await (await get("/me")).text();
+    assert.match(html, /<span class="status broken">withdrawn<\/span>/);
+    assert.doesNotMatch(html, /action="\/me\/challenges\/withdraw"/, "nothing left to withdraw");
   });
 });
 

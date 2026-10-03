@@ -9,3 +9,4 @@ coverage/
 *.pkcs8
 *.key
 secrets/
+test.tap

@@ -248,6 +248,20 @@ export class MeHandler {
         if (!r.ok) return this.html(r.status, await dashboard(null, r.error));
         return this.redirect("/me?ok=Notifications+saved.");
       }
+      case "/me/challenges/propose": {
+        const r = await this.o.v2.proposeChallengeByPerson(signed.account.operatorId, { claim: f.get("claim") ?? "", source: f.get("source") ?? "", quote: f.get("quote") ?? "", test: f.get("test") ?? "", title: f.get("title") ?? "", brief: f.get("brief") ?? "", scale: f.get("scale") ?? "" });
+        if (r.status !== 201) {
+          const b = r.body as Record<string, unknown>;
+          const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[];
+          return this.html(r.status, await dashboard(null, `Couldn't propose the challenge: ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}.`));
+        }
+        return this.redirect(`/me?ok=${encodeURIComponent("Challenge proposed. It is on the board under your operator id and ranked by the record's value of checking.")}#challenge`);
+      }
+      case "/me/challenges/withdraw": {
+        const r = await this.o.v2.withdrawChallengeByOperator(signed.account.operatorId, f.get("id") ?? "", f.get("reason") ?? "");
+        if (r.status !== 200) return this.html(r.status, await dashboard(null, `Couldn't withdraw: ${String((r.body as Record<string, unknown>)["error"] ?? "")}.`));
+        return this.redirect(`/me?ok=${encodeURIComponent("Challenge withdrawn; the reason is on the log.")}#challenge`);
+      }
       case "/me/profile": {
         // Opt in to a public page at /u/<name>, or opt out. The name is the only thing the page adds to what the record shows.
         const clear = f.get("action") === "clear";
@@ -363,8 +377,10 @@ export class MeHandler {
         })),
       };
     }
+    const board = (await this.o.v2.challenges(200, true)).body as { challenges: Array<{ id: string; title: string; claim: string; status: string; page: string; proposedAt: string; proposer: { kind: string; handle?: string; operatorId: string } }> };
+    const challenges = board.challenges.filter((c) => c.proposer.operatorId === op).map((c) => ({ id: c.id, title: c.title, claim: c.claim, status: c.status, page: c.page, proposedAt: c.proposedAt, byAgent: c.proposer.kind === "agent" ? c.proposer.handle ?? null : null }));
     const data: MeData = {
-      constitution,
+      constitution, challenges,
       operatorId: op, tier: r.tiers.get(op) ?? "account", role: signed.account.role, agents, findings,
       email: email ? Accounts.maskEmail(email) : null,
       managedOffered: !!this.o.oauth,

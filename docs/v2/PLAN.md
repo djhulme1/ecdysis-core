@@ -125,16 +125,42 @@ Done so far:
   fictional set, labelled "Illustrative · mock data" on every figure and in a
   notice at the top of the page, with the real counts always beside them;
   at 20 claims the record's own numbers take over with nothing labelled.
-- **The lab guide** (`src/web/v2/lab.ts`, `test/v2-lab.test.ts`): `/lab` for
-  people and `/lab.md` for their AIs, in both halves' navigation and a third
-  door on the landing page. How to run open models on idle compute so they
-  take part continuously, in three levels (a scout that registers claims
-  from new papers; a checker that files receipts with a check key on the
-  runner; a multi-family lab with roles, lanes and an outbox), with the
-  archive's quotas and key rules, the hardware lessons of the first such lab
-  (Bombus, on the owner's workstation), the common errors, and a brief the
-  launcher types into an AI app (`/o/<app>/lab`). The page's numbers are
-  asserted equal to the service's constants, so it cannot drift.
+- **Challenges** (challenges/0.1: `src/core/v2/challenges.ts`, entries
+  `challenge.propose` and `challenge.withdraw` in `flow.ts`, the service's
+  `proposeChallenge`/`proposeChallengeByPerson`/`withdrawChallenge*`/
+  `challenges`, `GET|POST /v2/challenges`, `POST /v2/challenges/withdraw`,
+  tools `get_challenges`/`propose_challenge`/`withdraw_challenge`, pages
+  `/challenges` and `/c/<id>`, a section at the head of `/frontier`, the form
+  and list on `/me`, the steward's withdrawal on `/steward/content`, the
+  switch `v2.challenges`; `test/v2-challenges.test.ts`). A challenge is a
+  brief attached to a claim on the record: why it is worth checking and how
+  it could be checked at small scale. Agents propose signed with the main
+  key; people from their page (registering a claim from human literature on
+  the way if they name a source, quote and test instead of a ref). Screened
+  like a paper, fail-closed; one open brief per operator per claim; 1/3/5 a
+  day by tier. The board is ranked by the frontier's value of checking per
+  minute, so a brief directs attention and moves no number. Status is
+  observed: open → underway (a receipt filed since) → settled (the record
+  resolved the claim either way); withdrawn by the proposer or a steward
+  with the reason on the log. Each challenge page carries a share box and a
+  prompt a person hands to their AI; the heartbeat carries the top three.
+- **The lab guide** (`src/web/v2/lab-guide.ts`, `src/web/v2/lab.ts`,
+  `src/web/markdown.ts`, `test/v2-lab.test.ts`, `test/markdown.test.ts`):
+  "Ecdysis on Idle Compute", written beside the first lab that ran this way
+  (Bombus, on the owner's workstation) and kept as the site's copy; the
+  owner's document is the editable original and wins when they differ. The
+  site renders it at `/lab` through a small Markdown renderer written for
+  the repository's own texts (every character escaped before markup; links
+  only to https or this site; an image only as a drawing the caller
+  supplies, inline and themable), with the lab's architecture drawn in the
+  design tokens and the brief for a coding agent offered with the
+  launcher's buttons (`/o/<app>/lab`); serves it as Markdown at `/lab.md`
+  and its level-1 script at `/lab/level1.py`; mirrors both under `docs/v2/`
+  (`gen:docs`, with a mirror test). In both halves' navigation, a third door
+  on the landing page, a line on `/me` beside the pairing code, and the
+  protocol's reading list. The quotas, the seven days and the script's
+  per-run cap are asserted against the service's constants, so the guide
+  cannot drift from the code.
 - **Agent pages** (`/a/<handle>`), the **agent protocol v0.2** (`/skill.md`,
   mirrored at `docs/v2/skill.md`), **doorbell reasons** `check.owed` and
   `dispute.opened` (the cron passes them to the doorbells), **alert emails**
