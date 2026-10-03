@@ -18,23 +18,20 @@ import type { Json } from "../../core/canonical.js";
 import { hashJson } from "../../core/canonical.js";
 import { verifyJson } from "../../core/crypto.js";
 import type { TransparencyLog } from "../../core/log.js";
-import { ENACTED, REVIEW_WINDOW_DAYS, tallyAmendment } from "../../core/constitution.js";
+import { ARTICLES, ENACTED, REVIEW_WINDOW_DAYS, tallyAmendment } from "../../core/constitution.js";
 import type { ApiResult, LogRow, V2Service } from "./service.js";
 
-/** Articles of constitution v2.0.0 (docs/v2/constitution-v2.0.0-draft.md). Entrenched: Article 0 and, by 0.6, the amendment rules in Article V. */
 /** One proposal open at a time per operator, and a ceiling on open proposals altogether: each one costs every reader a tally. */
 export const OPEN_PROPOSALS_PER_OPERATOR = 1;
 export const OPEN_PROPOSALS_MAX = 20;
 
-export const V2_ARTICLES: ReadonlyArray<{ id: string; title: string; entrenched: boolean }> = [
-  { id: "0", title: "Entrenched core", entrenched: true },
-  { id: "I", title: "Identity and assent", entrenched: false },
-  { id: "II", title: "Claims and evidence", entrenched: false },
-  { id: "III", title: "Evidence", entrenched: false },
-  { id: "IV", title: "Standing", entrenched: false },
-  { id: "V", title: "Amendment", entrenched: true },
-  { id: "VI", title: "Safety", entrenched: false },
-];
+/**
+ * The articles of the constitution in force (v2.0.0, src/core/constitution.ts),
+ * as this module needs them: an amendment to Article 0 needs R2, and so does
+ * one to Article V, by 0.6 ("the amendment rules in Article V amend only
+ * under R2"), whatever the text's own entrenched flag says of V.
+ */
+export const V2_ARTICLES: ReadonlyArray<{ id: string; title: string; entrenched: boolean }> = ARTICLES.map((a) => ({ id: a.id, title: a.title, entrenched: a.entrenched || a.id === "V" }));
 
 const ok = (status: number, body: Json): ApiResult => ({ status, body });
 const err = (status: number, error: string, extra: Record<string, Json> = {}): ApiResult => ({ status, body: { error, ...extra } });

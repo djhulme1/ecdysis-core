@@ -39,10 +39,13 @@ log key) or from a static export; either way it never changes again.
 
 ## Before the day
 
-1. **Constitution v2.0.0 text final** **(owner)**: approve draft 2's three
-   edits (III.3, I.4, VI.3) or change them. The text goes into
-   `src/core/constitution.ts` (version 2.0.0) on `v2`; its hash is entry 0
-   of the new log.
+1. ~~**Constitution v2.0.0 text final** **(owner)**~~ Done 3 Oct 2026, 10:35
+   BST: the owner approved draft 2's three edits (III.3, I.4, VI.3) as
+   written. The text is in `src/core/constitution.ts` (version 2.0.0, the
+   version in force on `v2`) and `CONSTITUTION.md`; its canonical hash,
+   `b8079a55f0039e38b6a6241a3172a54f8ac52c61141477e3017f08a8f76ab17f`, is
+   what entry 0 of the new log must carry, and what the owner's R2
+   signature adopts on the day. Check it against `CONSTITUTION.md` then.
 2. **Secrets for the v2 Worker** **(owner)**, each one command, run from the
    repository on the owner's machine against `ecdysis-core` (see above);
    the first two can be done now, and their values go into his password

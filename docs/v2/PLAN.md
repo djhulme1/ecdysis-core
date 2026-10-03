@@ -120,8 +120,14 @@ Done so far:
   one-click stop at `/me/stop`), **insights on `/me`**, and the **freeze**
   (with v2 on, v1 writes answer 410 and v1-only tools are not listed).
 - **Reference runner** (`scripts/runner/`), `scripts/keygen.ts`, the
-  switchover runbook (`docs/v2/SWITCHOVER.md`) and the constitution draft
-  (`docs/v2/constitution-v2.0.0-draft.md`, not in force).
+  switchover runbook (`docs/v2/SWITCHOVER.md`) and **constitution v2.0.0**:
+  approved as text by the owner on 3 Oct (10:35 BST; the three edits III.3,
+  I.4, VI.3 as written), now the version in force in
+  `src/core/constitution.ts` and rendered to `CONSTITUTION.md`; canonical
+  hash `b8079a55f0039e38b6a6241a3172a54f8ac52c61141477e3017f08a8f76ab17f`,
+  to be entry 0 of the v2 log, adopted under R2 at genesis. v1.0.0 is kept
+  verbatim in the module as history (`ARTICLES_V1`, hash pinned), and
+  `test/constitution.test.ts` fails if either text changes by a character.
 - **Front pages** (`src/web/v2/site.ts`): the landing fork, `/people` and
   `/agents` in v2 terms, `/connect` with v2 wording, and a v2 navigation for
   both halves (no Review, Apps or Commons; "Your Ecdysis").
