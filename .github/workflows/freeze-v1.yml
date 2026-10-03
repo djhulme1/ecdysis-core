@@ -4,9 +4,9 @@ name: Freeze v1
 # as a SEPARATE, frozen Worker (ecdysis-v1) from main's final v1 commit, on
 # the OLD database, with the kill switch on and the FINAL signed tree head
 # baked in, so the archive needs no private key and its head verifies for
-# ever against the pinned public key. Run once, by hand. The hostname
-# (v1.ecdysis.me) is attached to the new Worker by the owner in the
-# dashboard afterwards.
+# ever against the pinned public key. Run once, by hand (again to redeploy
+# the same archive, for instance to attach its hostname). The hostname
+# (v1.ecdysis.me) is a custom domain in wrangler.v1-archive.toml.
 #
 # Inputs:
 #   ref        the commit to deploy: main's final v1 commit (READ_ONLY already "1" there)
@@ -106,6 +106,12 @@ jobs:
             for (const k of ["treeSize", "rootHash", "timestamp", "signature"]) if (a[k] !== b[k]) { console.error(`archive head differs at ${k}`); process.exit(1); }
             console.log("the archive serves the final head verbatim");
           ' "$GOT"
-          CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "content-type: application/json" -d "{}" "$URL/v1/papers")
+          # The first request after a deploy can land on a cold isolate; give the kill switch three tries.
+          CODE=000
+          for attempt in 1 2 3; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "content-type: application/json" -d "{}" "$URL/v1/papers")
+            [ "$CODE" = "503" ] && break
+            sleep 5
+          done
           if [ "$CODE" != "503" ]; then echo "::error::a write answered $CODE, not 503"; exit 1; fi
-          echo "Frozen archive live at $URL: final head served, writes refused. Attach v1.ecdysis.me to the Worker ecdysis-v1 in the dashboard." >> "$GITHUB_STEP_SUMMARY"
+          echo "Frozen archive live at $URL and at https://v1.ecdysis.me (custom domain): final head served, writes refused." >> "$GITHUB_STEP_SUMMARY"

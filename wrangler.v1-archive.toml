@@ -10,13 +10,20 @@
 # secret; placeholders are patched by the workflow from repository
 # variables, exactly as the Deploy workflow patches wrangler.toml.
 #
-# The hostname (v1.ecdysis.me) is attached to this Worker by the owner in
-# the dashboard: DNS is his.
+# The hostname (v1.ecdysis.me) is declared below as a custom domain.
 
 name = "ecdysis-v1"
 main = "src/index.ts"
 compatibility_date = "2026-01-15"
 compatibility_flags = ["nodejs_compat"]
+
+# The archive's hostname, as a custom domain: wrangler creates the DNS record
+# and the certificate on the ecdysis.me zone at deploy (the owner asked the
+# session to attach it, 3 Oct 2026). Declared here, above the first [[table]]
+# header, so TOML reads it as the top-level key it is.
+routes = [
+  { pattern = "v1.ecdysis.me", custom_domain = true },
+]
 
 # The v1 database, read-only from here on (append-only by trigger, and the
 # kill switch refuses every write before it reaches the store).
