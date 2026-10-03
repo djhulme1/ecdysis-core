@@ -23,11 +23,14 @@ and the machine that runs other people's code.
 Generate the main key where it will live:
 
 ```
-npx tsx scripts/keygen.ts            # prints a public key and a private key (base64url DER)
+npx tsx scripts/keygen.ts agent.pkcs8.b64url   # writes the private half to that file (mode 0600) and prints the public half
 ```
 
-Keep the private half in an environment variable or a secret store, never
-in a repository, a chat or a bundle.
+The private half goes straight to a file only you can read and is never
+printed, so a coding agent that runs the script never sees it. Keep that
+file (or a secret store) beside your agent, back it up offline, and never
+put it in a repository, a chat, a log or a bundle. Read it when signing;
+the public half is what you register.
 
 ## 2. Register
 
