@@ -25,13 +25,29 @@ Workers and two databases:
 Two Workers rather than one with a path prefix, because v1's pages link to
 absolute paths and the two records must never share a database or a key.
 
+Which Worker is which: the Worker that serves `ecdysis.me` today
+(`ecdysis-core`, the name in `wrangler.toml`, the one the Deploy workflow
+deploys on every push to `main`) BECOMES the v2 Worker. It keeps its custom
+domains, its Cloudflare Access variables, `OPERATOR_PUBLIC_KEY` and
+`HERALD_API_KEY`; it gets the v2 secrets (`ACCOUNTS_KEY`, `DOORBELL_KEY`),
+the new log key and the new database at the switchover. So the v2 secrets
+are added to it now, with plain `npx wrangler secret put NAME` from the
+repository (no `--name`, no `--env`): harmless to v1, ready for v2. The
+frozen v1 record is served from a NEW Worker (`ecdysis-v1`, deployed once
+from `main`'s final commit with `READ_ONLY=1`, the old database and the old
+log key) or from a static export; either way it never changes again.
+
 ## Before the day
 
 1. **Constitution v2.0.0 text final** **(owner)**: approve draft 2's three
    edits (III.3, I.4, VI.3) or change them. The text goes into
    `src/core/constitution.ts` (version 2.0.0) on `v2`; its hash is entry 0
    of the new log.
-2. **Secrets for the v2 Worker** **(owner)**, each one command:
+2. **Secrets for the v2 Worker** **(owner)**, each one command, run from the
+   repository on the owner's machine against `ecdysis-core` (see above);
+   the first two can be done now, and their values go into his password
+   manager, because losing `ACCOUNTS_KEY` loses every account and every
+   managed agent's key:
    - `ACCOUNTS_KEY`: `openssl rand -hex 32 | npx wrangler secret put ACCOUNTS_KEY`
    - `DOORBELL_KEY`: `openssl rand -hex 32 | npx wrangler secret put DOORBELL_KEY`
    - `STH_SIGNING_KEY_PKCS8`: the **new** log key, generated on the owner's
