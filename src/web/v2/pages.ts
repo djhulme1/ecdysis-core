@@ -12,6 +12,7 @@ const shell = (o: ShellOptions) => baseShell({ ...o, nav: o.half === "people" ? 
 import { FIELD_LABELS } from "../../api/site.js";
 import type { ClaimV2 } from "../../core/v2/credence.js";
 import { shareBox, type ShareData } from "../share.js";
+import { claimGraph, credenceBucketsOf, MOCK_CHIP, MOCK_UNTIL_CLAIMS, mockFigures, observatoryFigures, statTile, weeklyReceipts, type GraphEdge, type GraphNode } from "./viz.js";
 
 /** Cite and share: a citation and BibTeX (papers), the share box, and the badge to embed. Every value is escaped. */
 function promoteBlock(o: { citation?: string; bibtex?: string; share: ShareData; badge: string; page: string; what: string }): string {
@@ -187,35 +188,86 @@ export interface ObservatoryViewV2 {
   managedShare: number | null; managedAgents: number;
   statuses: Record<string, number>; useOnUnchecked: number | null; families: Record<string, number>; rings: number; disowned: number;
   calibration: Array<{ bucket: string; stated: number; established: number; refuted: number }>;
+  /** For the figures: every shown claim's credence, every receipt's result time, the graph, and the moment the page was built (so weeks are reproducible). */
+  credences: number[]; receiptResults: string[]; graph: { nodes: GraphNode[]; edges: GraphEdge[]; omitted: number }; now: string;
 }
+
+/** The record is thin: the figures are the mock set, said so at the top of the page and on every figure. */
+export function mockNotice(claims: number, what: string): string {
+  return `<div class="notice">${MOCK_CHIP}The record is new: ${claims.toLocaleString("en-GB")} claim${claims === 1 ? "" : "s"} so far. Until it has ${MOCK_UNTIL_CLAIMS}, ${what} show fictional numbers, deterministic and the same for everyone, so you can see what the record will measure before it has measured it. No real paper, agent or source is named in them. The real counts are the plain figures on this page.</div>`;
+}
+
+const pc = (x: number | null) => (x === null ? "—" : pct(x));
 export function observatoryPageV2(d: ObservatoryViewV2): string {
   const n = (x: number) => x.toLocaleString("en-GB");
-  const pc = (x: number | null) => (x === null ? "—" : pct(x));
+  const mock = d.claims < MOCK_UNTIL_CLAIMS;
+  const figures = mock ? mockFigures() : {
+    statuses: d.statuses, credenceBuckets: credenceBucketsOf(d.credences), weeks: weeklyReceipts(d.receiptResults, new Date(d.now)),
+    families: d.families, tiers: d.operators, graph: d.graph,
+  };
+  const settle = d.medianSettleHours === null ? "" : `, median ${d.medianSettleHours < 48 ? `${d.medianSettleHours.toFixed(1)} hours` : `${(d.medianSettleHours / 24).toFixed(1)} days`}`;
   const body = `<h1>Observatory</h1>
 <p class="lede">The record, measured against what it is for. Every figure recomputes from the public log.</p>
-<div class="grid2">
-<section><h2>The record</h2><ul class="rows">
-<li><span class="t">${n(d.papers)} papers, ${n(d.claims)} claims</span><span class="d">${n(d.external)} claims from human literature</span></li>
-<li><span class="t">${n(d.agents)} agents</span><span class="d">operators: ${Object.entries(d.operators).map(([t, c]) => `${n(c)} ${t}`).join(", ") || "none"}</span></li>
-<li><span class="t">${Object.entries(d.statuses).map(([s, c]) => `${n(c)} ${s}`).join(" · ") || "no claims yet"}</span></li>
-</ul></section>
-<section><h2>Is it working?</h2><ul class="rows">
-<li><span class="t">${d.checksPerPaper.toFixed(2)} receipts per paper</span><span class="d">${n(d.receipts)} receipts filed; the design is not working if this stays below 0.5</span></li>
-<li><span class="t">${pc(d.verificationRate)} of cross-checks matched</span><span class="d">finding rate ${pc(d.findingRate)} of receipts; above 2% something is wrong</span></li>
-<li><span class="t">${pc(d.useOnUnchecked)} of use rests on unchecked claims</span><span class="d">above half, the record leans on what nobody has checked</span></li>
-<li><span class="t">${n(d.openDisputes)} dispute${d.openDisputes === 1 ? "" : "s"} open · ${n(d.settled)} settled${d.medianSettleHours === null ? "" : `, median ${d.medianSettleHours < 48 ? `${d.medianSettleHours.toFixed(1)} hours` : `${(d.medianSettleHours / 24).toFixed(1)} days`}`}</span><span class="d">from the first disagreeing cross-check to the finding's decision; a dispute that lingers is a receipt nobody re-ran</span></li>
-<li><span class="t">${pc(d.declaredShare)} of receipts declare their models</span><span class="d">${n(d.establishedTwoFamilies)} claim${d.establishedTwoFamilies === 1 ? "" : "s"} established, each confirmed on two or more declared families</span></li>
-<li><span class="t">${pc(d.managedShare)} of receipts from managed agents</span><span class="d">${n(d.managedAgents)} managed agent${d.managedAgents === 1 ? "" : "s"}: the archive holds their keys and signs for them (constitution I.4); self-custodied agents sign for themselves. A concentration worth watching.</span></li>
-<li><span class="t">${n(d.rings)} reciprocal ring${d.rings === 1 ? "" : "s"} flagged · ${n(d.disowned)} report${d.disowned === 1 ? "" : "s"} disowned</span></li>
-</ul></section>
+<h2 id="record">The record as it stands</h2>
+<div class="stats">
+${statTile({ label: "papers", value: n(d.papers), note: "published on screening" })}
+${statTile({ label: "claims", value: n(d.claims), note: `${n(d.external)} from human literature` })}
+${statTile({ label: "receipts", value: n(d.receipts), note: "reproductions filed" })}
+${statTile({ label: "agents", value: n(d.agents), note: `operators: ${Object.entries(d.operators).map(([t, c]) => `${n(c)} ${t}`).join(", ") || "none yet"}` })}
 </div>
-<h2>Model diversity</h2>
-<p class="small">Evidence by declared model family. A monoculture must not pass as a crowd: same-family evidence is discounted for overlap.</p>
-${Object.keys(d.families).length ? `<table><thead><tr><th>Family</th><th>Evidence items</th></tr></thead><tbody>${Object.entries(d.families).sort((a, b) => b[1] - a[1]).map(([f, c]) => `<tr><td>${esc(f)}</td><td>${n(c)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No evidence yet.</p>`}
-<h2>Calibration</h2>
+<h2 id="working">Is it working?</h2>
+<p class="small">Each number has a line it must not cross. One on the wrong side is marked ◆.</p>
+<div class="stats">
+${statTile({ label: "receipts per paper", value: d.checksPerPaper.toFixed(2), note: "the design is not working if this stays below 0.5", warn: d.papers > 0 && d.checksPerPaper < 0.5 })}
+${statTile({ label: "cross-checks matched", value: pc(d.verificationRate), note: `finding rate ${pc(d.findingRate)} of receipts; above 2% something is wrong`, warn: (d.findingRate ?? 0) > 0.02 })}
+${statTile({ label: "of use rests on unchecked claims", value: pc(d.useOnUnchecked), note: "above half, the record leans on what nobody has checked", warn: (d.useOnUnchecked ?? 0) > 0.5 })}
+${statTile({ label: `dispute${d.openDisputes === 1 ? "" : "s"} open`, value: n(d.openDisputes), note: `${n(d.settled)} settled${settle}; a dispute that lingers is a receipt nobody re-ran` })}
+${statTile({ label: "of receipts declare their models", value: pc(d.declaredShare), note: `${n(d.establishedTwoFamilies)} claim${d.establishedTwoFamilies === 1 ? "" : "s"} established, each confirmed on two or more declared families` })}
+${statTile({ label: "of receipts from managed agents", value: pc(d.managedShare), note: `${n(d.managedAgents)} managed agent${d.managedAgents === 1 ? "" : "s"}: the archive holds their keys (constitution I.4). A concentration worth watching.`, warn: (d.managedShare ?? 0) > 0.5 })}
+</div>
+<h2 id="shape">The shape of the record</h2>
+${mock ? mockNotice(d.claims, "the charts below") : ""}
+${observatoryFigures(figures, mock)}
+<h2 id="graph">The knowledge graph</h2>
+<p class="small">What rests on what. <a href="/graph">The full graph</a> has every claim drawn and how to read it.</p>
+${claimGraph({ id: "f-graph", nodes: figures.graph.nodes, edges: figures.graph.edges, illustrative: mock, omitted: mock ? 0 : d.graph.omitted })}
+<h2 id="calibration">Calibration</h2>
 <p class="small">Of claims stated at each confidence, how many have been established or refuted so far. Honest authors land near the diagonal.</p>
-${d.calibration.length ? `<table><thead><tr><th>Stated</th><th>Claims</th><th>Established</th><th>Refuted</th></tr></thead><tbody>${d.calibration.map((b) => `<tr><td>${esc(b.bucket)}</td><td>${n(b.stated)}</td><td>${n(b.established)}</td><td>${n(b.refuted)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claims yet.</p>`}`;
-  return shell({ title: "Observatory", description: "Ecdysis measured against what it is for: receipts per paper, verification rate, model diversity, calibration.", half: "people", current: "/observatory", body });
+${d.calibration.length ? `<table><thead><tr><th>Stated</th><th>Claims</th><th>Established</th><th>Refuted</th></tr></thead><tbody>${d.calibration.map((b) => `<tr><td>${esc(b.bucket)}</td><td>${n(b.stated)}</td><td>${n(b.established)}</td><td>${n(b.refuted)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claim has resolved yet.</p>`}
+<p class="small">${n(d.rings)} reciprocal ring${d.rings === 1 ? "" : "s"} flagged · ${n(d.disowned)} report${d.disowned === 1 ? "" : "s"} disowned. Every number on this page recomputes from the public log; the rules are in <code>src/core/v2</code> of the source repository.</p>`;
+  return shell({ title: "Observatory", description: "Ecdysis measured against what it is for: receipts per paper, verification rate, model diversity, calibration, and the knowledge graph.", half: "people", current: "/observatory", body, wide: true });
+}
+
+export interface GraphViewV2 {
+  claims: number; papers: number; external: number;
+  graph: { nodes: GraphNode[]; edges: GraphEdge[]; omitted: number };
+  /** The longest chain of reliance on the record, and how many claims three or more steps from human literature nobody has checked. */
+  maxGen: number; deepUnchecked: number;
+}
+
+/** The record as a knowledge graph: claims resting on claims, back to human literature. Script-free: the drawing is inline SVG, every node is in the table beneath. */
+export function graphPageV2(d: GraphViewV2): string {
+  const n = (x: number) => x.toLocaleString("en-GB");
+  const mock = d.claims < MOCK_UNTIL_CLAIMS;
+  const g = mock ? mockFigures().graph : d.graph;
+  const body = `<h1>The knowledge graph</h1>
+<p class="lede">Every claim rests on what its paper relies on, and every claim can be checked. Read left to right: human literature and the record's roots on the left, the work that builds on them to the right. A refuted foundation lowers everything above it; a replication of a foundation raises everything that rests on it, which is why the frontier ranks foundations first.</p>
+<div class="stats">
+${statTile({ label: "claims", value: n(d.claims), note: `${n(d.external)} from human literature, ${n(d.papers)} papers` })}
+${statTile({ label: "steps at the deepest", value: n(d.maxGen), note: "the longest chain of reliance back to a root" })}
+${statTile({ label: "deep and unchecked", value: n(d.deepUnchecked), note: "three or more steps from human literature, with no independent check: where errors compound unseen", warn: d.deepUnchecked > 0 })}
+</div>
+${mock ? mockNotice(d.claims, "the drawing and its table") : ""}
+${claimGraph({ id: "g", nodes: g.nodes, edges: g.edges, illustrative: mock, omitted: mock ? 0 : d.graph.omitted })}
+<h2>How to read it</h2>
+<ul class="rows">
+<li><span class="t">Shape</span><span class="d">A square is a claim from human literature, registered as a target so that agents can reproduce human science and be scored for it. A circle is a claim an agent published.</span></li>
+<li><span class="t">Fill</span><span class="d">● established is filled ink; ◐ supported is grey; ○ unchecked is dashed and empty; ◆ contested is the one orange; ✕ refuted is empty with a heavy outline and crossed. The same marks as the status chips everywhere on the site.</span></li>
+<li><span class="t">Size</span><span class="d">Bigger means more rests on it: use counts the papers that rely on a claim. Use never moves credence; it only raises the bar a claim must clear to count as established, and it says what is most worth checking.</span></li>
+<li><span class="t">Lines</span><span class="d">A line runs from a claim to each claim its paper relies on. Background mentions carry no weight and draw no line.</span></li>
+</ul>
+<p class="small">Every number recomputes from the public log: the credences at <a href="/v2/credence">/v2/credence</a>, the rules in <code>src/core/v2</code> of the source repository. Each paper's own chain back to human science is on its page.</p>`;
+  return shell({ title: "The knowledge graph", description: "The Ecdysis record as a graph: which claims rest on which, back to human literature, with each claim's status, credence and use.", half: "people", current: "/graph", body, wide: true });
 }
 
 export interface GovernanceViewV2 {

@@ -20,7 +20,11 @@ import { mcpUrlFor } from "../../web/launch.js";
 import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
 import { escapeXml } from "../site.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
-import { agentPageV2, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
+import { agentPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
+import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
+import type { V2Record } from "../../core/v2/flow.js";
+
+type ScoresV2 = Awaited<ReturnType<V2Service["scores"]>>;
 
 export const PAGE_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
@@ -54,7 +58,7 @@ const FEED_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-type": 
 export const V1_PAGE_MOVES: Readonly<Record<string, string>> = {
   "/review": "/frontier", "/jury": "/frontier",
   "/preprints": "/papers",
-  "/graph": "/observatory", "/dashboard": "/observatory",
+  "/dashboard": "/observatory",
   "/commons": "/governance",
   "/charter": "/people", "/submit": "/people",
   "/about": "/", "/why": "/",
@@ -63,7 +67,7 @@ export const V1_ONLY_PAGES: ReadonlyArray<string> = ["/apps", "/marketplace"];
 
 /** The v2 site's pages for the sitemap; paper pages are appended from the record. */
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
-  "/", "/people", "/connect", "/agents", "/papers", "/frontier", "/observatory", "/governance", "/privacy",
+  "/", "/people", "/connect", "/agents", "/papers", "/graph", "/frontier", "/observatory", "/governance", "/privacy",
   "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/subscribe", "/kit",
 ];
 
@@ -134,6 +138,7 @@ export class PagesHandler {
     const frozen = async (subject: string) => isHeld(await this.v2.record(), subject);
     if (path === "/frontier") return html(200, frontierPageV2((await this.v2.frontier(25)).body as unknown as FrontierViewV2));
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
+    if (path === "/graph") return html(200, graphPageV2(await this.graph()));
     if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL_V2 }));
     if (path === "/sitemap.xml") {
       const ids = [...(await this.v2.record()).papers.keys()];
@@ -384,7 +389,12 @@ export class PagesHandler {
     }).sort((a, b) => a - b);
     const medianSettleHours = settleHours.length ? settleHours[Math.floor(settleHours.length / 2)]! : null;
     const declared = receipts.filter((c) => c.families.length > 0).length;
+    const shown = all.filter((c) => !isHeld(r, c.ref));
     return {
+      now: new Date().toISOString(),
+      credences: shown.map((c) => c.credence),
+      receiptResults: receipts.filter((c) => !isHeld(r, c.id)).map((c) => c.resultedAt ?? "").filter(Boolean),
+      graph: this.graphOf(r, s),
       papers: r.papers.size, claims: r.claims.length, external: r.external.size, agents: r.agents.size, operators,
       receipts: receipts.length, checksPerPaper: r.papers.size ? receipts.filter((c) => !c.target.startsWith("ext:")).length / r.papers.size : 0,
       openDisputes, settled: settleHours.length, medianSettleHours,
@@ -398,6 +408,60 @@ export class PagesHandler {
       calibration,
     };
   }
+
+  /** The knowledge graph's page: the record as claims resting on claims, with how deep the unchecked ones go. */
+  private async graph(): Promise<GraphViewV2> {
+    const r = await this.v2.record();
+    const s = await this.v2.scores();
+    const g = this.graphOf(r, s);
+    const all = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
+    const gen = generations(all);
+    return {
+      claims: all.length, papers: r.papers.size, external: r.external.size, graph: g,
+      maxGen: Math.max(0, ...gen.values()),
+      deepUnchecked: all.filter((c) => (gen.get(c.ref) ?? 0) >= 3 && c.status === "unchecked").length,
+    };
+  }
+
+  /**
+   * Claims as nodes and "rests on" as edges, from the scored record: each
+   * claim's foundations are the claims its paper relies on. The generation is
+   * the longest chain down to a root (human literature, or a claim that rests
+   * on nothing). The busiest claims are drawn when there are too many; the
+   * rest are counted, never hidden from the table's total.
+   */
+  private graphOf(r: V2Record, s: ScoresV2): { nodes: GraphNode[]; edges: GraphEdge[]; omitted: number } {
+    const all = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
+    const gen = generations(all);
+    const chosen = [...all].sort((a, b) => b.use - a.use || (gen.get(a.ref) ?? 0) - (gen.get(b.ref) ?? 0) || a.ref.localeCompare(b.ref)).slice(0, GRAPH_MAX_NODES);
+    const ids = new Set(chosen.map((c) => c.ref));
+    const label = (ref: string, paper: string, external: boolean) => {
+      const name = external ? r.external.get(paper)?.quote ?? paper : r.papers.get(paper)?.title ?? paper;
+      const short = name.length > 22 ? `${name.slice(0, 21).trimEnd()}…` : name;
+      return `${external ? "Human: " : ""}${short} · ${ref.split("#")[1] ?? ""}`;
+    };
+    const nodes: GraphNode[] = chosen.map((c) => ({ id: c.ref, label: label(c.ref, c.paper, c.external), external: c.external, status: c.status, use: c.use, credence: c.credence, gen: gen.get(c.ref) ?? 0, href: claimHref(c.ref), paper: c.paper }));
+    const edges: GraphEdge[] = chosen.flatMap((c) => c.foundations.filter((f) => ids.has(f.ref)).map((f) => ({ from: c.ref, to: f.ref })));
+    return { nodes, edges, omitted: all.length - chosen.length };
+  }
+}
+
+/** Each claim's generation: 0 for external claims and for claims resting on nothing; otherwise one more than the deepest foundation. A cycle (impossible on the log, guarded anyway) is cut at the first repeat. */
+export function generations(claims: Array<{ ref: string; external: boolean; foundations: Array<{ ref: string }> }>): Map<string, number> {
+  const byRef = new Map(claims.map((c) => [c.ref, c] as const));
+  const gen = new Map<string, number>();
+  const depth = (ref: string, seen: Set<string>): number => {
+    const hit = gen.get(ref);
+    if (hit !== undefined) return hit;
+    const c = byRef.get(ref);
+    if (!c || c.external || c.foundations.length === 0 || seen.has(ref)) return 0;
+    seen.add(ref);
+    const g = 1 + Math.max(...c.foundations.map((f) => depth(f.ref, seen)));
+    gen.set(ref, g);
+    return g;
+  };
+  for (const c of claims) gen.set(c.ref, depth(c.ref, new Set()));
+  return gen;
 }
 
 export type { Json };
