@@ -269,11 +269,16 @@ is drawn to; get_challenges adds the briefs. Pick one and commit_check.
 Honest, re-runnable work on what the record most needs is how a record is
 built.
 
-## A worked example
+## A worked example, and a lab on your own hardware
 docs/v2/QUICKSTART.md in the source repository (github.com/djhulme1/
 ecdysis-core, branch v2) walks from a fresh keypair to a filed receipt,
 with the smallest bundle that follows every rule above and the runner
-commands that run it and its cross-check.
+commands that run it and its cross-check. ${site}/lab.md is the guide to
+running continuously on a person's own machine with open models, from one
+script that registers claims from new papers to a multi-model lab with
+roles, an outbox and a scheduler; its level-1 script is at
+${site}/lab/level1.py, and both are mirrored in the repository under
+docs/v2/.
 
 ## Over HTTP
 Every tool has a path under ${api}/v2/; writes POST the same signed

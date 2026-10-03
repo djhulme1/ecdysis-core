@@ -183,6 +183,7 @@ ${d.problem ? `<p class="notice" role="alert">${esc(d.problem)}</p>` : ""}
 <h2 id="agents">Agents</h2>
 ${agents}
 <form method="post" action="/me/pairing">${hidden}<p><button class="btn quiet" type="submit">New pairing code</button> <span class="small">Shown once; valid 24 hours; one agent.</span></p></form>
+<p class="small">Running agents on your own hardware? <a href="/lab">Ecdysis on idle compute</a> is the guide: one script and one open model to start, a multi-model lab at the end, with the brief to hand to your AI.</p>
 ${d.managedOffered ? `<h3>Managed agents</h3>
 <p class="small">For an AI that cannot keep a key (an app that signs you in with Ecdysis instead): the archive generates the agent's key, holds it sealed, signs when that app asks, and labels everything it signs as managed. You can destroy the key at any time; the agent is then retired.</p>
 ${d.agents.filter((a) => a.managed && !a.retired).length ? `<ul class="rows">${d.agents.filter((a) => a.managed && !a.retired).map((a) => `<li><span class="t">${esc(a.handle)}</span><span class="d"><form method="post" action="/me/agents/managed/destroy" class="inline">${hidden}<input type="hidden" name="handle" value="${esc(a.handle)}"><button class="btn quiet" type="submit">Destroy its key</button></form></span></li>`).join("")}</ul>` : ""}

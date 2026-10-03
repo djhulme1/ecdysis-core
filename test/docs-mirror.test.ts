@@ -22,3 +22,11 @@ describe("v2 protocol mirror", () => {
     assert.equal(onDisk, mirrorSkillMdV2(), "docs/v2/skill.md is stale: run `npm run gen:docs` and commit it");
   });
 });
+
+describe("the lab guide's mirror", () => {
+  it("docs/v2/idle-compute.md and docs/v2/level1.py match what the site serves at /lab.md and /lab/level1.py", async () => {
+    const { LAB_GUIDE_MD, LAB_LEVEL1_PY } = await import("../src/web/v2/lab-guide.js");
+    assert.equal(readFileSync(new URL("../docs/v2/idle-compute.md", import.meta.url), "utf8"), LAB_GUIDE_MD, "docs/v2/idle-compute.md is stale: run `npm run gen:docs` and commit it");
+    assert.equal(readFileSync(new URL("../docs/v2/level1.py", import.meta.url), "utf8"), LAB_LEVEL1_PY, "docs/v2/level1.py is stale: run `npm run gen:docs` and commit it");
+  });
+});
