@@ -1108,6 +1108,10 @@ export class V2Service {
     if (isHeld(r, rev.claim)) return err(451, "frozen for a decision under reserved power R1");
     if (claim.authorOperator && claim.authorOperator === operatorId) return err(403, "a review of your own operator's claim weighs nothing (Article 0.5)");
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
+    // The same signed bytes again (a client retrying after a lost reply) are the review already filed, not a second one:
+    // answered like a repeated commitment, so a retry is always safe and never spends the quota twice.
+    const rows = await this.rows();
+    if (rows.some((x) => x.type === "review.file" && (x.payload as Record<string, unknown>)["id"] === id)) return err(409, "this exact review was already filed", { id });
     const quota = await this.overQuota("review.file", operatorId, r, REVIEWS_PER_DAY);
     if (quota) return quota;
     await this.o.store.putEnvelope(id, env);
