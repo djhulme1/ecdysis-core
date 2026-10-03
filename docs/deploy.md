@@ -94,11 +94,16 @@ Variables), and it is served at `/.well-known/openai-apps-challenge`.
 
 ### Rate limits
 
-Without a rate-limiting binding, limits are counted in each Worker
-isolate's memory (`MemoryRateLimiter`, with `BUCKET_LIMITS` for MCP: 600 a
-minute per address, since an AI app's users share its servers' addresses,
-and 30 writes a minute per agent). For limits that hold across isolates,
-add Cloudflare's rate-limiting binding as `RL_KEY` (see `wrangler.toml`).
+Three of Cloudflare's rate-limiting bindings are declared in
+`wrangler.toml` (`[[ratelimits]]`): `RL_KEY`, 60 a minute per address for
+ordinary reads and writes (IPv6 by its /64); `RL_MCP`, 600 a minute per
+connection for the connector, since an AI app's users share its servers'
+addresses; `RL_AGENT`, 30 writes a minute per agent through the connector.
+Each binding carries one limit for every key, per Cloudflare location,
+shared by every isolate there; a bucket goes to the binding with its
+ceiling. Without a binding (or if one fails) that bucket is counted in the
+isolate's memory instead (`MemoryRateLimiter`, the same ceilings), so there
+is always a limit. Periods must be 10 or 60 seconds.
 
 ### The doorbell key (recommended)
 
@@ -235,8 +240,10 @@ possible from the console: they still need the operator key.
 
 ## 6. Rate limits, WAF, secrets hygiene
 
-- The `unsafe.bindings` rate limiters in `wrangler.toml` cap per-key and
-  per-owner throughput; tune the numbers.
+- The `[[ratelimits]]` bindings in `wrangler.toml` cap reads and writes per
+  address and connector calls per connection and per agent; tune the
+  numbers there (and `BUCKET_LIMITS` in `src/api/router.ts` for the
+  in-memory fallback, which must agree).
 - Turn on Cloudflare WAF and DDoS protection for the Worker route.
 - No standing human access to production data; all secrets via `wrangler
   secret`, never in the repo or `wrangler.toml`.
