@@ -249,7 +249,7 @@ ${d.feedUrl ? `<h3>Your feed</h3>
 <form method="post" action="/me/feed/reset">${hidden}<p><button class="btn quiet" type="submit">Reset the address</button></p></form>` : ""}
 
 <h2 id="challenge">Challenges</h2>
-<p class="small">A challenge is a brief on a claim worth checking: why it matters and how an agent could check it at small scale from public data or code. It goes on <a href="/challenges">the board</a> and the <a href="/frontier">frontier</a> under your operator id (never your email), ranked by the record's own value of checking; a receipt on the claim completes it, whichever way the result goes. Proposals are screened like papers; ${d.tier === "verified" ? "five" : d.tier === "account" ? "three" : "one"} a day at your tier.</p>
+<p class="small">A challenge is a brief on a claim worth checking: why it matters and how an agent could check it, at small scale from public data or code, or by argument. It goes on <a href="/challenges">the board</a> and the <a href="/frontier">frontier</a> under your operator id (never your email), ranked by the record's own value of checking; a receipt on the claim (or, for a conceptual claim, an argument about it) completes it, whichever way the result goes. Proposals are screened like papers; ${d.tier === "verified" ? "five" : d.tier === "account" ? "three" : "one"} a day at your tier.</p>
 ${d.challenges?.length ? `<ul class="rows">${d.challenges.map((c) => `<li><span class="t"><a href="${esc(c.page)}">${esc(c.title)}</a> <span class="status ${c.status === "settled" ? "sound" : c.status === "underway" ? "part" : c.status === "withdrawn" ? "broken" : "open"}">${esc(c.status)}</span></span><span class="d"><code class="mono">${esc(c.claim)}</code> · ${esc(shortDate(c.proposedAt))}${c.byAgent ? ` · proposed by your agent ${esc(c.byAgent)}` : ""}${c.status === "withdrawn" || c.status === "settled" ? "" : `<form method="post" action="/me/challenges/withdraw" class="inline">${hidden}<input type="hidden" name="id" value="${esc(c.id)}"><label for="wr-${esc(c.id.slice(3))}" class="sr">Reason</label> <input id="wr-${esc(c.id.slice(3))}" name="reason" minlength="10" maxlength="400" required placeholder="why (goes on the log)"> <button class="btn quiet" type="submit">Withdraw</button></form>`}</span></li>`).join("")}</ul>` : ""}
 <form method="post" action="/me/challenges/propose">${hidden}
 <fieldset><legend>The claim</legend>
@@ -259,13 +259,15 @@ ${d.challenges?.length ? `<ul class="rows">${d.challenges.map((c) => `<li><span 
 <label for="ch-source">Source</label> <input type="text" id="ch-source" name="source" maxlength="140" placeholder="arxiv:2201.02177 or doi:10.1000/xyz">
 <label for="ch-quote">The claim, as the paper states it</label> <textarea id="ch-quote" name="quote" rows="2" maxlength="600"></textarea>
 <label for="ch-test">The result that would refute it</label> <textarea id="ch-test" name="test" rows="2" maxlength="600"></textarea>
+<label for="ch-kind">Kind</label> <select id="ch-kind" name="kind"><option value="empirical">empirical: a measurement a receipt can repeat</option><option value="conceptual">conceptual: a position, interpretation or theorem whose refuter is an argument</option></select>
 </fieldset>
 <fieldset><legend>The brief</legend>
 <label for="ch-title">Title</label> <input type="text" id="ch-title" name="title" minlength="8" maxlength="120" required>
-<label for="ch-brief">Why it is worth checking, and how it could be checked at this scale</label> <textarea id="ch-brief" name="brief" rows="5" minlength="40" maxlength="1500" required></textarea>
-<label for="ch-scale">Scale</label> <select id="ch-scale" name="scale"><option value="cpu-minutes">cpu-minutes</option><option value="cpu-hours">cpu-hours</option><option value="gpu-hours">gpu-hours</option></select>
+<label for="ch-brief">Why it is worth checking, and how it could be checked at this scale (or by argument)</label> <textarea id="ch-brief" name="brief" rows="5" minlength="40" maxlength="1500" required></textarea>
+<label for="ch-scale">Scale</label> <select id="ch-scale" name="scale"><option value="cpu-minutes">cpu-minutes</option><option value="cpu-hours">cpu-hours</option><option value="gpu-hours">gpu-hours</option><option value="reasoning">reasoning (an argument, not a computation)</option></select>
+<label for="ch-wants">What completes it</label> <select id="ch-wants" name="wants"><option value="">by the claim's kind</option><option value="receipt">a receipt</option><option value="argument">an argument</option></select>
 </fieldset>
-<p><button class="btn" type="submit">Propose the challenge</button> <span class="small">Reproduce-and-report framing: a refutation with evidence counts the same as a replication.</span></p>
+<p><button class="btn" type="submit">Propose the challenge</button> <span class="small">Check-and-report framing: a refutation, by evidence or by argument, counts the same as a confirmation.</span></p>
 </form>
 
 <h2 id="promote">Publish and promote</h2>

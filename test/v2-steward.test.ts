@@ -312,7 +312,7 @@ describe("the stewardship area", () => {
     let html = await (await w.get("/steward/controls", d.session)).text();
     assert.match(html, /<code class="mono">v2\.publishing<\/code>/);
     assert.match(html, /never \(default\)/);
-    assert.equal((html.match(/<span class="status sound">open<\/span>/g) ?? []).length, 6, "six switches, all open");
+    assert.equal((html.match(/<span class="status sound">open<\/span>/g) ?? []).length, 7, "seven switches, all open");
     const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
     assert.match(await (await w.post("/steward/controls/set", { csrf, setting: "v2.nonsense", value: "paused" }, d.session)).text(), /no such switch/);
     assert.match(await (await w.post("/steward/controls/set", { csrf, setting: "v2.publishing", value: "closed" }, d.session)).text(), /is one of: open, paused/);
@@ -377,7 +377,8 @@ describe("the stewardship area", () => {
     assert.match(html, /hazard\.hold/);
     assert.match(html, /op-b/);
     assert.match(html, /open/);
-    assert.doesNotMatch(html, /action="\/steward\/content/, "no form acts on a hold");
+    assert.doesNotMatch(html, /action="\/steward\/content\/(hold|release|reject|decide|hazard)/, "no form acts on a hold");
+    assert.doesNotMatch(html.slice(0, html.indexOf("<h2>Challenges</h2>")), /<form/, "the holds table carries no form at all: R1 is decided off the site");
     assert.equal((await w.post("/steward/content/release", { csrf: "x" }, d.session)).status, 200, "no such act exists; the page shows a problem and nothing changes");
     assert.equal((await w.svc.holds()).filter((h) => h.open).length, 1);
   });
@@ -421,5 +422,25 @@ describe("the stewardship area", () => {
     assert.match(html, /withdrawn<br><span class="small">by steward: The brief tries to instruct/);
     assert.doesNotMatch(html, /action="\/steward\/content\/challenge-withdraw"/, "nothing left to withdraw");
     assert.equal((await w.svc.challenges()).body && ((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]!.length, 0, "off the board");
+    // Seeding a founding challenge from the same page: a conceptual claim from the literature, registered and briefed in one act,
+    // outside the daily quota (four in a row where a person would stop at three), named on the board as a steward's seed.
+    assert.match(html, /<form method="post" action="\/steward\/content\/challenge-seed">/);
+    for (let i = 0; i < 4; i++) {
+      res = await w.post("/steward/content/challenge-seed", {
+        csrf, claim: "", source: `doi:10.1000/position.${i}`, quote: `Position ${i}: a thesis from the literature, quoted here in the words its authors used to state it.`, test: "A counterexample of the stated form, or an established claim on the record that entails its negation.", kind: "conceptual",
+        title: `Founding challenge ${i}`, brief: "This position is widely cited and rarely attacked. An agent can test it by looking for an instance that satisfies its premises and violates its conclusion, or for an established claim it is incompatible with, and filing the argument with the checkable part stated.", scale: "reasoning", wants: "",
+      }, d.session);
+      assert.equal(res.status, 303, await res.text());
+      assert.match(res.headers.get("location")!, /Founding\+challenge\+seeded|Founding%20challenge%20seeded/);
+    }
+    const seeded = ((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]! as Array<Record<string, Json>>;
+    assert.equal(seeded.length, 4);
+    for (const c of seeded) { assert.equal((c["proposer"] as Record<string, Json>)["kind"], "steward"); assert.equal(c["wants"], "argument"); assert.equal(c["claimKind"], "conceptual"); }
+    html = await (await w.get("/steward/content", d.session)).text();
+    assert.match(html, /steward op_[0-9a-f]+ \(founding\)/);
+    assert.ok((await w.svc.audit()).some((a) => a.type === "challenge.propose"), "seeds are on the audit trail");
+    const noClaim = await w.post("/steward/content/challenge-seed", { csrf, claim: "", source: "", quote: "", test: "", kind: "conceptual", title: "Nothing named", brief: "A brief that names no claim and registers none, which the form must refuse with the reason shown.", scale: "reasoning", wants: "" }, d.session);
+    assert.equal(noClaim.status, 200);
+    assert.match(await noClaim.text(), /Couldn&#39;t seed the challenge/);
   });
 });

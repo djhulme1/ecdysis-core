@@ -4,6 +4,7 @@
  * `getJson` you supply, so the same code runs from a script against a live
  * deployment and from a test against the router.
  */
+import { CREDENCE_V2_VERSION } from "../../core/v2/credence.js";
 import { deriveV2, V2_ENTRY_TYPES, type V2Entry, type V2EntryType } from "../../core/v2/flow.js";
 import { computeV2 } from "../../core/v2/scoring.js";
 
@@ -25,9 +26,9 @@ export async function recomputeV2(getJson: <T>(path: string) => Promise<T>, now:
     from = page.next;
   }
   const r = deriveV2(entries, now);
-  const s = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors });
+  const s = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors, arguments: r.argumentEffects, argumentStates: [...r.arguments.values()] });
   const served = await getJson<{ version: string; claims: Array<{ ref: string; credence: number; status: string; use: number; dispute: number }> }>("/v2/credence");
-  if (served.version !== "credence/0.2") throw new Error(`server speaks ${served.version}, this code credence/0.2`);
+  if (served.version !== CREDENCE_V2_VERSION) throw new Error(`server speaks ${served.version}, this code ${CREDENCE_V2_VERSION}`);
   const near = (a: number, b: number) => Math.abs(a - b) <= 1e-6;
   const mismatches: string[] = [];
   const mine = new Map([...s.claims.values()].map((c) => [c.ref, c] as const));

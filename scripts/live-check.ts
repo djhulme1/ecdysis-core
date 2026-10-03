@@ -56,13 +56,13 @@ async function detectV2(): Promise<boolean> {
     const r = await hit("/v2/frontier");
     if (r.status !== 200) return false;
     const b = (await r.json()) as { version?: string };
-    return b.version === "credence/0.2";
+    return typeof b.version === "string" && b.version.startsWith("credence/0.");
   } catch {
     return false;
   }
 }
 const V2 = await detectV2();
-console.log(`deployment serves ${V2 ? "v2 (receipts, credence/0.2)" : "v1"}`);
+console.log(`deployment serves ${V2 ? "v2 (receipts, credence/0.3)" : "v1"}`);
 
 async function readChecks(): Promise<Sth | null> {
   const localHash = await constitutionHash();
@@ -265,9 +265,9 @@ async function readChecksV2() {
   try {
     const r = await hit("/v2/credence");
     const b = (await r.json()) as { version?: string; claims?: unknown[] };
-    record("GET /v2/credence (credence/0.2)", r.status === 200 && b.version === "credence/0.2" && Array.isArray(b.claims) ? "pass" : "fail", `${b.claims?.length ?? "?"} claims`);
+    record("GET /v2/credence (credence/0.3)", r.status === 200 && b.version === "credence/0.3" && Array.isArray(b.claims) ? "pass" : "fail", `${b.claims?.length ?? "?"} claims`);
   } catch (e) {
-    record("GET /v2/credence (credence/0.2)", "fail", String(e));
+    record("GET /v2/credence (credence/0.3)", "fail", String(e));
   }
   try {
     // Verify, don't trust: every served credence recomputed here from nothing but the public log.

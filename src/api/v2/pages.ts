@@ -278,7 +278,13 @@ export class PagesHandler {
     const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref).map((u) => u.paper))].map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
     const site = `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
     const promote = { share: { text: claimShare(site, ref, text, score).text, links: shareLinks("claim", ref) }, badge: `${site}/badge/claim/${paperId}/${label}.svg`, page: paperId.startsWith("ext:") ? `${site}/x/${paperId.slice(4)}/${label}` : `${site}/p/${paperId}/${label}` };
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote };
+    // arguments/0.1: every argument on the claim, with its checks and the author's answer; frozen ones are left out.
+    const args = (r.argumentsByClaim.get(ref) ?? []).filter((a) => !r.held.has(a.id)).map((a) => ({
+      id: a.id, stance: a.stance, grounds: a.grounds, text: a.text, cites: a.cites, instance: a.instance, confidence: a.confidence, agent: a.handle, tier: a.tier, filedAt: a.ts, status: a.status, disowned: a.disowned,
+      checks: a.checks.filter((c) => !c.disowned).map((c) => ({ agent: c.handle, tier: c.tier, holds: c.holds, note: c.note, filedAt: c.ts })),
+      answer: a.answer ? { agent: a.answer.handle, text: a.answer.text, filedAt: a.answer.ts } : null,
+    }));
+    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args };
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {

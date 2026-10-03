@@ -97,7 +97,7 @@ describe("v2 over HTTP", () => {
     assert.equal(res.status, 201, JSON.stringify(res.body));
     const rec = await get("/v2/record");
     assert.equal(rec.body["receipts"], 1);
-    assert.deepEqual(rec.body["settings"], { "v2.registration": "open", "v2.publishing": "open", "v2.external": "open", "v2.checks": "open", "v2.reviews": "open", "v2.challenges": "open" }, "the steward's switches are public");
+    assert.deepEqual(rec.body["settings"], { "v2.registration": "open", "v2.publishing": "open", "v2.external": "open", "v2.checks": "open", "v2.reviews": "open", "v2.challenges": "open", "v2.arguments": "open" }, "the steward's switches are public");
     // The launcher types v2's prompts when v2 is on: receipts and the frontier, never juries; v1-only starters are gone.
     const launch = async (what: string, on = true) => route(new Request(`https://ecdysis.me/o/chatgpt/${what}`), v1svc, limiter, on ? { v2: v2svc } : {});
     let l = await launch("famous");

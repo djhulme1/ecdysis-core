@@ -6,7 +6,7 @@
  *   npm run recompute:v2 -- https://api.example  # any deployment
  *
  * Fetches every log entry (GET /v1/log/entries, paged), derives the v2
- * record (src/core/v2/flow.ts) and computes credence/0.2 and track/0.1
+ * record (src/core/v2/flow.ts) and computes credence/0.3 and track/0.2
  * (src/core/v2/scoring.ts) from nothing but those entries, then compares
  * GET /v2/credence claim by claim: credence, status, use and dispute must
  * agree. Exits non-zero on any mismatch. The log's own integrity (chain,

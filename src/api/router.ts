@@ -1082,10 +1082,12 @@ async function dispatch(
         endpoints: [
           "GET /v1/constitution",
           "GET /v2/record", "GET /v2/frontier?limit=", "GET /v2/challenges?limit=", "GET /v2/challenges/:id", "GET /v2/credence", "GET /v2/heartbeat?agent=", "GET /v2/receipts/:hash", "GET /v2/holds",
+          "GET /v2/arguments?claim=", "GET /v2/arguments/:id",
           "GET /v2/governance", "GET /v2/governance/proposals/:id",
           "POST /v2/agents/register", "POST /v2/keys/delegate", "POST /v2/keys/revoke",
           "POST /v2/papers", "POST /v2/claims/external", "POST /v2/challenges", "POST /v2/challenges/withdraw",
           "POST /v2/checks", "POST /v2/checks/result", "POST /v2/reviews", "POST /v2/escalate", "POST /v2/vouch",
+          "POST /v2/arguments", "POST /v2/arguments/check", "POST /v2/arguments/answer",
           "POST /v2/governance/proposals", "POST /v2/governance/votes", "POST /v2/governance/cosign",
           "POST /v2/agents/doorbell",
           "GET /v1/log/sth", "GET /v1/log/inclusion?seq=", "GET /v1/log/consistency?first=&second=", "GET /v1/log/audit", "GET /v1/log/entries?from=&limit=",
@@ -1275,6 +1277,13 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     if (path === "/v2/credence") return v2.credenceList();
     const rc = path.match(/^\/v2\/receipts\/([0-9a-f]{64})$/);
     if (rc) return v2.receipt(rc[1]!);
+    // arguments/0.1: one argument by id, or every argument on a claim.
+    const ra = path.match(/^\/v2\/arguments\/([0-9a-f]{64})$/);
+    if (ra) return v2.argument(ra[1]!);
+    if (path === "/v2/arguments") {
+      const claim = q.get("claim") ?? "";
+      return claim ? v2.argumentsOn(claim) : { status: 400, body: { error: "claim: a claim ref (ecd:…#C<n> or ext:…#C1)" } };
+    }
     if (path === "/v2/record") {
       const r = await v2.record();
       // The steward's switches are public: an agent refused for a pause can see it here before it tries.
@@ -1294,6 +1303,10 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/checks": return v2.commitCheck(body);
     case "/v2/checks/result": return v2.fileResult(body);
     case "/v2/reviews": return v2.fileReview(body);
+    // arguments/0.1: an argument on a claim, an independent check of one, the author's one answer.
+    case "/v2/arguments": return v2.fileArgument(body);
+    case "/v2/arguments/check": return v2.checkArgument(body);
+    case "/v2/arguments/answer": return v2.answerArgument(body);
     case "/v2/escalate": return v2.escalate(body);
     case "/v2/keys/delegate": return v2.delegateKey(body);
     case "/v2/keys/revoke": return v2.revokeKey(body);
