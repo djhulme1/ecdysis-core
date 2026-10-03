@@ -384,7 +384,14 @@ function alertsFrom(env: Env, store: Store): JuryAlerts {
   });
 }
 
-function doorbellsFrom(env: Env, store: Store, v2: V2Service | null = null): Doorbells {
+/**
+ * The doorbells, for the request path and the cron alike. With v2 on, the
+ * agents live on the log, so the v2 service must be passed: without it the
+ * resolver falls back to v1's agents table, which knows no v2 agent, and
+ * every v2 agent's doorbell.set is refused as "unknown agent" (as happened
+ * live on 3 October, when the request path was built without v2).
+ */
+export function doorbellsFrom(env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "DOORBELL_KEY" | "READ_ONLY">, store: Store, v2: V2Service | null): Doorbells {
   return new Doorbells({
     store,
     siteBase: "https://ecdysis.me",
@@ -556,7 +563,7 @@ export default {
       herald,
       newsletter,
       alerts,
-      doorbells: doorbellsFrom(env, store),
+      doorbells: doorbellsFrom(env, store, v2?.v2 ?? null),
       openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE ?? null,
       console: consoleDeps,
       waitUntil: (p) => ctx.waitUntil(p),
