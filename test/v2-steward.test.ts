@@ -96,6 +96,12 @@ describe("the stewardship area", () => {
     const cross = await w.steward.handle(new Request("https://ecdysis.me/steward/people/tier", { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${d.session}`, origin: "https://evil.example" } }), "/steward/people/tier");
     assert.equal(cross.status, 403);
     assert.match(await cross.text(), /did not come from this site/);
+    // The steward's pages send a same-origin referrer policy (never no-referrer, under which browsers post
+    // `Origin: null` to the page's own forms); and a post as Chrome made it under the old policy goes through.
+    const page = await w.get("/steward/people", d.session);
+    assert.equal(page.headers.get("referrer-policy"), "same-origin");
+    const asChrome = await w.steward.handle(new Request("https://ecdysis.me/steward/people/tier", { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${d.session}`, origin: "null", "sec-fetch-site": "same-origin" } }), "/steward/people/tier");
+    assert.notEqual(asChrome.status, 403, "a same-origin post with Origin null is not refused as foreign");
     // The role is read from the list as it stands: struck off, a steward's open session stops working at once.
     const struck = new StewardHandler({ accounts: new Accounts({ store: w.accounts["o"].store, key: "ab".repeat(32), send: null, from: "a@notify.ecdysis.me", replyTo: "r@ecdysis.me", siteBase: "https://ecdysis.me", stewardEmailHashes: [], now: () => new Date() }), v2: w.svc, access: null });
     assert.equal((await struck.handle(new Request("https://ecdysis.me/steward", { headers: { cookie: `ecd_s=${d.session}` } }), "/steward")).status, 403);
