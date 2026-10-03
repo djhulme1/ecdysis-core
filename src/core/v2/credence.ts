@@ -195,6 +195,15 @@ export interface EvidenceInput {
   /** The model families the check was run on (normalised, e.g. ["claude"], ["claude", "gpt"]); empty when undeclared. */
   families: string[];
   seq: number;
+  /**
+   * inputs/0.1: false for a receipt whose bundle needs inputs not everyone
+   * can obtain and which no verified, independent cross-check has yet
+   * matched. The audit that makes a receipt evidence (every receipt of a
+   * living claim is eventually re-run) is not guaranteed for it, so it is
+   * weighed as an unverified operator's would be, whatever its operator's
+   * tier, and settles nothing. Absent or true: weighed by tier as usual.
+   */
+  auditable?: boolean;
 }
 
 /** A later paper relying on a claim (extends or method). */
@@ -419,25 +428,27 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   const earlierOperators: string[] = [];
   const counted: CountedItem[] = [];
   for (const e of [...best.values()].sort((a, b) => a.seq - b.seq)) {
+    // inputs/0.1: a receipt the audit cannot yet reach is weighed as an unverified operator's, whatever its operator's tier.
+    const tier: Tier = e.auditable === false ? "unverified" : e.tier;
     const omega = Math.max(0, Math.min(1, o.reliability ? o.reliability(e.agent) : P.omega0));
     const diversity = diversityFactor(e.families, e.confirms, earlier);
     const linked = linkedTo(e.operatorId, earlierOperators, o.vouchLinked, o.ringLinked) ? 0.5 : 1;
-    const w = independence(e.operatorId, authorOperator, o.vouchLinked, o.ringLinked) * P.tier[e.tier] * omega * diversity * linked;
+    const w = independence(e.operatorId, authorOperator, o.vouchLinked, o.ringLinked) * P.tier[tier] * omega * diversity * linked;
     if (w <= 0) continue;
-    if (e.tier === "verified") earlier.push({ families: e.families, confirms: e.confirms });
+    if (tier === "verified") earlier.push({ families: e.families, confirms: e.confirms });
     earlierOperators.push(e.operatorId);
     let ev: number;
     if (e.kind === "review") {
       ev = e.confirms ? P.reviewStep : -P.reviewStep;
-      if (e.tier === "verified") reviews += w * ev; else unverified += w * ev;
+      if (tier === "verified") reviews += w * ev; else unverified += w * ev;
     } else if (e.kind === "rerun") {
       ev = e.confirms ? P.confirm * P.rerunConfirmShare : -P.refute * P.rerunFailShare;
-      if (e.tier === "verified") checks += w * ev; else unverified += w * ev;
+      if (tier === "verified") checks += w * ev; else unverified += w * ev;
       if (e.confirms) reproduced = true;
     } else {
       ev = e.confirms ? P.confirm : -P.refute;
-      if (e.tier === "verified") checks += w * ev; else unverified += w * ev;
-      if (e.tier === "verified") {
+      if (tier === "verified") checks += w * ev; else unverified += w * ev;
+      if (tier === "verified") {
         if (e.confirms) {
           confirmingReplication = true;
           confirmingOperators++;
@@ -446,7 +457,7 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
         } else failingReplication = true;
       }
     }
-    if (e.tier === "verified") {
+    if (tier === "verified") {
       if (e.confirms) s += w * MASS[e.kind];
       else f += w * MASS[e.kind];
       if (e.kind === "replication") {

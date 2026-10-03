@@ -56,6 +56,49 @@ export interface OutputSpec {
   relative?: boolean;
 }
 
+/**
+ * An input the bundle reads but does not carry (inputs/0.1): data that may
+ * not be redistributed, sits behind a registration, or is simply large. It
+ * is content-addressed: the commit pins its SHA-256 and size before the
+ * seed exists, the runner fetches or is handed the bytes BEFORE the sandbox
+ * starts, refuses anything that does not match, and mounts them read-only
+ * at inputs/<name>; the sandbox stays offline. Nothing is redistributed by
+ * the archive: each checker obtains the data from its source under that
+ * source's terms, and content addressing makes the route irrelevant.
+ *
+ *   open        anyone can fetch the URL with no credentials: the runner does.
+ *   registered  anyone can obtain it after registering (a data archive, a
+ *               platform account): the checker downloads it and hands the
+ *               runner the file.
+ *   restricted  an access agreement or application is needed.
+ *
+ * A receipt whose bundle has any input that is not open cannot be re-run
+ * by everyone, so the audit that gives a receipt its weight (Proposition 3)
+ * is not guaranteed: such a receipt counts at the unverified weight until a
+ * verified, independent operator's cross-check matches it (flow.ts sets
+ * `auditable`), is drawn as a cross-check only for checkers who declared
+ * they hold its inputs (`CheckCommit.holds`), and may report numbers only.
+ */
+export type InputAccess = "open" | "registered" | "restricted";
+export const INPUT_ACCESS: readonly InputAccess[] = ["open", "registered", "restricted"];
+export interface BundleInput {
+  /** A letter then letters, digits, _ . - (max 40); the file appears at inputs/<name> in the working directory. */
+  name: string;
+  /** https only. For open inputs the file itself; for the others, where access is sought. */
+  url: string;
+  /** SHA-256 of the bytes as mounted (compressed if compressed: the bundle's own code unpacks them). */
+  sha256: string;
+  /** The exact size in bytes; checked before and during a download. */
+  bytes: number;
+  access: InputAccess;
+  /** For people: an SPDX identifier or a few words. The runner does not read it. */
+  licence?: string;
+}
+export const MAX_INPUTS = 8;
+/** The total an honest bundle may declare: 1 TiB. The reference runner stops far earlier unless told otherwise. */
+export const MAX_INPUT_BYTES_TOTAL = 2 ** 40;
+export const MAX_HOLDS = 32;
+
 export interface Bundle {
   /** https URL of a public git repository. */
   repo: string;
@@ -74,6 +117,8 @@ export interface Bundle {
   outputs: OutputSpec[];
   /** Expected wall-clock minutes on one CPU, so priorities can be shown per unit of compute. */
   runtimeMinutes: number;
+  /** Data the bundle reads but does not carry (inputs/0.1). Absent or empty: everything it needs is in the repository or the image. */
+  inputs?: BundleInput[];
 }
 
 export interface CheckCommit {
@@ -91,6 +136,13 @@ export interface CheckCommit {
    */
   models?: string[];
   methods?: string;
+  /**
+   * SHA-256s of inputs that are not open which this checker can supply to
+   * its runner. A receipt whose non-open inputs are all held here may be
+   * drawn as this check's cross-check; one that needs anything else never
+   * is. Pre-registered with the commit, so it cannot follow the seed.
+   */
+  holds?: string[];
   agent: { handle: string; publicKey: string };
   ts: string;
 }
@@ -140,16 +192,21 @@ export async function bundleHash(b: Bundle): Promise<string> {
 /**
  * The earlier receipt a new check must re-run: uniform, under the seed,
  * among earlier receipts of the same claim by operators independent of
- * the checker. Null when there is none (the first receipt of a claim).
+ * the checker, and (inputs/0.1) runnable by the checker: a receipt whose
+ * bundle needs inputs that are not open is eligible only when every one of
+ * them is among the holdings the checker pre-registered with its commit.
+ * Null when there is none (the first receipt of a claim).
  */
 export function pickCrossCheck(
   seed: string,
-  earlier: Array<{ id: string; operatorId: string; seq: number }>,
+  earlier: Array<{ id: string; operatorId: string; seq: number; requires?: readonly string[] }>,
   checkerOperator: string,
   vouchLinked?: (a: string, b: string) => boolean,
+  holds: ReadonlySet<string> | readonly string[] = [],
 ): string | null {
+  const held = holds instanceof Set ? holds : new Set(holds);
   const eligible = earlier
-    .filter((r) => r.operatorId !== checkerOperator && !vouchLinked?.(r.operatorId, checkerOperator))
+    .filter((r) => r.operatorId !== checkerOperator && !vouchLinked?.(r.operatorId, checkerOperator) && canRun(r.requires ?? [], held))
     .sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : 1));
   if (eligible.length === 0) return null;
   const k = Number(BigInt(`0x${seed}`) % BigInt(eligible.length));
@@ -242,6 +299,43 @@ export function seedInsensitive(a: Outputs, b: Outputs, spec: OutputSpec[]): boo
   return compareOutputs(a, b, spec.map((o) => ({ name: o.name }))).match;
 }
 
+/* ---------------- inputs ---------------- */
+
+/** The SHA-256s of a bundle's inputs that are not open: what a checker must hold to re-run it. */
+export function requiredHoldings(inputs: BundleInput[] | undefined): string[] {
+  return [...new Set((inputs ?? []).filter((i) => i.access !== "open").map((i) => i.sha256))].sort();
+}
+
+/** Whether a checker who declared `holds` can re-run a bundle that requires `requires`. */
+export function canRun(requires: readonly string[], holds: ReadonlySet<string> | readonly string[]): boolean {
+  const h = holds instanceof Set ? holds : new Set(holds);
+  return requires.every((x) => h.has(x));
+}
+
+/** Problems with a bundle's declared inputs, in the archive's words; empty when there are none or they are fine. */
+export function inputProblems(inputs: unknown): string[] {
+  if (inputs === undefined) return [];
+  if (!Array.isArray(inputs) || inputs.length > MAX_INPUTS) return [`bundle.inputs: at most ${MAX_INPUTS} declared inputs`];
+  const errors: string[] = [];
+  const names = new Set<string>();
+  let total = 0;
+  for (const [k, x] of (inputs as Array<Partial<BundleInput> | null>).entries()) {
+    const at = `bundle.inputs[${k}]`;
+    if (!x || typeof x !== "object") { errors.push(`${at}: {name, url, sha256, bytes, access, licence?}`); continue; }
+    if (typeof x.name !== "string" || !NAME.test(x.name)) errors.push(`${at}.name: a letter then letters, digits, _ . - (max 40)`);
+    else if (names.has(x.name)) errors.push(`${at}.name: duplicate`);
+    else names.add(x.name);
+    if (typeof x.url !== "string" || !/^https:\/\/[^\s]{4,300}$/.test(x.url)) errors.push(`${at}.url: https, at most 300 characters`);
+    if (typeof x.sha256 !== "string" || !HEX64.test(x.sha256)) errors.push(`${at}.sha256: 64 hex`);
+    if (!(typeof x.bytes === "number" && Number.isSafeInteger(x.bytes) && x.bytes > 0)) errors.push(`${at}.bytes: the exact size, a positive integer`);
+    else total += x.bytes;
+    if (!(INPUT_ACCESS as readonly string[]).includes(String(x.access))) errors.push(`${at}.access: ${INPUT_ACCESS.join(", ")}`);
+    if (x.licence !== undefined && (typeof x.licence !== "string" || x.licence.length > 120)) errors.push(`${at}.licence: optional; at most 120 characters`);
+  }
+  if (total > MAX_INPUT_BYTES_TOTAL) errors.push(`bundle.inputs: more than ${MAX_INPUT_BYTES_TOTAL} bytes in all`);
+  return errors;
+}
+
 /* ---------------- validation ---------------- */
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -293,6 +387,10 @@ export function validateCheckCommit(p: unknown): { ok: true; value: CheckCommit 
       if (o?.tolerance !== undefined && !(typeof o.tolerance === "number" && o.tolerance >= 0 && Number.isFinite(o.tolerance))) errors.push("bundle.outputs[].tolerance: a number ≥ 0");
       if (o?.relative !== undefined && typeof o.relative !== "boolean") errors.push("bundle.outputs[].relative: true or false");
     }
+    errors.push(...inputProblems(b.inputs));
+  }
+  if (c.holds !== undefined) {
+    if (!Array.isArray(c.holds) || c.holds.length > MAX_HOLDS || c.holds.some((h) => typeof h !== "string" || !HEX64.test(h))) errors.push(`holds: optional; at most ${MAX_HOLDS} SHA-256s (64 hex) of inputs that are not open which you can supply to your runner`);
   }
   checkAgent(c.agent, errors);
   if (typeof c.ts !== "string" || !ISO.test(c.ts)) errors.push("ts: ISO-8601 UTC");
