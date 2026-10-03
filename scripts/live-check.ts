@@ -240,7 +240,28 @@ async function readChecks(): Promise<Sth | null> {
 }
 
 /** v2's own surfaces: the numbers recompute from the log, the frozen stay frozen, v1 takes no writes, the private areas stay private. */
+/** The frozen v1 record's log key, as pinned in mirror/README.md: the archive's head must verify against it for ever. */
+const V1_LOG_PUBLIC_KEY = "MCowBQYDK2VwAyEA3LNL7FbALcHoXnj5tscgDZhsKrAZ0wa5AqGhttnVwvM";
+const V1_ARCHIVE = process.env.V1_ARCHIVE_URL ?? "https://v1.ecdysis.me";
+
 async function readChecksV2() {
+  const localHash = await constitutionHash();
+  // The archive: the final v1 head, exactly as mirrored at the freeze, verifying against the v1 key; and no write gets through.
+  try {
+    const final = JSON.parse(readFileSync("mirror/v1/final-sth.json", "utf8")) as Sth;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 15_000);
+    const r = await fetch(`${V1_ARCHIVE}/v1/log/sth`, { headers: { "x-ecdysis-probe": "1" }, signal: ac.signal }).finally(() => clearTimeout(timer));
+    const got = (await r.json()) as Sth;
+    const same = (["treeSize", "rootHash", "timestamp", "signature"] as const).every((k) => got[k] === final[k]);
+    const verifies = await TransparencyLog.verifySth(V1_LOG_PUBLIC_KEY, got);
+    record("the frozen v1 record serves its final head verbatim", r.status === 200 && same && verifies ? "pass" : "fail",
+      same ? `size ${got.treeSize}, root ${String(got.rootHash).slice(0, 12)}…, ${verifies ? "verifies against the v1 key" : "DOES NOT verify against the v1 key"}` : `archive head size ${got.treeSize} root ${String(got.rootHash).slice(0, 12)}… differs from the mirrored final head (size ${final.treeSize})`);
+    const w = await fetch(`${V1_ARCHIVE}/v1/papers`, { method: "POST", headers: { "content-type": "application/json", "x-ecdysis-probe": "1" }, body: "{}" });
+    record("the frozen v1 record takes no writes", w.status === 503 ? "pass" : "fail", `status ${w.status}`);
+  } catch (e) {
+    record("the frozen v1 record serves its final head verbatim", "fail", String(e));
+  }
   try {
     const r = await hit("/v2/credence");
     const b = (await r.json()) as { version?: string; claims?: unknown[] };
@@ -279,11 +300,31 @@ async function readChecksV2() {
   } catch (e) {
     record("v1 takes no writes (410)", "fail", String(e));
   }
+  // The reserved powers take a timestamped, operator-signed decision. A well-formed
+  // request with a forged signature must reach the signature check and fail THERE
+  // (401), or 501 when no operator key is configured (fail closed); a 400 would mean
+  // the probe itself is malformed and proves nothing about the gate.
+  const signedNow = new Date().toISOString();
   try {
-    const r = await hit("/v2/hazard/decision", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject: "x", decision: "release", signature: "nope" }) });
+    const r = await hit("/v2/hazard/decision", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject: "x", decision: "release", ts: signedNow, signature: "nope" }) });
     record("R1 refuses anything but the operator key's signature", r.status === 401 || r.status === 501 ? "pass" : "fail", `status ${r.status}`);
   } catch (e) {
     record("R1 refuses anything but the operator key's signature", "fail", String(e));
+  }
+  try {
+    const r = await hit("/v2/constitution/adopt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: CONSTITUTION_VERSION, hash: localHash, ts: signedNow, signature: "nope" }) });
+    record("R2: a forged genesis is refused", r.status === 401 || r.status === 501 ? "pass" : "fail", `status ${r.status}`);
+  } catch (e) {
+    record("R2: a forged genesis is refused", "fail", String(e));
+  }
+  try {
+    const r = await hit("/v2/record");
+    const b = (await r.json()) as { constitution?: { version?: string; hash?: string; seq?: number } | null; agents?: number };
+    if (r.status !== 200) record("v2 record: constitution in force", "fail", `status ${r.status}`);
+    else if (!b.constitution) record("v2 record: constitution in force", b.agents === 0 ? "pass" : "fail", b.agents === 0 ? "before genesis: nothing on the record yet" : `no adoption but ${b.agents} agents: the gate failed`);
+    else record("v2 record: constitution in force", b.constitution.version === CONSTITUTION_VERSION && b.constitution.hash === localHash ? "pass" : "fail", `v${b.constitution.version} ${String(b.constitution.hash).slice(0, 12)}… adopted at seq ${b.constitution.seq}`);
+  } catch (e) {
+    record("v2 record: constitution in force", "fail", String(e));
   }
   try {
     const r = await hit("/me", { headers: { accept: "text/html" } });

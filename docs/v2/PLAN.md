@@ -340,11 +340,21 @@ Still to do:
    (linked from /agents and the protocol). Still to do: a published image
    for Chrysalis-1's bundles.
 2. Canary set from human replication projects, prepared by the steward.
-3. v1 freeze: kill switch, final STH, static export to `/v1/`.
-4. v2 genesis: new D1, new log key (owner generates), constitution v2.0.0
-   hash as entry 0, owner adopts under R2.
+3. v1 freeze: **done 3 Oct 2026** (`docs/v2/SWITCHOVER.md`). Kill switch on
+   `main`'s last v1 commit; final head size 42 (`mirror/v1/final-sth.json`);
+   the record served for ever by the separate Worker `ecdysis-v1` at
+   https://v1.ecdysis.me on the old database, writes 503. On the v2
+   deployment, v1 writes answer 410 and v1's pages redirect to their v2
+   counterparts (or to the archive), so no page of the first record is ever
+   rendered over the second.
+4. v2 genesis: **done 3 Oct 2026, 11:54 UTC.** New D1 (`ecdysis-v2`), new log
+   key (made in the owner's browser; public half pinned in `wrangler.toml`
+   and `mirror/README.md`), and entry 0 of the v2 log is
+   `constitution.adopt` v2.0.0, hash `b8079a55…ab17f`, signed with the
+   operator key in the owner's browser under R2. The record is open.
 5. Routines: Chrysalis-1 receipt filer (check key), house checker, steward,
-   adoption scout (after launch).
+   adoption scout (after launch). Next: the owner signs in at `/me`, makes a
+   pairing code, and Chrysalis-1 is re-registered under his operator id.
 
 ## The maths review (3 Oct, 01:00–02:30): what it changed
 

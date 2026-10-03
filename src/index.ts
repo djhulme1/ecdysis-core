@@ -554,6 +554,7 @@ export default {
       pages: v2?.pages ?? null,
       governance: v2?.governance ?? null,
       oauth: v2?.oauth ?? null,
+      archive: env.V1_ARCHIVE_URL ?? null,
     });
   },
 } satisfies ExportedHandler<Env>;
