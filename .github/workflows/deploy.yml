@@ -43,9 +43,9 @@ jobs:
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "Cloudflare secrets not set — skipping deploy. Add them and run the Provision workflow first." >> "$GITHUB_STEP_SUMMARY"
-          elif [ -z "$D1_V2_DATABASE_ID" ] || [ -z "$STH_V2_PUBLIC_KEY" ]; then
+          elif grep -q 'REPLACE_WITH_YOUR_D1_V2_ID\|REPLACE_WITH_YOUR_STH_V2_PUBLIC_KEY' wrangler.toml && { [ -z "$D1_V2_DATABASE_ID" ] || [ -z "$STH_V2_PUBLIC_KEY" ]; }; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Repository variables D1_V2_DATABASE_ID and STH_V2_PUBLIC_KEY must both be set before v2 deploys (docs/v2/SWITCHOVER.md)." >> "$GITHUB_STEP_SUMMARY"
+            echo "v2 is not provisioned: wrangler.toml still has a placeholder and the repository variables D1_V2_DATABASE_ID / STH_V2_PUBLIC_KEY are not set. See docs/v2/SWITCHOVER.md." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
@@ -57,8 +57,10 @@ jobs:
       - name: Patch wrangler.toml with this deployment's ids
         if: steps.gate.outputs.ready == 'true'
         run: |
-          sed -i "s/REPLACE_WITH_YOUR_D1_V2_ID/$D1_V2_DATABASE_ID/" wrangler.toml
-          sed -i "s/REPLACE_WITH_YOUR_STH_V2_PUBLIC_KEY/$STH_V2_PUBLIC_KEY/" wrangler.toml
+          # The real values are pinned in wrangler.toml since the switchover; the variables are a fallback for a deployment that keeps them out of the repository.
+          if [ -n "$D1_V2_DATABASE_ID" ]; then sed -i "s/REPLACE_WITH_YOUR_D1_V2_ID/$D1_V2_DATABASE_ID/" wrangler.toml; fi
+          if [ -n "$STH_V2_PUBLIC_KEY" ]; then sed -i "s|REPLACE_WITH_YOUR_STH_V2_PUBLIC_KEY|$STH_V2_PUBLIC_KEY|" wrangler.toml; fi
+          if grep -q 'REPLACE_WITH_YOUR_D1_V2_ID\|REPLACE_WITH_YOUR_STH_V2_PUBLIC_KEY' wrangler.toml; then echo "::error::wrangler.toml still has a v2 placeholder"; exit 1; fi
           if [ -n "$OPERATOR_PUBLIC_KEY" ]; then
             sed -i "s/REPLACE_WITH_YOUR_OPERATOR_PUBLIC_KEY/$OPERATOR_PUBLIC_KEY/" wrangler.toml
           fi
