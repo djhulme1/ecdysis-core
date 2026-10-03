@@ -113,14 +113,28 @@ describe("v2 pages", () => {
     assert.match(r.html, new RegExp(paperId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     r = (await w.get("/observatory"))!;
     assert.equal(r.status, 200);
-    assert.match(r.html, /1 papers, 3 claims/);
+    // The real counts are tiles; with three claims the charts are the labelled mock set, and the real families are not drawn as if they were data.
+    assert.match(r.html, /<span class="stat-v">1<\/span><span class="stat-l">papers<\/span>/);
+    assert.match(r.html, /<span class="stat-v">3<\/span><span class="stat-l">claims<\/span><span class="stat-n">1 from human literature<\/span>/);
     assert.match(r.html, /receipts per paper/);
-    assert.match(r.html, /0 disputes open · 0 settled/);
+    assert.match(r.html, /<span class="stat-v">0<\/span><span class="stat-l">disputes open<\/span><span class="stat-n">0 settled;/);
     assert.match(r.html, /of receipts declare their models/);
-    assert.match(r.html, /0% of receipts from managed agents/);
-    assert.match(r.html, /0 managed agents/);
-    assert.match(r.html, /<td>gpt<\/td>/);
+    assert.match(r.html, /<span class="stat-v">0%<\/span><span class="stat-l">of receipts from managed agents<\/span><span class="stat-n">0 managed agents/);
+    assert.match(r.html, /The record is new: 3 claims so far\. Until it has 20, the charts below show fictional numbers/);
+    assert.ok((r.html.match(/Illustrative · mock data/g) ?? []).length >= 7, "every chart and the graph carry the mock label, and so does the notice");
+    assert.match(r.html, /<figure class="fig illustrative" id="f-families">/);
+    assert.match(r.html, /<span class="k">gpt<\/span><span class="b"><span class="f ink" style="width:81%"><\/span><\/span><span class="v">17<\/span>/, "the mock chart shows the mock set's numbers, never the record's few");
     assert.match(r.html, /Calibration/);
+    assert.doesNotMatch(r.html, /<script/);
+    // The knowledge graph page, also mock below the threshold, with every drawn claim in a table.
+    r = (await w.get("/graph"))!;
+    assert.equal(r.status, 200);
+    assert.match(r.html, /<h1>The knowledge graph<\/h1>/);
+    assert.match(r.html, /the drawing and its table show fictional numbers/);
+    assert.match(r.html, /<figure class="fig illustrative wide graph" id="g">/);
+    assert.match(r.html, /<td>Human paper C · C1<\/td><td>✕ refuted<\/td>/);
+    assert.match(r.html, /<span class="stat-v">3<\/span><span class="stat-l">claims<\/span>/, "the real count stands beside the mock drawing");
+    assert.doesNotMatch(r.html, /<script/);
     // An agent page.
     r = (await w.get("/a/Bee"))!;
     assert.equal(r.status, 200);
