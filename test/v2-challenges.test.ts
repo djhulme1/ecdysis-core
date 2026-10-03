@@ -94,9 +94,9 @@ describe("challenges: the core", () => {
     assert.equal(challengeStatus(ch, { status: "refuted" }, 0), "settled", "a refutation settles it as much as a replication");
     assert.equal(challengeStatus({ withdrawn: { ts: "", by: "steward", reason: "" } }, { status: "established" }, 9), "withdrawn", "withdrawal wins");
     assert.equal(challengeStatus(ch, undefined, 0), "open", "a claim with no score yet is simply open");
-    const mk = (id: string, seq: number, status: "open" | "underway" | "settled" | "withdrawn", v: number) => ({ challenge: { id, seq } as ChallengeState, status, valuePerMinute: v, receiptsSince: 0 });
-    const ranked = rankChallenges([mk("w", 1, "withdrawn", 9), mk("s1", 2, "settled", 9), mk("o-low", 3, "open", 0.1), mk("u-high", 4, "underway", 0.9), mk("s2", 5, "settled", 0), mk("o-high-old", 0, "open", 0.9)]);
-    assert.deepEqual(ranked.map((x) => x.challenge.id), ["o-high-old", "u-high", "o-low", "s2", "s1", "w"], "open and underway by value then age; settled newest first; withdrawn last");
+    const mk = (id: string, seq: number, status: "open" | "underway" | "settled" | "withdrawn", v: number, weight = 1) => ({ challenge: { id, seq } as ChallengeState, status, valuePerMinute: v, rank: v * weight, receiptsSince: 0 });
+    const ranked = rankChallenges([mk("w", 1, "withdrawn", 9), mk("s1", 2, "settled", 9), mk("o-low", 3, "open", 0.1), mk("u-high", 4, "underway", 0.9), mk("s2", 5, "settled", 0), mk("o-high-old", 0, "open", 0.9), mk("o-sybil", 6, "open", 0.9, 0.25)]);
+    assert.deepEqual(ranked.map((x) => x.challenge.id), ["o-high-old", "u-high", "o-sybil", "o-low", "s2", "s1", "w"], "open and underway by weighed value then age; settled newest first; withdrawn last");
   });
 
   it("the record derives challenges from the log and ignores a hostile entry that names no claim", () => {
@@ -143,8 +143,9 @@ describe("challenges: proposing, the board, taking up, withdrawing", () => {
     const list = board["challenges"] as Array<Record<string, Json>>;
     assert.equal(list.length, 3);
     assert.ok(list.every((c) => c["status"] === "open"));
-    const vals = list.map((c) => Number(c["valuePerMinute"]));
-    assert.deepEqual(vals, [...vals].sort((a, b) => b - a), "ranked by value per minute, descending");
+    const ranks = list.map((c) => Number(c["rank"]));
+    assert.deepEqual(ranks, [...ranks].sort((a, b) => b - a), "ranked by the tier-weighed value per minute, descending");
+    assert.ok(list.every((c) => Number(c["rank"]) <= Number(c["valuePerMinute"])), "the weight never raises a brief above the claim's own value");
     const mine = list.find((c) => c["id"] === id1)!;
     assert.deepEqual(mine["proposer"], { kind: "agent", handle: "Bee", operatorId: "op-b" });
     assert.equal(mine["title"], `Check this ${hostile}`);
@@ -236,6 +237,17 @@ describe("challenges: proposing, the board, taking up, withdrawing", () => {
     assert.equal(again.status, 409);
     await w.agent("Cat", "op-c", ["gemini"]);
     assert.equal((await w.propose("Cat", c1, "Another operator's brief on paper one", w.BRIEF)).status, 201);
+    // A claim carries at most three open briefs: a fourth operator waits, however good its brief.
+    await w.agent("Dog", "op-d", ["llama"], "account");
+    await w.agent("Eel", "op-e", ["mistral"], null);
+    assert.equal((await w.propose("Dog", c1, "A third angle on paper one", w.BRIEF)).status, 201);
+    const fourth = await w.propose("Eel", c1, "A fourth angle on paper one", w.BRIEF);
+    assert.equal(fourth.status, 409);
+    assert.match(String(w.b(fourth)["error"]), /already carries 3 open challenges/);
+    // The board weighs a brief by its proposer's tier: on one claim, verified above account above unverified.
+    const onC1 = (w.b(await w.svc.challenges())["challenges"] as Array<Record<string, Json>>).filter((c) => c["claim"] === c1);
+    assert.deepEqual(onC1.map((c) => c["proposerTier"]), ["verified", "verified", "account"]);
+    assert.ok(Number(onC1[0]!["rank"]) === Number(onC1[0]!["valuePerMinute"]) && Number(onC1[2]!["rank"]) === Number(onC1[2]!["valuePerMinute"]) / 2);
     // The quota by tier: Cat (verified) has 5 a day, one claim each; the sixth is refused.
     const targets = [c1];
     for (const [t, by] of [["two", "Bee"], ["three", "Ant"], ["four", "Bee"], ["five", "Ant"], ["six", "Ant"]] as const) targets.push(await w.paper(by, `Paper ${t}`));

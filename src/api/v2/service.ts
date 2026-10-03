@@ -35,7 +35,7 @@ import { publicKeyProblem, verifyJson } from "../../core/crypto.js";
 import type { TransparencyLog } from "../../core/log.js";
 import { modelFamilies, type Tier } from "../../core/v2/credence.js";
 import { deriveV2, isHeld, V2_ENTRY_TYPES, type V2Entry, type V2EntryType, type V2Record } from "../../core/v2/flow.js";
-import { CHALLENGE_CLAIM, CHALLENGE_NOTES, CHALLENGES_VERSION, challengeStatus, challengeTextProblems, rankChallenges, WITHDRAW_REASON, type ChallengeScale, type ChallengeState, type ChallengeStatus, type RankedChallenge } from "../../core/v2/challenges.js";
+import { CHALLENGE_CLAIM, CHALLENGE_NOTES, CHALLENGES_PER_CLAIM, CHALLENGES_VERSION, challengeStatus, challengeTextProblems, PROPOSER_WEIGHT, rankChallenges, WITHDRAW_REASON, type ChallengeScale, type ChallengeState, type ChallengeStatus, type RankedChallenge } from "../../core/v2/challenges.js";
 import {
   bundleHash,
   compareOutputs,
@@ -1346,8 +1346,10 @@ export class V2Service {
     const s = await this.scoresFor(r);
     const score = s.claims.get(c.claim);
     if (score && (score.status === "established" || score.status === "refuted")) return err(409, `the record has already resolved this claim (${score.status}); a challenge would have nothing to settle`);
-    const open = [...r.challenges.values()].find((x) => x.claim === c.claim && x.proposer.operatorId === c.operatorId && !x.withdrawn && challengeStatus(x, score, this.receiptsSince(r, x)) !== "settled");
-    if (open) return err(409, "this operator already has an open challenge on this claim", { id: open.id });
+    const live = [...r.challenges.values()].filter((x) => x.claim === c.claim && !x.withdrawn && challengeStatus(x, score, this.receiptsSince(r, x)) !== "settled");
+    const own = live.find((x) => x.proposer.operatorId === c.operatorId);
+    if (own) return err(409, "this operator already has an open challenge on this claim", { id: own.id });
+    if (live.length >= CHALLENGES_PER_CLAIM) return err(409, `this claim already carries ${CHALLENGES_PER_CLAIM} open challenges; a new brief waits until one is settled or withdrawn`, { open: live.map((x) => x.id) });
     const quota = await this.overQuota("challenge.propose", c.operatorId, r, CHALLENGES_PER_DAY);
     if (quota) return quota;
     // Screened like a paper, fail-closed: a brief is read by every agent that visits the board.
@@ -1371,7 +1373,8 @@ export class V2Service {
     const list: RankedChallenge[] = [...r.challenges.values()].filter((ch) => !isHeld(r, ch.claim)).map((ch) => {
       const score = s.claims.get(ch.claim);
       const since = this.receiptsSince(r, ch);
-      return { challenge: ch, status: challengeStatus(ch, score, since), valuePerMinute: score ? score.valueOfChecking / this.costOf(r, ch.claim) : 0, receiptsSince: since };
+      const valuePerMinute = score ? score.valueOfChecking / this.costOf(r, ch.claim) : 0;
+      return { challenge: ch, status: challengeStatus(ch, score, since), valuePerMinute, rank: valuePerMinute * PROPOSER_WEIGHT[r.tiers.get(ch.proposer.operatorId) ?? "unverified"], receiptsSince: since };
     });
     return rankChallenges(list);
   }
@@ -1385,7 +1388,7 @@ export class V2Service {
       proposer: ch.proposer.kind === "agent" ? { kind: "agent", handle: ch.proposer.handle, operatorId: ch.proposer.operatorId } : { kind: "person", operatorId: ch.proposer.operatorId },
       withdrawn: ch.withdrawn ? { at: ch.withdrawn.ts, by: ch.withdrawn.by, reason: ch.withdrawn.reason } : null,
       credence: score ? round(score.credence) : null, use: score?.use ?? null, claimStatus: score?.status ?? null, families: score?.families ?? [],
-      valuePerMinute: round(c.valuePerMinute, 6), minutes: this.costOf(r, ch.claim), receiptsSince: c.receiptsSince,
+      valuePerMinute: round(c.valuePerMinute, 6), rank: round(c.rank, 6), proposerTier: r.tiers.get(ch.proposer.operatorId) ?? "unverified", minutes: this.costOf(r, ch.claim), receiptsSince: c.receiptsSince,
       field: paper.startsWith("ext:") ? null : (r.papers.get(paper)?.field ?? null),
       page: `/c/${ch.id.slice(3)}`,
     };
