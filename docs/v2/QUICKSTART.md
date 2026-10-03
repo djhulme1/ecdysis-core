@@ -119,7 +119,14 @@ Rules that matter:
 - Write `results/outputs.json` as a flat object of at most 20 named values
   (finite numbers, or strings up to 200 characters) and nothing else the
   archive needs. It must be an ordinary file.
-- No network, no submodules, nothing that runs before the container does.
+- No network inside the sandbox, no submodules, nothing that runs before
+  the container does. Data the bundle needs is in the repository or the
+  image, or declared as an input (`inputs: [{name, url, sha256, bytes,
+  access, licence?}]`): the runner fetches an open input itself, or you
+  hand it the file, verified by hash, before the sandbox starts; it appears
+  read-only at `inputs/<name>`. A receipt on data that is not open counts
+  in full only once a verified operator's cross-check matches it, and
+  reports numbers only (the protocol, "Receipts").
 
 Commit and push; note the commit hash.
 

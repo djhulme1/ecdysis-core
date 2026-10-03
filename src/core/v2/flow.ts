@@ -141,6 +141,10 @@ export interface CheckState {
   resultKey: string | null;
   /** Signed by a key after its declared compromise: feeds no number (see the file comment). */
   disowned: boolean;
+  /** inputs/0.1: SHA-256s of the bundle's inputs that are not open, which a checker must hold to re-run it. Empty: anyone can. */
+  requires: string[];
+  /** inputs/0.1: holdings the checker pre-registered with the commit (SHA-256s of non-open inputs it can supply). */
+  holds: string[];
 }
 
 export interface KeyState {
@@ -227,7 +231,7 @@ export interface V2Record {
   /** Lapses plus irreproducible marks, per agent. */
   lapses: Map<string, number>;
   /** Receipts (resulted checks) per claim, in log order, for cross-check assignment. */
-  receiptsByClaim: Map<string, Array<{ id: string; operatorId: string; seq: number }>>;
+  receiptsByClaim: Map<string, Array<{ id: string; operatorId: string; seq: number; requires: string[] }>>;
   vouchLinked: (a: string, b: string) => boolean;
   /** Revealed canaries: claim ref → true if its known outcome confirms it. */
   anchors: Map<string, boolean>;
@@ -248,6 +252,7 @@ export interface V2Record {
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown, d = 0): number => (typeof v === "number" && Number.isFinite(v) ? v : d);
+const HEX64 = /^[0-9a-f]{64}$/;
 /** The objects in a list field; anything that is not an object is dropped. */
 const objects = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x)) : []);
 
@@ -402,6 +407,10 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         const id = str(p["id"]);
         const handle = str(p["handle"]);
         const declared = modelFamilies(p["models"] as string[] | undefined);
+        // inputs/0.1: the commit entry lists the bundle's inputs by hash and access class; what is not open must be held to re-run.
+        const inputs = Array.isArray(p["inputs"]) ? (p["inputs"] as Array<Record<string, unknown>>) : [];
+        const requires = [...new Set(inputs.filter((i) => i && typeof i === "object" && str(i["access"]) !== "open" && HEX64.test(str(i["sha256"]))).map((i) => str(i["sha256"])))].sort();
+        const holds = Array.isArray(p["holds"]) ? [...new Set((p["holds"] as unknown[]).filter((h): h is string => typeof h === "string" && HEX64.test(h)))].sort() : [];
         checks.set(id, {
           id, target: str(p["target"]), kind: str(p["kind"]) === "rerun" ? "rerun" : "replication",
           bundle: str(p["bundle"]), image: p["image"] === true, runtimeMinutes: num(p["runtimeMinutes"], 0),
@@ -410,6 +419,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
           seq: e.seq, stage: "committed", seed: null, crossCheck: null, outcome: null, crossMatch: null, verifiedBy: [], disputedBy: [], otherCrossChecks: [], lapsedSeq: null, seedInsensitive: false,
           committedAt: e.ts, sealedAt: null, resultedAt: null,
           key: str(p["key"]) || (agents.get(handle)?.publicKey ?? ""), resultKey: null, disowned: false,
+          requires, holds,
         });
         break;
       }
@@ -557,18 +567,21 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   // Frozen under R1: the item itself, or the paper a claim belongs to. Evidence on a frozen claim feeds no number while it is frozen.
   const frozen = (ref: string) => held.has(ref) || (ref.indexOf("#") > 0 && held.has(ref.slice(0, ref.indexOf("#"))));
   const evidence: EvidenceInput[] = [];
-  const receiptsByClaim = new Map<string, Array<{ id: string; operatorId: string; seq: number }>>();
+  const receiptsByClaim = new Map<string, Array<{ id: string; operatorId: string; seq: number; requires: string[] }>>();
   for (const c of [...checks.values()].sort((a, b) => a.seq - b.seq)) {
     if (c.stage !== "resulted" || !c.outcome) continue;
     // A disowned receipt is no longer its agent's evidence, but one already under dispute stays in the pool so the finding can
     // still be decided: declaring a compromise does not close an open finding.
     if (c.disowned && c.disputedBy.length === 0) continue;
-    receiptsByClaim.set(c.target, [...(receiptsByClaim.get(c.target) ?? []), { id: c.id, operatorId: c.operatorId, seq: c.seq }]);
+    receiptsByClaim.set(c.target, [...(receiptsByClaim.get(c.target) ?? []), { id: c.id, operatorId: c.operatorId, seq: c.seq, requires: c.requires }]);
     if (c.disowned || c.outcome === "inconclusive") continue;
     // A receipt whose outputs duplicate an earlier one's under a different seed adds nothing: the bundle ignored its seed.
     if (c.seedInsensitive) continue;
     if (held.has(c.id) || frozen(c.target)) continue;
-    evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq });
+    // inputs/0.1: a receipt not everyone can re-run earns its tier's weight only once a verified, independent cross-check has
+    // matched it; until then it counts at the unverified weight and settles nothing (credence.ts, `auditable`).
+    const auditable = c.requires.length === 0 || c.verifiedBy.length > 0;
+    evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq, ...(auditable ? {} : { auditable: false }) });
   }
   for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts) && !frozen(r.claim)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
   evidence.sort((a, b) => a.seq - b.seq);

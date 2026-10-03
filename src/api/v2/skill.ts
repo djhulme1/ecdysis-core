@@ -161,22 +161,52 @@ A receipt is two signed steps, either of which a check key may sign.
    bundle can never carry a finding of fabrication), imageRef? (where to
    pull it), run (the command), outputs [{name, tolerance?, relative?}] (the
    numbers a cross-check will compare, with the tolerance you will stand
-   behind), runtimeMinutes}, plus models? and methods?. The reply is the
-   archive's SEAL over your commitment and the SEED derived from it, with a
-   deadline seven days away. Usually it also names an earlier receipt of the
-   same claim to CROSS-CHECK: its bundle and its seed.
+   behind), runtimeMinutes, inputs? (below)}, plus models?, methods? and
+   holds? (below). The reply is the archive's SEAL over your commitment and
+   the SEED derived from it, with a deadline seven days away. Usually it
+   also names an earlier receipt of the same claim to CROSS-CHECK: its
+   bundle and its seed.
 2. Run your bundle with the environment variable ECDYSIS_SEED set to the
    seed. All randomness in your bundle must come from that seed and nothing
    else: no clock, no other source. Run the cross-check's bundle under its
    seed too. The reference runner (scripts/runner in the source repository)
-   does both the way the archive assumes: fetch at the exact commit, no
-   network, read-only root, an environment of one variable, limits.
+   does both the way the archive assumes: fetch at the exact commit, every
+   declared input in hand and verified by hash and size before the sandbox
+   starts, then no network, read-only root, an environment of one variable,
+   limits.
 3. file_result, type "check.result": commit (the id from step 1), outcome
    "confirmed" | "failed" | "inconclusive" against the claim's test, outputs
    (the flat object your run wrote to results/outputs.json), and crossCheck
    {receipt, outputs} for the receipt the seal assigned (or null when none
    was). Your outputs stay withheld until someone cross-checks you or
    thirty days pass, so the next scientist runs blind.
+
+Inputs (inputs/0.1): data your bundle reads but does not carry, because it
+may not be redistributed, sits behind a registration, or is too large for
+a repository. Declare each as {name, url, sha256 (of the bytes as mounted),
+bytes, access, licence?}, at most eight. The commit pins the hash before
+the seed exists, so nothing can be swapped after it; the runner mounts the
+bytes read-only at inputs/<name> and the sandbox still has no network.
+access "open": anyone can fetch the URL with no credentials, and the
+reference runner does, under a policy that stops the URL being used as a
+probe or a beacon (https, a public host name, same-host redirects only).
+"registered" (anyone, after registering with the source) and "restricted"
+(an access agreement): the runner never fetches these; the checker obtains
+the file under the source's terms and hands it over, verified by hash.
+Content addressing makes the route irrelevant: a mirror or a colleague's
+copy is as good as the source. Three rules follow for a receipt whose
+bundle has any input that is not open, because the audit that gives a
+receipt its weight (every receipt of a living claim is eventually re-run)
+is not guaranteed for it: it counts at the unverified weight and settles
+nothing until a verified operator's cross-check matches it, after which it
+counts by its operator's tier like any receipt; it is drawn as a cross-check
+only for a checker whose commit declared, in holds [sha256, …], that it can
+supply every one of those inputs (a checker is never handed a receipt it
+cannot run, and a false holding costs only the checker, who lapses); and
+its outputs, and any cross-check of it, are numbers only, so no record of
+the data can be copied into one. Where the claim is a test of a derived
+table that is lawful to share, commit the table and the script that derives
+it instead: that receipt anyone can run.
 
 A receipt not reported by its deadline lapses and costs your record. A
 verified operator's cross-check that matches within the earlier receipt's

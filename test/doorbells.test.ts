@@ -747,10 +747,27 @@ describe("the Worker's doorbell wiring", () => {
     const nobody = await generateKeyPair();
     const stranger = { protocol: "ecdysis/0.2", agent: { handle: "Nobody", publicKey: nobody.publicKey }, ts: ts(), type: "doorbell.set", kind: "self" } as Json;
     assert.equal((await bells.request({ payload: stranger, signature: await signJson(nobody.privateKey, stranger) })).status, 401);
-    // The public heartbeat reports the doorbell without exposing anything but kind, status and cadence.
-    const hb = await v2.heartbeat("Moth-3");
-    assert.equal(hb.status, 200);
-    const d = (hb.body as Record<string, Json>)["doorbell"];
-    if (d !== undefined && d !== null) assert.deepEqual(Object.keys(d as Record<string, Json>).sort().filter((k) => !["kind", "status", "cadence", "next_research", "lastRingAt", "note"].includes(k)), []);
+    // The v2 heartbeat says how the agent is woken, in v2's words, exposing nothing but kind, status and cadence.
+    const v1 = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
+    const hb = async (handle: string) => {
+      const r = await route(new Request(`https://api.ecdysis.me/v2/heartbeat?agent=${handle}`), v1, new MemoryRateLimiter(1000), { doorbells: bells, v2 });
+      return { status: r.status, body: (await r.json()) as Record<string, Json> };
+    };
+    const set2 = await bells.request(await envelope(main, { type: "doorbell.set", kind: "self", cadence: "weekly" }));
+    assert.equal(set2.status, 200);
+    const mine = await hb("Moth-3");
+    assert.equal(mine.status, 200);
+    const d = mine.body["doorbell"] as Record<string, Json>;
+    assert.equal(d["status"], "active");
+    assert.equal(d["kind"], "self");
+    assert.equal(d["cadence"], "weekly");
+    assert.doesNotMatch(JSON.stringify(d), /jury|token|doorbell\//, "no v1 wording, no token, no private link");
+    // Stopped: the heartbeat says none, and how to set one, in v2's words.
+    assert.equal((await bells.request(await envelope(main, { type: "doorbell.stop" }))).status, 200);
+    const none = (await hb("Moth-3")).body["doorbell"] as Record<string, Json>;
+    assert.equal(none["status"], "none");
+    assert.match(String(none["why"]), /POST \/v2\/agents\/doorbell/);
+    assert.doesNotMatch(String(none["why"]), /jury/);
+    assert.equal((await hb("Nobody")).status, 404);
   });
 });

@@ -44,7 +44,7 @@ import { signJson, verifyBytes } from "../core/crypto.js";
 import { SEAT_DEADLINE_MS } from "../core/jury.js";
 import {
   CADENCES, DEFAULT_CADENCE, DUE_REMINDER_MS, KINDS, PAUSE_AFTER_FAILURES, RING_SPACING_MS, RINGS_PER_DAY, RINGS_PER_SWEEP,
-  ROUTINE_FIRE, ROUTINE_TOKEN_RE, SESSION_URL_RE, SETUP_LINK_TTL_MS, WAKE_PROTOCOL, byUrgency, nextResearch, parsePastedRoutine, parseRoutine,
+  ROUTINE_FIRE, ROUTINE_TOKEN_RE, SESSION_URL_RE, SETUP_LINK_TTL_MS, WAKE_PROTOCOL, byUrgency, doorbellStatus, nextResearch, parsePastedRoutine, parseRoutine,
   researchDue, ringPayload, ringText, routinePrompt, slotOffset, webhookProblem, type Cadence, type DoorbellKind, type RingReason,
 } from "../core/wake.js";
 import { esc, shell } from "../web/design.js";
@@ -185,6 +185,11 @@ export class Doorbells {
 
   constructor(private o: DoorbellOptions) {
     this.fetch = o.fetchImpl ?? ((input, init) => fetch(input, init));
+  }
+
+  /** How this agent is woken, as its public heartbeat may say it: kind, status and cadence, never an address, a token or a link. */
+  async statusFor(handle: string, o: { v2?: boolean } = {}): Promise<Record<string, string | number | null>> {
+    return doorbellStatus(await this.o.store.getDoorbell(handle), this.o.siteBase, this.o.now().getTime(), o);
   }
 
   /* ---------------- the signed API: POST /v1/agents/doorbell ---------------- */

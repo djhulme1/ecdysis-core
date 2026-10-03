@@ -42,6 +42,7 @@ import {
   isDeterministic,
   largestIdenticalGroup,
   pickCrossCheck,
+  requiredHoldings,
   sealCommit,
   seedInsensitive,
   settleRuns,
@@ -717,20 +718,27 @@ export class V2Service {
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     const bundle = await bundleHash(c.bundle);
     const families = modelFamilies(c.models ?? null);
+    // inputs/0.1: the bundle's inputs go on the log by name, hash, size and access class (the derivation needs the hash and the
+    // class; the URL and licence stay in the stored bundle), with the holdings the checker pre-registers.
+    const inputs = (c.bundle.inputs ?? []).map((i) => ({ name: i.name, sha256: i.sha256, bytes: i.bytes, access: i.access }));
+    const holds = [...new Set(c.holds ?? [])].sort();
     await this.o.store.putEnvelope(id, env);
     await this.o.store.putBundle(id, c.bundle);
     await this.o.log.append("check.commit", {
       id, target: c.target, kind: c.kind, bundle, image: !!c.bundle.image, runtimeMinutes: c.bundle.runtimeMinutes,
       handle: c.agent.handle, operatorId, ...(c.models ? { models: c.models } : {}), ...(c.methods ? { methods: c.methods } : {}),
+      ...(inputs.length ? { inputs } : {}), ...(holds.length ? { holds } : {}),
       ...(checkKey ? { key } : {}),
     });
     // Seal at once: the submitter has committed, so nothing it chose can move the seed or the cross-check any more.
-    const { seal, seed, cross } = await this.seal(r, id, c.target, operatorId);
+    const { seal, seed, cross } = await this.seal(r, id, c.target, operatorId, holds);
     const crossBundle = cross ? await this.o.store.getBundle(cross) : null;
     const crossSeed = cross ? r.checks.get(cross)?.seed ?? null : null;
+    const requires = requiredHoldings(c.bundle.inputs);
     return ok(201, {
       id, seal, seed, deadline: new Date(this.now().getTime() + RESULT_DEADLINE_MS).toISOString(),
       families,
+      ...(requires.length ? { inputs: "This bundle needs inputs that are not open, so until a verified operator's cross-check matches it, this receipt counts at the unverified weight and settles nothing; it is drawn as a cross-check only for checkers who hold those inputs. Report numbers only." } : {}),
       crossCheck: cross ? { receipt: cross, bundle: crossBundle as unknown as Json, seed: crossSeed } : null,
       next: cross
         ? "Run your bundle with ECDYSIS_SEED=<seed>. Also run the cross-check's bundle with ECDYSIS_SEED=<its seed> and report both outputs with file_result."
@@ -745,7 +753,7 @@ export class V2Service {
    * first (an earlier receipt that a cross-check disagreed with, and that
    * no finding has decided yet, gets its extra runs before anything else).
    */
-  private async seal(r: V2Record, id: string, target: string, operatorId: string): Promise<{ seal: string; seed: string; cross: string | null }> {
+  private async seal(r: V2Record, id: string, target: string, operatorId: string, holds: readonly string[] = []): Promise<{ seal: string; seed: string; cross: string | null }> {
     const { seal, seed } = await sealCommit(this.o.logPrivateKey!, id);
     const earlier = r.receiptsByClaim.get(target) ?? [];
     const decided = new Set(r.findings.filter((f) => f.verdict !== "unresolved").map((f) => `${f.bundle}|${f.seed}`)); // reversed ones too: the steward closed them
@@ -761,7 +769,7 @@ export class V2Service {
     let cross: string | null = null;
     for (const pool of [disputed, unsettled, earlier]) {
       if (!pool.length) continue;
-      cross = pickCrossCheck(seed, pool, operatorId, r.vouchLinked);
+      cross = pickCrossCheck(seed, pool, operatorId, r.vouchLinked, holds);
       if (cross) break;
     }
     await this.o.log.append("check.seal", { commit: id, seal, seed, crossCheck: cross });
@@ -780,7 +788,7 @@ export class V2Service {
     const sealed: string[] = [];
     for (const c of r.checks.values()) {
       if (c.stage !== "committed") continue;
-      await this.seal(r, c.id, c.target, c.operatorId);
+      await this.seal(r, c.id, c.target, c.operatorId, c.holds);
       sealed.push(c.id);
     }
     return { sealed };
@@ -811,6 +819,8 @@ export class V2Service {
       committedAt: c.committedAt, sealedAt: c.sealedAt, resultedAt: c.resultedAt, seed: c.seed, crossCheck: c.crossCheck,
       outcome: c.outcome, crossMatch: c.crossMatch, verifiedBy: c.verifiedBy, disputedBy: c.disputedBy, disowned: c.disowned,
       bundle: bundle as unknown as Json, bundleHash: c.bundle,
+      requires: c.requires, holds: c.holds,
+      auditable: c.requires.length === 0 || c.verifiedBy.length > 0,
       outputs: outputs as unknown as Json,
       outputsStatus: c.stage !== "resulted" ? "not filed" : revealed ? "revealed" : disputeOpen ? "withheld while a finding is open" : "withheld until a verified cross-check matches or 30 days pass",
       otherCrossChecks: c.otherCrossChecks as unknown as Json,
@@ -832,6 +842,8 @@ export class V2Service {
     const sealedAt = Date.parse(check.sealedAt ?? "");
     if (Number.isFinite(sealedAt) && this.now().getTime() - sealedAt > RESULT_DEADLINE_MS) return err(409, "past the deadline: this check will be marked lapsed");
 
+    // inputs/0.1: a bundle on data not everyone may see reports numbers only, so no record can be copied into an output.
+    if (check.requires.length && Object.values(res.outputs).some((v) => typeof v !== "number")) return err(422, "outputs: numbers only for a bundle whose inputs are not all open");
     // The cross-check: the earlier receipt's outputs are compared within its declared tolerances, and exactly.
     let crossMatch: boolean | null = null;
     let crossExact: boolean | null = null;
@@ -840,6 +852,7 @@ export class V2Service {
       const theirs = await this.o.store.getOutputs(check.crossCheck);
       const theirBundle = await this.o.store.getBundle(check.crossCheck);
       if (!theirs || !theirBundle) return err(500, "the cross-checked receipt's outputs are missing");
+      if ((r.checks.get(check.crossCheck)?.requires.length ?? 0) > 0 && Object.values(res.crossCheck.outputs).some((v) => typeof v !== "number")) return err(422, "crossCheck.outputs: numbers only for a bundle whose inputs are not all open");
       crossMatch = compareOutputs(theirs, res.crossCheck.outputs, theirBundle.outputs).match;
       crossExact = compareOutputs(theirs, res.crossCheck.outputs, theirBundle.outputs.map((o) => ({ name: o.name }))).match;
       await this.o.store.putOutputs(`${check.crossCheck}@${res.commit}`, res.crossCheck.outputs);

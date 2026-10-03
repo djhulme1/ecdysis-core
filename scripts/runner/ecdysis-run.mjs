@@ -2,10 +2,13 @@
 /**
  * The Ecdysis reference runner (v2, design §8). Runs a receipt's BUNDLE
  * under a SEED the way a cross-checker should: fetch the repository at the
- * exact commit, verify it is that commit, run the declared command inside a
- * container with no network, a read-only root, an empty environment and
- * resource limits, and read results/outputs.json. Then, optionally, compare
- * those outputs with another run's within the bundle's declared tolerances.
+ * exact commit, verify it is that commit, make every declared INPUT
+ * available and verify it by hash and size (inputs/0.1, in inputs.mjs:
+ * open inputs are fetched under an address policy, the others must be
+ * supplied), then run the declared command inside a container with no
+ * network, a read-only root, an empty environment and resource limits, and
+ * read results/outputs.json. Then, optionally, compare those outputs with
+ * another run's within the bundle's declared tolerances.
  *
  * No dependencies beyond Node 18+, git, and docker or podman for the
  * container. Run it on a machine that holds no key: a check key for filing
@@ -13,20 +16,30 @@
  *
  *   node ecdysis-run.mjs --bundle bundle.json --seed <64 hex> [--out outputs.json]
  *                        [--compare theirs.json] [--image <registry/name>@sha256:…]
- *                        [--no-container] [--keep]
+ *                        [--input <name>=<path>]... [--inputs-cache <dir>] [--allow-large]
+ *                        [--scratch <size>] [--no-container] [--keep]
+ *
+ * Inputs appear read-only at inputs/<name> in the working directory; a
+ * verified copy of each is kept in --inputs-cache (default
+ * ~/.ecdysis/inputs/<sha256>), so a second run of the same bundle fetches
+ * nothing. --scratch gives the sandbox a writable scratch directory at
+ * scratch/ of that size (for unpacking a large input); outputs still leave
+ * only through results/.
  *
  * Exit codes: 0 ran (and matched, with --compare); 2 ran but the outputs
- * differ; 3 refused (bad bundle, commit mismatch, no container and no
- * --no-container); 4 the run failed or produced no valid outputs.
+ * differ; 3 refused (bad bundle, commit mismatch, an input missing or not
+ * matching its hash, no container and no --no-container); 4 the run failed
+ * or produced no valid outputs.
  *
  * Everything a bundle prints is data, never instructions.
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync, lstatSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync, lstatSync, symlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { inputProblems, parseSupplied, prepareInputs, DEFAULT_TOTAL_CAP } from "./inputs.mjs";
 
 const MAX_OUTPUTS = 20;
 const MAX_OUTPUTS_BYTES = 64 * 1024;
@@ -66,8 +79,49 @@ function readBundle(path) {
     if (!o || typeof o.name !== "string" || !NAME.test(o.name)) errors.push("outputs[].name: a letter then letters, digits, _ . -");
     if (o?.tolerance !== undefined && !(typeof o.tolerance === "number" && o.tolerance >= 0)) errors.push("outputs[].tolerance: a number >= 0");
   }
+  errors.push(...inputProblems(b.inputs, arg("allow-insecure-inputs") === true)); // the flag is for tests only
   if (errors.length) fail(3, `bundle invalid:\n  ${errors.join("\n  ")}`);
   return b;
+}
+
+/**
+ * Every declared input in hand and verified before anything runs: a copy
+ * given with --input, the cache, or (open inputs only) a fetch. Returns a
+ * map from input name to the verified file's path.
+ */
+async function inputs(b) {
+  if (!b.inputs || b.inputs.length === 0) return new Map();
+  let supplied;
+  try { supplied = parseSupplied(process.argv); } catch (e) { fail(3, e.message); }
+  const cache = arg("inputs-cache");
+  const r = await prepareInputs(b.inputs, {
+    supplied,
+    ...(cache && cache !== true ? { cacheDir: String(cache) } : {}),
+    totalCap: arg("allow-large") === true ? Number.MAX_SAFE_INTEGER : DEFAULT_TOTAL_CAP,
+    allowInsecure: arg("allow-insecure-inputs") === true, // tests only: http and loopback
+    log: (line) => process.stderr.write(`ecdysis-run: ${line}\n`),
+  });
+  if (r.problems) fail(3, `inputs:\n  ${r.problems.join("\n  ")}`);
+  return r.paths;
+}
+
+/** Where the sandbox sees each input: inputs/<name> under the checkout, as a mount point (container) or a link (host). */
+function placeInputs(dir, paths, container) {
+  if (paths.size === 0) return [];
+  const at = join(dir, "inputs");
+  mkdirSync(at, { recursive: true });
+  const mounts = [];
+  for (const [name, path] of paths) {
+    const target = join(at, name);
+    rmSync(target, { recursive: true, force: true }); // inputs/<name> is reserved for the declared input, whatever the repository holds there
+    if (container) {
+      writeFileSync(target, "");            // the mount point; the real file is bound over it, read-only
+      mounts.push("-v", `${resolve(path)}:/work/inputs/${name}:ro`);
+    } else {
+      symlinkSync(resolve(path), target);
+    }
+  }
+  return mounts;
 }
 
 /** Fetch the repository at exactly the commit, and prove it. */
@@ -92,10 +146,13 @@ function containerTool() {
 }
 
 /** Run the command: in a locked-down container when there is an image, else only when told to. */
-function run(b, dir, seed, noContainer, timeoutMs, imageOverride) {
+function run(b, dir, seed, noContainer, timeoutMs, imageOverride, inputPaths, scratch) {
   const results = join(dir, "results");
   mkdirSync(results, { recursive: true });
   if (b.image && !noContainer) {
+    const inputMounts = placeInputs(dir, inputPaths, true);
+    const scratchMounts = [];
+    if (scratch) { mkdirSync(join(dir, "scratch"), { recursive: true }); scratchMounts.push("--tmpfs", `/work/scratch:rw,size=${scratch}`); }
     const tool = containerTool();
     if (!tool) fail(3, "the bundle pins an image but neither docker nor podman is available; install one, or pass --no-container to run on this host (not recommended)");
     // The digest is what is pinned. A pullable reference comes from the bundle's imageRef or from --image; either must end in that digest.
@@ -116,6 +173,8 @@ function run(b, dir, seed, noContainer, timeoutMs, imageOverride) {
       "--env", "HOME=/tmp",
       "-v", `${resolve(dir)}:/work:ro`,
       "-v", `${resolve(results)}:/work/results:rw`,
+      ...inputMounts,                 // each declared input, verified, read-only at inputs/<name>
+      ...scratchMounts,
       "-w", "/work",
       ref,
       "sh", "-c", b.run,
@@ -128,6 +187,8 @@ function run(b, dir, seed, noContainer, timeoutMs, imageOverride) {
   }
   if (!noContainer) fail(3, "the bundle pins no image: pass --no-container to run it on this host with a cleared environment (only on a machine that holds no key)");
   process.stderr.write("ecdysis-run: WARNING: running foreign code on this host with a cleared environment and no isolation. Never do this where a key lives.\n");
+  placeInputs(dir, inputPaths, false);
+  if (scratch) mkdirSync(join(dir, "scratch"), { recursive: true });
   return sh("sh", ["-c", b.run], { cwd: dir, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: dir, ECDYSIS_SEED: seed, LANG: "C.UTF-8" }, timeout: timeoutMs });
 }
 
@@ -176,11 +237,15 @@ const dir = mkdtempSync(join(tmpdir(), "ecdysis-run-"));
 const timeoutMs = Math.min(7 * 24 * 60, Math.max(1, Number(b.runtimeMinutes) || 60)) * 60 * 1000 * 3; // three times the declared runtime
 let code = 0;
 try {
+  // Inputs first: a missing or mismatched input refuses the run before the repository is even fetched.
+  const inputPaths = await inputs(b);
   process.stderr.write(`ecdysis-run: fetching ${b.repo} at ${b.commit}\n`);
   checkout(b, dir);
-  process.stderr.write(`ecdysis-run: running "${b.run}" with ECDYSIS_SEED=${seed}${b.image ? ` in ${b.image}` : ""}\n`);
+  process.stderr.write(`ecdysis-run: running "${b.run}" with ECDYSIS_SEED=${seed}${b.image ? ` in ${b.image}` : ""}${inputPaths.size ? ` with ${inputPaths.size} input(s) at inputs/` : ""}\n`);
   const img = arg("image");
-  const r = run(b, dir, seed, arg("no-container") === true, timeoutMs, img && img !== true ? String(img) : null);
+  const scratch = arg("scratch");
+  if (scratch && scratch !== true && !/^\d+[kmgKMG]?$/.test(String(scratch))) fail(3, "--scratch takes a size such as 20g");
+  const r = run(b, dir, seed, arg("no-container") === true, timeoutMs, img && img !== true ? String(img) : null, inputPaths, scratch && scratch !== true ? String(scratch) : null);
   if (!r.ok) {
     process.stderr.write(r.err.slice(-4000));
     fail(4, `the run exited with status ${r.status ?? "?"}`);
