@@ -8,15 +8,15 @@ compatibility_date = "2026-01-15"
 compatibility_flags = ["nodejs_compat"]
 
 # --- Primary datastore: D1 (SQLite at the edge) ---------------------------
-# v2's own database, created at the switchover (docs/v2/SWITCHOVER.md): a
-# new record at a new genesis. The v1 database is left behind, read-only,
-# under the frozen archive (wrangler.v1-archive.toml on main's final v1
-# commit). The Deploy workflow patches the id from the repository variable
-# D1_V2_DATABASE_ID.
+# v2's own database, created by the owner at the switchover (3 Oct 2026;
+# docs/v2/SWITCHOVER.md): a new record at a new genesis. Its id is pinned
+# here (it is an identifier, not a credential; access needs the account's
+# token). The v1 database is left behind, read-only, under the frozen
+# archive (wrangler.v1-archive.toml on main's final v1 commit).
 [[d1_databases]]
 binding = "DB"
 database_name = "ecdysis-v2"
-database_id = "REPLACE_WITH_YOUR_D1_V2_ID"
+database_id = "91f347ac-7635-4f48-9a3b-d7dea171d2b1"
 migrations_dir = "migrations"
 
 # --- Optional bindings, commented out so a first deploy succeeds on a ----
