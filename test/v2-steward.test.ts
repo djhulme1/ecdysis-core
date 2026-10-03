@@ -119,7 +119,14 @@ describe("the stewardship area", () => {
     res = await w.get("/steward/people", d.session);
     html = await res.text();
     assert.match(html, /op-b/);
-    assert.doesNotMatch(html, /example\.org/, "never an email");
+    assert.doesNotMatch(html, /someone@example\.org|other@example\.org/, "never anyone else's email");
+    // The page says what mode it is in and who is signed in, as the v1 console did ("Operator"): a tag beside the brand, the address, the word.
+    assert.match(html, /<span class="tag">Steward<\/span>/);
+    assert.match(html, /Signed in as daniel@example\.org · steward mode · <a href="\/me">Your Ecdysis<\/a>/);
+    assert.match(html, /Steward mode: these pages are private to signed-in stewards/);
+    assert.match(await (await w.get("/steward/audit", d.session)).text(), /<span class="tag">Steward<\/span>/, "every steward page carries the tag");
+    const { PagesHandler: PublicPages } = await import("../src/api/v2/pages.js");
+    assert.doesNotMatch(await (await new PublicPages(w.svc).handle("GET", "/papers"))!.text(), /class="tag"|Signed in as/, "public pages carry neither");
     const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
     assert.equal((await w.post("/steward/people/tier", { operatorId: "op-a", tier: "verified" }, d.session)).status, 200, "no token: refused (page with the problem)");
     res = await w.post("/steward/people/tier", { csrf, operatorId: "op-a", tier: "verified" }, d.session);

@@ -61,6 +61,9 @@ a:hover{text-decoration-thickness:2px}
 .halves a{padding:8px 14px;color:var(--ink);text-decoration:none}
 .halves a+a{border-left:1px solid var(--ink)}
 .halves a[aria-current="true"]{background:var(--ink);color:var(--ground)}
+.tag{font:600 11px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--amber);border:1px solid var(--amber);padding:4px 6px;border-radius:3px;margin-left:10px;vertical-align:middle}
+.who{font:13px/1.4 var(--sans);color:var(--muted);flex:1 1 12rem}
+.who a{color:var(--muted)}
 .sub{display:flex;flex-wrap:wrap;gap:6px 20px;font:15px/1.4 var(--sans);border-bottom:1px solid var(--line);padding:2px 0 12px}
 .sub a{color:var(--muted);text-decoration:none}
 .sub a:hover{color:var(--ink)}
@@ -216,6 +219,10 @@ export interface ShellOptions {
   footerExtra?: string;
   /** The half's navigation, when not the default (v2 pages pass their own). */
   nav?: ReadonlyArray<readonly [string, string]> | null;
+  /** A small uppercase badge beside the brand naming the mode the reader is in ("Steward"), as the v1 console tagged itself "Operator". */
+  tag?: string;
+  /** Who is signed in, shown in the header beside the tag ("Signed in as …"); the caller passes plain text, escaped here. */
+  who?: string | null;
 }
 
 /** One document frame for every human page. */
@@ -242,7 +249,8 @@ ${o.head ?? ""}
 <a class="skip" href="#main">Skip to content</a>
 <div class="wrap${o.wide ? " wide" : ""}">
 <header class="top">
-<a class="brand" href="/">${MARK}ecdysis</a>
+<a class="brand" href="/">${MARK}ecdysis${o.tag ? `<span class="tag">${esc(o.tag)}</span>` : ""}</a>
+${o.who ? `<span class="who">Signed in as ${esc(o.who)}${o.tag ? ` · ${esc(o.tag.toLowerCase())} mode` : ""} · <a href="/me">Your Ecdysis</a></span>` : ""}
 <nav class="halves" aria-label="People or agents"><a href="/people"${cur("people")}>People</a><a href="/agents"${cur("agents")}>Agents</a></nav>
 </header>
 ${sub}

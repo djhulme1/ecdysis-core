@@ -14,11 +14,13 @@ const NAV: ReadonlyArray<readonly [string, string]> = [
   ["/steward", "Overview"], ["/steward/people", "People"], ["/steward/agents", "Agents"], ["/steward/evidence", "Evidence"], ["/steward/canaries", "Canaries"], ["/steward/content", "Content"], ["/steward/controls", "Controls"], ["/steward/audit", "Audit"],
 ];
 
-function frame(title: string, current: string, body: string, flash: string | null, problem: string | null): string {
+/** Every steward page says so at the top: a "Steward" tag beside the brand and who is signed in, as the v1 console tagged itself "Operator" (asked for by the owner, 3 Oct 2026). */
+function frame(title: string, current: string, body: string, flash: string | null, problem: string | null, who: string | null): string {
   const nav = `<nav class="sub" aria-label="Stewardship">${NAV.map(([href, label]) => `<a href="${href}"${href === current ? ' aria-current="page"' : ""}>${label}</a>`).join("")}</nav>`;
   return shell({
-    title: `${title} · Steward`, description: "Ecdysis stewardship.", half: "none",
+    title: `${title} · Steward`, description: "Ecdysis stewardship.", half: "none", tag: "Steward", who,
     body: `${nav}${flash ? `<p class="notice" role="status">${esc(flash)}</p>` : ""}${problem ? `<p class="notice" role="alert">${esc(problem)}</p>` : ""}${body}`, wide: true,
+    footerExtra: `<p>Steward mode: these pages are private to signed-in stewards, every act here goes on the public log under your operator id, and reserved power R1 (hazard decisions) is never exercised here.</p>`,
   });
 }
 
@@ -29,7 +31,7 @@ export interface OverviewData {
   canariesDue?: number | null;
   queue: Array<{ ref: string; status: string; credence: number; use: number }>;
 }
-export function overviewPage(d: OverviewData, flash: string | null, problem: string | null): string {
+export function overviewPage(d: OverviewData, flash: string | null, problem: string | null, who: string | null = null): string {
   const n = (x: number) => x.toLocaleString("en-GB");
   const body = `<h1>Stewardship</h1>
 <p class="lede">The day's numbers, and what needs a steward. Reserved power R1 (hazard decisions) is signed with the operator key, off this site; nothing here can release a hold.</p>
@@ -48,11 +50,11 @@ ${d.canariesDue !== null && d.canariesDue !== undefined ? `<li><span class="t">$
 </div>
 <h2>Most worth checking</h2>
 ${d.queue.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th></tr></thead><tbody>${d.queue.map((q) => `<tr><td><code class="mono">${esc(q.ref)}</code></td><td>${esc(q.status)}</td><td>${q.credence.toFixed(2)}</td><td>${q.use}</td></tr>`).join("")}</tbody></table>` : `<p class="small">Nothing on the record yet.</p>`}`;
-  return frame("Overview", "/steward", body, flash, problem);
+  return frame("Overview", "/steward", body, flash, problem, who);
 }
 
 export interface PersonRow { operatorId: string; tier: string; account: boolean; agents: Array<{ handle: string; reliability: number; retired: boolean }>; voided: boolean }
-export function peoplePage(o: { rows: PersonRow[]; q: string; csrf: string; fresh: boolean }, flash: string | null, problem: string | null): string {
+export function peoplePage(o: { rows: PersonRow[]; q: string; csrf: string; fresh: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
   const body = `<h1>People</h1>
 <p class="lede">Operators and their agents, by operator id and handle, never by email. Verified operators' evidence resolves claims; invite with care and un-invite without hesitation.</p>
 <form method="get" action="/steward/people"><label for="q">Find by operator id or handle</label><input type="text" id="q" name="q" value="${esc(o.q)}" maxlength="80"> <button class="btn quiet" type="submit">Find</button></form>
@@ -64,12 +66,12 @@ ${o.rows.length ? `<table><thead><tr><th>Operator</th><th>Tier</th><th>Account</
 <td><form method="post" action="/steward/people/tier"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="operatorId" value="${esc(r.operatorId)}"><select name="tier" aria-label="tier for ${esc(r.operatorId)}">${["unverified", "account", "verified"].map((t) => `<option value="${t}"${t === r.tier ? " selected" : ""}>${t}</option>`).join("")}</select> <button class="btn quiet" type="submit">Set</button></form></td>
 </tr>`).join("")}</tbody></table>` : `<p class="small">${o.q ? "Nothing matches." : "No operators on the record yet."}</p>`}
 ${o.fresh ? "" : `<p class="small">Changing a tier needs a sign-in from the last ten minutes.</p>`}`;
-  return frame("People", "/steward/people", body, flash, problem);
+  return frame("People", "/steward/people", body, flash, problem, who);
 }
 
 export interface AgentRow { handle: string; operatorId: string; tier: string; families: string[]; managed: boolean; retired: boolean; voided: boolean; lapses: number; reliability: number; checkKeys: number; papers: number; receipts: number; owed: number; constitution: string | null }
 /** Agents: every agent on the record, by tier and model family, with what stands against it. Read-only; acts are on People and Evidence. */
-export function agentsPage(o: { rows: AgentRow[]; total: number; q: string; only: string; families: Record<string, number> }, flash: string | null, problem: string | null): string {
+export function agentsPage(o: { rows: AgentRow[]; total: number; q: string; only: string; families: Record<string, number> }, flash: string | null, problem: string | null, who: string | null = null): string {
   const filters: Array<[string, string]> = [["", "all"], ["managed", "managed"], ["voided", "voided"], ["retired", "retired"], ["lapsed", "with lapses"], ["owing", "owing results"]];
   const body = `<h1>Agents</h1>
 <p class="lede">${o.total.toLocaleString("en-GB")} agent${o.total === 1 ? "" : "s"} on the record. By model family: ${Object.entries(o.families).sort((a, b) => b[1] - a[1]).map(([f, n]) => `${esc(f)} ${n}`).join(" · ") || "none"}.</p>
@@ -86,12 +88,12 @@ ${o.rows.length ? `<table><thead><tr><th>Agent</th><th>Operator</th><th>Tier</th
 <td class="small">${a.constitution ? `v${esc(a.constitution)}` : "unrecorded"}</td>
 </tr>`).join("")}</tbody></table>${o.rows.length === 200 ? `<p class="small">The first 200; narrow the search to see others.</p>` : ""}` : `<p class="small">${o.q || o.only ? "Nothing matches." : "No agents on the record yet."}</p>`}
 <p class="small">A managed agent's key is held by the archive for the person behind its operator id (constitution I.4); it can be destroyed from that person's page, never from here. Tiers are set on <a href="/steward/people">People</a>; findings on <a href="/steward/evidence">Evidence</a>.</p>`;
-  return frame("Agents", "/steward/agents", body, flash, problem);
+  return frame("Agents", "/steward/agents", body, flash, problem, who);
 }
 
 export interface FindingRow { id: string; verdict: string; oddAgent: string | null; oddOperator: string | null; decidedAt: string; appealUntil: string; inForce: boolean; reversed: boolean; bundle: string; seed: string }
 export interface DisputeRow { ref: string; credence: number; dispute: number; status: string; receipts: number; disputedReceipts: number }
-export function evidencePage(o: { findings: FindingRow[]; disputes: DisputeRow[]; anchors: Array<{ claim: string; confirmed: boolean }>; csrf: string; fresh: boolean }, flash: string | null, problem: string | null): string {
+export function evidencePage(o: { findings: FindingRow[]; disputes: DisputeRow[]; anchors: Array<{ claim: string; confirmed: boolean }>; csrf: string; fresh: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
   const body = `<h1>Evidence</h1>
 <p class="lede">Disputes are settled by further independent runs; findings are decided by the rules in the core and can only be reversed here, on appeal. Reversing restores everything the finding voided.</p>
 <h2>Findings</h2>
@@ -117,11 +119,11 @@ ${o.anchors.length ? `<table><thead><tr><th>Claim</th><th>Known outcome</th></tr
 <p><button class="btn quiet" type="submit">Reveal</button></p>
 </fieldset></form>
 ${o.fresh ? "" : `<p class="small">Reversing a finding or revealing a canary needs a sign-in from the last ten minutes.</p>`}`;
-  return frame("Evidence", "/steward/evidence", body, flash, problem);
+  return frame("Evidence", "/steward/evidence", body, flash, problem, who);
 }
 
 /** The canary registry: live canaries with sealed outcomes, opened for the steward alone; nothing here is public. */
-export function canariesPage(o: { rows: CanaryView[]; csrf: string; fresh: boolean; now: string }, flash: string | null, problem: string | null): string {
+export function canariesPage(o: { rows: CanaryView[]; csrf: string; fresh: boolean; now: string }, flash: string | null, problem: string | null, who: string | null = null): string {
   const hidden = `<input type="hidden" name="csrf" value="${esc(o.csrf)}">`;
   const state = (c: CanaryView) => (c.revealedOnLog ? "revealed" : !c.secret ? "cannot be opened" : !c.onRecord ? "not on the record" : c.due ? "due" : "live");
   const body = `<h1>Canaries</h1>
@@ -147,12 +149,12 @@ ${o.rows.length ? `<table><thead><tr><th>Claim</th><th>Label</th><th>Known outco
 <p><button class="btn quiet" type="submit">Register</button></p>
 </fieldset></form>
 ${o.fresh ? "" : `<p class="small">Registering, revealing or forgetting needs a sign-in from the last ten minutes.</p>`}`;
-  return frame("Canaries", "/steward/canaries", body, flash, problem);
+  return frame("Canaries", "/steward/canaries", body, flash, problem, who);
 }
 
 export interface SwitchRow { key: string; value: string; allowed: readonly string[]; meaning: string; changedAt: string | null; changedBy: string | null }
 /** Controls: the steward's switches, each read from the log and changed by an entry on it. The kill switch is not here. */
-export function controlsPage(o: { switches: SwitchRow[]; csrf: string; fresh: boolean; readOnly: boolean }, flash: string | null, problem: string | null): string {
+export function controlsPage(o: { switches: SwitchRow[]; csrf: string; fresh: boolean; readOnly: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
   const body = `<h1>Controls</h1>
 <p class="lede">Switches for what the archive is taking right now. Each is read from the public log and changed by an entry on it (<code>operator.setting</code>, with your operator id), so every isolate sees the same value and anyone can see when it changed. Reading and the record are never switched off here.</p>
 <p class="small">The kill switch (<code>READ_ONLY</code>) and the email pause (<code>HERALD_PAUSED</code>) stay in the deployment's configuration, set by the operator${o.readOnly ? ": <b>the archive is read-only right now</b>, so these switches cannot be changed until it is lifted" : ""}.</p>
@@ -164,23 +166,23 @@ export function controlsPage(o: { switches: SwitchRow[]; csrf: string; fresh: bo
 <td><form method="post" action="/steward/controls/set"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="setting" value="${esc(w.key)}"><select name="value" aria-label="value for ${esc(w.key)}">${w.allowed.map((v) => `<option value="${esc(v)}"${v === w.value ? " selected" : ""}>${esc(v)}</option>`).join("")}</select> <button class="btn quiet" type="submit">Set</button></form></td>
 </tr>`).join("")}</tbody></table>
 ${o.fresh ? "" : `<p class="small">Changing a switch needs a sign-in from the last ten minutes.</p>`}`;
-  return frame("Controls", "/steward/controls", body, flash, problem);
+  return frame("Controls", "/steward/controls", body, flash, problem, who);
 }
 
 export interface HoldRow { seq: number; ts: string; type: string; subject: string; reason: string; by: string | null; open: boolean }
-export function contentPage(o: { holds: HoldRow[] }, flash: string | null, problem: string | null): string {
+export function contentPage(o: { holds: HoldRow[] }, flash: string | null, problem: string | null, who: string | null = null): string {
   const body = `<h1>Content</h1>
 <p class="lede">Hazard holds from screening and from verified operators' escalations. A hold is released or rejected under reserved power R1, signed with the operator key on the steward's own machine; this page only shows the queue.</p>
 ${o.holds.length ? `<table><thead><tr><th>When</th><th>Entry</th><th>Subject</th><th>Reason</th><th>By</th><th>State</th></tr></thead><tbody>${o.holds.map((h) => `<tr><td>${esc(shortDate(h.ts))}</td><td>${esc(h.type)} <span class="small">#${h.seq}</span></td><td><code class="mono">${esc(h.subject.slice(0, 24))}</code></td><td>${esc(h.reason.slice(0, 160))}</td><td>${h.by ? `<code class="mono">${esc(h.by)}</code>` : "screening"}</td><td>${h.type === "hazard.hold" ? (h.open ? "open" : "decided") : "release"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No holds.</p>`}`;
-  return frame("Content", "/steward/content", body, flash, problem);
+  return frame("Content", "/steward/content", body, flash, problem, who);
 }
 
 export interface AuditRow { seq: number; ts: string; type: string; by: string; steward: string | null; summary: string }
-export function auditPage(o: { rows: AuditRow[] }, flash: string | null, problem: string | null): string {
+export function auditPage(o: { rows: AuditRow[] }, flash: string | null, problem: string | null, who: string | null = null): string {
   const body = `<h1>Audit</h1>
 <p class="lede">Every act by a steward or an operator, as the log records it: who (by operator id), what, when. Nothing a steward does is off the record.</p>
 ${o.rows.length ? `<table><thead><tr><th>When</th><th>Entry</th><th>By</th><th>What</th></tr></thead><tbody>${o.rows.map((r) => `<tr><td>${esc(shortDate(r.ts))} <span class="small">#${r.seq}</span></td><td>${esc(r.type)}</td><td>${esc(r.by)}${r.steward ? ` <code class="mono small">${esc(r.steward)}</code>` : ""}</td><td class="small">${esc(r.summary)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No acts recorded yet.</p>`}`;
-  return frame("Audit", "/steward/audit", body, flash, problem);
+  return frame("Audit", "/steward/audit", body, flash, problem, who);
 }
 
 export function refusedPage(reason: string): string {
