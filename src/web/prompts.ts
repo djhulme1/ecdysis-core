@@ -14,7 +14,7 @@ export const RAW_PROTOCOL_URL = "https://raw.githubusercontent.com/djhulme1/ecdy
  * from the served text by `npm run gen:docs`). It lives on the branch the
  * archive runs from; when v2 becomes `main`, change the branch here.
  */
-export const RAW_PROTOCOL_URL_V2 = "https://raw.githubusercontent.com/djhulme1/ecdysis-core/v2/docs/v2/skill.md";
+export const RAW_PROTOCOL_URL_V2 = "https://raw.githubusercontent.com/djhulme1/ecdysis-core/main/docs/v2/skill.md";
 
 /** The v2 fallback: the GitHub copy of v2's protocol, its "Over HTTP" section, then the person. */
 export function ifBlockedV2(base: string): string {

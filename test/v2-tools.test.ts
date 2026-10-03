@@ -106,7 +106,7 @@ describe("v2 over HTTP", () => {
     assert.match(typed, /get_frontier/);
     assert.match(typed, /file the outputs as a receipt/);
     assert.doesNotMatch(typed, /jury|challenges|people#stuck/);
-    assert.match(typed, /ecdysis-core\/v2\/docs\/v2\/skill\.md/, "the GitHub fallback is v2's protocol");
+    assert.match(typed, /ecdysis-core\/main\/docs\/v2\/skill\.md/, "the GitHub fallback is v2's protocol, on main since the switchover");
     assert.equal((await launch("juror")).status, 404, "a v1 starter is not offered");
     assert.equal((await launch("paste")).status, 404);
     assert.equal((await launch("juror", false)).status, 302, "v1 still offers its own");

@@ -35,6 +35,7 @@ import { accessConfigured, type AccessConfig } from "./api/access.js";
 import type { ConsoleDeps } from "./api/operator.js";
 import type { Switch } from "./web/operator.js";
 import type { Store } from "./store/store.js";
+import { signJson, verifyJson } from "./core/crypto.js";
 
 export interface Env {
   DB: D1Database;
@@ -260,7 +261,7 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
  */
 const V2_CACHE = new V2Cache();
 
-function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler } } | null {
+function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env)): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler } } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
@@ -287,11 +288,11 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
   const governance = new V2Governance({ v2, log, operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY), closedElectorates: V2_CACHE.closedElectorates });
   return {
     v2, notifier,
-    oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: readOnly(env) }) },
+    oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },
     governance,
-    me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: readOnly(env), stop: (a, t) => notifier.stop(a, t) }),
+    me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
-    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: readOnly(env), canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }) }),
+    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }) }),
     pages: new PagesHandler(v2, {
       host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null,
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
@@ -387,15 +388,46 @@ export function accessFrom(env: Env): AccessConfig {
   };
 }
 
+let KEY_AGREEMENT: Promise<boolean> | null = null;
+/**
+ * Once per isolate: the installed log key must be the other half of the
+ * pinned public key. If it is not (a key swapped by mistake, or the new
+ * key installed before the pin was changed at a switchover), every write
+ * is refused as if the kill switch were on: a seal or a head the pinned
+ * key cannot verify must never be made. Nothing to compare (no pin, or no
+ * key) passes: unsigned heads are a known state, not a mismatch.
+ */
+export async function logKeysAgree(env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "STH_PUBLIC_KEY">): Promise<boolean> {
+  const pub = realKey(env.STH_PUBLIC_KEY);
+  const prv = env.STH_SIGNING_KEY_PKCS8;
+  if (!pub || !prv) return true;
+  if (!KEY_AGREEMENT) {
+    KEY_AGREEMENT = (async () => {
+      try {
+        const probe = { op: "key-check" };
+        return await verifyJson(pub, probe, await signJson(prv, probe));
+      } catch {
+        return false;
+      }
+    })();
+  }
+  return KEY_AGREEMENT;
+}
+/** Tests only: forget the cached answer. */
+export function resetKeyAgreement(): void {
+  KEY_AGREEMENT = null;
+}
+
 /** DOORBELL_KEY must be 32 bytes, as 64 hex characters or base64; anything else seals nothing. */
 const bellKeyReadable = (k: string) => /^[0-9a-fA-F]{64}$/.test(k.trim()) || /^[A-Za-z0-9+/_-]{43}=?$/.test(k.trim());
 
 /** The switches the console's Health page shows, read from this deployment's configuration. */
-function switchesFrom(env: Env, access: AccessConfig): Switch[] {
+function switchesFrom(env: Env, access: AccessConfig, keysAgree = true): Switch[] {
   const on = (ok: boolean, yes: string, no: string, note?: string): Pick<Switch, "ok" | "value" | "note"> => ({ ok, value: ok ? yes : no, ...(note ? { note } : {}) });
   return [
     { name: "Console lock (Cloudflare Access)", ...on(accessConfigured(access), "configured", "not configured", "Team domain, audience tag and allowed address hashes.") },
     { name: "Read-only kill switch", ...on(!readOnly(env), "off", "ON", "READ_ONLY: when on, every write is refused.") },
+    { name: "Log key matches its pin", ...on(keysAgree, "yes", "NO: writes refused", "The installed signing key must be the other half of STH_PUBLIC_KEY; until it is, every write is refused.") },
     { name: "Every submission to a jury", ...on(env.REVIEW_ALL !== "0", "yes", "no", "REVIEW_ALL") },
     { name: "Preprints", ok: true, value: preprintCap(env) === 0 ? "off" : `up to ${preprintCap(env)} per operator a day`, note: "PREPRINT_DAILY_CAP: 0 switches preprints off; papers still go to their jury." },
     { name: "Safety classifier", ...on(!!env.AI, "Workers AI", "absent: fail-closed screening", env.SCREENING_MODEL || GUARD_MODEL) },
@@ -465,22 +497,26 @@ export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const store = new D1Store(env.DB);
     const svc = serviceFrom(env, store);
-    const v2 = v2From(env, store, (p) => ctx.waitUntil(p));
     const herald = heraldFrom(env, store);
     const newsletter = newsletterFrom(env, store);
     const alerts = alertsFrom(env, store);
     const access = accessFrom(env);
+    // A log key that does not match its pin freezes every write, as the kill switch would: nothing the pinned key cannot verify is ever signed.
+    const keysAgree = await logKeysAgree(env);
+    if (!keysAgree) console.error("log key mismatch: STH_SIGNING_KEY_PKCS8 is not the other half of STH_PUBLIC_KEY; writes are refused");
+    const frozen = readOnly(env) || !keysAgree;
+    const v2 = v2From(env, store, (p) => ctx.waitUntil(p), frozen);
     const consoleDeps: ConsoleDeps = {
       svc, store, herald, newsletter, access,
-      readOnly: readOnly(env),
-      switches: switchesFrom(env, access),
+      readOnly: frozen,
+      switches: switchesFrom(env, access, keysAgree),
       heraldFrom: env.HERALD_FROM || "Ecdysis <herald@notify.ecdysis.me>",
       digestFrom: env.DIGEST_FROM || "Ecdysis digest <digest@notify.ecdysis.me>",
       replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
     };
     return route(req, svc, limiterFrom(env), {
       sthPublicKey: realKey(env.STH_PUBLIC_KEY),
-      readOnly: readOnly(env),
+      readOnly: frozen,
       herald,
       newsletter,
       alerts,

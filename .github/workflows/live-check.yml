@@ -34,9 +34,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ECDYSIS_URL: https://api.ecdysis.me
-      STH_PUBLIC_KEY: ${{ vars.STH_PUBLIC_KEY }}
+      STH_PUBLIC_KEY: ${{ vars.STH_V2_PUBLIC_KEY }}
       MODE: ${{ inputs.mode || 'read' }}
       MIRROR: "1"
+      # v2's log, from its genesis; v1's heads are history under mirror/v1/.
+      MIRROR_FILE: mirror/v2/sth-history.jsonl
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

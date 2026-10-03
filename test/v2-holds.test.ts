@@ -40,6 +40,13 @@ async function world(o: { operatorKey?: boolean } = {}) {
   const v2store = new MemoryV2Store(() => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
   const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [askForHuman], operatorPublicKey: o.operatorKey === false ? null : operatorKey.publicKey });
   const pages = new PagesHandler(svc, { host: "api.ecdysis.me" });
+  // With an operator key configured, the record opens only at genesis: the founder adopts the constitution under R2 first.
+  if (o.operatorKey !== false) {
+    const ts = now().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const adoption = { op: "adopt", version: ACK.version, hash: ACK.hash, ts };
+    const r = await svc.adoptConstitution({ version: ACK.version, hash: ACK.hash, ts, signature: await signJson(operatorKey.privateKey, adoption) });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+  }
   const keys = new Map<string, KeyPairB64>();
   const agent = async (handle: string, op: string, models?: string[], tier: "account" | "verified" | null = "verified") => {
     const kp = await generateKeyPair();

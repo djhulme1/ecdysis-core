@@ -22,8 +22,12 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # v2's database and log key (the switchover of 3 Oct 2026); the v1
+      # values stay as D1_DATABASE_ID and STH_PUBLIC_KEY for the apps Worker
+      # and the frozen archive.
+      D1_V2_DATABASE_ID: ${{ vars.D1_V2_DATABASE_ID }}
+      STH_V2_PUBLIC_KEY: ${{ vars.STH_V2_PUBLIC_KEY }}
       D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
-      STH_PUBLIC_KEY: ${{ vars.STH_PUBLIC_KEY }}
       OPERATOR_PUBLIC_KEY: ${{ vars.OPERATOR_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -39,9 +43,9 @@ jobs:
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "Cloudflare secrets not set — skipping deploy. Add them and run the Provision workflow first." >> "$GITHUB_STEP_SUMMARY"
-          elif [ -z "$D1_DATABASE_ID" ]; then
+          elif [ -z "$D1_V2_DATABASE_ID" ] || [ -z "$STH_V2_PUBLIC_KEY" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Repository variable D1_DATABASE_ID not set — run the Provision workflow and save its outputs as variables." >> "$GITHUB_STEP_SUMMARY"
+            echo "Repository variables D1_V2_DATABASE_ID and STH_V2_PUBLIC_KEY must both be set before v2 deploys (docs/v2/SWITCHOVER.md)." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
@@ -53,17 +57,15 @@ jobs:
       - name: Patch wrangler.toml with this deployment's ids
         if: steps.gate.outputs.ready == 'true'
         run: |
-          sed -i "s/REPLACE_WITH_YOUR_D1_ID/$D1_DATABASE_ID/" wrangler.toml
-          if [ -n "$STH_PUBLIC_KEY" ]; then
-            sed -i "s/REPLACE_WITH_YOUR_STH_PUBLIC_KEY/$STH_PUBLIC_KEY/" wrangler.toml
-          fi
+          sed -i "s/REPLACE_WITH_YOUR_D1_V2_ID/$D1_V2_DATABASE_ID/" wrangler.toml
+          sed -i "s/REPLACE_WITH_YOUR_STH_V2_PUBLIC_KEY/$STH_V2_PUBLIC_KEY/" wrangler.toml
           if [ -n "$OPERATOR_PUBLIC_KEY" ]; then
             sed -i "s/REPLACE_WITH_YOUR_OPERATOR_PUBLIC_KEY/$OPERATOR_PUBLIC_KEY/" wrangler.toml
           fi
 
       - name: Apply any new migrations
         if: steps.gate.outputs.ready == 'true'
-        run: npx wrangler d1 migrations apply ecdysis --remote
+        run: npx wrangler d1 migrations apply ecdysis-v2 --remote
 
       - name: Deploy
         if: steps.gate.outputs.ready == 'true'
@@ -96,6 +98,8 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
+          # The apps Worker serves the v1 record's bundles: it stays on the v1 database.
+          if [ -z "$D1_DATABASE_ID" ]; then echo "No D1_DATABASE_ID (v1): skipping the apps Worker." >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
           sed -i "s/REPLACE_WITH_YOUR_D1_ID/$D1_DATABASE_ID/" wrangler.apps.toml
           if npx wrangler deploy -c wrangler.apps.toml | tee /tmp/deploy-apps.log; then
             echo "Apps Worker deployed." >> "$GITHUB_STEP_SUMMARY"

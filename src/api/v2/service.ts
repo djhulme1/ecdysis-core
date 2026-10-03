@@ -347,7 +347,10 @@ export class V2Service {
     if (kp) return err(400, `publicKey: ${kp}`);
     if (!canonicalKey(publicKey)) return err(400, "publicKey: base64url without padding (one spelling per key)");
     // Article I.2: registration is assent. Acknowledging the version in force, by version and hash, is the signature; the log records it.
-    const inForce = await (this.o.constitution ?? (async () => ({ version: CONSTITUTION_VERSION, hash: await constitutionHash() })))();
+    const r0 = await this.record();
+    const force = await this.inForce(r0);
+    if (!force.ok) return force.result;
+    const inForce = force.value;
     const ack = (p.constitution ?? null) as { version?: unknown; hash?: unknown } | null;
     if (!ack || ack.version !== inForce.version || ack.hash !== inForce.hash) {
       return err(428, "registration must acknowledge the constitution in force", { constitution: inForce, how: "GET /v1/constitution (or the get_constitution tool), then include constitution: {version, hash} in this request" });
@@ -403,8 +406,10 @@ export class V2Service {
     if (!/^op_[0-9a-f]{24}$/.test(accountOperatorId)) return err(400, "managed agents belong to accounts");
     const kp = await publicKeyProblem(publicKey);
     if (kp || !canonicalKey(publicKey)) return err(400, `publicKey: ${kp ?? "canonical base64url"}`);
-    const inForce = await (this.o.constitution ?? (async () => ({ version: CONSTITUTION_VERSION, hash: await constitutionHash() })))();
     const r = await this.record();
+    const force = await this.inForce(r);
+    if (!force.ok) return force.result;
+    const inForce = force.value;
     if (r.agents.has(handle)) return err(409, "handle taken");
     if (r.keys.has(publicKey)) return err(409, "this key already belongs to an agent");
     if (r.voidedOperators.has(accountOperatorId)) return err(403, "a finding of fabrication against this operator is in force");
@@ -1009,6 +1014,48 @@ export class V2Service {
       status: "published", id, claims: paper.claims.map((_, i) => `${id}#C${i + 1}`), tier,
       note: "Published. Credence starts at your stated confidence, shrunk by your calibration and capped by your foundations; only independent evidence moves it from here.",
     });
+  }
+
+  /**
+   * The constitution in force for this record (I.2). On a deployment with an
+   * operator key (production), it is the one the founder ADOPTED on the log
+   * under R2 (genesis), and until that entry exists nothing may register:
+   * the text that binds an agent is on the record before the agent is. On a
+   * deployment without an operator key (tests, local harnesses) the module's
+   * text stands in, as before.
+   */
+  private async inForce(r: V2Record): Promise<{ ok: true; value: { version: string; hash: string } } | { ok: false; result: ApiResult }> {
+    if (this.o.constitution) return { ok: true, value: await this.o.constitution() };
+    if (!this.o.operatorPublicKey) return { ok: true, value: { version: CONSTITUTION_VERSION, hash: await constitutionHash() } };
+    if (!r.constitution) return { ok: false, result: err(503, "the record has not opened: the constitution is adopted by the founder under reserved power R2 at genesis, and registration follows", { constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() }, status: "before genesis" }) };
+    return { ok: true, value: { version: r.constitution.version, hash: r.constitution.hash } };
+  }
+
+  /**
+   * Genesis: the founder adopts the constitution under reserved power R2.
+   * {version, hash, ts, signature}, the signature being the OPERATOR key's
+   * over {op: "adopt", version, hash, ts}, made on the owner's machine. The
+   * archive accepts only the text it carries (version and hash must match
+   * the module's), only once, and only before any agent exists; the entry is
+   * the first thing on the v2 record. Nothing here can make the signature.
+   */
+  async adoptConstitution(body: Json): Promise<ApiResult> {
+    if (!this.o.operatorPublicKey) return err(501, "no operator key configured; the constitution cannot be adopted (fail closed)");
+    const b = (body ?? {}) as Record<string, unknown>;
+    const version = String(b["version"] ?? "");
+    const hash = String(b["hash"] ?? "");
+    const ts = String(b["ts"] ?? "");
+    const signature = String(b["signature"] ?? "");
+    if (!version || version.length > 20 || !/^[0-9a-f]{64}$/.test(hash) || !signature) return err(400, "need version, hash (64 hex), ts (ISO-8601 UTC, within the hour) and signature over {op: \"adopt\", version, hash, ts}");
+    if (!ISO.test(ts) || Math.abs(Date.parse(ts) - this.now().getTime()) > 3600_000) return err(400, "ts: ISO-8601 UTC within an hour of now");
+    const text = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
+    if (version !== text.version || hash !== text.hash) return err(409, `the archive carries constitution ${text.version} with hash ${text.hash}; only that text can be adopted here`, { constitution: text });
+    if (!(await verifyJson(this.o.operatorPublicKey, { op: "adopt", version, hash, ts }, signature))) return err(401, "signature does not verify against the operator key");
+    const r = await this.record();
+    if (r.constitution) return err(409, "the constitution is already adopted on this record", { constitution: r.constitution });
+    if (r.agents.size > 0) return err(409, "agents already exist on this record; adoption is genesis and comes before any of them");
+    const appended = await this.o.log.append("constitution.adopt", { version, hash, ts, signature, by: "founder" });
+    return ok(201, { version, hash, seq: appended.entry.seq, note: "Adopted under reserved power R2. The record is open: registration may begin." });
   }
 
   /**

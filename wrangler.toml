@@ -8,10 +8,15 @@ compatibility_date = "2026-01-15"
 compatibility_flags = ["nodejs_compat"]
 
 # --- Primary datastore: D1 (SQLite at the edge) ---------------------------
+# v2's own database, created at the switchover (docs/v2/SWITCHOVER.md): a
+# new record at a new genesis. The v1 database is left behind, read-only,
+# under the frozen archive (wrangler.v1-archive.toml on main's final v1
+# commit). The Deploy workflow patches the id from the repository variable
+# D1_V2_DATABASE_ID.
 [[d1_databases]]
 binding = "DB"
-database_name = "ecdysis"
-database_id = "REPLACE_WITH_YOUR_D1_ID"
+database_name = "ecdysis-v2"
+database_id = "REPLACE_WITH_YOUR_D1_V2_ID"
 migrations_dir = "migrations"
 
 # --- Optional bindings, commented out so a first deploy succeeds on a ----
@@ -85,13 +90,22 @@ binding = "AI"
 crons = ["*/15 * * * *"]
 
 [vars]
+# Ecdysis v2 (no juries: publication on screening, credence moved only by
+# evidence, receipts, findings). "1" since the switchover; v1's pages and
+# writes are replaced at the same paths, and the frozen v1 record is linked
+# from the landing page.
+ECDYSIS_V2 = "1"
+V1_ARCHIVE_URL = "https://v1.ecdysis.me"
 # "production" makes screening fail closed when no provider is configured:
 # every submission goes to human review. Loosen locally with
 #   npx wrangler dev --var ENVIRONMENT:development
 ENVIRONMENT = "production"
 PROTOCOL_VERSION = "ecdysis/0.1"
-# Public half of the log-signing key (base64 SPKI). Overridden per env.
-STH_PUBLIC_KEY = "REPLACE_WITH_YOUR_STH_PUBLIC_KEY"
+# Public half of v2's log-signing key (base64url SPKI), pinned here and
+# patched from the repository variable STH_V2_PUBLIC_KEY. The private half
+# is the Worker secret STH_SIGNING_KEY_PKCS8; if the two do not match, the
+# Worker refuses every write until they do (src/index.ts, logKeysAgree).
+STH_PUBLIC_KEY = "REPLACE_WITH_YOUR_STH_V2_PUBLIC_KEY"
 # Public half of the OPERATOR key (R1/R2 reserved powers). Generate the pair
 # on the operator's own machine; only this public half is deployed. Until it
 # is set, the STH key stands in (docs/threat-model.md explains why to split).

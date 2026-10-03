@@ -1202,7 +1202,7 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
       // The steward's switches are public: an agent refused for a pause can see it here before it tries.
       const settings: Record<string, Json> = {};
       for (const w of await v2.settingsView()) settings[w.key] = w.value;
-      return { status: 200, body: { agents: r.agents.size, claims: r.claims.length, external: r.external.size, checks: r.checks.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted").length, findings: r.findings.length, voidedOperators: r.voidedOperators.size, settings } };
+      return { status: 200, body: { constitution: r.constitution ? { ...r.constitution } : null, agents: r.agents.size, claims: r.claims.length, external: r.external.size, checks: r.checks.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted").length, findings: r.findings.length, voidedOperators: r.voidedOperators.size, settings } };
     }
     return { status: 404, body: { error: "no such v2 endpoint" } };
   }
@@ -1220,6 +1220,8 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/vouch": return v2.vouch(body);
     // Reserved power R1: the operator key's signature, made on the owner's machine, is the whole authority here.
     case "/v2/hazard/decision": return v2.decideHazard(body);
+    // Reserved power R2 at genesis: the founder adopts the constitution; the same key, the same way.
+    case "/v2/constitution/adopt": return v2.adoptConstitution(body);
     // Doorbells, as in v1 but for agents on the v2 log: the same signed envelope, protocol ecdysis/0.2, main key only.
     case "/v2/agents/doorbell": return doorbells ? doorbells.request(body) : { status: 501, body: { error: "doorbells are not configured on this deployment" } };
     default: return { status: 404, body: { error: "no such v2 endpoint" } };

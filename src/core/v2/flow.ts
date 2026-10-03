@@ -26,6 +26,7 @@
  *   key.delegate       {handle, key, scope: "reports"}          a CHECK KEY: signs reports only (constitution I.3)
  *   key.revoke         {handle, key, compromisedAt?}            immediate; a compromise time disowns later reports
  *   canary.reveal      {claim, outcome}                         a steward reveals a canary's known truth (design §7)
+ *   constitution.adopt {version, hash, ts, signature}           the founder adopts the constitution under R2 (genesis)
  *
  * check.result may carry seedInsensitive: true when the same bundle gave
  * exactly the same outputs under a different seed earlier; the bundle then
@@ -85,12 +86,12 @@ import { APPEAL_MS } from "./receipts.js";
 export type V2EntryType =
   | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
   | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "finding.decide" | "finding.reverse" | "review.file"
-  | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release";
+  | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
   "check.commit", "check.seal", "check.result", "check.lapse", "finding.decide", "finding.reverse", "review.file",
-  "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release",
+  "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release", "constitution.adopt",
 ];
 
 export interface V2Entry {
@@ -231,6 +232,13 @@ export interface V2Record {
   seedInsensitiveBundles: Set<string>;
   /** Items held under reserved power R1 (an escalation or a screening hold not yet released): frozen out of every page and number. */
   held: Set<string>;
+  /**
+   * The constitution in force, adopted on this log by the founder under
+   * reserved power R2 (the first constitution.adopt entry; genesis). Null
+   * until then: nothing may register before the text that binds it is on
+   * the record.
+   */
+  constitution: { version: string; hash: string; seq: number; ts: string } | null;
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -271,6 +279,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const seedInsensitiveBundles = new Set<string>();
   const forecasts = new Map<string, number>();
   const held = new Set<string>();
+  let constitution: V2Record["constitution"] = null;
   /** Cross-checks, to be sorted into verified and other once tiers are known. */
   const crossChecks: Array<{ later: CheckState; earlier: CheckState }> = [];
 
@@ -436,6 +445,13 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         if (outcome === "confirmed" || outcome === "refuted") anchors.set(str(p["claim"]), outcome === "confirmed");
         break;
       }
+      case "constitution.adopt": {
+        // The first adoption is genesis and stands; the service verifies the founder's signature before the entry is written.
+        const version = str(p["version"]);
+        const hash = str(p["hash"]);
+        if (!constitution && version && /^[0-9a-f]{64}$/.test(hash)) constitution = { version, hash, seq: e.seq, ts: e.ts };
+        break;
+      }
       case "review.file": {
         const handle = str(p["handle"]);
         const declared = modelFamilies(p["models"] as string[] | undefined);
@@ -547,5 +563,5 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, constitution };
 }

@@ -11,7 +11,7 @@
  *   MODE              read | full            (default read)
  *   STH_PUBLIC_KEY    repo-pinned log key; signature checks warn if unset
  *   MIRROR            "1" appends a verified tree head to MIRROR_FILE
- *   MIRROR_FILE       default mirror/sth-history.jsonl
+ *   MIRROR_FILE       default mirror/sth-history.jsonl (the workflow sets mirror/v2/sth-history.jsonl)
  *
  * Exit code: 0 all pass (warns allowed), 1 any failure.
  */

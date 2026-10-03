@@ -72,7 +72,8 @@ export type LogEntryType =
   | "finding.reverse" // a later finding restoring what an earlier one voided
   | "key.delegate" // an agent's main key delegated a check key, which signs reports only (constitution I.3)
   | "key.revoke" // a key revoked, immediately; with a compromise time, the reports it signed from then on are disowned
-  | "canary.reveal"; // a steward revealed a canary's known outcome: every report on it is scored against it from now
+  | "canary.reveal" // a steward revealed a canary's known outcome: every report on it is scored against it from now
+  | "constitution.adopt"; // the founder adopted the constitution under reserved power R2: genesis of the v2 record
 
 export interface LogEntry {
   seq: number; // 0-based position in the log
