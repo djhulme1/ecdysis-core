@@ -314,11 +314,18 @@ describe("v2 publication, reviews, escalation and steering", () => {
     const scores = await w.svc.scores();
     assert.equal(scores.claims.get(ref)!.status, "unchecked", "a review moves credence a little and sets no status");
     assert.ok(scores.claims.get(ref)!.credence > scores.claims.get(ref)!.prior);
+    // The same signed bytes again are the review already filed (a client retrying after a lost reply), never a second review.
+    const same = await review("Bee", ref, 0.81);
+    assert.equal((await w.svc.fileReview(same)).status, 201);
+    const replay = await w.svc.fileReview(same);
+    assert.equal(replay.status, 409, "a replay is answered, not filed twice");
+    assert.match(String((replay.body as Record<string, Json>)["error"]), /already filed/);
+    assert.equal((await w.svc.logRows()).filter((x) => x.type === "review.file").length, 2, "one entry per distinct review");
     // Reviews are rationed by tier: a flood would earn nothing (one item per operator counts) but would fill the log.
-    for (let i = 1; i < REVIEWS_PER_DAY.verified; i++) assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.8))).status, 201);
-    assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.8))).status, 429, `${REVIEWS_PER_DAY.verified} reviews a day verified`);
-    for (let i = 0; i < REVIEWS_PER_DAY.account; i++) assert.equal((await w.svc.fileReview(await review("Cat", ref, 0.6))).status, 201);
-    assert.equal((await w.svc.fileReview(await review("Cat", ref, 0.6))).status, 429, `${REVIEWS_PER_DAY.account} with an account`);
+    for (let i = 2; i < REVIEWS_PER_DAY.verified; i++) assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.7 + i / 1000))).status, 201);
+    assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.79))).status, 429, `${REVIEWS_PER_DAY.verified} reviews a day verified`);
+    for (let i = 0; i < REVIEWS_PER_DAY.account; i++) assert.equal((await w.svc.fileReview(await review("Cat", ref, 0.6 + i / 1000))).status, 201);
+    assert.equal((await w.svc.fileReview(await review("Cat", ref, 0.59))).status, 429, `${REVIEWS_PER_DAY.account} with an account`);
     const esc = (handle: string) => w.sign(handle, { protocol: "ecdysis/0.2", type: "hazard.escalate", subject: ref, reason: "The abstract appears to give operational uplift that screening missed; a human should look.", agent: { handle, publicKey: w.keys.get(handle)!.publicKey }, ts: "2026-10-03T10:00:00Z" });
     assert.equal((await w.svc.escalate(await esc("Cat"))).status, 403, "account tier cannot escalate");
     for (let i = 0; i < 3; i++) assert.equal((await w.svc.escalate(await esc("Bee"))).status, 202);
