@@ -248,6 +248,30 @@ describe("the fallback rate limiter", () => {
     assert.equal(await bound.allow("read", "1.1.1.1"), true);
     assert.equal(await bound.allow("read", "9.9.9.9"), false);
     assert.deepEqual(seen, ["read:1.1.1.1", "read:9.9.9.9"]);
+    // Each bucket goes to the binding that carries its ceiling: one binding has one limit for every key, so the connector's
+    // 600 a minute must never be judged by RL_KEY's 60. Writes share RL_KEY with reads (the same default ceiling).
+    const calls: Record<string, string[]> = { key: [], mcp: [], agent: [] };
+    const three = limiterFrom({
+      RL_KEY: { limit: async ({ key }) => { calls.key!.push(key); return { success: true }; } },
+      RL_MCP: { limit: async ({ key }) => { calls.mcp!.push(key); return { success: false }; } },
+      RL_AGENT: { limit: async ({ key }) => { calls.agent!.push(key); return { success: true }; } },
+    });
+    assert.equal(await three.allow("read", "1.1.1.1"), true);
+    assert.equal(await three.allow("write", "1.1.1.1"), true);
+    assert.equal(await three.allow("mcp", "1.1.1.1"), false);
+    assert.equal(await three.allow("mcp-agent", "Moth-1"), true);
+    assert.deepEqual(calls, { key: ["read:1.1.1.1", "write:1.1.1.1"], mcp: ["mcp:1.1.1.1"], agent: ["mcp-agent:Moth-1"] });
+    // A bucket whose binding is not bound keeps a ceiling: it falls back to the in-memory limiter with that bucket's own
+    // limit, so an old configuration with RL_KEY alone never applies 60 to the connector.
+    const keyOnly = limiterFrom({ RL_KEY: { limit: async () => ({ success: false }) } });
+    assert.equal(await keyOnly.allow("read", "3.3.3.3"), false, "RL_KEY judges reads");
+    assert.equal(await keyOnly.allow("mcp", "3.3.3.3"), true, "the connector is not judged by RL_KEY");
+    for (let i = 0; i < 599; i++) await keyOnly.allow("mcp", "3.3.3.3");
+    assert.equal(await keyOnly.allow("mcp", "3.3.3.3"), false, "but the in-memory ceiling of 600 still holds");
+    // A binding that fails never opens the gates: the request is judged by the in-memory limiter instead.
+    const broken = limiterFrom({ RL_KEY: { limit: async () => { throw new Error("binding unavailable"); } } });
+    for (let i = 0; i < 60; i++) assert.equal(await broken.allow("read", "4.4.4.4"), true);
+    assert.equal(await broken.allow("read", "4.4.4.4"), false, "the 61st is refused by the fallback");
     // The sliding window: 60 reads a minute per address; the 61st is refused, and a minute later the window has moved on.
     let t = Date.UTC(2026, 9, 3);
     const l = new MemoryRateLimiter(60, 60_000, () => t, { mcp: 600 });
