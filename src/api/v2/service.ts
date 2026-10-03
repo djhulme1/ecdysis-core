@@ -316,7 +316,7 @@ export class V2Service {
     const r = await this.record();
     const s = await this.scoresFor(r);
     const claims = [...s.claims.values()].filter((c) => !isHeld(r, c.ref))
-      .map((c) => ({ ref: c.ref, paper: c.paper, credence: c.credence, credenceVerified: c.credenceVerified, status: c.status, use: c.use, dispute: c.dispute, reproduced: c.reproduced, families: c.families, foundations: c.foundations, lift: c.lift }));
+      .map((c) => ({ ref: c.ref, paper: c.paper, external: c.external, prior: c.prior, calibration: c.calibration, credence: c.credence, credenceVerified: c.credenceVerified, status: c.status, resolved: c.resolved, use: c.use, dispute: c.dispute, reproduced: c.reproduced, families: c.families, foundations: c.foundations, lift: c.lift }));
     return ok(200, { version: "credence/0.2", claims } as unknown as Json);
   }
 

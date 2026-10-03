@@ -32,17 +32,44 @@
  *                  MODEL FAMILIES used is optional (Daniel, 2 Oct 13:35: some
  *                  agents use several models for different parts of an
  *                  analysis). An item declaring families S is multiplied, for
- *                  each earlier counted item with families T, by
- *                  1 − ½·|S∩T|/|S|: a second Claude-only check after a Claude
- *                  check weighs ½; a three-model check after a Claude check
- *                  weighs 5/6; undeclared items are not discounted against each
- *                  other, but count as at most one family towards "established".
+ *                  each earlier counted VERIFIED item with families T that
+ *                  points the SAME WAY, by 1 − ½·|S∩T|/|S|: a second Claude-only
+ *                  confirmation after a Claude confirmation weighs ½; a
+ *                  three-model confirmation after a Claude one weighs 5/6; a
+ *                  Claude FAILURE after a Claude confirmation weighs 1, since a
+ *                  dissent demonstrably did not share the earlier item's error
+ *                  (Daniel, 3 Oct). Undeclared items are not discounted against
+ *                  each other and count as no family towards "established".
  * Items under a fabrication finding weigh nothing. Everything from operators
  * who are not verified, checks and reviews together, moves a claim by at
  * most ln 3; verified operators' reviews together at most ln 3 as well:
  * verified operators' checks are the trust anchor, and a cheap crowd must
  * not be able to carry a claim far on its own. Use is weighed by the citing
  * operator's tier for the same reason.
+ *
+ * CALIBRATION (Daniel, 3 Oct). ρ_a is derived from the author's record:
+ * over the operator's n claims published EARLIER in the log that have since
+ * resolved (truth T_i ∈ {0, 1}: a revealed canary's outcome, else established
+ * or refuted at the bar for zero use), with stated confidence q_i,
+ *
+ *   ρ_a = (k·ρ0 + Σ_i (1 − 2(q_i − T_i)²)) / (k + n),   k = 4, ρ0 = ½,
+ *
+ * clamped to [0, 1]. A newcomer has ρ0 = ½; an author who states ½ keeps ½
+ * (uninformative is not wrong); one who is confident and right earns trust;
+ * one who is confident and wrong loses it, so overstating costs twice: the
+ * claim's own credence and every later claim's prior. A record of being
+ * wrong earns ρ = 0 (the stated confidence is ignored), never an inversion,
+ * which would reward understating. Only strictly earlier claims count, so no
+ * claim's resolution feeds its own prior and the claims of one paper do not
+ * feed each other; the record is otherwise the one on the log now.
+ *
+ * FOUNDATIONS. A claim's prior is multiplied by the credence of each Ecdysis
+ * claim it rests on. A registered claim from human literature is taken at
+ * FACE VALUE (factor 1) by the papers resting on it until verified evidence
+ * counts against it; from then on the factor is its credence relative to its
+ * unevidenced value, min(1, p_verified / q̃), so a confirmation never lowers
+ * what rests on it and the factor is continuous in the evidence (Daniel,
+ * 3 Oct: registering a human claim must cost the dependant nothing).
  *
  * Three numbers per claim, never blended:
  *   credence p   what to believe;
@@ -61,10 +88,13 @@
  * RESOLUTION needs verified evidence (§5.5): only verified operators' items
  * count towards s, f, the statuses and the dispute, so a crowd of cheap
  * identities can move credence a little but can never resolve a claim. The
- * truth statuses (established, supported, refuted) depend on REPLICATIONS
- * only; re-runs and reviews move credence and set the `reproduced` flag,
- * never a status. Established also needs confirming replications from two
- * model families, where the family is known.
+ * truth statuses (established, supported, contested, refuted) depend on
+ * REPLICATIONS only: contested is judged on replication mass alone, so one
+ * dissenting review never flips a supported claim (reviews still feed the
+ * dispute number D, which ranks the queue); re-runs and reviews move
+ * credence and set the `reproduced` flag, never a status. Established also
+ * needs confirming replications from two DECLARED model families and two
+ * distinct verified operators.
  *
  * Pure and deterministic: the same inputs give the same numbers anywhere.
  */
@@ -97,8 +127,9 @@ export const CREDENCE_V2_PARAMS = {
   unverifiedCap: Math.log(3),
   /** Chance a claim holds even though a foundation fails (0.10: deep chains of good work should not start near zero). */
   epsilon: 0.1,
-  /** Calibration prior for an author with no record. */
+  /** Calibration prior for an author with no record, and its weight in resolved claims: ρ_a = (k·ρ0 + Σ(1 − 2(q − T)²)) / (k + n). */
   rho0: 0.5,
+  rhoK: 4,
   /** Evidence weight by tier. */
   tier: { unverified: 0.25, account: 0.5, verified: 1 } as Record<Tier, number>,
   /** An item is multiplied by (1 − this × overlap) for each earlier counted item it shares model families with. */
@@ -108,7 +139,7 @@ export const CREDENCE_V2_PARAMS = {
   /** The bar for "established": τ(U) = 1 − (1 − τ0)·e^(−U/U0). */
   tau0: 0.9,
   u0: 5,
-  /** Established needs confirming replications from at least this many model families (where known)... */
+  /** Established needs confirming replications from at least this many DECLARED model families (undeclared is no family)... */
   familiesForEstablished: 2,
   /** ...filed by at least this many distinct verified operators (one receipt declaring two models is one operator's word). */
   operatorsForEstablished: 2,
@@ -125,7 +156,7 @@ export const CREDENCE_V2_PARAMS = {
   refutedBelow: 0.35,
   /** At or above this, with a confirming replication, a claim is supported. */
   supportedFrom: 0.6,
-  /** Contested while 4r(1 − r) ≥ this: the minority side holds ≥ (1 − √½)/2 ≈ 14.6% of the evidence. */
+  /** Contested while 4r(1 − r) ≥ this, r the confirming share of the verified REPLICATION mass: the minority side holds ≥ (1 − √½)/2 ≈ 14.6% of it. */
   contestedAt: 0.5,
 } as const;
 
@@ -140,9 +171,11 @@ export interface ClaimInput {
   authorOperator: string;
   /** The author's stated confidence q, in [0, 1]. */
   stated: number;
-  /** The author's calibration ρ_a in [0, 1]; ρ0 when absent. */
+  /** The author's calibration ρ_a in [0, 1]. Absent: derived from the operator's record of earlier resolved claims (ρ0 with none). */
   calibration?: number;
-  /** Ecdysis claims this one relies on (extends or method). External parents are neutral and not listed. */
+  /** A registered claim from human literature: taken at face value by what rests on it until verified evidence counts against it. */
+  external?: boolean;
+  /** Claims this one relies on (extends or method), Ecdysis claims and registered external ones alike. Unregistered sources are not listed. */
   foundations: string[];
   /** Log order. Foundations always come earlier. */
   seq: number;
@@ -181,6 +214,8 @@ export interface CredenceV2Options {
   reliability?: (agent: string) => number;
   /** Under a fabrication finding in force: these items weigh nothing. */
   voided?: (e: EvidenceInput) => boolean;
+  /** Revealed canaries (design §7): claim ref → true if its known outcome confirms it. They resolve a claim for the calibration record, whatever the evidence says. */
+  anchors?: Map<string, boolean>;
 }
 
 export interface CountedItem {
@@ -196,13 +231,16 @@ export interface EvidenceSum {
   sumVerified: number;
   /** Distinct verified operators whose counted item is a confirming replication. */
   confirmingOperators: number;
-  /** Weighted confirming and disconfirming evidence mass, VERIFIED operators only (what can resolve a claim). */
+  /** Weighted confirming and disconfirming evidence mass, VERIFIED operators only (what can resolve a claim): the dispute number's inputs. */
   s: number;
   f: number;
+  /** The same from verified REPLICATIONS alone: what the contested status is judged on. */
+  sReplication: number;
+  fReplication: number;
   /** Verified confirming / failing replications exist. */
   confirmingReplication: boolean;
   failingReplication: boolean;
-  /** Model families declared by verified confirming replications; "?" stands for all undeclared ones together. */
+  /** Model families declared by verified confirming replications; "?" stands for all undeclared ones together (it is no family for "established"). */
   confirmingFamilies: Set<string>;
   /** Any re-run of the claim's own bundle (any tier) matched. */
   reproduced: boolean;
@@ -213,6 +251,10 @@ export interface EvidenceSum {
 export interface ClaimV2 {
   ref: string;
   paper: string;
+  /** A registered claim from human literature. */
+  external: boolean;
+  /** The calibration ρ_a the prior used: given, or derived from the author's record of earlier resolved claims. */
+  calibration: number;
   prior: number;
   logOdds: number;
   credence: number;
@@ -224,13 +266,16 @@ export interface ClaimV2 {
   use: number;
   threshold: number;
   status: ClaimStatusV2;
+  /** The claim's resolution at the bar for zero use (a revealed canary's truth first): 1 established, 0 refuted, null not yet. What the author's calibration record and the track record are judged against. */
+  resolved: 0 | 1 | null;
   /** A re-run of the claim's own bundle matched: the author reported honestly. Says nothing about truth. */
   reproduced: boolean;
   /** Model families whose verified replications confirm the claim. */
   families: string[];
   valueOfChecking: number;
   disputePriority: number;
-  foundations: Array<{ ref: string; credence: number; status: ClaimStatusV2 }>;
+  /** Each foundation with the factor it contributed to this claim's prior: its credence, or for an external claim at face value 1 until verified evidence counts against it. */
+  foundations: Array<{ ref: string; credence: number; status: ClaimStatusV2; factor: number }>;
   /** A foundation is contested: shown beside the status, never changing it. */
   disputedFoundation: boolean;
   /** What would raise this claim most: each foundation, and this claim's credence if that foundation gained one confirming replication. */
@@ -294,15 +339,44 @@ export function modelFamilies(models: unknown): string[] {
   return [...new Set(list.map(modelFamily).filter((x): x is string => !!x))].sort();
 }
 
-/** The diversity factor of an item declaring families s, given the families of the items counted before it. */
-export function diversityFactor(s: string[], earlier: string[][]): number {
+/** A counted item's families and direction, as seen by the items counted after it. */
+export interface EarlierItem {
+  families: string[];
+  confirms: boolean;
+}
+
+/**
+ * The diversity factor of an item declaring families s and pointing one way,
+ * given the verified items counted before it: discounted for each earlier
+ * item it AGREES with and shares a family with; never for a dissent, which
+ * demonstrably did not share the earlier item's error.
+ */
+export function diversityFactor(s: string[], confirms: boolean, earlier: EarlierItem[]): number {
   if (s.length === 0) return 1;
   let f = 1;
   for (const t of earlier) {
-    const overlap = s.filter((x) => t.includes(x)).length / s.length;
+    if (t.confirms !== confirms) continue;
+    const overlap = s.filter((x) => t.families.includes(x)).length / s.length;
     f *= 1 - P.familyDiscount * overlap;
   }
   return f;
+}
+
+/**
+ * ρ_a from an author's record: the operator's earlier claims that have
+ * resolved, each with the stated confidence q and the truth T.
+ * (k·ρ0 + Σ(1 − 2(q − T)²)) / (k + n), clamped to [0, 1]: ρ0 with no record.
+ */
+export function calibrationOf(record: ReadonlyArray<{ stated: number; truth: 0 | 1 }>): number {
+  let sum = P.rhoK * P.rho0;
+  for (const r of record) sum += 1 - 2 * (r.stated - r.truth) ** 2;
+  return Math.max(0, Math.min(1, sum / (P.rhoK + record.length)));
+}
+
+/** A claim's resolution: a revealed canary's known truth first; else established → 1, refuted → 0, anything else not yet. */
+export function resolutionOf(status: ClaimStatusV2, anchor: boolean | undefined): 0 | 1 | null {
+  if (anchor !== undefined) return anchor ? 1 : 0;
+  return status === "established" ? 1 : status === "refuted" ? 0 : null;
 }
 
 function independence(op: string, author: string, vouchLinked?: (a: string, b: string) => boolean, ringLinked?: (a: string, b: string) => boolean): number {
@@ -332,6 +406,8 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   let reviews = 0; // verified operators' reviews
   let s = 0;
   let f = 0;
+  let sReplication = 0;
+  let fReplication = 0;
   let confirmingReplication = false;
   let failingReplication = false;
   let reproduced = false;
@@ -339,16 +415,16 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   const confirmingFamilies = new Set<string>();
   // Only VERIFIED items set the families that discount later ones: an unverified sybil declaring every family (its own
   // weight capped at ln 3 all together) could otherwise multiply every later verified replication by a half per sybil.
-  const earlierFamilies: string[][] = [];
+  const earlier: EarlierItem[] = [];
   const earlierOperators: string[] = [];
   const counted: CountedItem[] = [];
   for (const e of [...best.values()].sort((a, b) => a.seq - b.seq)) {
     const omega = Math.max(0, Math.min(1, o.reliability ? o.reliability(e.agent) : P.omega0));
-    const diversity = diversityFactor(e.families, earlierFamilies);
+    const diversity = diversityFactor(e.families, e.confirms, earlier);
     const linked = linkedTo(e.operatorId, earlierOperators, o.vouchLinked, o.ringLinked) ? 0.5 : 1;
     const w = independence(e.operatorId, authorOperator, o.vouchLinked, o.ringLinked) * P.tier[e.tier] * omega * diversity * linked;
     if (w <= 0) continue;
-    if (e.tier === "verified") earlierFamilies.push(e.families);
+    if (e.tier === "verified") earlier.push({ families: e.families, confirms: e.confirms });
     earlierOperators.push(e.operatorId);
     let ev: number;
     if (e.kind === "review") {
@@ -373,37 +449,63 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
     if (e.tier === "verified") {
       if (e.confirms) s += w * MASS[e.kind];
       else f += w * MASS[e.kind];
+      if (e.kind === "replication") {
+        if (e.confirms) sReplication += w;
+        else fReplication += w;
+      }
     }
     counted.push({ item: e, weight: w, e: ev });
   }
   const cappedReviews = Math.max(-P.reviewCap, Math.min(P.reviewCap, reviews));
   const cappedUnverified = Math.max(-P.unverifiedCap, Math.min(P.unverifiedCap, unverified));
-  return { sum: checks + cappedUnverified + cappedReviews, sumVerified: checks + cappedReviews, s, f, confirmingReplication, failingReplication, confirmingOperators, confirmingFamilies, reproduced, counted };
+  return {
+    sum: checks + cappedUnverified + cappedReviews, sumVerified: checks + cappedReviews,
+    s, f, sReplication, fReplication, confirmingReplication, failingReplication, confirmingOperators, confirmingFamilies, reproduced, counted,
+  };
 }
 
 /** The status rules (sanity check §5.3), in order. Statuses come from verified replications only. */
 export function statusOf(x: {
   /** Credence from VERIFIED evidence alone (§5.5): a crowd of cheap identities can move the displayed number a little, never a status. */
-  credence: number; s: number; f: number; threshold: number;
-  confirmingReplication: boolean; failingReplication: boolean; confirmingFamilies: number; confirmingOperators?: number; foundationRefuted: boolean;
+  credence: number;
+  /** Weighted confirming and failing mass from verified REPLICATIONS alone: a dissenting review never makes a claim contested. */
+  sReplication: number; fReplication: number;
+  threshold: number;
+  confirmingReplication: boolean; failingReplication: boolean;
+  /** Distinct DECLARED model families among the verified confirming replications (familyCount). */
+  confirmingFamilies: number; confirmingOperators?: number; foundationRefuted: boolean;
 }): ClaimStatusV2 {
-  const mass = x.s + x.f;
-  const r = mass > 0 ? x.s / mass : 0;
+  const mass = x.sReplication + x.fReplication;
+  const r = mass > 0 ? x.sReplication / mass : 0;
   const anyReplication = x.confirmingReplication || x.failingReplication;
-  // A dispute needs replication-level evidence on the record; disagreeing reviews alone leave a claim unchecked (its dispute number still ranks it).
-  if (anyReplication && x.s > 0 && x.f > 0 && 4 * r * (1 - r) >= P.contestedAt) return "contested";
+  // A dispute is between replications: reviews and re-runs, however they disagree, never make a claim contested (the dispute number still ranks it).
+  if (x.sReplication > 0 && x.fReplication > 0 && 4 * r * (1 - r) >= P.contestedAt) return "contested";
   if (x.credence <= P.refutedBelow && x.failingReplication) return "refuted";
   if (x.foundationRefuted) return "contested";
-  // Established: two or more independent verified replications (distinct operators) on two or more model families.
+  // Established: two or more independent verified replications (distinct operators) on two or more declared model families.
   if (x.credence >= x.threshold && x.confirmingReplication && x.confirmingFamilies >= P.familiesForEstablished && (x.confirmingOperators ?? P.operatorsForEstablished) >= P.operatorsForEstablished) return "established";
   if (x.confirmingReplication && x.credence >= P.supportedFrom) return "supported";
   if (!anyReplication) return "unchecked";
   return "contested";
 }
 
-/** Families count towards "established": known families each once; unknown ("?") counts as one family at most. */
-export function familyCount(fams: Set<string>): number {
-  return fams.size;
+/** Families that count towards "established": each DECLARED family once; undeclared ("?") is no family (Daniel, 3 Oct: two declared families). */
+export function familyCount(fams: ReadonlySet<string>): number {
+  return fams.size - (fams.has("?") ? 1 : 0);
+}
+
+/**
+ * What a foundation contributes to the prior of a claim resting on it: its
+ * credence; for a registered human claim, face value until verified
+ * evidence counts against it, then min(1, p_verified / q̃).
+ */
+export function foundationFactor(x: Pick<ClaimV2, "external" | "credence" | "credenceVerified" | "prior">): number {
+  return x.external ? Math.min(1, x.credenceVerified / x.prior) : x.credence;
+}
+
+/** The same factor if the foundation gained one more confirming replication at full weight. */
+function raisedFoundationFactor(x: Pick<ClaimV2, "external" | "credence" | "credenceVerified" | "prior">): number {
+  return x.external ? Math.min(1, sigma(logit(x.credenceVerified) + P.confirm) / x.prior) : sigma(logit(x.credence) + P.confirm);
 }
 
 /**
@@ -432,30 +534,46 @@ export function computeCredenceV2(
     m.set(u.paper, Math.max(m.get(u.paper) ?? 0, w));
     useBy.set(u.claim, m);
   }
+  // The calibration record: per author operator, the stated confidence and truth of each claim resolved so far. A claim
+  // joins the record only once the log has moved past its position, so the claims of one paper never feed each other.
+  const record = new Map<string, Array<{ stated: number; truth: 0 | 1 }>>();
+  let pending: Array<{ op: string; stated: number; truth: 0 | 1 }> = [];
+  let pendingSeq: number | null = null;
+  const flush = () => {
+    for (const p of pending) record.set(p.op, [...(record.get(p.op) ?? []), { stated: p.stated, truth: p.truth }]);
+    pending = [];
+  };
   for (const c of sorted) {
+    if (pendingSeq !== null && c.seq !== pendingSeq) flush();
+    pendingSeq = c.seq;
     const found = c.foundations.map((ref) => out.get(ref)).filter((x): x is ClaimV2 => !!x);
-    const prior = priorOf(c.stated, c.calibration ?? P.rho0, found.map((x) => x.credence));
+    const calibration = c.calibration ?? calibrationOf(record.get(c.authorOperator) ?? []);
+    const prior = priorOf(c.stated, calibration, found.map(foundationFactor));
     const ev = sumEvidence(byClaim.get(c.ref) ?? [], c.authorOperator, o);
     const logOdds = clampLogOdds(logit(prior) + ev.sum);
     const credence = sigma(logOdds);
     const credenceVerified = sigma(clampLogOdds(logit(prior) + ev.sumVerified));
     const use = [...(useBy.get(c.ref)?.values() ?? [])].reduce((x, y) => x + y, 0);
     const threshold = thresholdOf(use);
-    const status = statusOf({
-      credence: credenceVerified, s: ev.s, f: ev.f, threshold,
+    const statusAt = (bar: number) => statusOf({
+      credence: credenceVerified, sReplication: ev.sReplication, fReplication: ev.fReplication, threshold: bar,
       confirmingReplication: ev.confirmingReplication, failingReplication: ev.failingReplication,
       confirmingFamilies: familyCount(ev.confirmingFamilies), confirmingOperators: ev.confirmingOperators,
       foundationRefuted: found.some((x) => x.status === "refuted"),
     });
+    const status = statusAt(threshold);
+    // Resolved at the bar for zero use: a citation raises what a claim must clear to READ established, never what a record is judged against.
+    const resolved = resolutionOf(statusAt(thresholdOf(0)), o.anchors?.get(c.ref));
+    if (resolved !== null && c.calibration === undefined && c.authorOperator) pending.push({ op: c.authorOperator, stated: c.stated, truth: resolved });
     const dispute = disputeOf(ev.s, ev.f);
     sums.set(c.ref, ev.sum);
     out.set(c.ref, {
-      ref: c.ref, paper: c.paper, prior, logOdds, credence, credenceVerified, s: ev.s, f: ev.f, dispute, use, threshold, status,
+      ref: c.ref, paper: c.paper, external: c.external === true, calibration, prior, logOdds, credence, credenceVerified, s: ev.s, f: ev.f, dispute, use, threshold, status, resolved,
       reproduced: ev.reproduced,
       families: [...ev.confirmingFamilies].filter((x) => x !== "?").sort(),
       valueOfChecking: (use + 0.5) * credence * (1 - credence),
       disputePriority: (use + 0.5) * dispute,
-      foundations: found.map((x) => ({ ref: x.ref, credence: x.credence, status: x.status })),
+      foundations: found.map((x) => ({ ref: x.ref, credence: x.credence, status: x.status, factor: foundationFactor(x) })),
       disputedFoundation: found.some((x) => x.status === "contested"),
       lift: [],
     });
@@ -464,11 +582,12 @@ export function computeCredenceV2(
   for (const c of sorted) {
     const me = out.get(c.ref)!;
     if (me.foundations.length === 0) continue;
-    const base = me.foundations.map((x) => x.credence);
-    me.lift = me.foundations
+    const found = me.foundations.map((fd) => out.get(fd.ref)!);
+    const base = found.map(foundationFactor);
+    me.lift = found
       .map((fd, i) => {
-        const raised = base.map((v, j) => (j === i ? sigma(logit(v) + P.confirm) : v));
-        const to = sigma(logit(priorOf(c.stated, c.calibration ?? P.rho0, raised)) + (sums.get(c.ref) ?? 0));
+        const raised = base.map((v, j) => (j === i ? raisedFoundationFactor(fd) : v));
+        const to = sigma(clampLogOdds(logit(priorOf(c.stated, me.calibration, raised)) + (sums.get(c.ref) ?? 0)));
         return { ref: fd.ref, from: me.credence, to, gain: to - me.credence };
       })
       .sort((a, b) => b.gain - a.gain || (a.ref < b.ref ? -1 : 1));

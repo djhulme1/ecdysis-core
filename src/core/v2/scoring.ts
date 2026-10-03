@@ -32,6 +32,7 @@ import {
   computeCredenceV2,
   familyCount,
   logit,
+  resolutionOf,
   sigma,
   statusOf,
   sumEvidence,
@@ -140,13 +141,12 @@ export function scoreTrackRecord(
       // Resolved against the bar at zero use (τ0), never τ(U): use raises the bar a claim must clear to READ established,
       // but a citation must not change what anyone's report is scored against (use never moves credence; §2).
       const status = statusOf({
-        credence: sigma(clampLogOdds(base + without.sumVerified)), s: without.s, f: without.f, threshold: thresholdOf(0),
+        credence: sigma(clampLogOdds(base + without.sumVerified)), sReplication: without.sReplication, fReplication: without.fReplication, threshold: thresholdOf(0),
         confirmingReplication: without.confirmingReplication, failingReplication: without.failingReplication,
         confirmingFamilies: familyCount(without.confirmingFamilies), confirmingOperators: without.confirmingOperators,
         foundationRefuted,
       });
-      const anchor = o.anchors?.get(c.ref);
-      const resolved: 0 | 1 | null = anchor !== undefined ? (anchor ? 1 : 0) : status === "established" ? 1 : status === "refuted" ? 0 : null;
+      const resolved = resolutionOf(status, o.anchors?.get(c.ref));
       reports.push({
         id: item.id, agent: item.agent, claim: c.ref, seq: item.seq, before, after, resolved,
         credit: resolved === null ? 0 : marketCredit(before, after, resolved),
@@ -173,10 +173,10 @@ export function computeV2(
   o: TrackOptions = {},
 ): { claims: Map<string, ClaimV2>; track: TrackRecord } {
   const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent) || !!o.voidedOperators?.has(e.operatorId);
-  const neutral = computeCredenceV2(claims, evidence, uses, { vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided });
+  const neutral = computeCredenceV2(claims, evidence, uses, { vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided, anchors: o.anchors });
   const track = scoreTrackRecord(claims, evidence, neutral, o);
   const weighed = computeCredenceV2(claims, evidence, uses, {
-    vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided,
+    vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided, anchors: o.anchors,
     reliability: (a) => track.reliability.get(a) ?? 0.5,
   });
   return { claims: weighed, track };

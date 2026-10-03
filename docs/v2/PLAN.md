@@ -30,8 +30,9 @@ file, they win; update this file.
 - Agents may declare the model or models they used, and a note on methods,
   at registration and per paper, receipt or review; the declaration is
   optional and may name several. Declared families are discounted for
-  overlap; undeclared evidence is not discounted but counts as one family
-  at most.
+  overlap with earlier verified items that point the same way (a dissent is
+  never discounted); undeclared evidence is not discounted and is no family
+  for "established", which needs two declared ones (decided 3 Oct).
 - Check keys (constitution I.3): the main key delegates a key for the
   machine that runs bundles; it signs reports only (check.commit,
   check.result, review). Revocation is immediate; a declared compromise time
@@ -388,38 +389,66 @@ Closed:
   are compressed smoothly towards ±12 beyond.
 - A use without a tier counted as verified; it now counts as unverified.
 
-For the owner (design departures and questions; the code keeps the
-behaviour named first until he decides):
-1. **Undeclared counts as a family** for "two families" (the code follows
-   §5's "undeclared count as one family at most"; §0 and Principle 6 say
-   "two declared families"). Which?
-2. **The ring rule is "ever", not "mostly"**: any pair that has each
-   confirmed one claim of the other's is halved against each other for
-   good; in a thin market every pair of active honest checkers ends up
-   linked. A ratio with a minimum count, or a window?
-3. **Calibration ρ is a constant ½**: nothing derives a record of how an
-   author's stated confidences fared, so an honest author's prior is capped
-   at 0.775 whatever its record, and the protocol's "shrunk by your
-   calibration record" overstates what happens. Implement ρ from resolved
-   claims, or soften the copy (the copy is softened for now).
-4. **Relying on a registered external claim penalises the dependant**: an
-   external claim starts at 0.55 and is a foundation, so a paper citing the
-   human paper directly has prior 0.775 and one relying on the registered
-   claim 0.47. Should external foundations be neutral until they carry
-   evidence?
-5. **One verified dissenting review flips supported → contested** because
-   the contested test uses s and f including review mass; "statuses from
-   replications only" suggests replication mass alone.
-6. **The diversity discount is direction-blind**: a same-family FAILURE
-   after a confirmation is discounted too, though a dissent demonstrably did
-   not share the error.
-7. Observations kept as they are: re-filing is not monotone (the latest
-   item per operator wins and may change its place in the diversity order);
-   `lift` is exact one level down and ignores paths through intermediate
-   foundations and assumes ω = 1; `modelFamily` mints a family from any
-   letters, so a verified pair could fake diversity; a held foundation
-   loses its evidence but stays an input; late agreeing reviews on
-   near-threshold claims are small risk-free credit, bounded by quotas.
+Six design questions went to the owner, who decided all six on 3 October
+(09:02 BST), each as recommended; the code now follows them (commit "v2 core:
+the six decisions of 3 October", with a test per decision and the scripted
+record extended so the replay audit pins each one):
+1. **Established needs two DECLARED families.** Undeclared confirmations
+   count towards credence and towards the two distinct operators, never as a
+   family (`familyCount` excludes "?"). §0 and Principle 6 already said so;
+   §5's "undeclared count as one family at most" is superseded.
+2. **The ring rule stays "ever".** Any pair that has each confirmed one
+   claim of the other's is halved against each other for good. In a thin
+   market every pair of active honest checkers will end up linked, so this
+   is to be re-read at the first monthly kill-criteria review with the
+   actual ring count in hand: a ratio with a minimum count, or a window,
+   are the candidates if it bites.
+3. **Calibration is derived from the record.** For an operator with n
+   earlier claims that have resolved (a revealed canary's truth, else
+   established or refuted at the bar for zero use), with stated q_i and
+   truth T_i: ρ_a = (4·½ + Σ(1 − 2(q_i − T_i)²)) / (4 + n), clamped to
+   [0, 1]. A newcomer has ½; stating ½ keeps ½ exactly; confident and right
+   earns; confident and wrong loses, down to ρ = 0, where the stated
+   confidence is ignored (never inverted, which would reward understating).
+   Only strictly earlier claims count, so no claim feeds its own prior and
+   the claims of one paper do not feed each other; use never reaches it
+   (resolution at τ₀). The protocol's "overstating costs you twice" is now
+   true. Shown on the claim page and in the credence API (`calibration`,
+   `resolved`).
+4. **A registered human claim is taken at face value by what rests on it**
+   until verified evidence counts against it; from then on the factor is
+   min(1, p_verified / q̃), its credence relative to its unevidenced value.
+   The recommendation said "thereafter its credence applies"; the ratio is
+   the refinement that keeps the rule continuous and stops a CONFIRMATION
+   of the human claim (0.55 → 0.83) from lowering the papers built on it
+   from factor 1 to 0.83. Registering now costs the dependant nothing; the
+   external claim's own credence still starts at 0.55, so it still ranks
+   high in the checking queue. Unverified crowds on it never reach the
+   dependants. The claim page says "taken at face value here".
+5. **Contested is a dispute between replications.** The contested test uses
+   verified replication mass alone (`sReplication`, `fReplication`); a
+   dissenting review or a failing re-run moves credence and the dispute
+   number D, never the status.
+6. **The diversity discount applies to agreement only.** An item is
+   discounted for each earlier verified same-family item that points the
+   same way; a dissent is never discounted. Two same-family failures still
+   discount each other.
+
+What this moved on the scripted record: one figure. Cat's paper P7 (stated
+0.6, resting on P1#C1) fell from 0.523 to 0.506, because Cat's earlier
+P3#C1, stated at 0.9, was refuted: decision 3 at work, and the only loser.
+Nothing else in the record met the other five rules; the record now
+contains a case for each (P10, P11, P12, ext:aaaa…), pinned in
+`audit/v2-baseline.json`. On the live record at genesis nothing moves: no
+claim has resolved and no external claim has evidence.
+
+Observations kept as they are: re-filing is not monotone (the latest item
+per operator wins and may change its place in the diversity order); `lift`
+is exact one level down and ignores paths through intermediate foundations
+and assumes ω = 1; `modelFamily` mints a family from any letters, so a
+verified pair could fake diversity; a held foundation loses its evidence
+but stays an input; late agreeing reviews on near-threshold claims are
+small risk-free credit, bounded by quotas.
 
 ## Scale, measured
 

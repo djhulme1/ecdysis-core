@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   CREDENCE_V2_PARAMS as P,
+  calibrationOf,
   computeCredenceV2,
   disputeOf,
   diversityFactor,
@@ -139,16 +140,17 @@ describe("credence/0.2", () => {
     assert.equal(mixed.status, "established");
     const unknown = computeCredenceV2([claim("m#C1", 1)], [1, 2].map((i) => ev("m#C1", "replication", true, `op-u${i}`, { families: [] })), [], full).get("m#C1")!;
     near(unknown.s, 2); // undeclared items are not discounted against each other
-    assert.equal(unknown.status, "supported", "but undeclared counts as one family at most");
+    assert.equal(unknown.status, "supported", "but undeclared is no family: established needs two declared ones");
   });
 
   it("declaring models is optional, and an agent may declare several: the discount follows the overlap", () => {
-    // After a Claude-only check: another Claude-only check weighs ½; a three-model check that includes Claude weighs 5/6; a Gemini-only check weighs 1.
-    near(diversityFactor(["claude"], [["claude"]]), 0.5);
-    near(diversityFactor(["claude", "gpt", "gemini"], [["claude"]]), 5 / 6);
-    near(diversityFactor(["gemini"], [["claude"]]), 1);
-    near(diversityFactor(["claude"], [["claude", "gpt"]]), 0.5, 1e-9); // fully covered by an earlier mixed check
-    near(diversityFactor([], [["claude"], ["gpt"]]), 1); // undeclared: no discount, and no diversity credit either
+    // After a Claude-only confirmation: another Claude-only confirmation weighs ½; a three-model one that includes Claude weighs 5/6; a Gemini-only one weighs 1.
+    const claude = [{ families: ["claude"], confirms: true }];
+    near(diversityFactor(["claude"], true, claude), 0.5);
+    near(diversityFactor(["claude", "gpt", "gemini"], true, claude), 5 / 6);
+    near(diversityFactor(["gemini"], true, claude), 1);
+    near(diversityFactor(["claude"], true, [{ families: ["claude", "gpt"], confirms: true }]), 0.5, 1e-9); // fully covered by an earlier mixed check
+    near(diversityFactor([], true, [...claude, { families: ["gpt"], confirms: true }]), 1); // undeclared: no discount, and no diversity credit either
     const items = [
       ev("d2#C1", "replication", true, "op-a", { families: ["claude"] }),
       ev("d2#C1", "replication", true, "op-b", { families: ["claude", "gpt", "gemini"] }),
@@ -304,6 +306,180 @@ describe("credence/0.2: the maths review's defects, closed", () => {
     assert.ok(high.valueOfChecking > 0, "still worth a look, however little");
     const thenFail = computeCredenceV2([claim("p#C1", 1)], [...many, ev("p#C1", "replication", false, "op-x", { seq: 999 })], [], full).get("p#C1")!;
     assert.ok(thenFail.credence < high.credence, "a failure after thirty confirmations still moves the number");
+  });
+});
+
+/**
+ * The maths review's six design questions, decided by Daniel on 3 Oct 2026
+ * (all six as recommended): 1 two DECLARED families for established; 2 the
+ * ring rule stays "ever"; 3 calibration derived from the record; 4 external
+ * foundations at face value until verified evidence counts against them;
+ * 5 contested from replication mass only; 6 the diversity discount only for
+ * agreement.
+ */
+describe("credence/0.2: the six decisions of 3 October", () => {
+  /** Two verified confirming replications from two operators on two declared families, filed on `ref`. */
+  const establish = (ref: string, seq0 = 0) => [ev(ref, "replication", true, `op-e1-${ref}`, { families: ["claude"], seq: seq0 + 1 }), ev(ref, "replication", true, `op-e2-${ref}`, { families: ["gpt"], seq: seq0 + 2 })];
+  const refute = (ref: string, seq0 = 0) => [ev(ref, "replication", false, `op-r1-${ref}`, { families: ["claude"], seq: seq0 + 1 }), ev(ref, "replication", false, `op-r2-${ref}`, { families: ["gpt"], seq: seq0 + 2 })];
+
+  it("1. established needs two DECLARED families: undeclared confirmations count towards credence and operators, never as a family", () => {
+    const declaredAndNot = [ev("q1#C1", "replication", true, "op-a", { families: ["claude"] }), ev("q1#C1", "replication", true, "op-b", { families: [] })];
+    const r = computeCredenceV2([claim("q1#C1", 1, { stated: 1 })], declaredAndNot, [], full).get("q1#C1")!;
+    near(r.s, 2, 1e-9);
+    assert.ok(r.credenceVerified >= r.threshold, "credence clears the bar");
+    assert.equal(r.status, "supported", "one declared family and one undeclared: not established");
+    assert.deepEqual(r.families, ["claude"]);
+    const second = computeCredenceV2([claim("q1#C1", 1, { stated: 1 })], [...declaredAndNot, ev("q1#C1", "replication", true, "op-c", { families: ["gpt"] })], [], full).get("q1#C1")!;
+    assert.equal(second.status, "established", "a second declared family establishes it");
+    const twoUndeclared = computeCredenceV2([claim("q1#C1", 1, { stated: 1 })], [ev("q1#C1", "replication", true, "op-a", { families: [] }), ev("q1#C1", "replication", true, "op-b", { families: [] })], [], full).get("q1#C1")!;
+    assert.equal(twoUndeclared.status, "supported", "two undeclared confirmations are two operators and no family");
+  });
+
+  it("3. calibration is the author's record: confident and right earns trust, confident and wrong loses it, half is neutral, never inverted", () => {
+    const author = "op-auth";
+    const mine = (ref: string, seq: number, stated: number) => claim(ref, seq, { authorOperator: author, stated });
+    // Two earlier claims stated 0.9 and established: ρ = (2 + 2·(1 − 2·0.01)) / 6 = 0.66.
+    const good = computeCredenceV2([mine("a1#C1", 1, 0.9), mine("a2#C1", 2, 0.9), mine("a3#C1", 3, 0.9)], [...establish("a1#C1", 10), ...establish("a2#C1", 20)], [], full);
+    assert.equal(good.get("a1#C1")!.resolved, 1);
+    assert.equal(good.get("a2#C1")!.resolved, 1);
+    assert.equal(good.get("a3#C1")!.resolved, null);
+    near(good.get("a1#C1")!.calibration, P.rho0, 1e-12); // the first claim: no record yet
+    near(good.get("a3#C1")!.calibration, (2 + 2 * (1 - 2 * 0.01)) / 6);
+    near(good.get("a3#C1")!.prior, priorOf(0.9, (2 + 2 * 0.98) / 6, []));
+    assert.ok(good.get("a3#C1")!.prior > priorOf(0.9, P.rho0, []), "a good record raises the next claim's prior");
+    // Two earlier claims stated 0.9 and refuted: ρ = (2 + 2·(1 − 2·0.81)) / 6 ≈ 0.127.
+    const bad = computeCredenceV2([mine("b1#C1", 1, 0.9), mine("b2#C1", 2, 0.9), mine("b3#C1", 3, 0.9)], [...refute("b1#C1", 10), ...refute("b2#C1", 20)], [], full);
+    assert.equal(bad.get("b1#C1")!.resolved, 0);
+    near(bad.get("b3#C1")!.calibration, (2 + 2 * (1 - 2 * 0.81)) / 6);
+    assert.ok(bad.get("b3#C1")!.prior < priorOf(0.9, P.rho0, []), "a bad record shrinks the next claim's prior towards a half");
+    // Overstating costs twice: the refuted claims themselves, and every later claim's prior.
+    assert.ok(bad.get("b3#C1")!.prior < good.get("a3#C1")!.prior);
+    // Stating a half is uninformative, not wrong: however many resolve, ρ stays exactly ½.
+    const neutral = computeCredenceV2(
+      [mine("n1#C1", 1, 0.5), mine("n2#C1", 2, 0.5), mine("n3#C1", 3, 0.5), mine("n4#C1", 4, 0.5)],
+      [...establish("n1#C1", 10), ...refute("n2#C1", 20), ...establish("n3#C1", 30)], [], full,
+    );
+    near(neutral.get("n4#C1")!.calibration, 0.5, 1e-12);
+    // A record of being wrong earns ρ = 0, never an inversion: five claims stated 0.95 and refuted would give −0.225 unclamped.
+    const wrong = computeCredenceV2(
+      [1, 2, 3, 4, 5, 6].map((i) => mine(`w${i}#C1`, i, 0.95)),
+      [1, 2, 3, 4, 5].flatMap((i) => refute(`w${i}#C1`, 10 * i)), [], full,
+    ).get("w6#C1")!;
+    assert.ok((2 + 5 * (1 - 2 * 0.9025)) / 9 < 0);
+    assert.equal(wrong.calibration, 0);
+    near(wrong.prior, priorOf(0.95, 0, []));
+    near(wrong.prior, priorOf(0.05, 0, []), 1e-12); // the stated confidence is ignored, not inverted
+    // Clamped at 1 too: the formula never exceeds it, since each term is at most 1.
+    const perfect = Array.from({ length: 40 }, (_, i) => ({ stated: 1, truth: 1 as const }));
+    assert.ok(calibrationOf(perfect) < 1 && calibrationOf(perfect) > 0.95);
+    near(calibrationOf([]), P.rho0, 1e-12);
+  });
+
+  it("3. the record is strictly earlier claims, resolved at the bar for zero use; canaries anchor it; externals feed nothing", () => {
+    const author = "op-auth";
+    const mine = (ref: string, seq: number, stated: number, o: Partial<ClaimInput> = {}) => claim(ref, seq, { authorOperator: author, stated, ...o });
+    // The claims of one paper share a log position: the first's resolution does not feed the second's prior.
+    const paper = computeCredenceV2([mine("p#C1", 1, 0.9), mine("p#C2", 1, 0.9), mine("later#C1", 2, 0.9)], establish("p#C1", 10), [], full);
+    near(paper.get("p#C2")!.calibration, P.rho0, 1e-12);
+    assert.ok(paper.get("later#C1")!.calibration > P.rho0, "the next paper does see it");
+    // Eight verified citations raise the earlier claim's bar to 0.98 so it READS supported; it is still resolved, and ρ does not move.
+    const quiet = computeCredenceV2([mine("a1#C1", 1, 0.9), mine("a2#C1", 2, 0.9)], establish("a1#C1", 10), [], full);
+    const uses = Array.from({ length: 8 }, (_, i) => ({ claim: "a1#C1", paper: `p${i}`, operatorId: `op-cite${i}`, tier: "verified" as const }));
+    const cited = computeCredenceV2([mine("a1#C1", 1, 0.9), mine("a2#C1", 2, 0.9)], establish("a1#C1", 10), uses, full);
+    assert.equal(quiet.get("a1#C1")!.status, "established");
+    assert.equal(cited.get("a1#C1")!.status, "supported");
+    assert.equal(cited.get("a1#C1")!.resolved, 1);
+    near(cited.get("a2#C1")!.calibration, quiet.get("a2#C1")!.calibration, 1e-12);
+    near(cited.get("a2#C1")!.credence, quiet.get("a2#C1")!.credence, 1e-12);
+    // A revealed canary resolves against its known truth, whatever the evidence says.
+    const anchored = computeCredenceV2([mine("a1#C1", 1, 0.9), mine("a2#C1", 2, 0.9)], establish("a1#C1", 10), [], { ...full, anchors: new Map([["a1#C1", false]]) });
+    assert.equal(anchored.get("a1#C1")!.resolved, 0);
+    assert.equal(anchored.get("a1#C1")!.status, "established", "the reveal scores; it does not rewrite the evidence");
+    near(anchored.get("a2#C1")!.calibration, (2 + (1 - 2 * 0.81)) / 5);
+    // A registered external claim has no author: its placeholder confidence feeds nobody's record, and its own ρ is 0.
+    const ext = computeCredenceV2(
+      [claim("ext:h#C1", 1, { authorOperator: "", stated: 0.5, calibration: 0, external: true }), claim("ext:k#C1", 2, { authorOperator: "", stated: 0.5, calibration: 0, external: true }), claim("x#C1", 3, { authorOperator: "" })],
+      [...establish("ext:h#C1", 10), ...refute("ext:k#C1", 20)], [], full,
+    );
+    assert.equal(ext.get("ext:h#C1")!.calibration, 0);
+    near(ext.get("x#C1")!.calibration, P.rho0, 1e-12);
+    // The author's own evidence weighs nothing, so an author cannot resolve its own claims to build a record.
+    const self = computeCredenceV2([mine("s1#C1", 1, 0.9), mine("s2#C1", 2, 0.9)], [ev("s1#C1", "replication", true, author, { families: ["claude"] }), ev("s1#C1", "replication", true, author, { families: ["gpt"], agent: "other-agent" })], [], full);
+    assert.equal(self.get("s1#C1")!.resolved, null);
+    near(self.get("s2#C1")!.calibration, P.rho0, 1e-12);
+  });
+
+  it("4. a registered human claim is taken at face value by what rests on it until verified evidence counts against it", () => {
+    const ext = claim("ext:h#C1", 1, { authorOperator: "", stated: 0.5, calibration: 0, external: true });
+    const dep = claim("d#C1", 2, { foundations: ["ext:h#C1"] });
+    const alone = computeCredenceV2([claim("d#C1", 2)], [], [], full).get("d#C1")!;
+    const unevidenced = computeCredenceV2([ext, dep], [], [], full);
+    near(unevidenced.get("ext:h#C1")!.credence, 0.55, 1e-12);
+    near(unevidenced.get("d#C1")!.prior, alone.prior, 1e-12);
+    assert.equal(unevidenced.get("d#C1")!.foundations[0]!.factor, 1);
+    assert.equal(unevidenced.get("d#C1")!.lift[0]!.gain, 0, "a confirmation of a face-value foundation cannot raise what rests on it");
+    // A native claim at the same credence IS a cap: the external one is not, so registering costs the dependant nothing.
+    const native = computeCredenceV2([claim("n#C1", 1, { stated: 0.5, calibration: 0 }), claim("d#C1", 2, { foundations: ["n#C1"] })], [], [], full).get("d#C1")!;
+    near(native.prior, priorOf(0.8, P.rho0, [0.55]));
+    assert.ok(native.prior < alone.prior);
+    // Verified confirmations never lower it.
+    const confirmed = computeCredenceV2([ext, dep], establish("ext:h#C1", 10), [], full);
+    assert.ok(confirmed.get("ext:h#C1")!.credence > 0.55);
+    near(confirmed.get("d#C1")!.prior, alone.prior, 1e-12);
+    // A verified failure does: the factor is the credence relative to its unevidenced value.
+    const failed = computeCredenceV2([ext, dep], [ev("ext:h#C1", "replication", false, "op-f", { families: ["claude"] })], [], full);
+    const e = failed.get("ext:h#C1")!;
+    const factor = Math.min(1, e.credenceVerified / e.prior);
+    assert.ok(factor < 1 && factor > 0);
+    near(failed.get("d#C1")!.foundations[0]!.factor, factor);
+    near(failed.get("d#C1")!.prior, priorOf(0.8, P.rho0, [factor]));
+    assert.ok(failed.get("d#C1")!.lift[0]!.gain > 0, "now a confirmation would raise the dependant");
+    // Continuous in the evidence: a confirmation beside the failure brings the factor most of the way back, with no cliff at zero.
+    const split = computeCredenceV2([ext, dep], [ev("ext:h#C1", "replication", false, "op-f", { families: ["claude"] }), ev("ext:h#C1", "replication", true, "op-c", { families: ["gpt"] })], [], full);
+    const sf = split.get("d#C1")!.foundations[0]!.factor;
+    assert.ok(sf > factor && sf < 1, `${sf}`);
+    near(sf, sigma(logit(0.55) + Math.log(4) - Math.log(6)) / 0.55);
+    // An unverified crowd against it moves its own displayed credence a little and the dependant not at all.
+    const crowd = Array.from({ length: 20 }, (_, i) => ev("ext:h#C1", "replication", false, `op-s${i}`, { tier: "unverified", families: [] }));
+    const crowded = computeCredenceV2([ext, dep], crowd, [], full);
+    assert.ok(crowded.get("ext:h#C1")!.credence < 0.55);
+    assert.equal(crowded.get("d#C1")!.foundations[0]!.factor, 1);
+    near(crowded.get("d#C1")!.prior, alone.prior, 1e-12);
+  });
+
+  it("5. contested is a dispute between replications: a dissenting review or a failing re-run never flips a supported claim", () => {
+    const supported = computeCredenceV2([claim("c#C1", 1)], [ev("c#C1", "replication", true, "op-a")], [], full).get("c#C1")!;
+    assert.equal(supported.status, "supported");
+    const review = computeCredenceV2([claim("c#C1", 1)], [ev("c#C1", "replication", true, "op-a"), ev("c#C1", "review", false, "op-b")], [], full).get("c#C1")!;
+    assert.equal(review.status, "supported", "before: s = 1, f = ¼, 4r(1 − r) = 0.64 made it contested");
+    near(review.dispute, disputeOf(1, 0.25), 1e-12); // the disagreement still shows in the dispute number, which ranks the queue
+    assert.ok(review.credence < supported.credence, "and in the credence");
+    const rerun = computeCredenceV2([claim("c#C1", 1)], [ev("c#C1", "replication", true, "op-a"), ev("c#C1", "rerun", false, "op-b")], [], full).get("c#C1")!;
+    assert.equal(rerun.status, "supported", "a misreport moves credence; a dispute needs a replication against");
+    near(rerun.dispute, disputeOf(1, 0.5), 1e-12);
+    const replication = computeCredenceV2([claim("c#C1", 1)], [ev("c#C1", "replication", true, "op-a"), ev("c#C1", "replication", false, "op-b")], [], full).get("c#C1")!;
+    assert.equal(replication.status, "contested");
+    // Disagreeing reviews alone still leave a claim unchecked (unchanged).
+    const reviewsOnly = computeCredenceV2([claim("c#C1", 1)], [ev("c#C1", "review", true, "op-a"), ev("c#C1", "review", false, "op-b")], [], full).get("c#C1")!;
+    assert.equal(reviewsOnly.status, "unchecked");
+    assert.ok(reviewsOnly.dispute > 0);
+  });
+
+  it("6. the diversity discount applies to agreement only: a same-family dissent weighs in full", () => {
+    const claude = [{ families: ["claude"], confirms: true }];
+    near(diversityFactor(["claude"], true, claude), 0.5);
+    near(diversityFactor(["claude"], false, claude), 1, 1e-12);
+    near(diversityFactor(["claude"], false, [{ families: ["claude"], confirms: false }]), 0.5);
+    const confirm = ev("v#C1", "replication", true, "op-a", { families: ["claude"], seq: 1 });
+    const sameFail = computeCredenceV2([claim("v#C1", 1)], [confirm, ev("v#C1", "replication", false, "op-b", { families: ["claude"], seq: 2 })], [], full).get("v#C1")!;
+    near(sameFail.s, 1);
+    near(sameFail.f, 1, 1e-12); // before: ½
+    near(sameFail.logOdds - logit(sameFail.prior), Math.log(4) - Math.log(6), 1e-12);
+    assert.equal(sameFail.status, "contested");
+    const sameConfirm = computeCredenceV2([claim("v#C1", 1)], [confirm, ev("v#C1", "replication", true, "op-b", { families: ["claude"], seq: 2 })], [], full).get("v#C1")!;
+    near(sameConfirm.s, 1.5, 1e-12); // agreement on one family is still discounted
+    const twoFails = computeCredenceV2([claim("v#C1", 1)], [ev("v#C1", "replication", false, "op-a", { families: ["claude"], seq: 1 }), ev("v#C1", "replication", false, "op-b", { families: ["claude"], seq: 2 })], [], full).get("v#C1")!;
+    near(twoFails.f, 1.5, 1e-12); // two same-family failures agree with each other: the second weighs half
   });
 });
 

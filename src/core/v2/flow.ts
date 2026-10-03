@@ -357,9 +357,10 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         const op = str(p["operatorId"]);
         external.set(id, { source: str(p["source"]), quote: str(p["quote"]), test: str(p["test"]), handle: str(p["handle"]), operatorId: op });
         const ref = `${id}#C1`;
-        // The registrant is not the author: human science has no operator here. A neutral prior of ½; nobody's own evidence is excluded.
+        // The registrant is not the author: human science has no operator here. A neutral prior of ½; nobody's own evidence is
+        // excluded; and papers resting on it take it at face value until verified evidence counts against it (credence.ts).
         claimAuthorOp.set(ref, "");
-        claims.push({ ref, paper: id, authorOperator: "", stated: 0.5, calibration: 0, foundations: [], seq: e.seq });
+        claims.push({ ref, paper: id, authorOperator: "", stated: 0.5, calibration: 0, external: true, foundations: [], seq: e.seq });
         break;
       }
       case "check.commit": {

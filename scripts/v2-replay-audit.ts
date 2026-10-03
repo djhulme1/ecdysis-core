@@ -130,6 +130,26 @@ export function scriptedLog(): V2Entry[] {
   paper("ecd:p7", "Cat", "op-v3", [["C1", 0.6]], [{ id: "ecd:p1", rel: "extends", basis: "reproduced", claims: ["C1"] }]);
   paper("ecd:p8", "Emu", "op-v5", [["C1", 0.6]], [{ id: "ecd:p1", rel: "extends", basis: "reproduced", claims: ["C1"] }]);
   paper("ecd:p9", "Jay", "op-u3", [["C1", 0.6]], [{ id: "ecd:p1", rel: "extends", basis: "reproduced", claims: ["C1"] }]);
+  // The six decisions of 3 October (credence.ts, "Daniel, 3 Oct"), each exercised once so the baseline pins them.
+  // 4. Face value: P10 rests on the twice-confirmed human claim (factor 1, as if it were unregistered); P11 rests on a
+  //    registered human claim that Cat then fails (factor below 1).
+  push("claim.external", { id: "ext:aaaaaaaaaaaaaaaa", handle: "Ant", operatorId: "op-v1", source: "doi:10.1000/shaky", quote: "a result that will not replicate", test: "fails" });
+  paper("ecd:p10", "Ant", "op-v1", [["C1", 0.7], ["C2", 0.6]], [{ id: "ext:0123456789abcdef", rel: "extends", basis: "reproduced", claims: ["C1"] }]);
+  paper("ecd:p11", "Emu", "op-v5", [["C1", 0.7]], [{ id: "ext:aaaaaaaaaaaaaaaa", rel: "extends", basis: "reviewed", claims: ["C1"] }]);
+  receipt("Cat", "op-v3", "ext:aaaaaaaaaaaaaaaa#C1", "failed");
+  // 1. Undeclared is no family: P10#C1, confirmed by Cat (gemini) and Emu (undeclared), stays supported however high its credence.
+  const c1 = receipt("Cat", "op-v3", "ecd:p10#C1", "confirmed");
+  receipt("Emu", "op-v5", "ecd:p10#C1", "confirmed", { cross: c1, match: true });
+  // 5. A dissenting verified review never flips a supported claim: Bee forecasts 0.2 on P10#C1 (the dispute number shows it).
+  push("review.file", { id: "v5", claim: "ecd:p10#C1", handle: "Bee", operatorId: "op-v2", forecast: 0.2 });
+  // 6. A same-family dissent weighs in full: P12#C1 (Cat) confirmed by Bee (gpt) and failed by Kiwi (op-v4, gpt too).
+  push("agent.register", { handle: "Kiwi", operatorId: "op-v4", publicKey: "pk-Kiwi", models: ["gpt"], constitution: { version: "2.0.0" } });
+  paper("ecd:p12", "Cat", "op-v3", [["C1", 0.8]], []);
+  receipt("Bee", "op-v2", "ecd:p12#C1", "confirmed");
+  receipt("Kiwi", "op-v4", "ecd:p12#C1", "failed", { families: ["gpt"] });
+  // 3. Calibration: Cat's P3#C1 (stated 0.9) and Ant's P1#C2 (stated 0.6) were refuted, so Cat's P7 and P12 and Ant's P10
+  //    start below a newcomer's prior, Cat's much further; Fox's refuted P4#C1 was stated at a half, which is neutral.
+  // 2. The ring rule stays "ever": Ant and Bee (r1 and b-ant3 above) are linked for good.
   return out;
 }
 
