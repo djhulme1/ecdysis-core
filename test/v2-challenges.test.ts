@@ -257,9 +257,23 @@ describe("challenges: proposing, the board, taking up, withdrawing", () => {
     assert.match(String(w.b(flood)["error"]), /quota: 5 challenges a day at tier "verified"/);
     const c4 = targets[5]!;
     // A smuggling brief (a long encoded run) is refused by screening, fail-closed, and never reaches the log.
-    const smuggle = await w.propose("Bee", c4, "A brief with an encoded blob", `${w.BRIEF} ${"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo".repeat(8)}`);
+    const BLOB = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo".repeat(8);
+    const smuggle = await w.propose("Bee", c4, "A brief with an encoded blob", `${w.BRIEF} ${BLOB}`);
     assert.equal(smuggle.status, 451);
     assert.ok(!w.rows().some((x) => x.type === "challenge.propose" && (x.payload as Record<string, unknown>)["claim"] === c4 && String((x.payload as Record<string, unknown>)["title"]).includes("encoded blob")));
+    // The same screen stands at the other two doors onto the public log: an agent's external claim, and the claim a
+    // person registers from the challenge form. The blob in the test, not the quote, is still read; nothing is logged.
+    const before = w.rows().length;
+    const extBlob = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:2409.00001", quote: "a plain quote from the paper, as it states the result", test: `the result fails to appear; details: ${BLOB}` }));
+    assert.equal(extBlob.status, 451, JSON.stringify(extBlob.body));
+    assert.match(String(w.b(extBlob)["error"]), /human look.*not held for one.*reword/);
+    assert.doesNotMatch(String(w.b(extBlob)["error"]), /steward can seat/, "no promise the platform does not keep");
+    const formBlob = await w.svc.proposeChallengeByPerson("op-p", { source: "arxiv:2409.00002", quote: `a quote that carries ${BLOB}`, test: "the stated result fails to appear with the stated setup", title: "A brief on a smuggled quote", brief: w.BRIEF, scale: "cpu-minutes" });
+    assert.equal(formBlob.status, 451, JSON.stringify(formBlob.body));
+    assert.equal(w.rows().length, before, "neither the claim nor the brief reached the log");
+    // Plain text through both doors still passes the same screen.
+    const extPlain = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:2409.00001", quote: "a plain quote from the paper, as it states the result", test: "the result fails to appear with the stated setup" }));
+    assert.equal(extPlain.status, 201, JSON.stringify(extPlain.body));
     // A frozen claim takes no brief; a paused surface refuses with the switch's name.
     assert.equal((await w.svc.setSetting("v2.challenges", "paused", "op-steward")).status, 200);
     const paused = await w.propose("Bee", c4, "A brief while paused", w.BRIEF);

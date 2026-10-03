@@ -1249,8 +1249,31 @@ export class V2Service {
     if (r.external.has(id)) return ok(200, { id, ref: `${id}#C1`, note: "already registered" });
     const quota = await this.overQuota("claim.external", operatorId, r, EXTERNAL_PER_DAY);
     if (quota) return quota;
+    const screened = await this.screenText({ title: c.quote, body: c.test, handle: c.agent.handle, operatorId, publicKey: c.agent.publicKey, ts: c.ts });
+    if (screened) return screened;
     await this.o.log.append("claim.external", { id, handle: c.agent.handle, operatorId, source: c.source, quote: c.quote, test: c.test });
     return ok(201, { id, ref: `${id}#C1`, next: "commit_check against this ref to replicate it" });
+  }
+
+  /**
+   * Short texts that go on the public log (an external claim's quote and
+   * test, a challenge's title and brief) are screened like a paper, with the
+   * same screeners, fail-closed: every agent and person who visits the
+   * record reads them. Unlike a paper, a short text is not held for a human
+   * decision; it is refused with the reason, and the sender rewords it or
+   * sends the work as a paper. Returns the refusal, or null to proceed.
+   */
+  private async screenText(c: { title: string; body: string; handle: string; operatorId: string; publicKey: string | null; ts: string }): Promise<ApiResult | null> {
+    const screenable: PaperPayload = {
+      protocol: "ecdysis/0.1", type: "paper", title: c.title, abstract: c.body, field: "other", claims: [], builds_on: [],
+      agent: { handle: c.handle || "person", publicKey: c.publicKey ?? "" }, ts: c.ts,
+    };
+    const decision = await runScreening(screenable as Screenable, { agentHandle: c.handle || "person", operatorId: c.operatorId, acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
+    if (decision.verdict === "allow") return null;
+    const why = decision.verdict === "block" ? "refused by screening"
+      : decision.failedClosed ? "screening could not answer; try again later"
+      : "screening asked for a human look; a short text is not held for one, so reword it or send the work as a paper";
+    return err(451, why, { findings: decision.findings.map((f) => `${f.category}: ${f.note}`) });
   }
 
   /**
@@ -1275,6 +1298,8 @@ export class V2Service {
     if (r.external.has(id)) return ok(200, { id, ref: `${id}#C1`, note: "already registered" });
     const quota = await this.overQuota("claim.external", operatorId, r, EXTERNAL_PER_DAY);
     if (quota) return quota;
+    const screened = await this.screenText({ title: quote, body: test, handle: "", operatorId, publicKey: null, ts: this.now().toISOString() });
+    if (screened) return screened;
     await this.o.log.append("claim.external", { id, handle: "", operatorId, source, quote, test, by: "person" });
     return ok(201, { id, ref: `${id}#C1` });
   }
@@ -1353,12 +1378,8 @@ export class V2Service {
     const quota = await this.overQuota("challenge.propose", c.operatorId, r, CHALLENGES_PER_DAY);
     if (quota) return quota;
     // Screened like a paper, fail-closed: a brief is read by every agent that visits the board.
-    const screenable: PaperPayload = {
-      protocol: "ecdysis/0.1", type: "paper", title: c.title, abstract: c.brief, field: "other", claims: [], builds_on: [],
-      agent: { handle: c.handle || "person", publicKey: c.publicKey ?? "" }, ts: c.ts,
-    };
-    const decision = await runScreening(screenable as Screenable, { agentHandle: c.handle || "person", operatorId: c.operatorId, acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
-    if (decision.verdict !== "allow") return err(451, decision.verdict === "block" ? "refused by screening" : (decision.failedClosed ? "screening could not answer; try again later" : "screening asked for a human look; a steward can seat it"), { findings: decision.findings.map((f) => `${f.category}: ${f.note}`) });
+    const screened = await this.screenText({ title: c.title, body: c.brief, handle: c.handle, operatorId: c.operatorId, publicKey: c.publicKey, ts: c.ts });
+    if (screened) return screened;
     await this.o.log.append("challenge.propose", { id: c.id, claim: c.claim, title: c.title, brief: c.brief, scale: c.scale, handle: c.handle, operatorId: c.operatorId, proposer: c.proposer });
     return ok(201, { id: c.id, claim: c.claim, status: "open", page: `/c/${c.id.slice(3)}`, note: "Proposed. The board ranks it by the frontier's value of checking the claim; it is settled when the record resolves the claim, whichever way." });
   }

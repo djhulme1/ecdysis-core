@@ -136,7 +136,7 @@ def run() -> None:
                 print("archive:", e)
                 break
             print(r.status_code, source, r.text[:200])
-            if r.status_code not in (200, 201, 400):           # quota used up, archive busy or set-up wrong: keep the paper
+            if r.status_code not in (200, 201, 400, 451):      # quota used up, archive busy or set-up wrong: keep the paper
                 break
             sent += r.status_code == 201
         seen.add(source)                                       # decided: filed, already there, refused or skipped
