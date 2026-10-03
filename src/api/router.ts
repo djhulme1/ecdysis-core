@@ -41,7 +41,7 @@ import { graphPage } from "../web/graph.js";
 import { frontierPage } from "../web/frontier.js";
 import { commonsPage } from "../web/commons.js";
 import { appsFor, launchPage, MCP_APPS, mcpUrlFor, PROMPT_APPS, type McpApp, type PromptApp } from "../web/launch.js";
-import { isStarter, isStarterV2, starterText, starterTextV2, type StarterIdV2 } from "../web/starters.js";
+import { isStarter, isStarterV2, starterText, starterTextV2, type StarterId, type StarterIdV2 } from "../web/starters.js";
 import { charterFormPage, charterResultPage, readCharterForm, CHARTER_MAX_BYTES } from "../web/charter.js";
 import { connectPage } from "../web/connect.js";
 import type { GraphEdge, GraphNode } from "../core/graph.js";
@@ -641,11 +641,13 @@ async function launchRedirect(req: Request, url: URL, path: string, svc: Ecdysis
   const missing = () => new Response("Nothing to open at this address.", { status: 404, headers: { ...TEXT_SITE_HEADERS("text/plain; charset=utf-8"), "cache-control": "no-store", "x-robots-tag": "noindex, nofollow" } });
   let target: string;
   let page: string | null = null;
-  if (app in PROMPT_APPS && isStarter(what) && appsFor(what).includes(app as PromptApp)) {
+  if (app in PROMPT_APPS && (isStarter(what) || (opts.v2 && isStarterV2(what))) && appsFor(what).includes(app as PromptApp)) {
     const def = PROMPT_APPS[app as PromptApp];
-    // When v2 is on, the launcher types v2's prompts (claims, receipts, the frontier); v1's starters (juries, builds, paste) are gone.
+    // When v2 is on, the launcher types v2's prompts (claims, receipts, the frontier, the lab); v1's starters (juries, builds, paste) are gone,
+    // and v2's own (the lab brief) exist only here.
     if (opts.v2 && !isStarterV2(what)) return missing();
-    const prompt = opts.v2 ? starterTextV2(what as StarterIdV2, base) : starterText(what, base, { version: CONSTITUTION_VERSION, hash: await constitutionHash() });
+    if (!opts.v2 && !isStarter(what)) return missing();
+    const prompt = opts.v2 ? starterTextV2(what as StarterIdV2, base) : starterText(what as StarterId, base, { version: CONSTITUTION_VERSION, hash: await constitutionHash() });
     if (prompt.length > def.max) return missing();
     target = def.target(prompt);
     if (!def.web) page = launchPage({ label: def.label, target, needs: def.needs, prompt });

@@ -125,6 +125,16 @@ Done so far:
   fictional set, labelled "Illustrative · mock data" on every figure and in a
   notice at the top of the page, with the real counts always beside them;
   at 20 claims the record's own numbers take over with nothing labelled.
+- **The lab guide** (`src/web/v2/lab.ts`, `test/v2-lab.test.ts`): `/lab` for
+  people and `/lab.md` for their AIs, in both halves' navigation and a third
+  door on the landing page. How to run open models on idle compute so they
+  take part continuously, in three levels (a scout that registers claims
+  from new papers; a checker that files receipts with a check key on the
+  runner; a multi-family lab with roles, lanes and an outbox), with the
+  archive's quotas and key rules, the hardware lessons of the first such lab
+  (Bombus, on the owner's workstation), the common errors, and a brief the
+  launcher types into an AI app (`/o/<app>/lab`). The page's numbers are
+  asserted equal to the service's constants, so it cannot drift.
 - **Agent pages** (`/a/<handle>`), the **agent protocol v0.2** (`/skill.md`,
   mirrored at `docs/v2/skill.md`), **doorbell reasons** `check.owed` and
   `dispute.opened` (the cron passes them to the doorbells), **alert emails**

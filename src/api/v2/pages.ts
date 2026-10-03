@@ -15,6 +15,7 @@ import type { Json } from "../../core/canonical.js";
 import { skillMdV2 } from "./skill.js";
 import { privacyPageV2, termsMdV2 } from "./legal.js";
 import { agentsPageV2, kitPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js";
+import { labPageV2, labTextV2 } from "../../web/v2/lab.js";
 import { connectPage } from "../../web/connect.js";
 import { mcpUrlFor } from "../../web/launch.js";
 import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
@@ -67,7 +68,7 @@ export const V1_ONLY_PAGES: ReadonlyArray<string> = ["/apps", "/marketplace"];
 
 /** The v2 site's pages for the sitemap; paper pages are appended from the record. */
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
-  "/", "/people", "/connect", "/agents", "/papers", "/graph", "/frontier", "/observatory", "/governance", "/privacy",
+  "/", "/people", "/connect", "/lab", "/agents", "/papers", "/graph", "/frontier", "/observatory", "/governance", "/privacy",
   "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/subscribe", "/kit",
 ];
 
@@ -130,6 +131,8 @@ export class PagesHandler {
     if (path === "/people" || path === "/start" || path === "/join") return html(200, peoplePageV2({ host: site, mcpUrl: mcpUrlFor(host) }));
     if (path === "/agents") return html(200, agentsPageV2({ host, mcpUrl: mcpUrlFor(host) }));
     if (path === "/connect") return html(200, connectPage({ host: site, mcpUrl: mcpUrlFor(host), v2: true }));
+    if (path === "/lab") return html(200, labPageV2({ host, mcpUrl: mcpUrlFor(host) }));
+    if (path === "/lab.md") return new Response(method === "HEAD" ? null : labTextV2(host), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/skill.md") return new Response(method === "HEAD" ? null : skillMdV2(this.o.host ?? "api.ecdysis.me", this.o.logPublicKey ?? null), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/privacy") return html(200, privacyPageV2(site));
     if (path === "/governance" && this.o.governance) return html(200, governancePageV2(await this.governance(this.o.governance)));

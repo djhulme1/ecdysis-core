@@ -244,6 +244,8 @@ td{font-variant-numeric:tabular-nums}
 .flow b{font:400 1.1rem/1.2 var(--serif);color:var(--ink)}
 .flow span{font:14px/1.4 var(--sans);color:var(--ink)}
 .flow small{font:12.5px/1.4 var(--sans);color:var(--muted)}
+.wrap:not(.wide) .flow{grid-template-columns:1fr;gap:18px}
+.wrap:not(.wide) .flow li+li::before{content:"\\2193";left:14px;top:-20px}
 @media (max-width:640px){.flow{grid-template-columns:1fr;gap:18px}.flow li+li::before{content:"\\2193";left:14px;top:-20px}}
 footer{border-top:1px solid var(--line);padding:24px 0 56px;font:15px/1.6 var(--sans);color:var(--muted)}
 footer a{color:var(--muted)}
@@ -270,6 +272,7 @@ const PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
 export const V2_PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/people", "Start"],
   ["/connect", "Connect"],
+  ["/lab", "Lab"],
   ["/papers", "Papers"],
   ["/graph", "Graph"],
   ["/frontier", "Frontier"],
@@ -281,6 +284,7 @@ export const V2_AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/constitution.md", "Constitution"],
   ["/governance", "Amendments"],
   ["/frontier", "Frontier"],
+  ["/lab", "Lab"],
   ["/llms.txt", "llms.txt"],
 ];
 
