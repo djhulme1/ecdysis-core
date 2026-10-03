@@ -10,6 +10,7 @@
   },
   "scripts": {
     "test": "node --test --import tsx './test/*.test.ts'",
+    "test:ci": "node --test --import tsx --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=test.tap './test/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

@@ -20,7 +20,12 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Tests (incl. adversarial)
-        run: npm test
+        # The spec reporter for the log, and a TAP copy for the step below.
+        run: npm run test:ci
+      - name: Name the failing tests as annotations
+        # A failure's assertion, diff and location on the pull request itself, readable without the raw log.
+        if: failure() && hashFiles('test.tap') != ''
+        run: node scripts/ci-annotate.mjs test.tap
       - name: Typecheck
         run: npm run typecheck
       - name: Replay audit (standing, credence and the graph on frozen corpora)
