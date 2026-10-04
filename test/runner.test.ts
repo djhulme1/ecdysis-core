@@ -9,7 +9,7 @@ import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -120,6 +120,50 @@ describe("the reference runner", { skip: !hasGit && "git is not available" }, ()
 /* ---------------- inputs/0.1 ---------------- */
 
 const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+
+describe("the reference runner's container", { skip: (!hasGit && "git is not available") || (typeof process.getuid !== "function" && "no POSIX user ids here") }, () => {
+  // CI has no docker, so a stand-in records the arguments it is given and plays the container: it writes outputs.json into the
+  // results mount, as a run would. 4 October 2026: run as the image's own USER, the container could neither read the checkout (a
+  // private temporary directory) nor write results/, and every run of the Bombus lab's bundles on GitHub Actions failed.
+  it("runs the container as the user running the runner, locked down as before", () => {
+    const { url, commit, dir } = repo();
+    const work = mkdtempSync(join(tmpdir(), "ecdysis-runner-"));
+    try {
+      const bin = join(work, "bin");
+      mkdirSync(bin);
+      const log = join(work, "docker-args.txt");
+      writeFileSync(join(bin, "docker"), `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "Docker version 0 (stand-in)"; exit 0; fi
+if [ "$1" = "rm" ]; then exit 0; fi
+printf '%s\n' "$@" > "${log}"
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-v" ]; then case "$a" in *:/work/results:rw) printf '{"alpha": 1.5}' > "\${a%%:/work/results:rw}/outputs.json";; esac; fi
+  prev="$a"
+done
+exit 0
+`, { mode: 0o755 });
+      const digest = "sha256:" + "c".repeat(64);
+      const bpath = join(work, "bundle.json");
+      writeFileSync(bpath, JSON.stringify({ repo: url, commit, run: "sh run.sh", image: digest, imageRef: `ghcr.io/example/env@${digest}`, outputs: [{ name: "alpha", tolerance: 0.1 }], runtimeMinutes: 1 }));
+      const r = spawnSync("node", [RUNNER, "--bundle", bpath, "--seed", "a".repeat(64), "--allow-file-repo"], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` } });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal((JSON.parse(r.stdout) as Record<string, number>)["alpha"], 1.5, "the outputs the container wrote were read");
+      const args = readFileSync(log, "utf8").trim().split("\n");
+      const at = args.indexOf("--user");
+      assert.ok(at > 0, `the container runs as a named user: ${args.join(" ")}`);
+      assert.equal(args[at + 1], `${process.getuid!()}:${process.getgid!()}`, "the user running the runner, who owns the checkout and results/");
+      for (const flag of ["--network", "--read-only", "--cap-drop", "--security-opt", "--pids-limit"]) assert.ok(args.includes(flag), `still ${flag}`);
+      assert.equal(args[args.indexOf("--network") + 1], "none");
+      assert.equal(args[args.indexOf("--cap-drop") + 1], "ALL");
+      assert.ok(args.some((a) => a.endsWith(":/work:ro")), "the checkout is read-only");
+      assert.equal(args.filter((a) => a.startsWith("ECDYSIS_SEED=")).length, 1);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("the runner's input policy", () => {
   it("knows which addresses a bundle may never send a checker to, and refuses URLs that are not plain public https", () => {
