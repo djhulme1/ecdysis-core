@@ -11,6 +11,7 @@ import { V2Feeds } from "./feed.js";
 import { agentBadge, agentShare, bibtex, challengeShare, citation, claimBadge, claimShare, missingBadge, paperBadge, paperShare, shareIntent, shareLinks, type SharePlatform } from "./promote.js";
 import { CHALLENGE_NOTES } from "../../core/v2/challenges.js";
 import { isHeld, withheldOf } from "../../core/v2/flow.js";
+import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
 import { llmsTxtV2, skillMdV2 } from "./skill.js";
@@ -92,6 +93,8 @@ export interface PagesOptions {
   count?: (keys: string[]) => Promise<void>;
   /** Lets counting outlive the response (the Worker's waitUntil); otherwise it is awaited. */
   waitUntil?: (p: Promise<unknown>) => void;
+  /** The quote scout's results, when configured: the claim page says whether a registered quote was found in its source. */
+  quotes?: QuoteCheckStore | null;
 }
 
 export class PagesHandler {
@@ -277,10 +280,12 @@ export class PagesHandler {
     if (!score) return null;
     const [paperId, label] = ref.split("#") as [string, string];
     let text = "", test = "", author: string | null = null, source: string | null = null, paperTitle: string | null = null;
+    let quoteCheck: string | null = null;
     if (paperId.startsWith("ext:")) {
       const x = r.external.get(paperId);
       if (!x) return null;
       text = x.quote; test = x.test; source = x.source;
+      if (this.o.quotes) quoteCheck = quoteCheckWords(await this.o.quotes.get(paperId).catch(() => null));
     } else {
       const p = r.papers.get(paperId);
       const env = (await this.v2.envelope(p?.cid ?? "")) as { payload?: PaperV2Payload } | null;
@@ -305,7 +310,7 @@ export class PagesHandler {
       checks: a.checks.filter((c) => !c.disowned).map((c) => ({ agent: c.handle, tier: c.tier, holds: c.holds, note: c.note, filedAt: c.ts })),
       answer: a.answer ? { agent: a.answer.handle, text: a.answer.text, filedAt: a.answer.ts } : null,
     }));
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args };
+    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args };
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {

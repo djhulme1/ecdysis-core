@@ -20,6 +20,8 @@ import { CanaryRegistry } from "./api/v2/canaries.js";
 import { D1CanaryStore } from "./store/v2/canaries-d1.js";
 import { ComplaintsHandler, IssueRegistry } from "./api/v2/issues.js";
 import { D1IssueStore } from "./store/v2/issues-d1.js";
+import { QuoteScout } from "./api/v2/quotes.js";
+import { D1QuoteCheckStore } from "./store/v2/quotes-d1.js";
 import { sha256Hex } from "./api/access.js";
 import { D1OAuthStore } from "./store/v2/oauth-d1.js";
 import { TransparencyLog } from "./core/log.js";
@@ -296,7 +298,7 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
  */
 const V2_CACHE = new V2Cache();
 
-function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env), keysAgree = true): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler }; complaints: ComplaintsHandler } | null {
+function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env), keysAgree = true): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler }; complaints: ComplaintsHandler; quotes: QuoteScout } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
@@ -335,8 +337,11 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
   });
   // Screening's referrals open an issue for the stewards (the service knows nothing of the registry; this hook joins them).
   v2.setReferralHook((subject, detail) => issues.open("screening", subject, 2, detail, "screening").then(() => undefined));
+  // The quote scout: on the cron, a few registered quotes are checked against their source's abstract; the claim page shows the result.
+  const quoteStore = new D1QuoteCheckStore(env.DB);
+  const quotes = new QuoteScout({ store: quoteStore, v2, issues, contact: env.HERALD_REPLY_TO || "replies@ecdysis.me" });
   return {
-    v2, notifier,
+    v2, notifier, quotes,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },
     governance,
     complaints: new ComplaintsHandler({ issues, readOnly: frozen }),
@@ -360,7 +365,7 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
       },
     }),
     pages: new PagesHandler(v2, {
-      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null,
+      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null, quotes: quoteStore,
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
       ...(waitUntil ? { waitUntil } : {}),
     }),
@@ -566,12 +571,15 @@ export default {
         // v2: alert emails people asked for, once each, within the shared daily cap.
         const alerted = v2 ? await v2.notifier.run().catch((e) => { console.error("v2 alerts failed", e); return { sent: 0, skipped: 0, events: 0 }; }) : { sent: 0, skipped: 0, events: 0 };
         const digested = v2 ? await v2.notifier.digest().catch((e) => { console.error("v2 digest failed", e); return { sent: 0, skipped: 0 }; }) : { sent: 0, skipped: 0 };
+        // v2: a few registered quotes checked against their sources (arXiv asks for a pause between requests; six a run, every quarter hour, is well within it).
+        const quoted = v2 ? await v2.quotes.run(6).catch((e) => { console.error("quote scout failed", e); return { checked: 0, verified: 0, mismatched: 0, unresolvable: 0, errors: 0 }; }) : { checked: 0, verified: 0, mismatched: 0, unresolvable: 0, errors: 0 };
         if (r.cases || purged || sent.drawn || sent.reminders || rang.rung || rang.failed || swept.lapsed.length || swept.sealed.length) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent, doorbells: rang, v2: swept }));
         await store.putOpsState("cron:last", {
           ok: true, ...r, purged, alertsDrawn: sent.drawn, alertsReminders: sent.reminders,
           doorbellsRung: rang.rung, doorbellsFailed: rang.failed, doorbellsPaused: rang.paused, doorbellsWaiting: rang.waiting,
           ...("error" in rang ? { doorbellsError: rang.error } : {}),
           v2Lapsed: swept.lapsed.length, v2Sealed: swept.sealed.length, v2AlertsSent: alerted.sent, v2DigestsSent: digested.sent,
+          v2QuotesChecked: quoted.checked, v2QuotesVerified: quoted.verified, v2QuotesMismatched: quoted.mismatched,
         }, at);
       } catch (e) {
         console.error("cron failed", e);
