@@ -177,6 +177,10 @@ export interface DoorbellSettings {
   host?: string | null;
   /** The Standard Webhooks shared secret (whsec_…), sealed like a token: v1 signatures on every webhook and trigger-URL delivery. */
   signing?: string | null;
+  /** A GitHub dispatch doorbell's repository (owner/name), workflow file and branch; its token is sealed in target_sealed. */
+  repo?: string | null;
+  workflow?: string | null;
+  ref?: string | null;
   /** An address waiting for its owner's click: nothing is sent to it but the confirmation until then, and a working doorbell keeps ringing. */
   pending?: { kind: "email"; sealed: string; masked: string; challenge: string; issuedAt: string; platform?: string | null; sent: number } | null;
 }

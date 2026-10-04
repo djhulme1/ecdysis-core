@@ -58,7 +58,8 @@ import { signJson, verifyBytes } from "../core/crypto.js";
 import { SEAT_DEADLINE_MS } from "../core/jury.js";
 import {
   CADENCES, DEFAULT_CADENCE, DUE_REMINDER_MS, KINDS, OWED_ONLY, PAUSE_AFTER_FAILURES, PLATFORM_NAME, PLATFORMS, RING_SPACING_MS, RINGS_PER_DAY, RINGS_PER_SWEEP,
-  ROUTINE_FIRE, ROUTINE_TOKEN_RE, SESSION_URL_RE, SETUP_LINK_TTL_MS, TAG_ALPHABET, TAG_RE, WAKE_PROTOCOL, addressOf, asPlatform, assistantPrompt, byUrgency, cadenceIn, cadenceOut,
+  GITHUB_API_VERSION, ROUTINE_FIRE, ROUTINE_TOKEN_RE, RUN_URL_RE, SESSION_URL_RE, SETUP_LINK_TTL_MS, TAG_ALPHABET, TAG_RE, WAKE_PROTOCOL, addressOf, asPlatform, assistantPrompt, byUrgency, cadenceIn, cadenceOut,
+  githubCheck, githubDispatchUrl, watchable,
   APPS_SCRIPT_ECHO, FIRE_SERVICES, doorbellStatus, emailRingSubject, emailRingText, fireBody, fireUrlCheck, isPersonKind, maskEmail, nextResearch, parsePastedRoutine, parseRoutine, why,
   researchDue, ringPayload, ringText, routinePrompt, slotOffset, webhookProblem, type Cadence, type DoorbellKind, type Platform, type RingReason, type StoredKind,
 } from "../core/wake.js";
@@ -303,7 +304,7 @@ export class Doorbells {
     const cadence = cadenceGiven as Cadence;
 
     if (isPersonKind(kind)) {
-      if ((kind === "claude-routine" || kind === "fire-url") && !(await this.sealing())) return err(503, "this deployment can't keep tokens or trigger URLs safely yet; use an email, a webhook or your own schedule for now");
+      if ((kind === "claude-routine" || kind === "fire-url" || kind === "github-dispatch") && !(await this.sealing())) return err(503, "this deployment can't keep tokens or trigger URLs safely yet; use an email, a webhook or your own schedule for now");
       if (kind === "email" && !this.emailOn) return err(503, "this deployment can't send email right now; use a Claude routine, a webhook or your own schedule for now");
       const when = cadence === "jury-only" ? this.besides : `${cadence} for research, and ${this.besides}`;
       // A working doorbell its person set up keeps ringing: the agent gets a fresh link for its person, and the cadence it asked for.
@@ -313,7 +314,7 @@ export class Doorbells {
         await this.o.store.putDoorbell(d);
         return ok(200, {
           status: "active", kind: existing.kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
-          note: `Your doorbell is already working (${existing.kind === "email" ? "by email" : existing.kind === "fire-url" ? "a trigger URL" : "a Claude routine"}) and keeps ringing. The link is new (the old one no longer works): on it your person can change how you are woken, change the cadence, or stop the doorbell.`,
+          note: `Your doorbell is already working (${existing.kind === "email" ? "by email" : existing.kind === "fire-url" ? "a trigger URL" : existing.kind === "github-dispatch" ? "a GitHub Actions workflow" : "a Claude routine"}) and keeps ringing. The link is new (the old one no longer works): on it your person can change how you are woken, change the cadence, or stop the doorbell.`,
           next_research: this.nextResearchIso(d),
         });
       }
@@ -323,6 +324,14 @@ export class Doorbells {
         status: "pending", kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
         link_expires: new Date(Date.parse(d.setupIssuedAt) + SETUP_LINK_TTL_MS).toISOString(),
       };
+      if (kind === "github-dispatch") {
+        return ok(202, {
+          ...common,
+          next: "Give your person this link. On it they give the GitHub repository and workflow that run you (it needs a workflow_dispatch trigger with a 'ring' input: the template at https://github.com/djhulme1/ecdysis-core/tree/main/templates/github-agent has one) and a fine-grained token for that one repository with Actions: Read and write, and Ecdysis starts the workflow once to prove it. " +
+            `Ecdysis then starts it ${when}, passing the signed ring as the input 'ring'. Your key stays in the repository's secrets. The link is theirs alone and works for seven days: never publish it.`,
+          standing_instructions: assistantPrompt({ handle, siteBase: this.o.siteBase, apiBase: this.o.apiBase, v2: this.v2 }),
+        });
+      }
       if (kind === "fire-url") {
         return ok(202, {
           ...common,
@@ -419,6 +428,7 @@ export class Doorbells {
     if (action === "self") return this.useSchedule(d, form, nowIso, chosen);
     if (action === "test") return this.testRing(d, nowIso, chosen);
     if (action === "fire") return this.startFire(d, form, nowIso, chosen);
+    if (action === "github") return this.startGithub(d, form, nowIso, chosen);
     return this.panel(d, "That didn't do anything. Use one of the buttons below.", null, chosen);
   }
 
@@ -562,6 +572,45 @@ export class Doorbells {
     };
     await this.o.store.putDoorbell(next);
     return this.panel(next, null, `Connected: Ecdysis rang your ${check.service} trigger once, so your automation should be running now. If it can check signatures (Standard Webhooks, v1), give it this secret now: it isn't shown again. ${secret}`, chosen);
+  }
+
+  /**
+   * The person gives a repository, its workflow and a fine-grained token:
+   * Ecdysis starts the workflow once and keeps the token (sealed, bound to
+   * the repository and workflow) only if GitHub took the dispatch.
+   */
+  private async startGithub(d: DoorbellRecord, form: URLSearchParams, nowIso: string, chosen: Platform | null): Promise<Page> {
+    if (this.o.now().getTime() - Date.parse(d.setupIssuedAt) > SETUP_LINK_TTL_MS) {
+      return this.view(410, "This link can no longer connect a workflow", `<p>Links set up a doorbell for seven days. Ask your AI to set up its doorbell again for a fresh link. You can still stop the doorbell or change how often it rings from here.</p><p><a href="${esc(this.path(d))}">Back to the doorbell</a></p>`);
+    }
+    const check = githubCheck({ repo: form.get("repo"), workflow: form.get("workflow"), ref: form.get("ref"), token: form.get("token") });
+    if (!check.ok) return this.panel(d, check.problem, null, chosen);
+    if (!this.o.sthPrivateKey || !(await this.sealing())) return this.view(503, "Not available yet", `<p>This deployment can't keep tokens safely yet, so nothing was kept. Use an email or a schedule for now.</p>`);
+    if (!(await this.claimSlot(d.handle, "connect", CONNECT_PER_HOUR, nowIso))) return this.panel(d, `At most ${CONNECT_PER_HOUR} tries an hour. Nothing was kept; try again later.`, null, chosen);
+    const cadenceGiven = cadenceIn(form.get("cadence") ?? d.cadence);
+    const cadence = (typeof cadenceGiven === "string" && (CADENCES as readonly string[]).includes(cadenceGiven) ? cadenceGiven : d.cadence) as Cadence;
+    const trial: DoorbellRecord = { ...d, kind: "github-dispatch", cadence };
+    const reasons: RingReason[] = [{ event: "doorbell.welcome" }];
+    const slot = researchDue(trial.handle, cadence, d.lastResearchAt, this.o.now().getTime());
+    if (slot !== null) reasons.push({ event: "research.due", cadence, slot: new Date(slot).toISOString() });
+    const claimed = await this.claimReasons(trial.handle, reasons, nowIso);
+    const res = await this.ring(trial, claimed.map((c) => c.r), { repo: check.repo, workflow: check.workflow, ref: check.ref, token: check.token });
+    if (!res.ok) {
+      await this.releaseClaims(trial.handle, claimed);
+      return this.panel(d, `GitHub didn't start the workflow: ${res.error ?? "no answer"}. Nothing was kept.`, null, chosen);
+    }
+    const sealed = await this.sealValue(d.handle, `github|${check.repo}|${check.workflow}`, check.token);
+    if (!sealed) return this.view(503, "Not available yet", `<p>This deployment can't keep tokens safely yet, so nothing was kept.</p>`);
+    const was = this.switched(d);
+    const today = nowIso.slice(0, 10);
+    const next: DoorbellRecord = {
+      ...trial, ...was, status: "active", targetSealed: sealed, updatedAt: nowIso,
+      lastRingAt: nowIso, lastOkAt: nowIso, lastResearchAt: slot !== null ? nowIso : d.lastResearchAt ?? null, lastSessionUrl: res.sessionUrl ?? null,
+      ringsDay: today, ringsToday: (d.ringsDay === today ? d.ringsToday : 0) + 1,
+      settings: { ...was.settings, platform: chosen ?? d.settings?.platform, repo: check.repo, workflow: check.workflow, ref: check.ref },
+    };
+    await this.o.store.putDoorbell(next);
+    return this.panel(next, null, `Connected: GitHub started ${check.workflow} in ${check.repo}, so your agent is running now.`, chosen);
   }
 
   /** The person says the AI keeps its own schedule: nothing to prove, because nothing is ever sent. */
@@ -730,7 +779,7 @@ export class Doorbells {
 
   /* ---------------- ringing ---------------- */
 
-  private async ring(d: DoorbellRecord, reasons: RingReason[], direct?: { routineId?: string; token?: string; url?: string; secret?: string }): Promise<RingOutcome> {
+  private async ring(d: DoorbellRecord, reasons: RingReason[], direct?: { routineId?: string; token?: string; url?: string; secret?: string; repo?: string; workflow?: string; ref?: string }): Promise<RingOutcome> {
     if (!this.o.sthPrivateKey) return { ok: false, error: "this deployment has no log signing key, so it can't sign rings" };
     const now = this.o.now();
     const at = now.toISOString();
@@ -745,6 +794,14 @@ export class Doorbells {
     if (d.kind === "webhook") {
       if (!d.url) return { ok: false, permanent: true, error: "no webhook address" };
       return this.postWebhook(d.url, envelope as unknown as Json, { id: ringId, secret: await this.signingSecret(d) });
+    }
+    if (d.kind === "github-dispatch") {
+      const repo = direct?.repo ?? d.settings?.repo ?? null;
+      const workflow = direct?.workflow ?? d.settings?.workflow ?? null;
+      const ref = direct?.ref ?? d.settings?.ref ?? "main";
+      const token = direct?.token ?? (repo && workflow && d.targetSealed ? await this.unsealValue(d.handle, `github|${repo}|${workflow}`, d.targetSealed) : null);
+      if (!repo || !workflow || !token) return { ok: false, permanent: true, error: "the workflow's token can't be read: connect the repository again on the doorbell page" };
+      return this.dispatchGithub(repo, workflow, ref, token, JSON.stringify(envelope));
     }
     if (d.kind === "fire-url") {
       const url = direct?.url ?? (d.targetSealed ? await this.unsealValue(d.handle, "fire-url", d.targetSealed) : null);
@@ -799,6 +856,56 @@ export class Doorbells {
     if (r.status === 429) return { ok: false, rateLimited: true, error: "Claude's hourly limit was reached (429)" };
     if (r.status === 400) return { ok: false, error: "Claude refused the ring (400): the routine may be switched off" };
     return { ok: false, error: `Claude answered ${r.status}` };
+  }
+
+  /**
+   * Start the workflow: workflow_dispatch on the branch, with the signed ring
+   * as the one input "ring". GitHub's 2026-03-10 API answers 200 with the run
+   * it started (older versions 204, also delivered). A refused token, a
+   * missing permission, workflow or input pause the doorbell at once; the
+   * rate limit waits without counting against it.
+   */
+  private async dispatchGithub(repo: string, workflow: string, ref: string, token: string, ring: string): Promise<RingOutcome> {
+    let r: Response;
+    try {
+      r = await this.fetch(githubDispatchUrl(repo, workflow), {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/vnd.github+json",
+          "x-github-api-version": GITHUB_API_VERSION,
+          "content-type": "application/json",
+          "user-agent": UA,
+        },
+        body: JSON.stringify({ ref, inputs: { ring: ring.slice(0, 60_000) } }),
+        redirect: "manual",
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch {
+      return { ok: false, error: "no answer from GitHub within 10 seconds" };
+    }
+    if (r.status === 200 || r.status === 204) {
+      let runUrl: string | null = null;
+      if (r.status === 200) {
+        try {
+          const j = JSON.parse(await readCapped(r, 4096)) as { html_url?: unknown };
+          runUrl = typeof j.html_url === "string" && RUN_URL_RE.test(j.html_url) ? j.html_url : null;
+        } catch {
+          runUrl = null;
+        }
+      } else {
+        await discard(r);
+      }
+      return { ok: true, sessionUrl: runUrl };
+    }
+    const limited = r.headers.get("x-ratelimit-remaining") === "0" || r.status === 429;
+    await discard(r);
+    if (limited) return { ok: false, rateLimited: true, error: "GitHub's rate limit was reached" };
+    if (r.status === 401) return { ok: false, permanent: true, error: "GitHub refused the token (401): it was revoked or has expired" };
+    if (r.status === 403) return { ok: false, permanent: true, error: "GitHub refused the dispatch (403): the token needs Actions: Read and write on this repository" };
+    if (r.status === 404) return { ok: false, permanent: true, error: "GitHub found no such workflow (404): check the repository, the workflow's file name, and that the token is for this repository" };
+    if (r.status === 422) return { ok: false, permanent: true, error: "GitHub refused the dispatch (422): the workflow needs a workflow_dispatch trigger with an input named ring, on that branch" };
+    return { ok: false, error: `GitHub answered ${r.status}` };
   }
 
   /**
@@ -1117,7 +1224,7 @@ export class Doorbells {
     // The token and the address are erased, not just disabled; so is an address still waiting for its click.
     return {
       ...d, status: "stopped", tokenSealed: null, keyRef: null, challenge: null, lastSessionUrl: null, url: null, targetSealed: null, updatedAt: nowIso,
-      settings: { ...(d.settings ?? {}), pending: null, masked: null, signing: null, service: null, host: null },
+      settings: { ...(d.settings ?? {}), pending: null, masked: null, signing: null, service: null, host: null, repo: null, workflow: null, ref: null },
     };
   }
 
@@ -1175,7 +1282,7 @@ export class Doorbells {
     const next = d.status === "active" && d.kind !== "self" ? this.nextResearchIso(d) : null;
     // The agent's fixed research slot: a time of day (and, weekly, a day of the week).
     const off = d.cadence === "jury-only" ? null : slotOffset(d.handle, d.cadence);
-    const session = d.lastSessionUrl && SESSION_URL_RE.test(d.lastSessionUrl)
+    const session = watchable(d.lastSessionUrl)
       ? ` · <a href="${esc(d.lastSessionUrl)}" rel="noopener noreferrer">watch the run it started</a>` : "";
     const wokenBy = d.status === "pending"
       ? (d.kind === "claude-routine" ? "nothing yet: your AI asked for a Claude routine, and you choose below" : "nothing yet: you choose below")
@@ -1183,7 +1290,9 @@ export class Doorbells {
         ? `an email to ${d.settings.masked}, from ${this.wakeAddress}, with ${d.settings.tag ?? "its tag"} in the subject`
         : d.kind === "fire-url" && d.settings?.host
           ? `a trigger URL at ${d.settings.host} (${d.settings.service ?? "an automation"})`
-          : KIND_NAME[d.kind];
+          : d.kind === "github-dispatch" && d.settings?.repo
+            ? `the GitHub Actions workflow ${d.settings.workflow ?? "ecdysis.yml"} in ${d.settings.repo}, on ${d.settings.ref ?? "main"}`
+            : KIND_NAME[d.kind];
     const state = `<div class="state ${tone}" role="status"><b>${esc(word)}</b><dl>
 <dt>Agent</dt><dd>${esc(d.handle)}</dd>
 <dt>Woken by</dt><dd>${esc(wokenBy)}</dd>
@@ -1206,7 +1315,7 @@ ${d.kind === "self" ? "" : `<dt>Last ring</dt><dd>${esc(UTC_WHEN(d.lastRingAt))}
 <form method="post"><input type="hidden" name="action" value="cadence">${platform ? `<input type="hidden" name="platform" value="${esc(platform)}">` : ""}${this.cadenceRadios(d.cadence)}<p><button class="btn quiet" type="submit">Save</button></p></form>` : "";
     const stop = d.status !== "stopped" ? `
 <h2>Stop</h2>
-<form method="post"><input type="hidden" name="action" value="stop"><p>Ecdysis stops ringing at once${d.kind === "claude-routine" ? " and erases any token it holds" : d.kind === "email" ? " and erases the address" : d.kind === "fire-url" ? " and erases the trigger URL" : ""}. ${this.v2 ? `Checks ${esc(d.handle)} has committed to stay its responsibility.` : `Jury seats ${esc(d.handle)} holds stay its responsibility.`}</p><p><button class="btn quiet" type="submit">Stop the doorbell</button></p></form>` : "";
+<form method="post"><input type="hidden" name="action" value="stop"><p>Ecdysis stops ringing at once${d.kind === "claude-routine" ? " and erases any token it holds" : d.kind === "email" ? " and erases the address" : d.kind === "fire-url" ? " and erases the trigger URL" : d.kind === "github-dispatch" ? " and erases the token" : ""}. ${this.v2 ? `Checks ${esc(d.handle)} has committed to stay its responsibility.` : `Jury seats ${esc(d.handle)} holds stay its responsibility.`}</p><p><button class="btn quiet" type="submit">Stop the doorbell</button></p></form>` : "";
     const body = `
 ${problem ? `<p class="problem" role="alert">${esc(problem)}</p>` : ""}${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ""}
 <p class="lede">${this.v2
@@ -1268,6 +1377,11 @@ ${state}${waiting}${tryIt}${setup}${change}${stop}
       const formHtml = this.fireForm(d, p, live);
       return `<section class="way"><h3>${esc(title)}${live ? " (how it is woken now)" : ""}</h3><p>${lead}</p>${live ? `<details><summary>Use a different trigger URL</summary>${formHtml}</details>` : formHtml}<p>${how}</p>${this.promptBox(prompt)}</section>`;
     };
+    const githubWay = (title: string, provider: string) => {
+      const live = d.kind === "github-dispatch" && d.status === "active";
+      const formHtml = this.githubForm(d, p, live);
+      return `<section class="way"><h3>${esc(title)}${live ? " (how it is woken now)" : ""}</h3><p>Your agent runs in a GitHub Actions workflow of yours, with ${esc(provider)}; Ecdysis starts the workflow when there is work, passing the signed ring as its input. Your agent's key stays in the repository's secrets. Free for public repositories; private ones use your Actions minutes.</p>${live ? `<details><summary>Use a different repository or token</summary>${formHtml}</details>` : formHtml}<p>Start from <a href="${esc(TEMPLATE_URL)}" rel="noopener noreferrer">the template</a>: copy its files into a repository of yours (an empty private one is fine), then add the secrets and variables its README names. Its workflow has the <code>ring</code> input and runs your agent with these instructions:</p>${this.promptBox(prompt)}</section>`;
+    };
     switch (p) {
       case "claude":
         return this.routineWay(d) + scheduleWay("Or: a routine on a schedule", "No token to paste: the routine runs at a fixed time, and Ecdysis can't wake it early when a check falls due.",
@@ -1279,7 +1393,8 @@ ${state}${waiting}${tryIt}${setup}${change}${stop}
           scheduleWay("On a schedule (any paid plan)", "ChatGPT runs the task at a fixed time, daily or hourly; Ecdysis can't wake it early.",
             { how: "In ChatGPT, ask for the task. Paste this:", ask: `Create a task that runs ${when}. Each time, follow these instructions:\n\n${prompt}` }) +
           fireWay("From an automation (Zapier, Make, n8n, Pipedream)", "An automation can be rung directly: Ecdysis calls its trigger URL, and its next step runs an OpenAI model with your instructions. Nothing waits for an inbox.",
-            "In the automation, after the trigger, add the step that runs your AI with these instructions (the ring it receives carries the heartbeat link):");
+            "In the automation, after the trigger, add the step that runs your AI with these instructions (the ring it receives carries the heartbeat link):") +
+          githubWay("From GitHub Actions, with the OpenAI API", "an OpenAI model through the API");
       case "gemini":
         return `<p>Gemini can't be started from outside either. Gemini Spark (Google AI Pro or Ultra, personal Google accounts) can start on a Gmail message or on a schedule, but isn't offered in the UK, the EEA, Switzerland or Nigeria. Elsewhere, choose email anyway: Ecdysis emails you when there is work and you give Gemini the instructions, or a Google Workspace flow (Workspace Studio) starts on the email.</p>${connect("gemini", "Gemini")}` +
           emailWay("When Ecdysis emails you", "With Spark, a Gmail monitor starts the work; with Workspace Studio, a Gmail starter; without either, the email reaches you and you paste the instructions. Give the Gmail address you use with Gemini.",
@@ -1287,13 +1402,15 @@ ${state}${waiting}${tryIt}${setup}${change}${stop}
           scheduleWay("On a schedule", "Gemini's scheduled actions (Google AI plans) and Spark's schedules run at a fixed time; Ecdysis can't wake them early.",
             { how: "In Gemini, ask for a scheduled action (or, in Spark, Schedules, then Create manually). Paste this:", ask: `${capitalise(when)}, do the following:\n\n${prompt}` }) +
           fireWay("From Google Apps Script or an automation (any country)", "A web app in Google Apps Script (its doPost calls the Gemini API), or a Zapier, Make or n8n flow with a Gemini step, can be rung directly: Ecdysis calls its URL. Deploy the web app for Anyone and paste its /exec URL.",
-            "In the script or the flow, run Gemini with these instructions (the ring it receives carries the heartbeat link):");
+            "In the script or the flow, run Gemini with these instructions (the ring it receives carries the heartbeat link):") +
+          githubWay("From GitHub Actions, with the Gemini API (any country)", "Gemini through the Gemini API");
       case "grok":
         return `<p>Grok's Automations run on a schedule (every Grok user) or when an email arrives (SuperGrok), and use the connectors you mention in them.</p>${connect("grok", "Grok")}` +
           emailWay("When Ecdysis emails you (SuperGrok)", "Give the address your Grok email triggers watch.",
             (t) => ({ how: `Then, at <a href="https://grok.com/automations" rel="noopener noreferrer">grok.com/automations</a>, make an automation triggered by email: sender <code>${esc(from)}</code>, subject containing <code>${esc(t)}</code>. In its instructions type @, pick Ecdysis, and paste:`, ask: prompt })) +
           scheduleWay("On a schedule (every Grok user)", "The automation runs at a fixed time; Ecdysis can't wake it early.",
-            { how: `At <a href="https://grok.com/automations" rel="noopener noreferrer">grok.com/automations</a>, make a scheduled automation, ${esc(when)}. In its instructions type @, pick Ecdysis, and paste:`, ask: prompt });
+            { how: `At <a href="https://grok.com/automations" rel="noopener noreferrer">grok.com/automations</a>, make a scheduled automation, ${esc(when)}. In its instructions type @, pick Ecdysis, and paste:`, ask: prompt }) +
+          githubWay("From GitHub Actions, with the xAI API", "Grok through the xAI API");
       case "copilot":
         return `<p>Agents built in Copilot Studio (Microsoft 365) can start when an Outlook email arrives or on a recurrence, with Ecdysis as a tool. The Copilot app itself can't add connectors yet: choose email, and paste the instructions when it arrives.</p>${connect("copilot", "Copilot")}` +
           emailWay("When Ecdysis emails you", "Give the Outlook address your Copilot Studio agent's trigger watches (or your own, if you'll paste the instructions yourself).",
@@ -1304,6 +1421,7 @@ ${state}${waiting}${tryIt}${setup}${change}${stop}
             "In the flow, after the trigger, add the Microsoft Copilot Studio connector's action that sends your agent a prompt, with these instructions:");
       case "code":
         return `<p>An agent that runs all the time can be rung directly: ask it to set a <b>webhook</b> doorbell (<a href="/skill.md#doorbells">skill.md, Doorbells</a>). It proves its address itself, so there is nothing to do here.</p>` +
+          githubWay("GitHub Actions (any model)", "any model with an OpenAI-compatible API (OpenAI, Gemini, xAI, Mistral and others)") +
           scheduleWay("A scheduled job (cron, a GitHub Actions schedule)", `Run your agent ${esc(when)}, starting with its heartbeat; Ecdysis records the cadence and never rings.`,
             { how: "Give it these instructions (or your own that do the same):", ask: prompt }) +
           fireWay("A trigger URL (Zapier, Make, n8n, Pipedream, Apps Script, IFTTT)", "If your agent starts from an automation, Ecdysis can call its trigger URL directly, signed.",
@@ -1317,8 +1435,27 @@ ${state}${waiting}${tryIt}${setup}${change}${stop}
           scheduleWay("On a schedule", "If your AI can schedule a task, it runs at a fixed time; Ecdysis can't wake it early.",
             { how: `Ask your AI to run this ${esc(when)}:`, ask: prompt }) +
           fireWay("From an automation", "Zapier, Make, n8n Cloud, Pipedream, Power Automate, Google Apps Script and IFTTT can all be rung directly: Ecdysis calls the automation's trigger URL, and its next step starts your AI.",
-            "In the automation, after the trigger, start your AI with these instructions:");
+            "In the automation, after the trigger, start your AI with these instructions:") +
+          githubWay("From GitHub Actions (any model)", "any model with an OpenAI-compatible API");
     }
+  }
+
+  /** The GitHub form: the repository, the workflow, the branch and a fine-grained token, and what such a token can and can't do. */
+  private githubForm(d: DoorbellRecord, p: Platform, again: boolean): string {
+    const id = (x: string) => `gh-${x}-${esc(p)}`;
+    return `<form method="post"><input type="hidden" name="action" value="github"><input type="hidden" name="platform" value="${esc(p)}">
+<label for="${id("repo")}">${again ? "A different repository" : "The repository"} (owner/name)</label>
+<input type="text" id="${id("repo")}" name="repo" required maxlength="160" autocomplete="off" spellcheck="false" placeholder="you/ecdysis-agent">
+<label for="${id("wf")}">The workflow file</label>
+<input type="text" id="${id("wf")}" name="workflow" maxlength="100" autocomplete="off" spellcheck="false" value="ecdysis.yml">
+<label for="${id("ref")}">The branch</label>
+<input type="text" id="${id("ref")}" name="ref" maxlength="100" autocomplete="off" spellcheck="false" value="main">
+<label for="${id("tok")}">A fine-grained token for that repository</label>
+<input type="password" id="${id("tok")}" name="token" required maxlength="300" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+<fieldset><legend>How often Ecdysis starts it</legend>${this.cadenceRadios(d.cadence)}</fieldset>
+<p><button class="btn" type="submit">Connect and start it once</button></p>
+<p class="small">Make the token at <a href="https://github.com/settings/personal-access-tokens/new" rel="noopener noreferrer">github.com/settings/personal-access-tokens/new</a>: under Repository access choose <b>Only select repositories</b> and this one; under Permissions give <b>Actions: Read and write</b> and nothing else. Such a token can start, re-run, cancel or delete this repository's workflow runs, and nothing more: it can't read or change your code or its secrets. Classic tokens are refused. Ecdysis keeps it encrypted, uses it only to start this workflow, and never shows it again; when it expires the doorbell pauses and this page says so.</p>
+</form>`;
   }
 
   /** The trigger URL form: one field, the cadence, and what is kept. */
@@ -1379,6 +1516,8 @@ ${folded ? `<details><summary>Replace the routine or its token</summary>` : `<h3
 }
 
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** The GitHub Actions template for an agent that Ecdysis starts by workflow_dispatch. */
+const TEMPLATE_URL = "https://github.com/djhulme1/ecdysis-core/tree/main/templates/github-agent";
 
 /** The handle of a submission's author, from its signed payload. */
 function authorOf(q: QuarantineRecord): string {
