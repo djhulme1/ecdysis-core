@@ -36,6 +36,53 @@ export function isStewardPath(path: string): boolean {
   return /^\/steward(\/|$)/.test(path);
 }
 
+/**
+ * Reads the seeds a steward pasted into the bulk form, as a phone or a
+ * document viewer may have handed them over: a byte-order mark, a Markdown
+ * code fence, prose before or after the array, a viewer's line numbers,
+ * no-break and zero-width spaces from a rendered page, typographic quotes in
+ * place of straight ones. Each repair is tried only after the text fails to
+ * parse without it, and the first reading that parses wins, so a clean paste
+ * is read exactly as written (curly quotes inside a quoted sentence are the
+ * authors' words and stay). When nothing parses, the problem names the JSON
+ * engine's reason for the paste as it stood and how many characters arrived,
+ * so a paste cut short shows up as one.
+ */
+export function readSeedPaste(raw: string): { seeds: unknown[] } | { problem: string } {
+  const text = raw.replace(/^\uFEFF/, "").trim();
+  if (!text) return { problem: "Couldn't read the seeds: the box was empty. Paste a JSON array of {source, quote, test, kind, title, brief, scale, wants}." };
+  const attempts: string[] = [];
+  const add = (t: string) => { if (t && !attempts.includes(t)) attempts.push(t); };
+  const widen = (repair: (t: string) => string) => { for (const t of [...attempts]) add(repair(t)); };
+  // As pasted, minus a leading ```json line and a trailing ``` line.
+  const unfenced = text.replace(/^```[A-Za-z]*[ \t]*\r?\n?/, "").replace(/\r?\n?[ \t]*```$/, "").trim();
+  add(unfenced);
+  // The outermost array alone: anything before the first [ or after the last ] is a document's prose, not a seed.
+  const open = unfenced.indexOf("["), close = unfenced.lastIndexOf("]");
+  if (open >= 0 && close > open) add(unfenced.slice(open, close + 1));
+  // A code viewer's line numbers, when every line carries one (a JSON line never begins with a digit).
+  widen((t) => t.split(/\r?\n/).every((l) => !l.trim() || /^\s*\d+(\s|$)/.test(l)) ? t.replace(/^\s*\d+(\s|$)/gm, "") : t);
+  // A rendered page's spacing: no-break spaces for indentation, zero-width and soft-hyphen characters in the text.
+  widen((t) => t.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ").replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, ""));
+  // Typographic double quotes where JSON wants straight ones (a keyboard's smart punctuation, a word processor): first only
+  // where a string delimiter can stand (after [ { , : or before : , } ]), which leaves a quotation inside a sentence alone;
+  // then everywhere, for a paste with no quotations inside.
+  const curly = /[\u201C\u201D\u201E\u201F\u301D\u301E]/g;
+  widen((t) => t.replace(/([[{,:]\s*)[\u201C\u201D\u201E\u201F\u301D\u301E]/g, '$1"').replace(/[\u201C\u201D\u201E\u201F\u301D\u301E](\s*[:,}\]])/g, '"$1'));
+  widen((t) => t.replace(curly, '"'));
+  let why: string | null = null;
+  for (const t of attempts) {
+    try {
+      const v: unknown = JSON.parse(t);
+      return { seeds: Array.isArray(v) ? v : [v] };
+    } catch (e) {
+      why ??= (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 200);
+    }
+  }
+  const cut = /end of JSON input|Unterminated string/i.test(why ?? "") ? ` The text ends before the array closes, so the paste may have been cut short: ${text.length.toLocaleString("en-GB")} characters arrived.` : "";
+  return { problem: `Couldn't read the seeds as JSON (${why ?? "not JSON"}).${cut} Paste the whole array of {source, quote, test, kind, title, brief, scale, wants}; a code fence or text around it is ignored.` };
+}
+
 export class StewardHandler {
   private now: () => Date;
   constructor(private o: StewardOptions) { this.now = o.now ?? (() => new Date()); }
@@ -112,9 +159,10 @@ export class StewardHandler {
       }
       case "/steward/content/challenge-seed-many": {
         // Several founding challenges in one act: a JSON array pasted into the form, each seeded as above; the reply says which went on.
-        let seeds: unknown;
-        try { seeds = JSON.parse(f.get("seeds") ?? ""); } catch { return this.page("/steward/content", signed, url, null, "Couldn't read the seeds: paste a JSON array of {source, quote, test, kind, title, brief, scale, wants}."); }
-        if (!Array.isArray(seeds) || seeds.length === 0 || seeds.length > 25) return this.page("/steward/content", signed, url, null, "Couldn't read the seeds: a JSON array of 1 to 25 objects.");
+        const read = readSeedPaste(f.get("seeds") ?? "");
+        if ("problem" in read) return this.page("/steward/content", signed, url, null, read.problem);
+        const seeds = read.seeds;
+        if (seeds.length === 0 || seeds.length > 25) return this.page("/steward/content", signed, url, null, `Couldn't read the seeds: a JSON array of 1 to 25 objects (${seeds.length} arrived).`);
         const outcomes: string[] = [];
         let seeded = 0;
         for (const [i, raw] of seeds.entries()) {

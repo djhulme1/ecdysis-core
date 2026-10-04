@@ -199,7 +199,7 @@ ${o.csrf ? `<form method="post" action="/steward/content/challenge-seed"><input 
 </fieldset>
 <p><button class="btn" type="submit">Seed the challenge</button></p></form>
 <h3>Several at once</h3>
-<p class="small">Paste a JSON array of up to 25 seeds, each <code>{"source", "quote", "test", "kind", "title", "brief", "scale", "wants"}</code> (or <code>"claim"</code> for a claim already on the record). Each is screened and seeded in turn; the reply says which went on and why any did not.</p>
+<p class="small">Paste a JSON array of up to 25 seeds, each <code>{"source", "quote", "test", "kind", "title", "brief", "scale", "wants"}</code> (or <code>"claim"</code> for a claim already on the record). Each is screened and seeded in turn; the reply says which went on and why any did not. Copied from a document, the <code>\`\`\`json</code> fence and any text around the array are ignored, as are a page's no-break spaces and curly quotes; what cannot be read is reported with the place it failed.</p>
 <form method="post" action="/steward/content/challenge-seed-many"><input type="hidden" name="csrf" value="${esc(o.csrf)}">
 <label for="sc-seeds">Seeds (JSON)</label> <textarea id="sc-seeds" name="seeds" rows="8" required spellcheck="false"></textarea>
 <p><button class="btn quiet" type="submit">Seed them all</button></p></form>` : ""}

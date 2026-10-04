@@ -11,7 +11,7 @@ import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { Accounts, MemoryAccountStore } from "../src/api/v2/accounts.js";
-import { StewardHandler } from "../src/api/v2/steward.js";
+import { StewardHandler, readSeedPaste } from "../src/api/v2/steward.js";
 import { CanaryRegistry, MemoryCanaryStore } from "../src/api/v2/canaries.js";
 import { sha256Hex } from "../src/api/access.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
@@ -449,9 +449,59 @@ describe("the stewardship area", () => {
     assert.match(decodeURIComponent(res.headers.get("location")!), /2 of 2 seeded/);
     assert.equal((((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]!).length, 6);
     const bad = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: "not json" }, d.session);
-    assert.match(await bad.text(), /Couldn&#39;t read the seeds/);
+    assert.match(await bad.text(), /Couldn&#39;t read the seeds as JSON \(/);
+    // A paste from a document viewer or a phone: the Markdown fence, the prose around the array, the viewer's no-break
+    // spaces and the keyboard's curly quotes are all read through; the seeds go on exactly as a clean paste would.
+    const seven = { ...many[0]!, source: "doi:10.1000/position.7", title: "Founding challenge 7" };
+    const mangled = `## The JSON to paste\n\n\`\`\`json\n${JSON.stringify([seven], null, 1).replace(/\n /g, "\n\u00A0").replace(/"source"/, "\u201Csource\u201D")}\n\`\`\`\n\n## Candidates not included\n\n- Sutton: a blog post.`;
+    res = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: mangled }, d.session);
+    assert.equal(res.status, 303, await res.text());
+    assert.match(decodeURIComponent(res.headers.get("location")!), /1 of 1 seeded/);
+    const onBoard = ((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]! as Array<Record<string, Json>>;
+    assert.equal(onBoard.length, 7);
+    assert.ok(onBoard.some((c) => c["title"] === "Founding challenge 7"), "the mangled paste seeded the same challenge a clean one would");
+    // A paste cut short is named as one, with the count of characters that arrived, so the steward knows what went wrong.
+    const cut = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: JSON.stringify(many).slice(0, 300) }, d.session);
+    assert.match(await cut.text(), /Couldn&#39;t read the seeds as JSON \(.*\)\. The text ends before the array closes, so the paste may have been cut short: 300 characters arrived\./);
+    // Curly quotes inside a quoted sentence are content, not delimiters: a clean paste carrying them is read as written.
+    const curlyInside = { ...many[0]!, source: "doi:10.1000/position.8", title: "Founding challenge 8", quote: "Position 8: the species reaches a \u201Cposthuman\u201D stage, as the authors put it in the words they used." };
+    res = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: JSON.stringify([curlyInside]) }, d.session);
+    assert.equal(res.status, 303, await res.text());
+    assert.match(decodeURIComponent(res.headers.get("location")!), /1 of 1 seeded/);
     const mixed = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: JSON.stringify([many[0], { title: "no claim at all", brief: "A seed that names nothing, which must be reported as refused while the rest are seeded as usual.", scale: "reasoning" }]) }, d.session);
     assert.equal(mixed.status, 200, "not every seed went on, so the page shows the outcomes");
     assert.match(await mixed.text(), /0 of 2 seeded|1 of 2 seeded/);
+  });
+});
+
+describe("reading a pasted seed set", () => {
+  it("reads a clean array as written, wraps a lone object, and names an empty box", () => {
+    const clean = readSeedPaste('[{"title":"A"},{"title":"B"}]');
+    assert.deepEqual("seeds" in clean ? clean.seeds : null, [{ title: "A" }, { title: "B" }]);
+    const lone = readSeedPaste('{"title":"A"}');
+    assert.deepEqual("seeds" in lone ? lone.seeds : null, [{ title: "A" }]);
+    const empty = readSeedPaste("  \n ");
+    assert.match("problem" in empty ? empty.problem : "", /the box was empty/);
+  });
+  it("repairs only what fails as pasted, in order, and reports the first failure when nothing parses", () => {
+    // Byte-order mark, Windows line ends and a fence with a language tag.
+    const fenced = readSeedPaste("\uFEFF```json\r\n[{\"title\":\"A\"}]\r\n```");
+    assert.deepEqual("seeds" in fenced ? fenced.seeds : null, [{ title: "A" }]);
+    // Curly quotes inside a value survive when the paste parses as it stands (they are the authors' words).
+    const inner = readSeedPaste('[{"quote":"a \u201Cposthuman\u201D stage"}]');
+    assert.deepEqual("seeds" in inner ? inner.seeds : null, [{ quote: "a \u201Cposthuman\u201D stage" }]);
+    // Smart punctuation on every quote parses once the quotes are straightened; the brackets' prose is ignored.
+    const smart = readSeedPaste("Here it is:\n[{\u201Ctitle\u201D: \u201CA\u201D}]\nThat is all.");
+    assert.deepEqual("seeds" in smart ? smart.seeds : null, [{ title: "A" }]);
+    // Smart punctuation on every quote with a quotation inside a value: the delimiters are straightened, the quotation stays.
+    const nested = readSeedPaste("[{\u201Cquote\u201D: \u201Creaching a \u201Cposthuman\u201D stage, as they put it\u201D}]");
+    assert.deepEqual("seeds" in nested ? nested.seeds : null, [{ quote: "reaching a \u201Cposthuman\u201D stage, as they put it" }]);
+    // A code viewer's line numbers on every line are stripped; a digit at the start of a value's line is not touched because values never start lines.
+    const numbered = readSeedPaste("1 [\n2  {\n3   \"title\": \"A\"\n4  }\n5 ]");
+    assert.deepEqual("seeds" in numbered ? numbered.seeds : null, [{ title: "A" }]);
+    // Nothing parses: the report carries the engine's reason for the text as it stood, not for a repaired version.
+    const broken = readSeedPaste("[{\"title\": }]");
+    assert.match("problem" in broken ? broken.problem : "", /^Couldn't read the seeds as JSON \(.+\)\. Paste the whole array/);
+    assert.doesNotMatch("problem" in broken ? broken.problem : "", /cut short/);
   });
 });
