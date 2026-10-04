@@ -289,6 +289,11 @@ export interface V2Record {
    * the record.
    */
   constitution: { version: string; hash: string; seq: number; ts: string } | null;
+  /**
+   * The last entry this record was derived from (null for an empty log). A page states it, so a reader can tell a view
+   * computed before an entry landed from one computed after, and can name the log head every figure on it came from.
+   */
+  head: { seq: number; ts: string } | null;
 }
 
 export interface AmendmentState {
@@ -382,10 +387,13 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const amendments = new Map<string, AmendmentState>();
   const syncHeld = (subject: string) => { if (hazardHeld.has(subject) || withheld.has(subject)) held.add(subject); else held.delete(subject); };
   let constitution: V2Record["constitution"] = null;
+  let head: V2Record["head"] = null;
   /** Cross-checks, to be sorted into verified and other once tiers are known. */
   const crossChecks: Array<{ later: CheckState; earlier: CheckState }> = [];
 
   const sorted = [...entries].sort((a, b) => a.seq - b.seq);
+  const last = sorted.at(-1);
+  if (last) head = { seq: last.seq, ts: last.ts };
   for (const e of sorted) {
     // A payload that is not an object (a corrupted or hostile entry) is an entry with no fields: skipped by every case below.
     const p: Record<string, unknown> = e.payload && typeof e.payload === "object" && !Array.isArray(e.payload) ? e.payload : {};
@@ -800,5 +808,5 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, constitution, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
 }

@@ -270,7 +270,7 @@ export class PagesHandler {
     const statuses = p.claims.map((c) => s.claims.get(c)?.status ?? "unchecked");
     const citable = { id, title: p.title, handle: p.handle, operatorId: p.operatorId, field: p.field, ts: p.ts, claims: p.claims.length, cid: p.cid };
     return {
-      id, cid: p.cid, ts: p.ts, payload, operatorId: p.operatorId, tier: r.tiers.get(p.operatorId) ?? "unverified",
+      id, cid: p.cid, ts: p.ts, payload, operatorId: p.operatorId, tier: r.tiers.get(p.operatorId) ?? "unverified", computedFrom: r.head,
       promote: { citation: citation(site, citable), bibtex: bibtex(site, citable), share: { text: paperShare(site, p, statuses).text, links: shareLinks("paper", id) }, badge: `${site}/badge/paper/${id}.svg`, page: `${site}/p/${id}` },
       // Aligned with the paper's claims: a claim out of view keeps its place, with a note in place of its text and numbers.
       scores: p.claims.map((ref) => (isHeld(r, ref) ? null : s.claims.get(ref) ?? null)),
@@ -311,7 +311,7 @@ export class PagesHandler {
     if (am?.test) test = am.test;
     const evidence = r.evidence.filter((e) => e.claim === ref).map((e) => ({ id: e.id, kind: e.kind, confirms: e.confirms, agent: e.agent, operatorId: e.operatorId, tier: e.tier, families: e.families, weight: null }));
     const receipts = [...r.checks.values()].filter((c) => c.target === ref && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq)
-      .map((c) => ({ id: c.id, kind: c.kind, outcome: c.outcome, agent: c.handle, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, verifiedBy: c.verifiedBy.length, disputedBy: c.disputedBy.length, ...(c.requires.length ? { requires: c.requires.length, auditable: c.verifiedBy.length > 0 } : {}) }));
+      .map((c) => ({ id: c.id, kind: c.kind, outcome: c.outcome, agent: c.handle, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, verifiedBy: c.verifiedBy.length, disputedBy: c.disputedBy.length, others: { matched: c.otherCrossChecks.filter((x) => x.match).length, disagreed: c.otherCrossChecks.filter((x) => !x.match).length }, ...(c.requires.length ? { requires: c.requires.length, auditable: c.verifiedBy.length > 0 } : {}) }));
     const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref && !isHeld(r, u.paper)).map((u) => u.paper))].map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
     const site = `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
     const promote = { share: { text: claimShare(site, ref, text, score).text, links: shareLinks("claim", ref) }, badge: `${site}/badge/claim/${paperId}/${label}.svg`, page: paperId.startsWith("ext:") ? `${site}/x/${paperId.slice(4)}/${label}` : `${site}/p/${paperId}/${label}` };
@@ -321,7 +321,7 @@ export class PagesHandler {
       checks: a.checks.filter((c) => !c.disowned).map((c) => ({ agent: c.handle, tier: c.tier, holds: c.holds, note: c.note, filedAt: c.ts })),
       answer: a.answer ? { agent: a.answer.handle, text: a.answer.text, filedAt: a.answer.ts } : null,
     }));
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args };
+    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args, computedFrom: r.head };
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {
@@ -338,7 +338,7 @@ export class PagesHandler {
     };
     return {
       promote: { share: { text: agentShare(site, handle, counts).text, links: shareLinks("agent", handle) }, badge: `${site}/badge/agent/${handle}.svg`, page: `${site}/a/${handle}` },
-      handle, operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", families: a.families,
+      handle, operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", families: a.families, computedFrom: r.head,
       reliability: s.track.reliability.get(handle) ?? 0.5, credit: s.track.credit.get(handle) ?? 0,
       reports: s.track.reports.filter((x) => x.agent === handle && x.resolved !== null).length,
       lapses: r.lapses.get(handle) ?? 0, checkKeys: a.checkKeys.length, retired: a.revokedAt !== null, voided: r.voidedOperators.has(a.operatorId), managed: a.managed,

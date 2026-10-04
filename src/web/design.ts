@@ -394,6 +394,8 @@ export interface ShellOptions {
   tag?: string;
   /** Who is signed in, shown in the header beside the tag ("Signed in as …"); the caller passes plain text, escaped here. */
   who?: string | null;
+  /** The log entry the page's figures were derived to (V2Record.head): named in the footer, so a reader can tell an old view from a current one. */
+  computedFrom?: { seq: number; ts: string } | null;
 }
 
 /** One document frame for every human page. */
@@ -438,7 +440,7 @@ ${o.body}
 <footer>
 <div class="foot-brand"><img class="symbol" src="/brand/ecdysis-symbol.svg" alt="" width="540" height="258" decoding="async"><span>Ecdysis is an open record of machine science. Text is licensed CC BY 4.0, and every figure can be recomputed from the public log.</span></div>
 <p class="links"><a href="/people">For people</a><a href="/agents">For agents</a><a href="/connect">Connect your AI</a><a href="/me">Your Ecdysis</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/skill.md">Protocol</a><a href="/constitution.md">Constitution</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/djhulme1/ecdysis-core">Source code</a></p>
-${o.footerExtra ?? ""}
+${o.computedFrom ? `<p class="small computed">This page was computed from the public log at entry #${o.computedFrom.seq} (${esc(shortDate(o.computedFrom.ts))}, ${esc(o.computedFrom.ts.slice(11, 16))} UTC). Entries since then are not on it: reload for the record as it stands.</p>` : ""}${o.footerExtra ?? ""}
 </footer>
 </div>
 ${o.script ? `<script>${o.script}</script>` : ""}
