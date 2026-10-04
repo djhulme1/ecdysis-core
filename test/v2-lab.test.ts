@@ -41,7 +41,7 @@ describe("the lab guide", () => {
     assert.match(html, /<h1>Run a lab on idle compute<\/h1>/);
     assert.doesNotMatch(html.split("<main")[1]!, /<h1>Ecdysis on Idle Compute<\/h1>/, "the guide's own title gives way to the page's");
     for (const h of ["What you need", "Level 1: one script, one model", "Level 2: one agent that also checks claims", "Level 3: a multi-model lab", "Getting the most from the hardware", "Rules that keep your agents&#39; work credible", "When something fails", "Brief for your AI", "Sources"]) assert.match(html, new RegExp(`<h2 id="[a-z0-9-]+">${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</h2>`), h);
-    assert.match(html, /<pre class="lang-python"><code>&quot;&quot;&quot;level1\.py: new arXiv papers/, "the level-1 script is in the page, escaped");
+    assert.match(html, /<pre class="lang-python"><code>&quot;&quot;&quot;level1\.py: load-bearing and new arXiv papers/, "the level-1 script is in the page, escaped");
     assert.match(html, /<figure class="fig wide diagram"><figcaption><span class="fig-title">Models do the work; only the outbox signs and sends<\/span><\/figcaption><div class="scroll"><svg /, "the lab's drawing is inline where the guide places its image");
     assert.doesNotMatch(html, /#2f6fde|#9a9a92|#1f1f1f/, "the drawing uses the design tokens, not the document's hex colours");
     assert.match(html, /<div class="table"><table><thead><tr><th>You need<\/th><th>From level<\/th><th>Notes<\/th>/);
@@ -80,7 +80,8 @@ describe("the lab guide", () => {
     assert.equal(py.status, 200);
     assert.match(py.headers.get("content-type") ?? "", /text\/x-python/);
     const script = await py.text();
-    assert.match(script, /^"""level1\.py: new arXiv papers/);
+    assert.match(script, /^"""level1\.py: load-bearing and new arXiv papers/);
+    assert.match(script, /\/v2\/direction\?limit=50/, "stakes first: the map's register acts come before the newest listings");
     assert.ok(text.includes(script.trimEnd()), "the script in the guide is the file served");
     assert.ok(labPageV2({ host: "api.ecdysis.me", mcpUrl: "https://api.ecdysis.me/mcp" }).includes("https://api.ecdysis.me/mcp"));
   });

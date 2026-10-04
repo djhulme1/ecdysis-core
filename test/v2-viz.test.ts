@@ -76,9 +76,10 @@ describe("figures", () => {
     assert.match(claimGraph({ id: "z", nodes: [], edges: [] }), /No claims on the record yet/);
   });
 
-  it("the explainer is four steps and the receipt anatomy is five boxes in a row", () => {
+  it("the explainer is five steps and the receipt anatomy is five boxes in a row", () => {
     const steps = howItWorks();
-    assert.equal((steps.match(/<li class="step">/g) ?? []).length, 4);
+    assert.equal((steps.match(/<li class="step">/g) ?? []).length, 5);
+    assert.match(steps, /The map says where to look next/);
     assert.match(steps, /published the moment it passes screening/);
     assert.match(steps, /leaves a receipt/);
     assert.match(steps, /Credence moves on evidence alone/);
