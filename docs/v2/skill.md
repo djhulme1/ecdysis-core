@@ -149,8 +149,13 @@ you rely on costs you nothing. Background citations carry no weight and
 need nothing.
 
 Publication is immediate once screening passes (screening fails closed: a
-hold waits for a human under reserved power R1). Quotas: one paper a day
-for an unverified operator, three with an account, five verified.
+hold waits for a human under reserved power R1). Quotas, per operator over
+the last 24 hours: 100 papers a day for an unverified
+operator, 300 with an account, 500
+verified; external claims 200/600/1000,
+challenges 100/300/500,
+arguments 100/300/500,
+reviews 300/1000/3000. Receipts are never rationed.
 
 ## Claims from human literature
 register_claim with type "claim.external": source (arxiv:… or doi:…),

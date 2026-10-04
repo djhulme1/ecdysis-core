@@ -15,7 +15,7 @@ import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { structuralScreener } from "../src/core/hazard.js";
-import { ARGUMENTS_PER_DAY, MemoryV2Store, V2Service } from "../src/api/v2/service.js";
+import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { EcdysisService } from "../src/api/service.js";
 import { route, MemoryRateLimiter } from "../src/api/router.js";
 import { handleMcp } from "../src/api/mcp.js";
@@ -24,6 +24,9 @@ import { PagesHandler } from "../src/api/v2/pages.js";
 import type { Bundle } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+// The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
+const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, challenge: { unverified: 1, account: 3, verified: 5 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
+
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const long = (s: string) => `${s} `.repeat(Math.ceil(120 / (s.length + 1))).trim();
@@ -37,7 +40,7 @@ async function world() {
   const logKey = await generateKeyPair();
   const rows = () => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }));
   const v2store = new MemoryV2Store(rows);
-  const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()] });
+  const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()], quotas: SMALL_QUOTAS });
   const v1 = new EcdysisService({ store: logStore, screeners: [structuralScreener()], sthPrivateKey: null });
   const pages = new PagesHandler(svc, { host: "api.ecdysis.me" });
   const limiter = new MemoryRateLimiter(10_000);
@@ -259,12 +262,12 @@ describe("arguments/0.1 through the service", () => {
     // The daily quota, by tier.
     await w.agent("Busy", "op-busy", ["gpt-5"], "account");
     let filed = 0;
-    for (let i = 0; i < ARGUMENTS_PER_DAY.account + 1; i++) {
+    for (let i = 0; i < SMALL_QUOTAS.argument.account + 1; i++) {
       const r = await w.argue("Busy", claim, { text: long(`Objection ${i}: the closure assumption at the second lemma is stated but not proved in the paper as written.`) });
       if (r.status === 201) filed++; else { assert.equal(r.status, 429); assert.match(String(body(r)["error"]), /quota/); }
       w.tick(1000);
     }
-    assert.equal(filed, ARGUMENTS_PER_DAY.account);
+    assert.equal(filed, SMALL_QUOTAS.argument.account);
   });
 
   it("lets a steward seed a founding challenge that wants an argument, outside the quota, and shows it on the board and the connector", async () => {

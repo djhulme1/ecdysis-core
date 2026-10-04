@@ -36,6 +36,7 @@ import type { TransparencyLog } from "../../core/log.js";
 import { CREDENCE_V2_VERSION, modelFamilies, type Tier } from "../../core/v2/credence.js";
 import { isHeld, V2_ENTRY_TYPES, withheldOf, type V2Entry, type V2EntryType, type V2Record } from "../../core/v2/flow.js";
 import { sanitizeText } from "../../core/sanitize.js";
+import { QUOTAS, type Quotas } from "../../core/v2/quotas.js";
 import { CHALLENGE_CLAIM, CHALLENGE_NOTES, CHALLENGES_PER_CLAIM, CHALLENGES_VERSION, challengeStatus, challengeTextProblems, PROPOSER_WEIGHT, rankChallenges, WITHDRAW_REASON, type ChallengeScale, type ChallengeState, type ChallengeStatus, type ChallengeWants, type RankedChallenge } from "../../core/v2/challenges.js";
 import { ARGUMENT_PARAMS, ARGUMENTS_VERSION, CLAIM_KINDS, groundsProblem, MONTH_MS, validateArgumentAnswerV2, validateArgumentCheckV2, validateArgumentV2, type ArgumentAnswerV2Payload, type ArgumentCheckV2Payload, type ArgumentState, type ArgumentV2Payload, type ClaimKind } from "../../core/v2/arguments.js";
 import {
@@ -65,21 +66,22 @@ import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.
 export const RESULT_DEADLINE_MS = 7 * 24 * 3600 * 1000;
 /** arguments/0.1: the reasoning a conceptual claim is assumed to take to argue about, for ranking it beside compute-costed claims. */
 export const REASONING_MINUTES = 30;
-/** Papers a day, by tier (sanity check §5.7). */
-export const QUOTA_PER_DAY: Record<"unverified" | "account" | "verified", number> = { unverified: 1, account: 3, verified: 5 };
-/** External claims an operator may register a day, by tier: each one is a new target in the queues, so they are rationed like papers. */
-export const EXTERNAL_PER_DAY: Record<"unverified" | "account" | "verified", number> = { unverified: 2, account: 6, verified: 10 };
+export { QUOTAS, type Quotas };
+/** Papers a day, by tier. */
+export const QUOTA_PER_DAY = QUOTAS.paper;
+/** External claims an operator may register a day, by tier: each one is a new target in the queues. */
+export const EXTERNAL_PER_DAY = QUOTAS.external;
 /** Reviews an operator may file a day, by tier. Repeated reviews of one claim replace each other in credence and telescope in the
  *  track record, so a flood earns nothing; the limit keeps it off the log. */
-export const REVIEWS_PER_DAY: Record<"unverified" | "account" | "verified", number> = { unverified: 3, account: 10, verified: 30 };
-/** Escalations a day per operator (§5.8). */
+export const REVIEWS_PER_DAY = QUOTAS.review;
+/** Escalations a day per operator (§5.8): each one freezes an item for the owner's key, so this one stays small. */
 export const ESCALATIONS_PER_DAY = 3;
-/** Challenges an operator may propose a day, by tier: a brief is cheap to write and the board is finite. */
-export const CHALLENGES_PER_DAY: Record<"unverified" | "account" | "verified", number> = { unverified: 1, account: 3, verified: 5 };
+/** Challenges an operator may propose a day, by tier. */
+export const CHALLENGES_PER_DAY = QUOTAS.challenge;
 /** arguments/0.1: arguments filed a day, by tier (an argument is a claim about a claim, and is scored like one)... */
-export const ARGUMENTS_PER_DAY: Record<"unverified" | "account" | "verified", number> = { unverified: 1, account: 3, verified: 5 };
+export const ARGUMENTS_PER_DAY = QUOTAS.argument;
 /** ...and checks of arguments a day, by tier (as reviews). */
-export const ARGUMENT_CHECKS_PER_DAY: Record<"unverified" | "account" | "verified", number> = { unverified: 3, account: 10, verified: 30 };
+export const ARGUMENT_CHECKS_PER_DAY = QUOTAS.argumentCheck;
 /** Check keys in force per agent: one per runner is the idea, not a key farm. */
 export const CHECK_KEYS_MAX = 8;
 /** Vouches an operator may have in force (§5.4): vouching is a liability, not a favour to hand out. */
@@ -243,6 +245,8 @@ export interface V2ServiceOptions {
   onReferral?: ((subject: string, detail: string) => Promise<void>) | null;
   /** Spend a pairing code from a person's account page: the operator id it stands for. Absent: pairing is not offered. */
   pairing?: (code: string, ip: string) => Promise<{ ok: true; operatorId: string } | { ok: false; status: number; error: string }>;
+  /** The daily allowances, where a deployment (or a test that counts to the limit) sets them; QUOTAS otherwise. */
+  quotas?: Partial<Quotas>;
   /** The constitution in force (version and hash), which registration must acknowledge (I.2). Default: the module's current text. */
   constitution?: () => Promise<{ version: string; hash: string }>;
   /** The OPERATOR key's public half: the only key that decides a hazard hold (R1). Absent: holds stay held. Never the log key. */
@@ -1102,9 +1106,10 @@ export class V2Service {
 
 
   /** A daily quota by tier on one kind of entry: the operator's entries of that type on the log in the last day against the limit. */
-  private async overQuota(type: "paper.publish" | "claim.external" | "review.file" | "challenge.propose" | "argument.file" | "argument.check", operatorId: string, r: V2Record, limits: Record<Tier, number>): Promise<ApiResult | null> {
+  private async overQuota(type: "paper.publish" | "claim.external" | "review.file" | "challenge.propose" | "argument.file" | "argument.check", operatorId: string, r: V2Record, defaults: Record<Tier, number>): Promise<ApiResult | null> {
     const tier: Tier = r.tiers.get(operatorId) ?? "unverified";
-    const limit = limits[tier];
+    const key: keyof Quotas = type === "paper.publish" ? "paper" : type === "claim.external" ? "external" : type === "review.file" ? "review" : type === "challenge.propose" ? "challenge" : type === "argument.file" ? "argument" : "argumentCheck";
+    const limit = (this.o.quotas?.[key] ?? defaults)[tier];
     const dayAgo = this.now().getTime() - 24 * 3600 * 1000;
     const rows = await this.rows();
     // A steward's seed (a founding challenge and the claim it registers, logged with by: "steward") is stewardship, made

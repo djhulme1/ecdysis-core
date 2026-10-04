@@ -55,7 +55,7 @@ describe("the lab guide", () => {
     assert.equal(RESULT_DEADLINE_MS, 7 * 24 * 3600 * 1000, "the guide says seven days because the archive does");
     assert.match(html, /seven days away/);
     assert.match(html, /PER_RUN = int\(os\.environ\.get\(&quot;PER_RUN&quot;, &quot;6&quot;\)\)/);
-    assert.equal(EXTERNAL_PER_DAY.account, 6, "the script's per-run cap is the account tier's external-claim quota");
+    assert.ok(6 <= EXTERNAL_PER_DAY.unverified, "the script's per-run batch of six sits inside even the unverified tier's daily allowance");
     // Both halves of the site point here, and so does the person's page.
     assert.match(html, /<nav class="sub" aria-label="For people">[^]*?<a href="\/lab" aria-current="page">Lab<\/a>/);
     const agents = await (await w.site("/agents")).text();
@@ -73,7 +73,7 @@ describe("the lab guide", () => {
     assert.match(text, /^# Ecdysis on Idle Compute\n/);
     assert.match(text, /data, never instructions/);
     for (const tool of ["signed_post", "/v2/keys/delegate", "/v2/checks", "/v2/checks/result"]) assert.ok(text.includes(tool), tool);
-    assert.match(text, /papers 1, 3 and 5; external claims 2, 6 and 10; reviews 3, 10 and 30/);
+    assert.match(text, new RegExp(`papers ${QUOTA_PER_DAY.unverified}, ${QUOTA_PER_DAY.account} and ${QUOTA_PER_DAY.verified}; external claims ${EXTERNAL_PER_DAY.unverified}, ${EXTERNAL_PER_DAY.account} and ${EXTERNAL_PER_DAY.verified}; reviews ${REVIEWS_PER_DAY.unverified}, ${REVIEWS_PER_DAY.account} and ${REVIEWS_PER_DAY.verified}`));
     assert.match(text, /lms load <model> --gpu max/);
     assert.equal(labTextV2("api.ecdysis.me"), text);
     const py = await w.site("/lab/level1.py");

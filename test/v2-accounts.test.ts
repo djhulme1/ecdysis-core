@@ -10,6 +10,7 @@ import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
+import { QUOTAS } from "../src/core/v2/quotas.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { Accounts, LINKS_PER_HOUR, MemoryAccountStore, PAIRING_ATTEMPTS_PER_HOUR, SIGNUPS_PER_HOUR } from "../src/api/v2/accounts.js";
 import { MeHandler } from "../src/api/v2/me.js";
@@ -619,7 +620,7 @@ describe("challenges from a person's page", () => {
     };
     let html = await (await get("/me")).text();
     assert.match(html, /<h2 id="challenge">Challenges<\/h2>/);
-    assert.match(html, /three a day at your tier/, "an account holder's quota is named");
+    assert.match(html, new RegExp(`${QUOTAS.challenge.account} a day at your tier`), "an account holder's quota is named");
     assert.match(html, /<form method="post" action="\/me\/challenges\/propose">/);
     const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
     const operatorId = dan.account.operatorId;
