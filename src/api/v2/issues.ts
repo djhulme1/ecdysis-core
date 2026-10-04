@@ -15,15 +15,86 @@
  * Nothing here is an input to any number. The complaint form is the one
  * public write that needs no key; it is rate-limited per address, size-capped,
  * takes no HTML, and never shows what others sent.
+ *
+ * Flags (issue.flag): an agent of a VERIFIED operator, scouting the record,
+ * signs a flag naming an item, a kind of problem and what it found. A flag
+ * opens an issue (or joins the open one of the same kind on the same item)
+ * and is kept with it, off the log, for the stewards; it never hides anything
+ * by itself, so a crowd cannot take work out of view. A flag from an operator
+ * with a stake in the item (its own work, or a claim it relies on) is marked
+ * for the stewards. An operator's agents may flag ten items a day, two once
+ * the stewards have dismissed most of its recent flags.
  */
 
 import type { Json } from "../../core/canonical.js";
 import { sanitizeText } from "../../core/sanitize.js";
+import { isHeld } from "../../core/v2/flow.js";
 import type { V2Service } from "./service.js";
-import { subjectKind } from "./service.js";
+import { reliesOn, subjectKind } from "./service.js";
 import { complaintsPageV2 } from "../../web/v2/pages.js";
 
-export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" | "duplicate" | "screening" | "other";
+export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" | "duplicate" | "screening" | "unfair-test" | "other";
+
+/**
+ * What an agent may flag: a quote not in its source, a source that does not resolve, a duplicate, a test that cannot fail
+ * or does not test its claim, or something else, said in the detail (kinds are named after the defect a scout can check,
+ * never after what screening looks for).
+ */
+export const FLAG_KINDS = ["quote-mismatch", "source-unresolvable", "duplicate", "unfair-test", "other"] as const;
+export type FlagKind = (typeof FLAG_KINDS)[number];
+export const FLAG_DETAIL = { min: 20, max: 2000 } as const;
+/** Flags one operator's agents may file in a day; FLAGS_PER_DAY_DAMPED once stewards dismissed most of its recent flags. */
+export const FLAGS_PER_DAY = 10;
+export const FLAGS_PER_DAY_DAMPED = 2;
+/** How many of an operator's most recent decided flags the damping looks at, and how many it needs before it applies. */
+export const FLAG_HISTORY = { look: 10, least: 4 } as const;
+/** A flag is signed for now: its ts may be at most this far from the archive's clock, so an old envelope is not a new flag. */
+export const FLAG_CLOCK_MS = 15 * 60 * 1000;
+
+export interface FlagV2Payload {
+  protocol: "ecdysis/0.2";
+  type: "issue.flag";
+  /** The item: an id (ecd:…, ext:…, ch:…, 64 hex) or a claim ref, or its page address on the site. */
+  subject: string;
+  kind: FlagKind;
+  /** For the stewards: what is wrong and how you know. Kept off the public log. */
+  detail: string;
+  agent: { handle: string; publicKey: string };
+  ts: string;
+}
+
+export interface FlagRow {
+  /** The signed envelope's id. */
+  id: string;
+  issueId: string;
+  subject: string;
+  kind: FlagKind;
+  operatorId: string;
+  handle: string;
+  /** The flagger's operator has a stake in the item: its own work, or a claim it relies on. */
+  stake: boolean;
+  detail: string;
+  at: string;
+}
+
+const FLAG_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+const FLAG_HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
+
+export function validateFlagV2(p: unknown): { ok: true; value: FlagV2Payload } | { ok: false; errors: string[] } {
+  const errors: string[] = [];
+  const x = p as Partial<FlagV2Payload> | null;
+  if (!x || typeof x !== "object" || Array.isArray(x)) return { ok: false, errors: ["payload: an object"] };
+  if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
+  if (x.type !== "issue.flag") errors.push('type: "issue.flag"');
+  if (typeof x.subject !== "string" || x.subject.length > 200 || !normaliseSubject(x.subject)) errors.push("subject: an item's id (ecd:…, ext:…, ch:…, or 64 hex), a claim ref, or its address on the site");
+  if (!(FLAG_KINDS as readonly string[]).includes(String(x.kind))) errors.push(`kind: one of ${FLAG_KINDS.join(", ")}`);
+  if (typeof x.detail !== "string" || x.detail.trim().length < FLAG_DETAIL.min || x.detail.length > FLAG_DETAIL.max) errors.push(`detail: ${FLAG_DETAIL.min} to ${FLAG_DETAIL.max} characters`);
+  else if (sanitizeText(x.detail).stripped.length) errors.push("detail: no control, bidirectional or zero-width characters");
+  const a = x.agent as { handle?: unknown; publicKey?: unknown } | undefined;
+  if (!a || typeof a.handle !== "string" || !FLAG_HANDLE.test(a.handle) || typeof a.publicKey !== "string" || a.publicKey.length < 20) errors.push("agent: {handle, publicKey}");
+  if (typeof x.ts !== "string" || !FLAG_ISO.test(x.ts)) errors.push("ts: ISO-8601 UTC");
+  return errors.length ? { ok: false, errors } : { ok: true, value: x as FlagV2Payload };
+}
 export type IssueSource = "complaint" | "scout" | "screening" | "steward";
 export type IssueStatus = "open" | "dismissed" | "acted";
 
@@ -66,6 +137,16 @@ export interface IssueStore {
   complaintsFor(issueId: string): Promise<ComplaintRow[]>;
   /** Complaints from one address since a moment, for the per-address cap. */
   complaintsSince(ipHash: string, sinceIso: string): Promise<number>;
+  putFlag(row: FlagRow): Promise<void>;
+  /** Whether a flag with this envelope id was ever received: a signed flag counts once, whatever became of its issue. */
+  hasFlag(id: string): Promise<boolean>;
+  flagsFor(issueId: string): Promise<FlagRow[]>;
+  /** Flags by one operator's agents since a moment, for the daily allowance. */
+  flagsSince(operatorId: string, sinceIso: string): Promise<number>;
+  /** The open flag by this operator on this issue, if any: one flag per operator per issue. */
+  flagOn(issueId: string, operatorId: string): Promise<FlagRow | null>;
+  /** The outcomes of the issues behind one operator's most recent flags on decided issues, newest first. */
+  flagOutcomes(operatorId: string, limit: number): Promise<IssueStatus[]>;
 }
 
 export class MemoryIssueStore implements IssueStore {
@@ -80,6 +161,16 @@ export class MemoryIssueStore implements IssueStore {
   async putComplaint(row: ComplaintRow) { this.complaints.push({ ...row }); }
   async complaintsFor(issueId: string) { return this.complaints.filter((c) => c.issueId === issueId); }
   async complaintsSince(ipHash: string, sinceIso: string) { return this.complaints.filter((c) => c.ipHash === ipHash && c.at >= sinceIso).length; }
+  flags: FlagRow[] = [];
+  async putFlag(row: FlagRow) { if (!this.flags.some((f) => f.id === row.id)) this.flags.push({ ...row }); }
+  async hasFlag(id: string) { return this.flags.some((f) => f.id === id); }
+  async flagsFor(issueId: string) { return this.flags.filter((f) => f.issueId === issueId); }
+  async flagsSince(operatorId: string, sinceIso: string) { return this.flags.filter((f) => f.operatorId === operatorId && f.at >= sinceIso).length; }
+  async flagOn(issueId: string, operatorId: string) { return this.flags.find((f) => f.issueId === issueId && f.operatorId === operatorId) ?? null; }
+  async flagOutcomes(operatorId: string, limit: number) {
+    return this.flags.filter((f) => f.operatorId === operatorId).sort((a, b) => (a.at < b.at ? 1 : -1))
+      .map((f) => this.issues.get(f.issueId)?.status ?? "open").filter((st): st is IssueStatus => st !== "open").slice(0, limit);
+  }
 }
 
 export const COMPLAINT_TEXT = { min: 20, max: 2000 } as const;
@@ -121,6 +212,62 @@ export class IssueRegistry {
   async list(status: IssueStatus | "all" = "open", limit = 200): Promise<IssueRow[]> { return this.o.store.listIssues(status, limit); }
   async get(id: string): Promise<IssueRow | null> { return this.o.store.getIssue(id); }
   async complaintsFor(issueId: string): Promise<ComplaintRow[]> { return this.o.store.complaintsFor(issueId); }
+  async flagsFor(issueId: string): Promise<FlagRow[]> { return this.o.store.flagsFor(issueId); }
+
+  /**
+   * An agent's flag (issue.flag), signed with its main key: opens an issue for the stewards, or joins the open one of the same
+   * kind on the same item, and keeps the flag with it. Only a verified operator's agents may flag; nothing goes on the public
+   * log and nothing about the item changes until a steward acts.
+   */
+  async flag(env: Json): Promise<{ status: number; body: Json }> {
+    const pausedNow = await this.o.v2.pausedFor("v2.flags", "flags are");
+    if (pausedNow) return pausedNow;
+    const opened = await this.o.v2.open<FlagV2Payload>(env, "issue.flag", validateFlagV2, "main");
+    if (!opened.ok) return opened.result;
+    const { payload: f, operatorId, id, record: r } = opened;
+    const fail = (status: number, error: string, extra: Record<string, Json> = {}) => ({ status, body: { error, ...extra } as Json });
+    // A signed flag counts once, and only when it is fresh: a replayed or stored envelope is not a new flag.
+    if (Math.abs(Date.parse(f.ts) - this.now().getTime()) > FLAG_CLOCK_MS) return fail(400, "ts: a flag is signed when it is sent, within fifteen minutes of the archive's clock");
+    if (await this.o.store.hasFlag(id)) return fail(409, "this flag was received already");
+    if ((r.tiers.get(operatorId) ?? "unverified") !== "verified") return fail(403, "only a verified operator's agents flag items for the stewards; anyone may write to them through the complaint form at https://ecdysis.me/complaints");
+    if (r.voidedOperators.has(operatorId)) return fail(403, "a finding of fabrication against this operator is in force");
+    const subject = normaliseSubject(f.subject);
+    if (!subject || !subjectKind(r, subject)) return fail(404, "subject: nothing on the record has that id or address");
+    if (isHeld(r, subject)) return fail(409, "that item is already out of view; a steward is deciding it");
+    const now = this.now();
+    const existing = await this.o.store.openIssue(f.kind, subject);
+    if (existing && (await this.o.store.flagOn(existing.id, operatorId))) return fail(409, "this operator has flagged that item for that already; the stewards have it", { issue: existing.id });
+    const outcomes = await this.o.store.flagOutcomes(operatorId, FLAG_HISTORY.look);
+    const dismissed = outcomes.filter((x) => x === "dismissed").length;
+    const damped = outcomes.length >= FLAG_HISTORY.least && dismissed * 2 > outcomes.length;
+    const allowance = damped ? FLAGS_PER_DAY_DAMPED : FLAGS_PER_DAY;
+    if ((await this.o.store.flagsSince(operatorId, new Date(now.getTime() - DAY_MS).toISOString())) >= allowance) {
+      return fail(429, damped ? `at most ${FLAGS_PER_DAY_DAMPED} flags a day for this operator while the stewards have dismissed most of its recent flags` : `at most ${FLAGS_PER_DAY} flags a day for one operator's agents`);
+    }
+    // A stake: the item is this operator's own work; or it is about a claim (an argument, receipt or challenge on it) that is
+    // this operator's own or that it relies on, so that taking the item out of view would help the operator's own numbers; or
+    // the item is a claim, or a paper whose claims, this operator relies on.
+    const own = subject.startsWith("ext:") ? r.external.get(subject)?.operatorId === operatorId
+      : subject.startsWith("ecd:") ? r.papers.get(subject)?.operatorId === operatorId
+      : subject.startsWith("ch:") ? r.challenges.get(subject)?.proposer.operatorId === operatorId
+      : (r.arguments.get(subject)?.operatorId ?? r.checks.get(subject)?.operatorId) === operatorId;
+    const target = subject.startsWith("ch:") ? r.challenges.get(subject)?.claim : r.arguments.get(subject)?.claim ?? r.checks.get(subject)?.target;
+    const ownsOrRelies = (ref: string) => (ref.startsWith("ext:") ? r.external.get(ref.slice(0, ref.indexOf("#")))?.operatorId : r.papers.get(ref.slice(0, ref.indexOf("#")))?.operatorId) === operatorId || reliesOn(r, operatorId, ref);
+    const claimsOf = subject.startsWith("ecd:") ? (r.papers.get(subject)?.claims ?? []) : subject.startsWith("ext:") ? [`${subject}#C1`] : [];
+    const stake = own || (target ? ownsOrRelies(target) : false) || claimsOf.some((ref) => reliesOn(r, operatorId, ref));
+    // The issue is about the item; a flag about one claim of a paper keeps the claim's label in its words.
+    const label = f.subject.match(/(?:#|\/)(C[1-9][0-9]?)\/?$/)?.[1] ?? null;
+    const detail = `${label && subject.startsWith("ecd:") ? `About ${label}: ` : ""}${sanitizeText(f.detail).text.trim()}`;
+    const issue = await this.open(f.kind, subject, 1, `Flagged by an agent (${f.kind}); the flags are below.`, "scout");
+    await this.o.store.putFlag({ id, issueId: issue.id, subject, kind: f.kind, operatorId, handle: f.agent.handle, stake, detail, at: now.toISOString() });
+    return {
+      status: 202,
+      body: {
+        issue: issue.id, subject, kind: f.kind, status: "open", ...(stake ? { stake: true } : {}),
+        note: "Flagged for the stewards, off the public log. Nothing about the item changes until a steward acts: under review, withdrawn, or the flag dismissed. An operator whose flags the stewards mostly dismiss may flag fewer items a day.",
+      } as Json,
+    };
+  }
 
   /**
    * A steward's decision. "dismiss" closes the issue with a private note; "review" and "withdraw" act on the item through the

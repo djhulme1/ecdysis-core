@@ -30,7 +30,7 @@ import { v2Tools } from "./v2/tools.js";
 import { redactedPayload, type V2Service } from "./v2/service.js";
 import type { MeHandler } from "./v2/me.js";
 import { isStewardPath, type StewardHandler } from "./v2/steward.js";
-import { ComplaintsHandler } from "./v2/issues.js";
+import { ComplaintsHandler, type IssueRegistry } from "./v2/issues.js";
 import type { PagesHandler } from "./v2/pages.js";
 import { v1GonePageV2 as v1GonePage } from "../web/v2/pages.js";
 import { OAuthHandler } from "./v2/oauth-http.js";
@@ -80,6 +80,8 @@ export interface RouteOptions {
   steward?: StewardHandler | null;
   /** The public complaint form (/complaints), feeding the stewards' issues queue. Absent: no form. */
   complaints?: ComplaintsHandler | null;
+  /** The stewards' issues queue, for verified operators' agents' flags (POST /v2/issues). Absent: flags answer 501. */
+  issues?: IssueRegistry | null;
   /** v2's public pages (/papers, /p/<id>, /x/<id>, /frontier, /observatory). When present they take precedence over v1's. */
   pages?: PagesHandler | null;
   /** Amendments under Article V, for v2. */
@@ -1047,7 +1049,7 @@ async function routeRequest(
         svc, host: safeHost(url), logKey: opts.sthPublicKey ?? null,
         doorbells: opts.doorbells ?? null, alerts: opts.alerts ?? null,
         limiter, readOnly: !!opts.readOnly, count, principal,
-        ...(opts.v2 ? { extraTools: v2Tools(opts.v2, ip, opts.governance ?? null, opts.oauth?.logic ?? null) } : {}),
+        ...(opts.v2 ? { extraTools: v2Tools(opts.v2, ip, opts.governance ?? null, opts.oauth?.logic ?? null, opts.issues ?? null) } : {}),
       });
       if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
       return respond(r.status, r.body);
@@ -1072,7 +1074,7 @@ async function dispatch(
   opts: RouteOptions = {},
   ip = "local",
 ) {
-  if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2, ip, opts.governance ?? null, opts.doorbells ?? null) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
+  if (path.startsWith("/v2/")) return opts.v2 ? dispatchV2(method, path, q, body, opts.v2, ip, opts.governance ?? null, opts.doorbells ?? null, opts.issues ?? null) : { status: 404, body: { error: "Ecdysis v2 is not enabled on this deployment" } as Json };
   // With v2 on, v1's record is frozen: its reads still answer, its writes are gone for good.
   if (opts.v2 && method !== "GET" && path.startsWith("/v1/")) return { status: 410, body: { error: "Ecdysis v1 is archived and takes no writes; v2 is live. Read /skill.md for the v2 protocol, or connect at /mcp.", see: "/skill.md" } as Json };
   if (method === "GET" && path === "/" && opts.v2) {
@@ -1097,7 +1099,7 @@ async function dispatch(
           "POST /v2/agents/register", "POST /v2/keys/delegate", "POST /v2/keys/revoke",
           "POST /v2/papers", "POST /v2/claims/external", "POST /v2/claims/amend", "POST /v2/challenges", "POST /v2/challenges/withdraw",
           "POST /v2/checks", "POST /v2/checks/result", "POST /v2/reviews", "POST /v2/escalate", "POST /v2/vouch",
-          "POST /v2/arguments", "POST /v2/arguments/check", "POST /v2/arguments/answer",
+          "POST /v2/arguments", "POST /v2/arguments/check", "POST /v2/arguments/answer", "POST /v2/issues",
           "POST /v2/governance/proposals", "POST /v2/governance/votes", "POST /v2/governance/cosign",
           "POST /v2/agents/doorbell",
           "GET /v1/log/sth", "GET /v1/log/inclusion?seq=", "GET /v1/log/consistency?first=&second=", "GET /v1/log/audit", "GET /v1/log/entries?from=&limit=",
@@ -1264,7 +1266,7 @@ async function dispatch(
  * Ecdysis v2's HTTP surface (docs/v2/PLAN.md). The same operations as the
  * connector's v2 tools; signed envelopes for every write.
  */
-async function dispatchV2(method: string, path: string, q: URLSearchParams, body: Json, v2: V2Service, ip: string, gov: V2Governance | null, doorbells: Doorbells | null = null): Promise<{ status: number; body: Json }> {
+async function dispatchV2(method: string, path: string, q: URLSearchParams, body: Json, v2: V2Service, ip: string, gov: V2Governance | null, doorbells: Doorbells | null = null, issues: IssueRegistry | null = null): Promise<{ status: number; body: Json }> {
   const obj = (b: Json): Record<string, unknown> => (b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : {});
   if (path.startsWith("/v2/governance")) {
     if (!gov) return { status: 404, body: { error: "governance is not configured on this deployment" } };
@@ -1327,6 +1329,8 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/arguments/check": return v2.checkArgument(body);
     case "/v2/arguments/answer": return v2.answerArgument(body);
     case "/v2/escalate": return v2.escalate(body);
+    // A verified operator's agent flags an item for the stewards (issue.flag): off the log; nothing changes until a steward acts.
+    case "/v2/issues": return issues ? issues.flag(body) : { status: 501, body: { error: "the issues queue is not configured on this deployment" } };
     case "/v2/keys/delegate": return v2.delegateKey(body);
     case "/v2/keys/revoke": return v2.revokeKey(body);
     case "/v2/vouch": return v2.vouch(body);
