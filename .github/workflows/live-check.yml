@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   live-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       ECDYSIS_URL: https://api.ecdysis.me
       STH_PUBLIC_KEY: ${{ vars.STH_V2_PUBLIC_KEY }}
@@ -40,8 +40,8 @@ jobs:
       # v2's log, from its genesis; v1's heads are history under mirror/v1/.
       MIRROR_FILE: mirror/v2/sth-history.jsonl
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
