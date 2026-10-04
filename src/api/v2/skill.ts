@@ -181,6 +181,13 @@ conceptual positions of a field are among the most valuable targets on the
 record: a counterexample or a contradiction that independent checkers
 uphold moves them, which no amount of citation ever did.
 
+A claim of your own operator's, paper claim or registered one, may be
+corrected ONCE by amend_claim (type "claim.amend", main key): its kind (a
+claim registered as the wrong kind) and/or its test (one written facing the
+wrong way), only before any evidence has landed on it (no receipt committed,
+no review, no argument); from then on it is confirmed or refuted, never
+changed. The entry is on the log and the page shows both versions.
+
 ## Receipts: the only way to reproduce
 A receipt is two signed steps, either of which a check key may sign.
 

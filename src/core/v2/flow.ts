@@ -32,6 +32,7 @@
  *   argument.answer    {argument, text, handle, operatorId}
  *   content.withhold   {subject, status: review | withdrawn, reason, by: steward, steward}
  *   content.restore    {subject, reason, by: steward, steward}
+ *   claim.amend        {claim, kind?, test?, handle, operatorId}         the author's one correction before any evidence (4 Oct 2026)
  *
  * Paper claims and external claims may carry kind: "conceptual" (arguments/0.1); absent means empirical.
  *
@@ -101,7 +102,7 @@ export type V2EntryType =
   | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt"
   | "challenge.propose" | "challenge.withdraw"
   | "argument.file" | "argument.check" | "argument.answer"
-  | "content.withhold" | "content.restore";
+  | "content.withhold" | "content.restore" | "claim.amend";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
@@ -109,7 +110,7 @@ export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release", "constitution.adopt",
   "challenge.propose", "challenge.withdraw",
   "argument.file", "argument.check", "argument.answer",
-  "content.withhold", "content.restore",
+  "content.withhold", "content.restore", "claim.amend",
 ];
 
 export interface V2Entry {
@@ -226,6 +227,12 @@ export interface V2Record {
   stewardVerified: Set<string>;
   /** Operators verified by the record (resolve.ts): what they did and when they earned it. Empty from deriveV2 alone. */
   verifiedByRecord: Map<string, EarnedVerification>;
+  /**
+   * Claims their author corrected once, before any evidence landed (claim.amend): the new kind and/or test, and the entry.
+   * A paper claim's test lives in its envelope, so the page reads the amended one from here; an external claim's is amended
+   * in `external` too. One amendment per claim; later ones are ignored.
+   */
+  amendments: Map<string, AmendmentState>;
   /** Pairs of operators that have each confirmed the other's claims. */
   rings: Array<[string, string]>;
   ringLinked: (a: string, b: string) => boolean;
@@ -280,6 +287,16 @@ export interface V2Record {
    * the record.
    */
   constitution: { version: string; hash: string; seq: number; ts: string } | null;
+}
+
+export interface AmendmentState {
+  kind?: ClaimKind;
+  test?: string;
+  /** What stood before, for the page: the kind always; the test for an external claim (a paper claim's original is in its envelope). */
+  wasKind: ClaimKind;
+  wasTest?: string;
+  seq: number;
+  ts: string;
 }
 
 export interface WithheldState {
@@ -360,6 +377,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const held = new Set<string>();
   const hazardHeld = new Set<string>();
   const withheld = new Map<string, WithheldState>();
+  const amendments = new Map<string, AmendmentState>();
   const syncHeld = (subject: string) => { if (hazardHeld.has(subject) || withheld.has(subject)) held.add(subject); else held.delete(subject); };
   let constitution: V2Record["constitution"] = null;
   /** Cross-checks, to be sorted into verified and other once tiers are known. */
@@ -544,6 +562,23 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
       case "content.restore": {
         const subject = str(p["subject"]);
         if (withheld.delete(subject)) syncHeld(subject);
+        break;
+      }
+      case "claim.amend": {
+        // One correction per claim, by its author, before any evidence: the service checks all three; the derivation applies the
+        // first amendment it meets and ignores any other, so a replay cannot be talked into a second one.
+        const ref = str(p["claim"]);
+        const claim = claims.find((c) => c.ref === ref);
+        if (!claim || amendments.has(ref)) break;
+        // Evidence already on the claim (a receipt committed, a review, an argument) makes an amendment void, whatever let it through.
+        if ([...checks.values()].some((c) => c.target === ref) || reviews.some((v) => v.claim === ref) || [...args.values()].some((a) => a.claim === ref)) break;
+        const kind = p["kind"] === "conceptual" || p["kind"] === "empirical" ? (p["kind"] as ClaimKind) : undefined;
+        const test = typeof p["test"] === "string" && p["test"].trim().length >= 10 ? p["test"] : undefined;
+        if (kind === undefined && test === undefined) break;
+        const ext = external.get(ref.slice(0, ref.indexOf("#")));
+        amendments.set(ref, { ...(kind ? { kind } : {}), ...(test ? { test } : {}), wasKind: claim.kind ?? "empirical", ...(ext && test ? { wasTest: ext.test } : {}), seq: e.seq, ts: e.ts });
+        if (kind) claim.kind = kind;
+        if (ext) { if (kind) ext.kind = kind; if (test) ext.test = test; }
         break;
       }
       case "finding.decide": {
@@ -757,5 +792,5 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, constitution, arguments: args, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, constitution, arguments: args, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
 }

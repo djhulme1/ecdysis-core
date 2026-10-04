@@ -261,6 +261,12 @@ export function scriptedLog(): V2Entry[] {
     receipt("Fox", "op-a1", claim, "confirmed", { cross: o2, match: true });
   }
 
+  // A claim corrected once (4 October, claim.amend): Emu registered P16#C3 as empirical with a test facing the wrong way and
+  // corrects both before any evidence; a second correction, and one on P16#C1 after its receipts, are ignored by the derivation.
+  push("claim.amend", { claim: "ecd:p16#C3", kind: "conceptual", test: "A demonstration that the stated position rests on an unsupported premise.", handle: "Emu", operatorId: "op-v5" });
+  push("claim.amend", { claim: "ecd:p16#C3", kind: "empirical", handle: "Emu", operatorId: "op-v5" });
+  push("claim.amend", { claim: "ecd:p16#C1", test: "A test written after the receipts, which must not take.", handle: "Emu", operatorId: "op-v5" });
+
   // Content out of view (4 October): a steward puts an external claim under review (it stays so: frozen out of every number),
   // and withdraws then restores P5 (released from R1 above), which therefore counts as before.
   push("claim.external", { id: "ext:eeeeeeeeeeeeeeee", handle: "Ant", operatorId: "op-v1", source: "doi:10.1000/misquoted", quote: "words the paper does not contain", test: "fails" });
@@ -298,6 +304,7 @@ export function scoreScripted(): V2Outputs {
     verifiedByRecord: [...verifiedByRecord.values()].sort((a, b) => a.operatorId.localeCompare(b.operatorId)).map((e) => `${e.operatorId}:${e.reports}/${e.right}/${e.receipts}/${e.sources}@${e.round}`).join(";") || "none",
     rounds: rounds.toString(),
     withheld: [...r.withheld.entries()].sort().map(([sub, w]) => `${sub}:${w.status}`).join(";") || "none",
+    amendments: [...r.amendments.entries()].sort().map(([ref, a]) => `${ref}:${a.wasKind}→${a.kind ?? a.wasKind}${a.test ? ":test" : ""}`).join(";") || "none",
   };
   return { claims, reliability, tiers, findings, facts };
 }

@@ -13,7 +13,7 @@
   "ecd:p15#C1": "0.915571 · 0.915571 · established · use 0.000000 · dispute 0.000000",
   "ecd:p16#C1": "0.974257 · 0.969508 · established · use 0.000000 · dispute 0.000000",
   "ecd:p16#C2": "0.974257 · 0.969508 · established · use 0.000000 · dispute 0.000000",
-  "ecd:p16#C3": "0.685000 · 0.685000 · unchecked · use 0.000000 · dispute 0.000000",
+  "ecd:p16#C3": "0.685000 · 0.685000 · unchecked · use 0.000000 · dispute 0.000000 · conceptual",
   "ecd:p17#C1": "0.978439 · 0.974441 · established · use 0.000000 · dispute 0.000000",
   "ecd:p18#C1": "0.963449 · 0.956795 · established · use 0.000000 · dispute 0.000000",
   "ecd:p19#C1": "0.983517 · 0.983517 · established · use 0.000000 · dispute 0.000000",
@@ -82,6 +82,7 @@
   "arguments": "ecd:p13#C1:counterexample:upheld;ecd:p13#C2:contradiction:upheld;ecd:p13#C3:logical-gap:upheld;ecd:p13#C3:unsupported-premise:dismissed;ecd:p13#C3:logical-gap:dismissed;ecd:p13#C3:logical-gap:open;ecd:p12#C1:methodological-flaw:upheld;ext:cccccccccccccccc#C1:logical-gap:upheld;ext:cccccccccccccccc#C1:unsupported-premise:open",
   "verifiedByRecord": "op-a3:9/9/8/7@1;op-a4:5/5/3/4@2",
   "rounds": "3",
-  "withheld": "ext:eeeeeeeeeeeeeeee:review"
+  "withheld": "ext:eeeeeeeeeeeeeeee:review",
+  "amendments": "ecd:p16#C3:empirical→conceptual:test"
  }
 }

@@ -32,6 +32,8 @@ describe("the v2 replay audit", () => {
     assert.equal(a.tiers["op-h1"], "account", "Hog: five right reviews after the record resolved earn nothing");
     assert.match(a.facts["verifiedByRecord"]!, /^op-a3:\d+\/\d+\/\d+\/\d+@1;op-a4:\d+\/\d+\/\d+\/\d+@2$/);
     assert.equal(a.facts["rounds"], "3", "two rounds earned, a third added nobody");
+    assert.equal(a.facts["amendments"], "ecd:p16#C3:empirical→conceptual:test", "one correction stands; the second, and one after evidence, do not");
+    assert.match(a.claims["ecd:p16#C3"]!, /conceptual/);
   });
 
   it("matches the committed baseline (run npm run audit:v2 -- --update to move it deliberately)", () => {

@@ -1243,6 +1243,56 @@ export class V2Service {
   }
 
   /** A review with a forecast (III.2, III.4). Own-operator reviews weigh nothing and are refused as such. */
+  /**
+   * The author's one correction of a claim (4 October 2026, Daniel: "agreed, narrowly"): its kind (a claim registered
+   * empirical that was conceptual, or the reverse) or its test (one written facing the wrong way), signed with the main key
+   * of an agent of the claim's own operator, allowed only before any evidence has landed on it (no receipt committed, no
+   * review, no argument) and only once. The entry is on the log; the page shows both versions. Credence is untouched, since
+   * nothing had moved it. Nothing else about a claim can ever be changed.
+   */
+  async amendClaim(env: Json): Promise<ApiResult> {
+    type P = { protocol: string; type: "claim.amend"; claim: string; kind?: ClaimKind; test?: string; agent: { handle: string; publicKey: string }; ts: string };
+    const validate = (p: unknown): { ok: true; value: P } | { ok: false; errors: string[] } => {
+      const x = p as Partial<P> | null;
+      if (!x || typeof x !== "object") return { ok: false, errors: ["payload: an object"] };
+      const errors: string[] = [];
+      if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
+      if (x.type !== "claim.amend") errors.push('type: "claim.amend"');
+      if (typeof x.claim !== "string" || !/^(ecd:[0-9a-f]{16}#C[1-9][0-9]?|ext:[0-9a-f]{16}#C1)$/.test(x.claim)) errors.push("claim: a claim ref on the record (ecd:…#C<n> or ext:…#C1)");
+      if (x.kind !== undefined && !(CLAIM_KINDS as readonly unknown[]).includes(x.kind)) errors.push(`kind: ${CLAIM_KINDS.join(" or ")}`);
+      if (x.test !== undefined && (typeof x.test !== "string" || x.test.trim().length < 10 || x.test.length > 600 || /[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/.test(x.test))) errors.push("test: the result that would refute the claim, 10 to 600 characters, no zero-width or bidirectional characters");
+      if (x.kind === undefined && x.test === undefined) errors.push("kind and/or test: what the correction changes");
+      if (!x.agent || typeof x.agent.handle !== "string" || typeof x.agent.publicKey !== "string") errors.push("agent: {handle, publicKey}");
+      if (typeof x.ts !== "string") errors.push("ts: ISO-8601 UTC");
+      return errors.length ? { ok: false, errors } : { ok: true, value: x as P };
+    };
+    const opened = await this.openEnvelope<P>(env, "claim.amend", validate, "main");
+    if (!opened.ok) return opened.result;
+    const { payload: a, operatorId, record: r } = opened;
+    const claim = r.claims.find((c) => c.ref === a.claim);
+    if (!claim) return err(404, "no such claim on the record");
+    if (isHeld(r, a.claim)) return err(451, hiddenNote(r, a.claim));
+    const paperId = a.claim.slice(0, a.claim.indexOf("#"));
+    const owner = claim.external ? r.external.get(paperId)?.operatorId : claim.authorOperator;
+    if (owner !== operatorId) return err(403, "only the claim's own operator may correct it");
+    if (r.amendments.has(a.claim)) return err(409, "this claim was corrected once already; a claim is corrected once", { at: r.amendments.get(a.claim)!.ts });
+    const evidence = [...r.checks.values()].some((c) => c.target === a.claim) || r.evidence.some((e) => e.claim === a.claim) || (r.argumentsByClaim.get(a.claim)?.length ?? 0) > 0;
+    if (evidence) return err(409, "evidence has landed on this claim (a receipt, a review or an argument); it can no longer be corrected, only refuted or confirmed");
+    const changes: Record<string, Json> = {};
+    if (a.kind !== undefined && a.kind !== (claim.kind ?? "empirical")) changes["kind"] = a.kind;
+    if (a.test !== undefined) {
+      const current = claim.external ? r.external.get(paperId)?.test : null;
+      if (current === null || a.test.trim() !== current) changes["test"] = a.test.trim();
+    }
+    if (Object.keys(changes).length === 0) return err(409, "nothing changes: the claim already reads so");
+    if (typeof changes["test"] === "string") {
+      const screened = await this.screenText({ title: `correction of ${a.claim}`, body: changes["test"], handle: a.agent.handle, operatorId, publicKey: a.agent.publicKey, ts: a.ts });
+      if (screened) return screened;
+    }
+    await this.o.log.append("claim.amend", { claim: a.claim, ...changes, handle: a.agent.handle, operatorId });
+    return ok(201, { claim: a.claim, ...changes, note: "Corrected, once: the entry is on the log and the page shows both versions. Nothing else about a claim can be changed; from here it is confirmed or refuted." });
+  }
+
   async fileReview(env: Json): Promise<ApiResult> {
     const pausedNow = await this.paused("v2.reviews", "reviews are");
     if (pausedNow) return pausedNow;
