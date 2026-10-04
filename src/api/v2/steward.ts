@@ -13,7 +13,23 @@ import { ME_HEADERS, sameOrigin } from "./me.js";
 import { cookie, type Accounts, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
 import type { CanaryRegistry } from "./canaries.js";
-import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, overviewPage, peoplePage, refusedPage, type AgentRow, type PersonRow } from "../../web/steward.js";
+import { ISSUE_LABEL, ISSUES } from "../../core/v2/review.js";
+import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, healthPage, overviewPage, peoplePage, refusedPage, reviewPage, type AgentRow, type HealthSwitch, type PersonRow, type ReporterRow } from "../../web/steward.js";
+
+/**
+ * The deployment's health, for /steward/health: what the operator console's Health page showed, moved here when v2
+ * retired the console. Supplied by the Worker (it reads configuration and operational state no pure module may).
+ */
+export interface StewardHealth {
+  sth(): Promise<Record<string, unknown>>;
+  logSize(): Promise<number>;
+  ops(key: "cron:last" | "audit:last"): Promise<{ value: unknown; at: string } | null>;
+  /** Replays the whole hash chain and Merkle tree (read-only) and records the outcome as audit:last. */
+  runAudit(at: string): Promise<{ intact: boolean; problem: string | null; size: number }>;
+  switches(): Promise<HealthSwitch[]>;
+  /** Attempted writes by route: accepted, refused and why (operational counters, never who). */
+  writes(): Promise<Record<string, { accepted: number; refused: number; reasons: Record<string, number> }>>;
+}
 
 export interface StewardOptions {
   accounts: Accounts;
@@ -25,6 +41,8 @@ export interface StewardOptions {
   readOnly?: boolean;
   /** The canary registry (off the log), when configured. */
   canaries?: CanaryRegistry | null;
+  /** The deployment's health (log, scheduled run, configuration switches), when configured. */
+  health?: StewardHealth | null;
 }
 
 const MAX_FORM = 8 * 1024;
@@ -120,6 +138,12 @@ export class StewardHandler {
     if (len > maxForm || text.length > maxForm) return this.html(413, refusedPage("That form was too large."));
     const f = new URLSearchParams(text);
     if (!(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.page("/steward", signed, url, null, "That form had expired. Please try again.");
+    // A full audit only reads the log, so it needs no fresh sign-in and stays available in read-only mode.
+    if (path === "/steward/health/audit") {
+      if (!this.o.health) return this.html(404, refusedPage("Health is not configured on this deployment."));
+      const a = await this.o.health.runAudit(this.now().toISOString());
+      return a.intact ? this.redirect(`/steward/health?ok=${encodeURIComponent(`Full audit passed: the log is intact over ${a.size.toLocaleString("en-GB")} entries.`)}`) : this.page("/steward/health", signed, url, null, `The audit found a problem: ${a.problem ?? "unspecified"}.`);
+    }
     if (this.o.readOnly) return this.page("/steward", signed, url, null, "Ecdysis isn't taking changes at the moment.");
     if (!this.o.accounts.fresh(signed)) return this.html(401, refusedPage("This act needs a sign-in from the last ten minutes. Sign in again from your Ecdysis page, then return."));
     const steward = signed.account.operatorId;
@@ -180,6 +204,32 @@ export class StewardHandler {
         if (r.status !== 200) return this.page("/steward/content", signed, url, null, `Couldn't withdraw: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
         return this.redirect("/steward/content?ok=Challenge+withdrawn%3B+the+reason+is+on+the+log+under+your+operator+id.");
       }
+      // review/0.1: put an item under review, keep it, withdraw it from view, or correct its claim's test.
+      case "/steward/review/report": {
+        const r = await this.o.v2.reportBySteward((f.get("subject") ?? "").trim(), f.get("issue") ?? "", f.get("note") ?? "", steward);
+        if (r.status !== 202) return this.page("/steward/review", signed, url, null, `Couldn't put it under review: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
+        const b = r.body as Record<string, unknown>;
+        return this.redirect(`/steward/review?ok=${encodeURIComponent(b["hidden"] ? "Under review, and held out of view until a steward decides." : "Under review: it carries a banner until a steward decides.")}`);
+      }
+      case "/steward/review/withdraw": {
+        const r = await this.o.v2.withdrawContent((f.get("subject") ?? "").trim(), f.get("issue") ?? "", f.get("note") ?? "", steward);
+        if (r.status !== 200) return this.page("/steward/review", signed, url, null, `Couldn't withdraw it: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
+        return this.redirect(`/steward/review?ok=${encodeURIComponent("Withdrawn from view, with your note on its page and on the log. Restore it below if this was a mistake.")}`);
+      }
+      case "/steward/review/restore": {
+        const r = await this.o.v2.restoreContent((f.get("subject") ?? "").trim(), f.get("note") ?? "", steward);
+        if (r.status !== 200) return this.page("/steward/review", signed, url, null, `Couldn't restore it: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
+        return this.redirect(`/steward/review?ok=${encodeURIComponent(String((r.body as Record<string, unknown>)["note"] ?? "Done."))}`);
+      }
+      case "/steward/review/correct": {
+        const r = await this.o.v2.correctClaimBySteward((f.get("claim") ?? "").trim(), f.get("test") ?? "", f.get("kind") ?? "", f.get("reason") ?? "", steward);
+        if (r.status !== 200) {
+          const b = r.body as Record<string, unknown>;
+          const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[];
+          return this.page("/steward/review", signed, url, null, `Couldn't correct it: ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}`);
+        }
+        return this.redirect(`/steward/review?ok=${encodeURIComponent("Corrected. The old test stays on the log and on the claim's page; reports that the test was unfair are closed as answered.")}`);
+      }
       case "/steward/canaries/register": {
         if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
         const r = await this.o.canaries.register({ claim: f.get("claim") ?? "", outcome: f.get("outcome") ?? "", label: f.get("label") ?? "", source: f.get("source") ?? "", revealAfter: f.get("revealAfter") }, steward);
@@ -225,6 +275,7 @@ export class StewardHandler {
           findingsInForce: r.findings.filter((f) => f.inForce).length, voided: r.voidedOperators.size,
           lapses: [...r.lapses.values()].reduce((a, b) => a + b, 0),
           holdsOpen: (await this.o.v2.holds(500)).filter((h) => h.open).length,
+          review: { open: [...r.review.values()].filter((x) => x.pending).length, hidden: [...r.review.values()].filter((x) => x.hidden).length, withdrawn: [...r.review.values()].filter((x) => x.withdrawn).length },
           canariesDue: this.o.canaries ? await this.o.canaries.due() : null,
           disputes: all.filter((c) => c.dispute > 0).length,
           queue: all.filter((c) => c.status !== "established" && c.status !== "refuted").sort((a, b) => b.valueOfChecking - a.valueOfChecking).slice(0, 10).map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, use: c.use })),
@@ -290,6 +341,45 @@ export class StewardHandler {
         const board = (await this.o.v2.challenges(200, true)).body as { challenges: Array<{ id: string; title: string; claim: string; status: string; proposedAt: string; page: string; proposer: { kind: string; handle?: string; operatorId: string }; withdrawn: { at: string; by: string; reason: string } | null }> };
         const challenges = board.challenges.map((c) => ({ id: c.id, title: c.title, claim: c.claim, status: c.status, proposedAt: c.proposedAt, page: c.page, withdrawn: c.withdrawn, proposer: c.proposer.kind === "agent" ? `agent ${c.proposer.handle ?? ""} (${c.proposer.operatorId})` : c.proposer.kind === "steward" ? `steward ${c.proposer.operatorId} (founding)` : `person ${c.proposer.operatorId}` }));
         return this.html(200, contentPage({ holds: await this.o.v2.holds(100), challenges, csrf, fresh }, flash, problem, who));
+      }
+      case "/steward/review": {
+        const items = await this.o.v2.reviewQueue(300);
+        const reporters = new Map<string, ReporterRow>();
+        for (const st of r.review.values()) for (const x of st.reports) {
+          if (x.by !== "agent" || x.conflicted) continue;
+          const row = reporters.get(x.operatorId) ?? { operatorId: x.operatorId, tier: r.tiers.get(x.operatorId) ?? "unverified", open: 0, upheld: 0, dismissed: 0 };
+          if (x.open) row.open++; else if (x.closedAs === "restored") row.dismissed++; else row.upheld++;
+          reporters.set(x.operatorId, row);
+        }
+        return this.html(200, reviewPage({
+          open: items.filter((x) => x.state === "under review" || x.state === "held out of view" || x.state === "reported to the stewards"),
+          r1: items.filter((x) => x.state === "held under R1"),
+          withdrawn: items.filter((x) => x.state === "withdrawn"),
+          closed: items.filter((x) => x.state === "closed").slice(0, 30),
+          reporters: [...reporters.values()].sort((a, b) => b.open + b.upheld + b.dismissed - (a.open + a.upheld + a.dismissed)),
+          issues: ISSUES.map((i) => [i, ISSUE_LABEL[i]] as const), csrf, fresh, now: this.now().toISOString(),
+        }, flash, problem, who));
+      }
+      case "/steward/health": {
+        const h = this.o.health;
+        if (!h) return this.html(404, refusedPage("Health is not configured on this deployment."));
+        const sth = await h.sth();
+        const audit = await h.ops("audit:last");
+        const cron = await h.ops("cron:last");
+        const av = (audit?.value ?? {}) as Record<string, unknown>;
+        const cv = (cron?.value ?? {}) as Record<string, unknown>;
+        // The run's own counts, by the names the v2 record uses; a v1-only count is left out.
+        const COUNTS: ReadonlyArray<readonly [string, string]> = [
+          ["v2Lapsed", "checks lapsed"], ["v2Sealed", "seals completed"], ["v2AlertsSent", "alerts sent"], ["v2DigestsSent", "digests sent"],
+          ["doorbellsRung", "doorbells rung"], ["doorbellsFailed", "doorbells failed"], ["doorbellsPaused", "doorbells paused"], ["doorbellsWaiting", "doorbells waiting"], ["purged", "stale signups erased"],
+        ];
+        const writes = Object.entries(await h.writes()).map(([route, w]) => ({ route, accepted: w.accepted, refused: w.refused, reasons: Object.entries(w.reasons).sort((a, b) => b[1] - a[1]).slice(0, 3) as Array<readonly [string, number]> })).sort((a, b) => b.accepted + b.refused - (a.accepted + a.refused));
+        return this.html(200, healthPage({
+          logSize: await h.logSize(), rootHash: String(sth["rootHash"] ?? ""), treeAt: String(sth["timestamp"] ?? ""), signed: !!sth["signature"],
+          audit: audit ? { at: audit.at, intact: av["intact"] === true, size: typeof av["size"] === "number" ? (av["size"] as number) : null, problem: typeof av["problem"] === "string" ? (av["problem"] as string) : null } : null,
+          cron: cron ? { at: cron.at, ok: cv["ok"] !== false, error: typeof cv["error"] === "string" ? (cv["error"] as string) : null, counts: COUNTS.filter(([k]) => typeof cv[k] === "number").map(([k, label]) => [label, cv[k] as number] as const) } : null,
+          switches: await h.switches(), writes, now: this.now().toISOString(), csrf,
+        }, flash, problem, who));
       }
       case "/steward/audit":
         return this.html(200, auditPage({ rows: await this.o.v2.audit(200) }, flash, problem, who));

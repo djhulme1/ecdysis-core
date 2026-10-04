@@ -9,7 +9,7 @@ import { BUCKET_LIMITS, MemoryRateLimiter, route, type RateLimiter } from "./api
 import { V2Cache, V2Service } from "./api/v2/service.js";
 import { Accounts } from "./api/v2/accounts.js";
 import { MeHandler } from "./api/v2/me.js";
-import { StewardHandler } from "./api/v2/steward.js";
+import { StewardHandler, type StewardHealth } from "./api/v2/steward.js";
 import { PagesHandler } from "./api/v2/pages.js";
 import { Notifier } from "./api/v2/notify.js";
 import { V2Governance } from "./api/v2/governance.js";
@@ -316,12 +316,34 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
     governance,
     me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
-    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }) }),
+    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }), health: stewardHealthFrom(env, store) }),
     pages: new PagesHandler(v2, {
       host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null,
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
       ...(waitUntil ? { waitUntil } : {}),
     }),
+  };
+}
+
+/**
+ * /steward/health's source: the log's tree head and size, the last scheduled run and full audit, the deployment's
+ * switches and the operational write counters, as the operator console's Health page read them before v2 retired it.
+ */
+function stewardHealthFrom(env: Env, store: D1Store): StewardHealth {
+  const svc = () => serviceFrom(env, store);
+  return {
+    sth: async () => (await svc().sth()) as unknown as Record<string, unknown>,
+    logSize: () => store.logSize(),
+    ops: (key) => store.getOpsState(key),
+    runAudit: async (at) => {
+      const body = (await svc().audit()).body as { intact?: boolean; problem?: string | null };
+      const size = await store.logSize();
+      const out = { intact: !!body.intact, problem: body.problem ?? null, size };
+      await store.putOpsState("audit:last", out, at);
+      return out;
+    },
+    switches: async () => switchesFrom(env, accessFrom(env), await logKeysAgree(env)),
+    writes: async () => (await svc().operationalStats()).writes as unknown as Record<string, { accepted: number; refused: number; reasons: Record<string, number> }>,
   };
 }
 
@@ -467,19 +489,23 @@ export function consoleReadOnly(env: Pick<Env, "ECDYSIS_V2">, frozen: boolean): 
 
 function switchesFrom(env: Env, access: AccessConfig, keysAgree = true): Switch[] {
   const on = (ok: boolean, yes: string, no: string, note?: string): Pick<Switch, "ok" | "value" | "note"> => ({ ok, value: ok ? yes : no, ...(note ? { note } : {}) });
+  // On a v2 deployment these are shown on /steward/health; v1's jury and preprint switches no longer govern anything there.
+  const v2 = env.ECDYSIS_V2 === "1";
   return [
-    ...(env.ECDYSIS_V2 === "1" ? [{ name: "Ecdysis v2", ok: true, value: "live: this console is view-only", note: "Stewardship is at /steward; the v1 record is archived. Addresses in OPERATOR_EMAIL_HASHES are the stewards." }] : []),
-    { name: "Console lock (Cloudflare Access)", ...on(accessConfigured(access), "configured", "not configured", "Team domain, audience tag and allowed address hashes.") },
+    ...(v2 ? [{ name: "Ecdysis v2", ok: true, value: "live", note: "The v1 record is archived and its console retired. Addresses in OPERATOR_EMAIL_HASHES are the stewards." }] : []),
+    { name: v2 ? "Access lock (Cloudflare Access)" : "Console lock (Cloudflare Access)", ...on(accessConfigured(access), "configured", "not configured", v2 ? "In front of /steward: team domain, audience tag and allowed address hashes." : "Team domain, audience tag and allowed address hashes.") },
     { name: "Read-only kill switch", ...on(!readOnly(env), "off", "ON", "READ_ONLY: when on, every write is refused.") },
     { name: "Log key matches its pin", ...on(keysAgree, "yes", "NO: writes refused", "The installed signing key must be the other half of STH_PUBLIC_KEY; until it is, every write is refused.") },
-    { name: "Every submission to a jury", ...on(env.REVIEW_ALL !== "0", "yes", "no", "REVIEW_ALL") },
-    { name: "Preprints", ok: true, value: preprintCap(env) === 0 ? "off" : `up to ${preprintCap(env)} per operator a day`, note: "PREPRINT_DAILY_CAP: 0 switches preprints off; papers still go to their jury." },
+    ...(v2 ? [] : [
+      { name: "Every submission to a jury", ...on(env.REVIEW_ALL !== "0", "yes", "no", "REVIEW_ALL") },
+      { name: "Preprints", ok: true, value: preprintCap(env) === 0 ? "off" : `up to ${preprintCap(env)} per operator a day`, note: "PREPRINT_DAILY_CAP: 0 switches preprints off; papers still go to their jury." },
+    ]),
     { name: "Safety classifier", ...on(!!env.AI, "Workers AI", "absent: fail-closed screening", env.SCREENING_MODEL || GUARD_MODEL) },
     { name: "Log signing key", ...on(!!env.STH_SIGNING_KEY_PKCS8, "installed", "missing", "Tree heads are unsigned without it.") },
     { name: "Operator key (R1, R2)", ...on(!!realKey(env.OPERATOR_PUBLIC_KEY), "configured", "falls back to the log key") },
     { name: "Email provider", ...on(!!env.HERALD_API_KEY, "installed", "missing", "HERALD_API_KEY, installed by the deploy from the GitHub secret.") },
     { name: "Email sending", ...on(!emailPaused(env), "on", "paused", "HERALD_PAUSED (read-only mode also pauses it).") },
-    { name: "Herald approver key", ...on(!!realKey(env.HERALD_APPROVER_PUBLIC_KEY), "configured", "missing", "For signed API requests; the console uses your Access sign-in instead.") },
+    ...(v2 ? [] : [{ name: "Herald approver key", ...on(!!realKey(env.HERALD_APPROVER_PUBLIC_KEY), "configured", "missing", "For signed API requests; the console uses your Access sign-in instead.") }]),
     { name: "Shared daily email cap", ok: true, value: String(emailCap(env)), note: "EMAIL_DAILY_CAP: set it to your provider plan's daily quota." },
     {
       name: "Doorbell token key",

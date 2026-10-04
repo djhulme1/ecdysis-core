@@ -17,7 +17,7 @@ import type { V2Service } from "./service.js";
 import type { Preferences } from "./accounts.js";
 import { FIELDS } from "../../core/schema.js";
 import { FIELD_LABELS } from "../site.js";
-import { isHeld, type CheckState, type PaperState } from "../../core/v2/flow.js";
+import { isOutOfView, type CheckState, type PaperState } from "../../core/v2/flow.js";
 import { atomFeed, type AtomEntry } from "../../web/v2/feed.js";
 
 export const FEED_MAX = 50;
@@ -67,7 +67,7 @@ export class V2Feeds {
   async field(field: string): Promise<string | null> {
     if (field !== "all" && !(FIELDS as readonly string[]).includes(field)) return null;
     const r = await this.v2.record();
-    const papers = [...r.papers.values()].filter((p) => (field === "all" || p.field === field) && !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
+    const papers = [...r.papers.values()].filter((p) => (field === "all" || p.field === field) && !isOutOfView(r, p.id)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
     const self = `${this.o.site}/feeds/${field}.atom`;
     return atomFeed({
       id: self, self, alternate: `${this.o.site}/papers`, emptyUpdated: EPOCH,
@@ -81,7 +81,7 @@ export class V2Feeds {
   async profile(name: string, operatorId: string): Promise<string> {
     const r = await this.v2.record();
     const self = `${this.o.site}/u/${encodeURIComponent(name)}/feed.xml`;
-    const papers = [...r.papers.values()].filter((p) => p.operatorId === operatorId && !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
+    const papers = [...r.papers.values()].filter((p) => p.operatorId === operatorId && !isOutOfView(r, p.id)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
     return atomFeed({
       id: self, self, alternate: `${this.o.site}/u/${encodeURIComponent(name)}`, emptyUpdated: EPOCH,
       title: `${name} on Ecdysis`, subtitle: `Papers published by ${name}'s agents, from the public record.`,
@@ -99,13 +99,13 @@ export class V2Feeds {
     const r = await this.v2.record();
     const fields = new Set(prefs.interests.fields);
     const entries: AtomEntry[] = [];
-    for (const p of r.papers.values()) if ((!fields.size || fields.has(p.field)) && !isHeld(r, p.id)) entries.push(this.paperEntry(p));
+    for (const p of r.papers.values()) if ((!fields.size || fields.has(p.field)) && !isOutOfView(r, p.id)) entries.push(this.paperEntry(p));
     const own = new Set(r.claims.filter((c) => c.authorOperator === operatorId).map((c) => c.ref));
     const followed = new Set(prefs.interests.claims);
     const reliedOn = new Set(r.uses.filter((u) => u.operatorId === operatorId).map((u) => u.claim));
     const mine = new Set([...r.agents.entries()].filter(([, a]) => a.operatorId === operatorId).map(([h]) => h));
     for (const c of r.checks.values()) {
-      if (c.stage !== "resulted" || isHeld(r, c.id)) continue;
+      if (c.stage !== "resulted" || isOutOfView(r, c.id)) continue;
       if (own.has(c.target)) entries.push(this.receiptEntry(c, "On a claim of yours"));
       else if (followed.has(c.target)) entries.push(this.receiptEntry(c, "On a claim you follow"));
       if (c.disputedBy.length && (reliedOn.has(c.target) || own.has(c.target) || followed.has(c.target))) {

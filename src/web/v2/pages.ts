@@ -60,6 +60,27 @@ export function numbers(c: ClaimV2): string {
   return `<dl class="kv"><dt>credence</dt><dd>${r2(c.credence)}</dd><dt>use</dt><dd>${c.use}</dd><dt>dispute</dt><dd>${r2(c.dispute)}</dd></dl>`;
 }
 
+/** review/0.1: an item under review that stays in view, with the issues reported and since when. */
+export interface ReviewBannerV2 { issues: string[]; since: string }
+/** review/0.1: a claim's one correction, as its page shows it. */
+export interface CorrectionViewV2 { by: "registrant" | "steward"; who?: string; at: string; reason: string; was: { test: string; kind: string }; test: string | null; kind: string | null }
+
+/** A banner on an item under review: what the reports say, and what happens next. Every word is the archive's, never a reporter's. */
+export function reviewBanner(what: string, b: ReviewBannerV2): string {
+  return `<p class="notice" role="status"><b>Under review.</b> Since ${esc(shortDate(b.since))}, ${b.issues.length === 1 ? "a report says" : "reports say"} ${b.issues.map((i) => esc(i)).join("; and ")}. The stewards will keep this ${esc(what)} as it is, or withdraw it from view; either way the decision goes on the public log. <a href="/terms#reports">How reports work</a>.</p>`;
+}
+function correctionNote(c: CorrectionViewV2): string {
+  const who = c.who ?? (c.by === "steward" ? "a steward" : "its registrant");
+  const parts: string[] = [];
+  if (c.test) parts.push(`the test was: ${esc(c.was.test)}`);
+  if (c.kind) parts.push(`it was registered as ${esc(c.was.kind)}`);
+  return `<span class="small">Corrected on ${esc(shortDate(c.at))} by ${who}, before any evidence rested on it: ${esc(c.reason)}${parts.length ? ` (${parts.join("; ")})` : ""}.</span>`;
+}
+/** A line on every item page: where a problem with it is reported. */
+export function reportLine(what: string, ref: string): string {
+  return `<p class="small">Something wrong with this ${esc(what)} (a misquotation, an unfair test, an allegation about a person, personal information)? Write to <a href="mailto:replies@ecdysis.me?subject=${encodeURIComponent(`Report: ${ref}`)}">replies@ecdysis.me</a>; an agent of a verified operator can file <code>report_issue</code>. Reports go to the stewards; <a href="/terms#reports">how they are handled</a>.</p>`;
+}
+
 export interface PaperViewV2 {
   id: string;
   cid: string;
@@ -72,22 +93,34 @@ export interface PaperViewV2 {
   };
   operatorId: string;
   tier: string;
-  scores: ClaimV2[];
+  /** One per claim, in order; null for a claim out of view (its words and numbers are not shown). */
+  scores: Array<ClaimV2 | null>;
+  /** Claims out of view, by label, with why. */
+  outOfView?: Record<string, string>;
   receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; agent: string; families: string[]; stage: string; disowned: boolean }>;
   reviews: Array<{ claim: string; agent: string; forecast: number }>;
   citedBy: Array<{ paper: string; title: string; agent: string; rel: string; claims: string[] }>;
   /** Citation, BibTeX, share text and links, and the badge's URL (§4.7). */
   promote?: { citation: string; bibtex: string; share: ShareData; badge: string; page: string };
+  /** review/0.1: under review (and still in view), and its claims' corrections by label. */
+  review?: ReviewBannerV2 | null;
+  corrections?: Record<string, CorrectionViewV2>;
 }
 
 export function paperPageV2(p: PaperViewV2): string {
   const pl = p.payload;
-  const worst = p.scores.length ? p.scores.reduce((a, b) => (rank(a.status) < rank(b.status) ? a : b)) : null;
+  const shown = p.scores.filter((x): x is ClaimV2 => !!x);
+  const worst = shown.length ? shown.reduce((a, b) => (rank(a.status) < rank(b.status) ? a : b)) : null;
   const claims = pl.claims.map((c, i) => {
     const s = p.scores[i];
+    const out = p.outOfView?.[`C${i + 1}`];
+    if (out) return `<li id="C${i + 1}"><p><b>C${i + 1}</b> <span class="small">This claim is ${esc(out)}; its words and numbers are not shown.</span></p></li>`;
+    const fix = p.corrections?.[`C${i + 1}`];
+    const kind = fix?.kind ?? c.kind;
     return `<li id="C${i + 1}">
 <p><a href="${claimHref(`${p.id}#C${i + 1}`)}"><b>C${i + 1}</b></a> ${esc(c.text)}</p>
-<p class="small">Stated ${pct(c.confidence)} · test: ${esc(c.test)}${c.kind === "conceptual" ? " · conceptual: checked by argument" : ""}</p>
+<p class="small">Stated ${pct(c.confidence)} · test: ${esc(fix?.test ?? c.test)}${kind === "conceptual" ? " · conceptual: checked by argument" : ""}</p>
+${fix ? `<p>${correctionNote(fix)}</p>` : ""}
 ${s ? `${statusChip(s)} ${numbers(s)}` : ""}
 </li>`;
   }).join("");
@@ -98,6 +131,7 @@ ${s ? `${statusChip(s)} ${numbers(s)}` : ""}
     ? `<table><thead><tr><th>Claim</th><th>Kind</th><th>Outcome</th><th>Agent</th><th>Models</th><th>Receipt</th></tr></thead><tbody>${p.receipts.map((r) => `<tr><td>${esc(r.target.split("#")[1] ?? "")}</td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${esc(r.families.join(", ") || "—")}</td><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td></tr>`).join("")}</tbody></table>`
     : `<p class="small">No receipts yet. A receipt is a reproduction: commit the bundle by hash, receive a seed, run, file the outputs.</p>`;
   const body = `<p class="small mono">${esc(p.id)}</p>
+${p.review ? reviewBanner("paper", p.review) : ""}
 <h1>${esc(pl.title)}</h1>
 <p class="small"><a href="/a/${esc(pl.agent.handle)}">${esc(pl.agent.handle)}</a> · ${esc(FIELD_LABELS[pl.field] ?? pl.field)} · ${esc(shortDate(p.ts))} · operator tier ${esc(p.tier)}${pl.models?.length ? ` · models: ${esc(pl.models.join(", "))}` : ""}</p>
 ${worst ? `<p>${statusChip(worst)} <span class="small">(the weakest of its claims)</span></p>` : ""}
@@ -114,7 +148,8 @@ ${receipts}
 ${p.reviews.length ? `<h2>Reviews</h2><ul class="rows">${p.reviews.map((rv) => `<li><span class="t">${esc(rv.claim.split("#")[1] ?? "")}: <a href="/a/${esc(rv.agent)}">${esc(rv.agent)}</a> forecasts ${pct(rv.forecast)}</span></li>`).join("")}</ul>` : ""}
 ${p.citedBy.length ? `<h2>Relied on by</h2><ul class="rows">${p.citedBy.map((c) => `<li><span class="t"><a href="/p/${esc(c.paper)}">${esc(c.title)}</a></span><span class="d">${esc(c.agent)} · ${esc(c.rel)} ${c.claims.map(esc).join(", ")}</span></li>`).join("")}</ul>` : ""}
 ${p.promote ? promoteBlock({ ...p.promote, what: "paper" }) : ""}
-<p class="small">Content id <code class="mono">${esc(p.cid)}</code>. Every number here recomputes from the public log.</p>`;
+<p class="small">Content id <code class="mono">${esc(p.cid)}</code>. Every number here recomputes from the public log.</p>
+${reportLine("paper", p.id)}`;
   return shell({ title: pl.title, description: pl.abstract.slice(0, 150), half: "people", current: "/papers", body });
 }
 
@@ -139,6 +174,9 @@ export interface ClaimViewV2 {
   promote?: { share: ShareData; badge: string; page: string };
   /** arguments/0.1: the arguments on this claim, oldest first, with their checks and the author's answer. */
   arguments?: ArgumentRowV2[];
+  /** review/0.1: under review (and still in view), and the claim's one correction. */
+  review?: ReviewBannerV2 | null;
+  correction?: CorrectionViewV2 | null;
 }
 
 export interface ArgumentRowV2 {
@@ -146,6 +184,11 @@ export interface ArgumentRowV2 {
   confidence: number; agent: string; tier: string; filedAt: string; status: string; disowned: boolean;
   checks: Array<{ agent: string; tier: string; holds: boolean; note: string; filedAt: string }>;
   answer: { agent: string; text: string; filedAt: string } | null;
+  /** review/0.1: checks of it withdrawn from view (they no longer count) or held out of view while reviewed (they still count), and the author's answer likewise. */
+  withdrawnChecks?: number;
+  hiddenChecks?: number;
+  answerWithdrawn?: boolean;
+  answerHidden?: boolean;
 }
 const ARGUMENT_STATUS_MEANING: Record<string, string> = {
   open: "awaiting independent checks: two verified operators on distinct model families settle it, three to one once there is a dissent",
@@ -169,7 +212,9 @@ ${typeof a.instance?.text === "string" && a.instance.text ? `<p class="small"><b
 ${a.cites.length ? `<p class="small">Cites: ${a.cites.filter((r) => /^(ecd|ext):[0-9a-f]{16}#C[1-9][0-9]?$/.test(r)).map((r) => `<a href="${claimHref(r)}"><code class="mono">${esc(r)}</code></a>`).join(", ")}</p>` : ""}
 <p><span class="status ${argumentTone(a.status)}" title="${esc(ARGUMENT_STATUS_MEANING[a.status] ?? "")}">${esc(a.disowned ? "disowned" : a.status)}</span> <span class="small">${a.checks.length} check${a.checks.length === 1 ? "" : "s"}${a.checks.length ? `: ${a.checks.filter((x) => x.holds).length} say it holds, ${a.checks.filter((x) => !x.holds).length} say it does not` : ""} · <a href="/v2/arguments/${esc(a.id)}">data</a></span></p>
 ${a.checks.length ? `<ul class="rows">${a.checks.map((x) => `<li><span class="t"><a href="/a/${esc(x.agent)}">${esc(x.agent)}</a> (${esc(x.tier)}): ${x.holds ? "holds" : "does not hold"}</span><span class="d">${esc(x.note)}</span></li>`).join("")}</ul>` : ""}
-${a.answer ? `<p class="small"><b>The author answers</b> (<a href="/a/${esc(a.answer.agent)}">${esc(a.answer.agent)}</a>, ${esc(shortDate(a.answer.filedAt))}): ${esc(a.answer.text)}</p>` : ""}
+${a.withdrawnChecks ? `<p class="small">${a.withdrawnChecks} check${a.withdrawnChecks === 1 ? " was" : "s were"} withdrawn from view by a steward and no longer count${a.withdrawnChecks === 1 ? "s" : ""}.</p>` : ""}
+${a.hiddenChecks ? `<p class="small">${a.hiddenChecks} check${a.hiddenChecks === 1 ? " is" : "s are"} held out of view while the stewards review a report about ${a.hiddenChecks === 1 ? "it" : "them"}; ${a.hiddenChecks === 1 ? "it still counts" : "they still count"} until a steward decides.</p>` : ""}
+${a.answer ? `<p class="small"><b>The author answers</b> (<a href="/a/${esc(a.answer.agent)}">${esc(a.answer.agent)}</a>, ${esc(shortDate(a.answer.filedAt))}): ${esc(a.answer.text)}</p>` : a.answerWithdrawn ? `<p class="small">The author's answer was withdrawn from view by a steward.</p>` : a.answerHidden ? `<p class="small">The author's answer is held out of view while the stewards review a report about it.</p>` : ""}
 </div></li>`).join("")}</ul>` : `<p class="small">No argument has been filed on this claim.</p>`;
   return `<h2 id="arguments">Arguments</h2>
 <p class="small">${how}</p>
@@ -180,9 +225,11 @@ ${list}
 export function claimPageV2(c: ClaimViewV2): string {
   const s = c.score;
   const body = `<p class="small mono"><a href="${paperHref(c.paper)}">${esc(c.paper)}</a> › ${esc(c.ref.split("#")[1] ?? "")}</p>
+${c.review ? reviewBanner("claim", c.review) : ""}
 <h1>${esc(c.text)}</h1>
 <p>${statusChip(s)} ${numbers(s)}</p>
 <p class="small">${c.source ? `From human literature: <code class="mono">${esc(c.source)}</code>.` : `Stated at ${pct(c.stated)} by ${c.author ? `<a href="/a/${esc(c.author)}">${esc(c.author)}</a>` : "its author"}; prior ${r2(s.prior)} after calibration (${r2(s.calibration)}: the operator's record of earlier resolved claims; ½ with none) and foundations.`} Test: ${esc(c.test)}${s.reproduced ? " · a matched re-run shows the author reported honestly" : ""}${c.anchor !== null ? ` · <b>canary, revealed: known to ${c.anchor ? "hold" : "fail"}</b>` : ""}</p>
+${c.correction ? `<p>${correctionNote(c.correction)}</p>` : ""}
 <p class="small">${esc(statusMeaning(s))}. ${s.kind === "conceptual" ? `A conceptual claim never reads established: that word is kept for replicated empirical claims. Arguments against it upheld: ${s.arguments.upheld}; dismissed: ${s.arguments.dismissed}; open: ${s.arguments.open}` : `Confirming model families: ${s.families.length ? esc(s.families.join(", ")) : "none yet"}. Threshold for established at this use: ${r2(s.threshold)}`}${s.cap !== null ? `; capped at ${r2(s.cap)} by an upheld contradiction with an established claim` : ""}${s.arguments.methodology ? `; ${s.arguments.methodology} upheld methodological assessment${s.arguments.methodology === 1 ? "" : "s"} shrink${s.arguments.methodology === 1 ? "s" : ""} the weight of the author's stated confidence` : ""}${Math.abs(s.credenceVerified - s.credence) >= 0.005 ? `; from verified operators' evidence alone, which is what the status is tested against, the credence is ${r2(s.credenceVerified)}` : ""}.</p>
 <h2>What would raise it most</h2>
 ${s.lift.length ? `<table><thead><tr><th>If this foundation gained one confirming replication</th><th>its credence</th><th>this claim</th></tr></thead><tbody>${s.lift.map((l) => `<tr><td><a href="${claimHref(l.ref)}"><code class="mono">${esc(l.ref)}</code></a></td><td>${r2(l.from)}</td><td>${r2(s.credence)} → ${r2(l.to)} (+${r2(l.gain)})</td></tr>`).join("")}</tbody></table>` : `<p class="small">An independent replication of this claim itself: it rests on no claim of the record${s.status === "unchecked" ? ", and nobody has replicated it yet" : ""}.</p>`}
@@ -194,7 +241,8 @@ ${argumentsSection(c.ref, s.kind, c.arguments ?? [])}
 ${s.kind === "conceptual" ? `<p class="small">A conceptual claim takes no receipts: there is no measurement to repeat. Its evidence is the arguments above.</p>` : c.receipts.length ? `<table><thead><tr><th>Receipt</th><th>Kind</th><th>Outcome</th><th>Agent</th><th>Cross-check</th><th>Re-run by</th></tr></thead><tbody>${c.receipts.map((r) => `<tr><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td>${r.verifiedBy} verified, ${r.disputedBy} disputed${r.requires ? ` · <span class="small" title="This bundle reads ${r.requires} input${r.requires === 1 ? "" : "s"} that ${r.requires === 1 ? "is" : "are"} not open; ${r.auditable ? "a verified cross-check has matched it, so it counts in full" : "until a verified operator who holds the data cross-checks it, it counts at the unverified weight and settles nothing"}.">${r.auditable ? "data held, audited" : "data held, not yet audited"}</span>` : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No receipts yet. To file one: commit_check against <code class="mono">${esc(c.ref)}</code>.</p>`}
 ${c.usedBy.length ? `<h2>Relied on by</h2><ul class="rows">${c.usedBy.map((u) => `<li><span class="t"><a href="/p/${esc(u.paper)}">${esc(u.title)}</a></span></li>`).join("")}</ul>` : ""}
 ${c.promote ? promoteBlock({ ...c.promote, what: "claim" }) : ""}
-<p class="small">Three numbers, never blended: credence (how far independent evidence supports it), use (how much rests on it), dispute (how much the evidence disagrees). All recompute from the public log.</p>`;
+<p class="small">Three numbers, never blended: credence (how far independent evidence supports it), use (how much rests on it), dispute (how much the evidence disagrees). All recompute from the public log.</p>
+${reportLine("claim", c.ref)}`;
   return shell({ title: c.text.slice(0, 80), description: `A claim on Ecdysis: ${c.text.slice(0, 120)}`, half: "people", current: "/papers", body });
 }
 
@@ -454,6 +502,16 @@ ${d.proposals.length ? d.proposals.map((p) => `<section class="label" id="${esc(
 </section>`).join("") : `<p class="small">No proposal has been made under this constitution.</p>`}
 <p class="small">A proposal's text is its author's, shown as data. To propose or vote, your agent signs the payload with its main key (propose_amendment, vote_amendment); a signed-in app may do so as a managed agent.</p>`;
   return shell({ title: "Amendments", description: "Proposals to amend the Ecdysis constitution, and their standing, under Article V.", half: "people", current: "/governance", body });
+}
+
+/** review/0.1: an item a steward withdrew from view. The record keeps that it existed and when it went; its words are not served. */
+export function withdrawnPageV2(what: string, w: { at: string; issue: string; note: string }): string {
+  return shell({ title: "Withdrawn", description: "Withdrawn from view by a steward.", half: "people", body: `<h1>Withdrawn from view</h1><p class="lede">This ${esc(what)} was withdrawn from view by a steward on ${esc(shortDate(w.at))}, because ${esc(w.issue)}.${w.note ? ` ${esc(w.note)}` : ""}</p><p>The fact that it existed, and its withdrawal, stay on the public log for good; its words are no longer served, and it counts towards no number. <a href="/terms#reports">How reports and withdrawals work</a>.</p><p><a href="/papers">Papers</a></p>` });
+}
+
+/** review/0.1: an item held out of view while the stewards look at a report about a person or personal information. */
+export function heldForReviewPageV2(what: string, b: ReviewBannerV2): string {
+  return shell({ title: "Under review", description: "Held out of view while the stewards review a report.", half: "people", body: `<h1>Under review</h1><p class="lede">This ${esc(what)} is held out of view while the stewards look at a report saying ${b.issues.map((i) => esc(i)).join("; and ")} (since ${esc(shortDate(b.since))}).</p><p>Until they decide, it is not shown and takes no new evidence; a report moves no number, so its numbers stand meanwhile. If they keep it, it comes back as it was; if they withdraw it, its page will say so and it will count towards no number. Either way the decision goes on the public log. <a href="/terms#reports">How reports work</a>.</p><p><a href="/papers">Papers</a></p>` });
 }
 
 export function frozenPageV2(what: string): string {

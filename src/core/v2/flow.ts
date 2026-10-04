@@ -30,6 +30,10 @@
  *   argument.file      {id, claim, stance, grounds, text, cites, instance, confidence, handle, operatorId, models?, key?}  arguments/0.1
  *   argument.check     {id, argument, holds, note, handle, operatorId, models?, key?}
  *   argument.answer    {argument, text, handle, operatorId}
+ *   content.report     {id, subject, issue, by, handle?, operatorId?, steward?}   review/0.1: a problem reported; the report's words stay off the log
+ *   content.withdraw   {subject, issue, note, by: "steward", steward}             withdrawn from view: frozen out of every page and number
+ *   content.restore    {subject, note, by: "steward", steward}                    the reports closed, or a withdrawal lifted
+ *   claim.correct      {claim, test?, kind?, reason, by, handle?, operatorId?, steward?}  once, before anything rests on the claim
  *
  * Paper claims and external claims may carry kind: "conceptual" (arguments/0.1); absent means empirical.
  *
@@ -89,13 +93,15 @@ import { modelFamilies, type ClaimInput, type EvidenceInput, type Tier, type Use
 import { APPEAL_MS } from "./receipts.js";
 import { CHALLENGE_SCALES, CHALLENGE_WANTS, type ChallengeScale, type ChallengeState, type ChallengeWants } from "./challenges.js";
 import { argumentEffects, GROUNDS, settleArgument, STANCES, type ArgumentCheckState, type ArgumentState, type ClaimArgumentsInput, type ClaimKind, type Grounds, type Stance } from "./arguments.js";
+import { HIDE_WHILE_REVIEW, isIssue, itemOf, TEXT_FIELDS, type Issue } from "./review.js";
 
 export type V2EntryType =
   | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
   | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "finding.decide" | "finding.reverse" | "review.file"
   | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt"
   | "challenge.propose" | "challenge.withdraw"
-  | "argument.file" | "argument.check" | "argument.answer";
+  | "argument.file" | "argument.check" | "argument.answer"
+  | "content.report" | "content.withdraw" | "content.restore" | "claim.correct";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
@@ -103,6 +109,7 @@ export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release", "constitution.adopt",
   "challenge.propose", "challenge.withdraw",
   "argument.file", "argument.check", "argument.answer",
+  "content.report", "content.withdraw", "content.restore", "claim.correct",
 ];
 
 export interface V2Entry {
@@ -209,6 +216,63 @@ export interface FindingState {
   inForce: boolean;
 }
 
+/** A problem reported about an item (review/0.1). Its words are the stewards', kept off the log. */
+export interface ReportState {
+  id: string;
+  subject: string;
+  issue: Issue;
+  by: "agent" | "steward" | "screening";
+  handle: string | null;
+  operatorId: string;
+  seq: number;
+  ts: string;
+  open: boolean;
+  /** How a steward closed it: kept as it was ("restored": the report was dismissed), withdrawn, or its test corrected (an unfair-test report). */
+  closedAs: "restored" | "withdrawn" | "corrected" | null;
+  /**
+   * Filed by the item's own operator, or by an operator the item is evidence for or against (the author of the claim it
+   * concerns, the arguer an answer or a check concerns): such a report is shown to the stewards like any other, but it
+   * never holds the item out of view and it does not count towards the reporter's record of upheld reports.
+   */
+  conflicted: boolean;
+  /** Whether this report holds the item out of view while it is open (an issue about a person, not conflicted, not after a keep). */
+  mayHide: boolean;
+}
+
+/** An item's review: the reports on it, and whether a steward has withdrawn it from view. */
+export interface ReviewState {
+  item: string;
+  reports: ReportState[];
+  withdrawn: { ts: string; seq: number; issue: Issue; note: string; steward: string } | null;
+  /** The latest restoration: reports closed, or a withdrawal lifted. */
+  restored: { ts: string; seq: number; note: string; steward: string } | null;
+  /**
+   * The issues about a person a steward has decided by keeping the item (a keep that closed an open report of that issue
+   * by a reporter with no stake): an agent's later report of the same issue no longer holds it out of view.
+   */
+  kept: Issue[];
+  /** Open reports, and not withdrawn: what the stewards' queue shows. */
+  pending: boolean;
+  /** Open reports by reporters with no stake in it, and not withdrawn: what the item's page and /v2/review say. */
+  underReview: boolean;
+  /** Under review for an issue that keeps it out of view until a steward has looked. */
+  hidden: boolean;
+}
+
+/** A claim's one correction (review/0.1): its new test and/or kind, what they were, and why. */
+export interface CorrectionState {
+  claim: string;
+  test: string | null;
+  kind: ClaimKind | null;
+  was: { test: string; kind: ClaimKind };
+  reason: string;
+  by: "registrant" | "steward";
+  handle: string | null;
+  operatorId: string;
+  seq: number;
+  ts: string;
+}
+
 export interface V2Record {
   /** Effective tiers: explicit entries, raised to verified by vouches in force. */
   tiers: Map<string, Tier>;
@@ -256,6 +320,32 @@ export interface V2Record {
   /** Items held under reserved power R1 (an escalation or a screening hold not yet released): frozen out of every page and number. */
   held: Set<string>;
   /**
+   * Everything out of every number (and every page): R1 holds and items a steward has withdrawn from view (review/0.1).
+   * `held` is R1's alone; only R1 releases what it holds. A report alone never puts an item here: no number moves until
+   * a steward withdraws it.
+   */
+  frozen: Set<string>;
+  /**
+   * Everything out of view: the frozen items, and items held out of view while a report about a person or personal
+   * information awaits a steward. Out of view means no page or list shows its words, it takes no new evidence and it is
+   * in no queue; its numbers stand unless it is frozen.
+   */
+  outOfView: Set<string>;
+  /** The arguments that count: not frozen themselves and not on a frozen claim (the track record scores only these). */
+  argumentsInForce: ArgumentState[];
+  /** Items with reports or a withdrawal, by item (review/0.1). */
+  review: Map<string, ReviewState>;
+  /** Claims whose test or kind was corrected, by claim ref (review/0.1). */
+  corrections: Map<string, CorrectionState>;
+  /** Reviews by the id of their signed envelope, so a review can be reported and withdrawn like any other text. */
+  reviewsById: Map<string, { claim: string; handle: string; operatorId: string; seq: number; ts: string }>;
+  /** Every argument check's argument, by the check's id, frozen ones included (a frozen check is dropped from its argument). */
+  argumentCheckOf: Map<string, string>;
+  /** Every argument check's operator, by the check's id. */
+  argumentCheckOperator: Map<string, string>;
+  /** Each paper's parents on the record (ecd: and ext: ids, whatever the relation). */
+  paperParents: Map<string, string[]>;
+  /**
    * The constitution in force, adopted on this log by the founder under
    * reserved power R2 (the first constitution.adopt entry; genesis). Null
    * until then: nothing may register before the text that binds it is on
@@ -277,11 +367,113 @@ const objects = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v
  * item appears on no page and in no queue and takes no new reports.
  */
 export function isHeld(r: Pick<V2Record, "held" | "checks">, subject: string): boolean {
-  if (r.held.has(subject)) return true;
+  return inSet(r.held, r.checks, subject);
+}
+
+function inSet(set: Set<string>, checks: Map<string, CheckState>, subject: string): boolean {
+  if (set.has(subject)) return true;
   const hash = subject.indexOf("#");
-  if (hash > 0 && r.held.has(subject.slice(0, hash))) return true; // a claim of a held paper
-  const c = r.checks.get(subject);
-  return !!c && (r.held.has(c.target) || (c.target.indexOf("#") > 0 && r.held.has(c.target.slice(0, c.target.indexOf("#")))));
+  if (hash > 0 && set.has(subject.slice(0, hash))) return true; // a claim of a held paper
+  const c = checks.get(subject);
+  return !!c && (set.has(c.target) || (c.target.indexOf("#") > 0 && set.has(c.target.slice(0, c.target.indexOf("#")))));
+}
+
+/**
+ * Whether an item is out of every number: held under R1 or withdrawn by a steward (review/0.1). The same reach as isHeld:
+ * a paper's claims with their paper, a receipt with its claim.
+ */
+export function isFrozen(r: Pick<V2Record, "frozen" | "checks">, subject: string): boolean {
+  return inSet(r.frozen, r.checks, subject);
+}
+
+/**
+ * The operators with a stake in an item (review/0.1): its own operator, and the operators it is evidence for or against:
+ * the author of the claim an argument, a check, an answer or a review concerns, and the operators whose papers rely on
+ * that claim (or on the item's own claims); the arguer a check or an answer concerns; the operators of the papers a paper
+ * builds on. Their reports go to the stewards alone and never hold the item out of view, and a steward among them leaves
+ * the decision to another steward.
+ */
+export function stakeholders(r: Pick<V2Record, "external" | "papers" | "paperParents" | "arguments" | "argumentCheckOf" | "argumentCheckOperator" | "reviewsById" | "claims" | "uses">, item: string): Set<string> {
+  const ops = new Set<string>();
+  const add = (op: string | null | undefined) => { if (op) ops.add(op); };
+  // A claim's author, and every operator whose paper relies on the claim: all have a stake in what is said about it.
+  const authorOf = (ref: string) => {
+    add(r.claims.find((c) => c.ref === ref)?.authorOperator);
+    for (const u of r.uses) if (u.claim === ref) add(r.papers.get(u.paper)?.operatorId);
+  };
+  if (item.startsWith("ext:")) { add(r.external.get(item)?.operatorId); authorOf(`${item}#C1`); }
+  else if (item.startsWith("ecd:")) {
+    add(r.papers.get(item)?.operatorId);
+    for (const parent of r.paperParents.get(item) ?? []) add(r.papers.get(parent)?.operatorId);
+    for (const ref of r.papers.get(item)?.claims ?? []) authorOf(ref);
+  } else if (item.startsWith("answer:")) {
+    const a = r.arguments.get(item.slice(7));
+    if (a) { add(a.answer?.operatorId); add(a.operatorId); authorOf(a.claim); }
+  } else if (r.arguments.has(item)) {
+    const a = r.arguments.get(item)!;
+    add(a.operatorId); authorOf(a.claim);
+  } else if (r.argumentCheckOf.has(item)) {
+    const a = r.arguments.get(r.argumentCheckOf.get(item)!);
+    add(r.argumentCheckOperator.get(item));
+    if (a) { add(a.operatorId); authorOf(a.claim); }
+  } else if (r.reviewsById.has(item)) {
+    const rv = r.reviewsById.get(item)!;
+    add(rv.operatorId); authorOf(rv.claim);
+  }
+  return ops;
+}
+
+/**
+ * Whether an entry's words are withheld from the public log (review/0.1): when the item it carries, or the item it belongs
+ * to, is withdrawn by a steward or held out of view while reviewed. An argument goes with its claim; a check and an answer
+ * go with their argument and its claim; a correction and a challenge go with their claim. (R1 holds are decided apart.)
+ */
+export function wordsWithheld(r: Pick<V2Record, "review" | "arguments">, type: string, payload: Record<string, unknown>): boolean {
+  if (!TEXT_FIELDS[type]) return false;
+  const gone = (subject: string) => {
+    const item = itemOf(subject);
+    const st = item ? r.review.get(item) : undefined;
+    return !!st && (!!st.withdrawn || st.hidden);
+  };
+  const v = (k: string) => (typeof payload[k] === "string" ? (payload[k] as string) : "");
+  switch (type) {
+    case "claim.external":
+    case "paper.publish":
+      return gone(v("id"));
+    case "argument.file":
+      return gone(v("id")) || gone(v("claim"));
+    case "argument.check": {
+      const a = r.arguments.get(v("argument"));
+      return gone(v("id")) || gone(v("argument")) || (!!a && gone(a.claim));
+    }
+    case "argument.answer": {
+      const a = r.arguments.get(v("argument"));
+      return gone(`answer:${v("argument")}`) || gone(v("argument")) || (!!a && gone(a.claim));
+    }
+    case "claim.correct":
+    case "challenge.propose":
+      return gone(v("claim"));
+    default:
+      return false;
+  }
+}
+
+/** Whether an item is out of view: frozen, or held out of view while a report about a person awaits a steward. */
+export function isOutOfView(r: Pick<V2Record, "outOfView" | "checks">, subject: string): boolean {
+  return inSet(r.outOfView, r.checks, subject);
+}
+
+/** Why an item is out of view, in words for a refusal; null when it is not. */
+export function outOfViewWhy(r: Pick<V2Record, "held" | "outOfView" | "checks" | "review">, subject: string): string | null {
+  if (!isOutOfView(r, subject)) return null;
+  if (isHeld(r, subject)) return "frozen for a decision under reserved power R1";
+  const keys = [subject, subject.indexOf("#") > 0 ? subject.slice(0, subject.indexOf("#")) : "", r.checks.get(subject)?.target ?? ""].filter(Boolean).map((k) => itemOf(k) || k);
+  for (const k of keys) {
+    const st = r.review.get(k);
+    if (st?.withdrawn) return "withdrawn from view by a steward";
+    if (st?.hidden) return "held out of view while the stewards review a report about it";
+  }
+  return "out of view";
 }
 
 export function deriveV2(entries: V2Entry[], now: Date): V2Record {
@@ -296,17 +488,31 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const challenges = new Map<string, ChallengeState>();
   const args = new Map<string, ArgumentState>();
   const argChecks: Array<ArgumentCheckState & { argument: string }> = [];
+  const argumentCheckOf = new Map<string, string>();
   const kindOf = (v: unknown): ClaimKind => (v === "conceptual" ? "conceptual" : "empirical");
   const checks = new Map<string, CheckState>();
   const findings: FindingState[] = [];
   const uses: UseInput[] = [];
   const paperFamilies = new Map<string, string[]>();
   const claimAuthorOp = new Map<string, string>();
-  const reviews: Array<EvidenceInput & { key: string; ts: string }> = [];
+  const reviews: Array<EvidenceInput & { key: string; ts: string; envId: string }> = [];
   const anchors = new Map<string, boolean>();
   const seedInsensitiveBundles = new Set<string>();
   const forecasts = new Map<string, number>();
   const held = new Set<string>();
+  const review = new Map<string, ReviewState>();
+  const corrections = new Map<string, CorrectionState>();
+  const claimTests = new Map<string, string>();
+  const reviewsById = new Map<string, { claim: string; handle: string; operatorId: string; seq: number; ts: string }>();
+  /** Each paper's parents on the record (ecd: and ext: ids, whatever the relation), for who has a stake in it. */
+  const paperParents = new Map<string, string[]>();
+  /** Each argument check's operator, by the check's id. */
+  const argumentCheckOperator = new Map<string, string>();
+  const reviewOf = (item: string): ReviewState => {
+    let st = review.get(item);
+    if (!st) { st = { item, reports: [], withdrawn: null, restored: null, kept: [], pending: false, underReview: false, hidden: false }; review.set(item, st); }
+    return st;
+  };
   let constitution: V2Record["constitution"] = null;
   /** Cross-checks, to be sorted into verified and other once tiers are known. */
   const crossChecks: Array<{ later: CheckState; earlier: CheckState }> = [];
@@ -363,6 +569,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         const op = str(p["operatorId"]);
         paperFamilies.set(id, modelFamilies(p["models"] as string[] | undefined));
         const builds = objects(p["builds_on"]);
+        paperParents.set(id, [...new Set(builds.map((b) => str(b["id"])).filter((x) => /^(ecd|ext):/.test(x)))]);
         const foundations: string[] = [];
         for (const b of builds) {
           const rel = str(b["rel"]);
@@ -383,6 +590,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
           const label = str(c["label"]) || `C${i + 1}`;
           const ref = `${id}#${label}`;
           claimAuthorOp.set(ref, op);
+          claimTests.set(ref, str(c["test"]));
           refs.push(ref);
           claims.push({ ref, paper: id, authorOperator: op, stated: Math.min(1, Math.max(0, num(c["confidence"], 0.5))), kind: kindOf(c["kind"]), foundations: [...foundations], seq: e.seq });
         }
@@ -510,7 +718,9 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         const handle = str(p["handle"]);
         const declared = modelFamilies(p["models"] as string[] | undefined);
         forecasts.set(`${str(p["claim"])}|${handle}`, Math.min(1, Math.max(0, num(p["forecast"], 0.5))));
+        if (str(p["id"])) reviewsById.set(str(p["id"]), { claim: str(p["claim"]), handle, operatorId: str(p["operatorId"]), seq: e.seq, ts: e.ts });
         reviews.push({
+          envId: str(p["id"]),
           id: `review:${e.seq}`, claim: str(p["claim"]), kind: "review", confirms: num(p["forecast"], 0.5) >= 0.5,
           agent: handle, operatorId: str(p["operatorId"]), tier: "unverified", // tier is filled in below, once all tier entries are known
           families: declared.length ? declared : (agents.get(handle)?.families ?? []), seq: e.seq,
@@ -543,6 +753,8 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         const handle = str(p["handle"]);
         if (!a || !handle || typeof p["holds"] !== "boolean") break;
         const declared = modelFamilies(p["models"] as string[] | undefined);
+        argumentCheckOf.set(str(p["id"]) || `argcheck:${e.seq}`, a.id);
+        argumentCheckOperator.set(str(p["id"]) || `argcheck:${e.seq}`, str(p["operatorId"]));
         argChecks.push({
           id: str(p["id"]) || `argcheck:${e.seq}`, argument: a.id, handle, operatorId: str(p["operatorId"]), tier: "unverified", holds: p["holds"] as boolean, note: str(p["note"]),
           families: declared.length ? declared : (agents.get(handle)?.families ?? []), seq: e.seq, ts: e.ts,
@@ -556,7 +768,94 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
         a.answer = { handle: str(p["handle"]), operatorId: str(p["operatorId"]), text: str(p["text"]), seq: e.seq, ts: e.ts };
         break;
       }
+      case "content.report": {
+        // review/0.1. The service checks who may report and that the item exists; a hostile entry naming nothing is dropped.
+        const subject = str(p["subject"]);
+        const item = itemOf(subject);
+        const issue = str(p["issue"]);
+        if (!item || !isIssue(issue)) break;
+        const st = reviewOf(item);
+        const by = p["by"] === "steward" || p["by"] === "screening" ? (p["by"] as "steward" | "screening") : "agent";
+        const reporter = str(p["operatorId"]) || str(p["steward"]);
+        const conflicted = !!reporter && stakeholders({ external, papers, paperParents, arguments: args, argumentCheckOf, argumentCheckOperator, reviewsById, claims, uses }, item).has(reporter);
+        // Held out of view only for an allegation about a person or personal information, never by an interested party,
+        // never for a review (it has no words in public to hide), and, once a steward has kept the item on that issue,
+        // never again by an agent's report of it alone: a steward's keep sticks, for what it decided.
+        const mayHide = HIDE_WHILE_REVIEW.has(issue) && !conflicted && (by !== "agent" || !st.kept.includes(issue));
+        st.reports.push({
+          id: str(p["id"]) || `report:${e.seq}`, subject, issue, by, handle: str(p["handle"]) || null,
+          operatorId: reporter, seq: e.seq, ts: e.ts,
+          open: !st.withdrawn, closedAs: st.withdrawn ? "withdrawn" : null, conflicted, mayHide: mayHide && !reviewsById.has(item),
+        });
+        break;
+      }
+      case "content.withdraw": {
+        // Only a steward's act withdraws (the service writes it from /steward alone).
+        const item = itemOf(str(p["subject"]));
+        const issue = str(p["issue"]);
+        if (!item || !isIssue(issue) || p["by"] !== "steward" || !str(p["steward"])) break;
+        const st = reviewOf(item);
+        st.withdrawn = { ts: e.ts, seq: e.seq, issue, note: str(p["note"]), steward: str(p["steward"]) };
+        for (const rep of st.reports) if (rep.open) { rep.open = false; rep.closedAs = "withdrawn"; }
+        break;
+      }
+      case "content.restore": {
+        const item = itemOf(str(p["subject"]));
+        const st = item ? review.get(item) : undefined;
+        if (!st || p["by"] !== "steward" || !str(p["steward"])) break;
+        st.withdrawn = null;
+        st.restored = { ts: e.ts, seq: e.seq, note: str(p["note"]), steward: str(p["steward"]) };
+        // What this keep decided: the issues about a person in the open reports of reporters with no stake.
+        for (const rep of st.reports) if (rep.open && !rep.conflicted && HIDE_WHILE_REVIEW.has(rep.issue) && !st.kept.includes(rep.issue)) st.kept.push(rep.issue);
+        for (const rep of st.reports) if (rep.open) { rep.open = false; rep.closedAs = "restored"; }
+        break;
+      }
+      case "claim.correct": {
+        // Once, and only while nothing rests on the claim at this point in the log: no receipt committed against it, no
+        // argument filed on it (reviews may exist and are shown as filed before the correction).
+        const ref = str(p["claim"]);
+        if (!ref || corrections.has(ref) || !claimAuthorOp.has(ref)) break;
+        if ([...checks.values()].some((c) => c.target === ref) || [...args.values()].some((a) => a.claim === ref)) break;
+        const test = str(p["test"]).trim() || null;
+        // A test shown as null on the public log was corrected, its words withheld with a withdrawn item's (review/0.1).
+        const testWithheld = p["test"] === null;
+        const kind: ClaimKind | null = p["kind"] === "conceptual" || p["kind"] === "empirical" ? (p["kind"] as ClaimKind) : null;
+        if (!test && !kind && !testWithheld) break;
+        const claim = claims.find((c) => c.ref === ref);
+        const extId = ref.startsWith("ext:") ? ref.slice(0, ref.indexOf("#")) : null;
+        const x = extId ? external.get(extId) : undefined;
+        // A paper's tests are not on the log (only its envelope carries them), so the service writes the old one with the
+        // correction; a claim from the literature's test is on the log, and the record's own copy is the authority.
+        const wasLogged = p["was"] && typeof p["was"] === "object" ? str((p["was"] as Record<string, unknown>)["test"]) : "";
+        const was = { test: x ? x.test : (wasLogged || claimTests.get(ref) || ""), kind: claim?.kind ?? "empirical" };
+        if (kind && claim) claim.kind = kind;
+        if (x) { if (test) x.test = test; if (kind) x.kind = kind; }
+        if (test && !x) claimTests.set(ref, test);
+        corrections.set(ref, {
+          claim: ref, test, kind, was, reason: str(p["reason"]), by: p["by"] === "steward" ? "steward" : "registrant",
+          handle: str(p["handle"]) || null, operatorId: str(p["operatorId"]) || str(p["steward"]), seq: e.seq, ts: e.ts,
+        });
+        // A corrected test answers the reports that it was unfair; any other report on the item stays open.
+        const reviewed = (test || testWithheld) ? review.get(itemOf(ref)) : undefined;
+        if (reviewed) for (const rep of reviewed.reports) if (rep.open && rep.issue === "unfair-test") { rep.open = false; rep.closedAs = "corrected"; }
+        break;
+      }
     }
+  }
+
+  // review/0.1: what is under review, what is held out of view meanwhile, and what is withdrawn. A report moves no number:
+  // an item held out of view keeps its numbers until a steward decides. Withdrawn items are frozen like items under an R1
+  // hold: out of every page, queue and number until a steward restores them.
+  const frozenSet = new Set<string>(held);
+  const outOfViewSet = new Set<string>(held);
+  for (const st of review.values()) {
+    const open = st.reports.filter((x) => x.open);
+    st.pending = !st.withdrawn && open.length > 0;
+    // A report by an interested party goes to the stewards alone: no banner, no public listing, nothing out of view.
+    st.underReview = !st.withdrawn && open.some((x) => !x.conflicted);
+    st.hidden = st.underReview && open.some((x) => x.mayHide);
+    if (st.withdrawn) { frozenSet.add(st.item); outOfViewSet.add(st.item); }
+    if (st.hidden) outOfViewSet.add(st.item);
   }
 
   // Disowned reports: signed by a key at or after its declared compromise (I.3). The log's time, not the payload's, is what counts: a thief dates its own payloads.
@@ -610,7 +909,9 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   for (const [op, vouchers] of byVouchee) if (vouchers.size >= 2) tiers.set(op, "verified");
 
   const tierOf = (op: string): Tier => tiers.get(op) ?? "unverified";
-  for (const u of uses) u.tier = tierOf(u.operatorId);
+  // A frozen paper (held under R1, or withdrawn) relies on nothing while it is frozen: its uses count towards no claim's use.
+  const usesInForce = uses.filter((u) => !frozenSet.has(u.paper));
+  for (const u of usesInForce) u.tier = tierOf(u.operatorId);
 
   // Arguments (arguments/0.1), now that tiers are known: disowned reports count for nothing; checks settle each argument;
   // the settled arguments' effects on each claim are what credence/0.3 applies. Arguments on frozen claims feed no number.
@@ -620,7 +921,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   }
   for (const c of argChecks) {
     const a = args.get(c.argument);
-    if (!a) continue;
+    if (!a || frozenSet.has(c.id)) continue; // a check withdrawn from view no longer counts towards settling its argument
     c.tier = tierOf(c.operatorId);
     c.disowned = disownedAt(c.key, c.ts);
     a.checks.push(c);
@@ -632,12 +933,13 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
     a.settledSeq = settled.settledSeq;
     argumentsByClaim.set(a.claim, [...(argumentsByClaim.get(a.claim) ?? []), a]);
   }
-  const frozenRef = (ref: string) => held.has(ref) || (ref.indexOf("#") > 0 && held.has(ref.slice(0, ref.indexOf("#"))));
+  const frozenRef = (ref: string) => frozenSet.has(ref) || (ref.indexOf("#") > 0 && frozenSet.has(ref.slice(0, ref.indexOf("#"))));
+  const argumentsInForce = [...args.values()].filter((a) => !frozenSet.has(a.id) && !frozenRef(a.claim));
   const argumentEffectsByClaim = new Map<string, ClaimArgumentsInput>();
   for (const [ref, list] of argumentsByClaim) {
     if (frozenRef(ref)) continue;
     const kind = claims.find((c) => c.ref === ref)?.kind ?? "empirical";
-    argumentEffectsByClaim.set(ref, argumentEffects(list.filter((a) => !held.has(a.id)), kind));
+    argumentEffectsByClaim.set(ref, argumentEffects(list.filter((a) => !frozenSet.has(a.id)), kind));
   }
 
   // Cross-checks, now that tiers are known: only a VERIFIED operator's cross-check verifies or disputes a receipt (and so can open a
@@ -649,7 +951,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   }
 
   // Frozen under R1: the item itself, or the paper a claim belongs to. Evidence on a frozen claim feeds no number while it is frozen.
-  const frozen = (ref: string) => held.has(ref) || (ref.indexOf("#") > 0 && held.has(ref.slice(0, ref.indexOf("#"))));
+  const frozen = (ref: string) => frozenSet.has(ref) || (ref.indexOf("#") > 0 && frozenSet.has(ref.slice(0, ref.indexOf("#"))));
   const evidence: EvidenceInput[] = [];
   const receiptsByClaim = new Map<string, Array<{ id: string; operatorId: string; seq: number; requires: string[] }>>();
   for (const c of [...checks.values()].sort((a, b) => a.seq - b.seq)) {
@@ -661,13 +963,13 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
     if (c.disowned || c.outcome === "inconclusive") continue;
     // A receipt whose outputs duplicate an earlier one's under a different seed adds nothing: the bundle ignored its seed.
     if (c.seedInsensitive) continue;
-    if (held.has(c.id) || frozen(c.target)) continue;
+    if (frozenSet.has(c.id) || frozen(c.target)) continue;
     // inputs/0.1: a receipt not everyone can re-run earns its tier's weight only once a verified, independent cross-check has
     // matched it; until then it counts at the unverified weight and settles nothing (credence.ts, `auditable`).
     const auditable = c.requires.length === 0 || c.verifiedBy.length > 0;
     evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq, ...(auditable ? {} : { auditable: false }) });
   }
-  for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts) && !frozen(r.claim)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
+  for (const { key, ts, envId, ...r } of reviews) if (!disownedAt(key, ts) && !frozen(r.claim) && !(envId && frozenSet.has(envId))) evidence.push({ ...r, tier: tierOf(r.operatorId) });
   evidence.sort((a, b) => a.seq - b.seq);
 
   // Rings: X confirmed a claim of Y's and Y confirmed a claim of X's.
@@ -686,5 +988,5 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, constitution, arguments: args, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, frozen: frozenSet, outOfView: outOfViewSet, argumentsInForce, review, corrections, reviewsById, argumentCheckOf, argumentCheckOperator, paperParents, constitution, arguments: args, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
 }

@@ -10,7 +10,8 @@ import type { Accounts } from "./accounts.js";
 import { V2Feeds } from "./feed.js";
 import { agentBadge, agentShare, bibtex, challengeShare, citation, claimBadge, claimShare, missingBadge, paperBadge, paperShare, shareIntent, shareLinks, type SharePlatform } from "./promote.js";
 import { CHALLENGE_NOTES } from "../../core/v2/challenges.js";
-import { isHeld } from "../../core/v2/flow.js";
+import { isHeld, isOutOfView, outOfViewWhy } from "../../core/v2/flow.js";
+import { ISSUE_LABEL, itemOf } from "../../core/v2/review.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
 import { llmsTxtV2, skillMdV2 } from "./skill.js";
@@ -23,7 +24,7 @@ import { mcpUrlFor } from "../../web/launch.js";
 import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
 import { escapeXml } from "../site.js";
 import { ARTICLES, CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
-import { agentPageV2, challengePageV2, challengesPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
+import { agentPageV2, challengePageV2, challengesPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, heldForReviewPageV2, withdrawnPageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2, type CorrectionViewV2, type ReviewBannerV2 } from "../../web/v2/pages.js";
 import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
 import type { V2Record } from "../../core/v2/flow.js";
 
@@ -147,7 +148,15 @@ export class PagesHandler {
     if (path === "/governance") return html(200, governancePageV2(this.o.governance ? await this.governance(this.o.governance) : await this.governanceStatic()));
     if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/papers") return html(200, papersPageV2(await this.papers()));
-    const frozen = async (subject: string) => isHeld(await this.v2.record(), subject);
+    const gate = async (subject: string, what: string): Promise<Response | null> => {
+      const r = await this.v2.record();
+      if (isHeld(r, subject)) return html(451, frozenPageV2(what));
+      if (!isOutOfView(r, subject)) return null;
+      const st = r.review.get(itemOf(subject));
+      if (st?.withdrawn) return html(410, withdrawnPageV2(what, { at: st.withdrawn.ts, issue: ISSUE_LABEL[st.withdrawn.issue], note: st.withdrawn.note }));
+      if (st?.hidden) return html(451, heldForReviewPageV2(what, reviewBanner(r, subject)!));
+      return html(451, frozenPageV2(what));
+    };
     if (path === "/frontier") return html(200, frontierPageV2({ ...((await this.v2.frontier(25)).body as unknown as FrontierViewV2), challenges: (await this.challengeRows(50, false)).filter((c) => c.status === "open" || c.status === "underway").slice(0, 5) }));
     if (path === "/challenges") {
       const all = await this.challengeRows(200, true);
@@ -171,7 +180,8 @@ export class PagesHandler {
     if (moved) return new Response(null, { status: 301, headers: { ...PAGE_HEADERS, location: moved } });
     const pm = path.match(PAPER);
     if (pm) {
-      if (await frozen(pm[2] ? `${pm[1]}#${pm[2]}` : pm[1]!)) return html(451, frozenPageV2(pm[2] ? "claim" : "paper"));
+      const shut = await gate(pm[2] ? `${pm[1]}#${pm[2]}` : pm[1]!, pm[2] ? "claim" : "paper");
+      if (shut) return shut;
       if (pm[2]) { const c = await this.claim(`${pm[1]}#${pm[2]}`); return c ? html(200, claimPageV2(c)) : html(404, missingPageV2("claim")); }
       const p = await this.paper(pm[1]!);
       return p ? html(200, paperPageV2(p)) : html(404, missingPageV2("paper"));
@@ -180,7 +190,8 @@ export class PagesHandler {
     if (am) { const a = await this.agent(am[1]!); return a ? html(200, agentPageV2(a)) : html(404, missingPageV2("agent")); }
     const xm = path.match(EXTERNAL);
     if (xm) {
-      if (await frozen(`ext:${xm[1]}#C1`)) return html(451, frozenPageV2("claim"));
+      const shut = await gate(`ext:${xm[1]}#C1`, "claim");
+      if (shut) return shut;
       const c = await this.claim(`ext:${xm[1]}#C1`);
       return c ? html(200, claimPageV2(c)) : html(404, missingPageV2("claim"));
     }
@@ -206,7 +217,7 @@ export class PagesHandler {
 
   private async landing(site: string) {
     const r = await this.v2.record();
-    const latest = [...r.papers.values()].filter((p) => !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq)[0] ?? null;
+    const latest = [...r.papers.values()].filter((p) => !isOutOfView(r, p.id)).sort((a, b) => b.seq - a.seq)[0] ?? null;
     return {
       host: site,
       constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() },
@@ -221,11 +232,11 @@ export class PagesHandler {
     const r = await this.v2.record();
     const s = await this.v2.scores();
     const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
-    const papers = [...r.papers.values()].filter((p) => !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq).map((p) => {
+    const papers = [...r.papers.values()].filter((p) => !isOutOfView(r, p.id)).sort((a, b) => b.seq - a.seq).map((p) => {
       const statuses = p.claims.map((ref) => s.claims.get(ref)?.status).filter((x): x is NonNullable<typeof x> => !!x);
       return { id: p.id, title: p.title, agent: p.handle, field: p.field, ts: p.ts, claims: p.claims.length, worst: statuses.length ? statuses.reduce((a, b) => (rank(a) < rank(b) ? a : b)) : null };
     });
-    const external = [...r.external.entries()].filter(([id]) => !isHeld(r, `${id}#C1`)).map(([id, x]) => { const sc = s.claims.get(`${id}#C1`); return { id, quote: x.quote, source: x.source, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5 }; });
+    const external = [...r.external.entries()].filter(([id]) => !isOutOfView(r, `${id}#C1`)).map(([id, x]) => { const sc = s.claims.get(`${id}#C1`); return { id, quote: x.quote, source: x.source, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5 }; });
     return { papers, external };
   }
 
@@ -244,10 +255,14 @@ export class PagesHandler {
     return {
       id, cid: p.cid, ts: p.ts, payload, operatorId: p.operatorId, tier: r.tiers.get(p.operatorId) ?? "unverified",
       promote: { citation: citation(site, citable), bibtex: bibtex(site, citable), share: { text: paperShare(site, p, statuses).text, links: shareLinks("paper", id) }, badge: `${site}/badge/paper/${id}.svg`, page: `${site}/p/${id}` },
-      scores: p.claims.filter((ref) => !isHeld(r, ref)).map((ref) => s.claims.get(ref)!).filter(Boolean),
-      receipts: [...r.checks.values()].filter((c) => refs.has(c.target) && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, agent: c.handle, families: c.families, stage: c.stage, disowned: c.disowned })),
+      // One entry per claim, in order: a claim out of view (held under R1 by itself, say) keeps its place, with no words or numbers.
+      scores: p.claims.map((ref) => (isOutOfView(r, ref) ? null : s.claims.get(ref) ?? null)),
+      outOfView: Object.fromEntries(p.claims.filter((ref) => isOutOfView(r, ref)).map((ref) => [ref.split("#")[1]!, outOfViewWhy(r, ref) ?? "out of view"] as const)),
+      receipts: [...r.checks.values()].filter((c) => refs.has(c.target) && c.stage !== "committed" && !isOutOfView(r, c.id)).sort((a, b) => a.seq - b.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, agent: c.handle, families: c.families, stage: c.stage, disowned: c.disowned })),
       reviews: r.evidence.filter((e) => e.kind === "review" && refs.has(e.claim)).map((e) => ({ claim: e.claim, agent: e.agent, forecast: r.forecasts.get(`${e.claim}|${e.agent}`) ?? 0.5 })),
-      citedBy: [...r.papers.values()].filter((q) => q.id !== id && r.uses.some((u) => u.paper === q.id && refs.has(u.claim))).map((q) => ({ paper: q.id, title: q.title, agent: q.handle, rel: "relies on", claims: r.uses.filter((u) => u.paper === q.id && refs.has(u.claim)).map((u) => u.claim.split("#")[1]!) })),
+      citedBy: [...r.papers.values()].filter((q) => q.id !== id && !isOutOfView(r, q.id) && r.uses.some((u) => u.paper === q.id && refs.has(u.claim))).map((q) => ({ paper: q.id, title: q.title, agent: q.handle, rel: "relies on", claims: r.uses.filter((u) => u.paper === q.id && refs.has(u.claim)).map((u) => u.claim.split("#")[1]!) })),
+      review: reviewBanner(r, id),
+      corrections: Object.fromEntries(p.claims.filter((ref) => !isOutOfView(r, ref)).map((ref) => [ref.split("#")[1]!, correctionView(r, ref)] as const).filter((x): x is [string, CorrectionViewV2] => !!x[1])),
     };
   }
 
@@ -273,18 +288,32 @@ export class PagesHandler {
       text = c.text; test = c.test; author = p.handle; paperTitle = p.title;
     }
     const evidence = r.evidence.filter((e) => e.claim === ref).map((e) => ({ id: e.id, kind: e.kind, confirms: e.confirms, agent: e.agent, operatorId: e.operatorId, tier: e.tier, families: e.families, weight: null }));
-    const receipts = [...r.checks.values()].filter((c) => c.target === ref && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq)
+    const receipts = [...r.checks.values()].filter((c) => c.target === ref && c.stage !== "committed" && !isOutOfView(r, c.id)).sort((a, b) => a.seq - b.seq)
       .map((c) => ({ id: c.id, kind: c.kind, outcome: c.outcome, agent: c.handle, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, verifiedBy: c.verifiedBy.length, disputedBy: c.disputedBy.length, ...(c.requires.length ? { requires: c.requires.length, auditable: c.verifiedBy.length > 0 } : {}) }));
-    const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref).map((u) => u.paper))].map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
+    const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref).map((u) => u.paper))].filter((pid) => !isOutOfView(r, pid)).map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
     const site = `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
     const promote = { share: { text: claimShare(site, ref, text, score).text, links: shareLinks("claim", ref) }, badge: `${site}/badge/claim/${paperId}/${label}.svg`, page: paperId.startsWith("ext:") ? `${site}/x/${paperId.slice(4)}/${label}` : `${site}/p/${paperId}/${label}` };
     // arguments/0.1: every argument on the claim, with its checks and the author's answer; frozen ones are left out.
-    const args = (r.argumentsByClaim.get(ref) ?? []).filter((a) => !r.held.has(a.id)).map((a) => ({
-      id: a.id, stance: a.stance, grounds: a.grounds, text: a.text, cites: a.cites, instance: a.instance, confidence: a.confidence, agent: a.handle, tier: a.tier, filedAt: a.ts, status: a.status, disowned: a.disowned,
-      checks: a.checks.filter((c) => !c.disowned).map((c) => ({ agent: c.handle, tier: c.tier, holds: c.holds, note: c.note, filedAt: c.ts })),
-      answer: a.answer ? { agent: a.answer.handle, text: a.answer.text, filedAt: a.answer.ts } : null,
-    }));
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args };
+    const args = (r.argumentsByClaim.get(ref) ?? []).filter((a) => !r.outOfView.has(a.id)).map((a) => {
+      const answerSt = r.review.get(`answer:${a.id}`);
+      const checksOf = (want: "withdrawn" | "hidden") => [...r.review.values()].filter((st) => (want === "withdrawn" ? !!st.withdrawn : st.hidden) && this.isCheckOf(r, st.item, a.id)).length;
+      return {
+        id: a.id, stance: a.stance, grounds: a.grounds, text: a.text, cites: a.cites, instance: a.instance, confidence: a.confidence, agent: a.handle, tier: a.tier, filedAt: a.ts, status: a.status, disowned: a.disowned,
+        checks: a.checks.filter((c) => !c.disowned && !r.outOfView.has(c.id)).map((c) => ({ agent: c.handle, tier: c.tier, holds: c.holds, note: c.note, filedAt: c.ts })),
+        withdrawnChecks: checksOf("withdrawn"),
+        hiddenChecks: checksOf("hidden"),
+        answer: a.answer && !r.outOfView.has(`answer:${a.id}`) ? { agent: a.answer.handle, text: a.answer.text, filedAt: a.answer.ts } : null,
+        answerWithdrawn: !!a.answer && !!answerSt?.withdrawn,
+        answerHidden: !!a.answer && !!answerSt?.hidden && !answerSt.withdrawn,
+      };
+    });
+    const corrected = correctionView(r, ref);
+    return { ref, paper: paperId, paperTitle, text, test: corrected?.test ?? test, stated: claim.stated, author, source, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args, review: reviewBanner(r, ref), correction: corrected };
+  }
+
+  /** Whether a 64-hex item is a check of the argument (frozen checks are dropped from the argument, so the record's raw checks are consulted). */
+  private isCheckOf(r: V2Record, item: string, argument: string): boolean {
+    return (r.argumentCheckOf.get(item) ?? "") === argument;
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {
@@ -295,7 +324,7 @@ export class PagesHandler {
     const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
     const site = `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
     const counts = {
-      papers: [...r.papers.values()].filter((p) => p.handle === handle && !isHeld(r, p.id)).length,
+      papers: [...r.papers.values()].filter((p) => p.handle === handle && !isOutOfView(r, p.id)).length,
       receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "resulted" && !c.disowned).length,
       reliability: s.track.reliability.get(handle) ?? 0.5,
     };
@@ -305,11 +334,11 @@ export class PagesHandler {
       reliability: s.track.reliability.get(handle) ?? 0.5, credit: s.track.credit.get(handle) ?? 0,
       reports: s.track.reports.filter((x) => x.agent === handle && x.resolved !== null).length,
       lapses: r.lapses.get(handle) ?? 0, checkKeys: a.checkKeys.length, retired: a.revokedAt !== null, voided: r.voidedOperators.has(a.operatorId), managed: a.managed,
-      papers: [...r.papers.values()].filter((p) => p.handle === handle && !isHeld(r, p.id)).sort((x, y) => y.seq - x.seq).map((p) => {
+      papers: [...r.papers.values()].filter((p) => p.handle === handle && !isOutOfView(r, p.id)).sort((x, y) => y.seq - x.seq).map((p) => {
         const st = p.claims.map((ref) => s.claims.get(ref)?.status).filter((x): x is NonNullable<typeof x> => !!x);
         return { id: p.id, title: p.title, field: p.field, ts: p.ts, worst: st.length ? st.reduce((x, y) => (rank(x) < rank(y) ? x : y)) : null };
       }),
-      receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed" && !isHeld(r, c.id)).sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned })),
+      receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed" && !isOutOfView(r, c.id)).sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned })),
       reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle).map((e) => ({ claim: e.claim, forecast: r.forecasts.get(`${e.claim}|${handle}`) ?? 0.5 })),
       findings: r.findings.filter((f) => f.oddAgent === handle).map((f) => ({ id: f.id, verdict: f.verdict, inForce: f.inForce, reversed: f.reversed, decidedAt: f.decidedAt })),
     };
@@ -331,7 +360,7 @@ export class PagesHandler {
     const p = r.papers.get(paperId);
     const env = (await this.v2.envelope(p?.cid ?? "")) as { payload?: PaperV2Payload } | null;
     const c = env?.payload?.claims[Number(label.slice(1)) - 1];
-    return { text: c?.text ?? "", test: c?.test ?? "", source: null, paperTitle: p?.title ?? null };
+    return { text: c?.text ?? "", test: r.corrections.get(ref)?.test ?? c?.test ?? "", source: null, paperTitle: p?.title ?? null };
   }
 
   private async challengeView(short: string, site: string) {
@@ -361,13 +390,13 @@ export class PagesHandler {
     }
     if (kind === "paper") {
       const p = r.papers.get(ref);
-      if (!p || isHeld(r, p.id)) return null;
+      if (!p || isOutOfView(r, p.id)) return null;
       return shareIntent(platform, paperShare(site, p, p.claims.map((c) => s.claims.get(c)?.status ?? "unchecked")));
     }
     if (kind === "claim") {
       const c = r.claims.find((x) => x.ref === ref);
       const score = s.claims.get(ref);
-      if (!c || !score || isHeld(r, ref)) return null;
+      if (!c || !score || isOutOfView(r, ref)) return null;
       const [paperId, label] = ref.split("#") as [string, string];
       let text: string | null = null;
       if (paperId.startsWith("ext:")) text = r.external.get(paperId)?.quote ?? null;
@@ -380,7 +409,7 @@ export class PagesHandler {
     const a = r.agents.get(ref);
     if (!a) return null;
     return shareIntent(platform, agentShare(site, ref, {
-      papers: [...r.papers.values()].filter((p) => p.handle === ref && !isHeld(r, p.id)).length,
+      papers: [...r.papers.values()].filter((p) => p.handle === ref && !isOutOfView(r, p.id)).length,
       receipts: [...r.checks.values()].filter((c) => c.handle === ref && c.stage === "resulted" && !c.disowned).length,
       reliability: s.track.reliability.get(ref) ?? 0.5,
     }));
@@ -392,13 +421,13 @@ export class PagesHandler {
     const s = await this.v2.scores();
     if (kind === "paper") {
       const p = r.papers.get(ref);
-      return p && !isHeld(r, p.id) ? paperBadge(p.id, p.claims.map((c) => s.claims.get(c)?.status ?? "unchecked")) : missingBadge("no such paper");
+      return p && !isOutOfView(r, p.id) ? paperBadge(p.id, p.claims.map((c) => s.claims.get(c)?.status ?? "unchecked")) : missingBadge("no such paper");
     }
     if (kind === "claim") {
       // The claim's ref is written with a slash in the path: /badge/claim/<paper>/C1.svg.
       const refHash = ref.replace(/\/(C[1-9][0-9]?)$/, "#$1");
       const score = s.claims.get(refHash);
-      return score && !isHeld(r, refHash) ? claimBadge(refHash, score) : missingBadge("no such claim");
+      return score && !isOutOfView(r, refHash) ? claimBadge(refHash, score) : missingBadge("no such claim");
     }
     const a = r.agents.get(ref);
     return a ? agentBadge(ref, s.track.reliability.get(ref) ?? 0.5, s.track.reports.filter((x) => x.agent === ref && x.resolved !== null).length) : missingBadge("no such agent");
@@ -409,9 +438,9 @@ export class PagesHandler {
     const r = await this.v2.record();
     const s = await this.v2.scores();
     const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
-    const receipts = [...r.checks.values()].filter((c) => c.operatorId === operatorId && c.stage === "resulted" && !c.disowned && !isHeld(r, c.id));
-    const papers = [...r.papers.values()].filter((p) => p.operatorId === operatorId && !isHeld(r, p.id)).sort((x, y) => y.seq - x.seq);
-    const claims = r.claims.filter((c) => c.authorOperator === operatorId && !isHeld(r, c.ref));
+    const receipts = [...r.checks.values()].filter((c) => c.operatorId === operatorId && c.stage === "resulted" && !c.disowned && !isOutOfView(r, c.id));
+    const papers = [...r.papers.values()].filter((p) => p.operatorId === operatorId && !isOutOfView(r, p.id)).sort((x, y) => y.seq - x.seq);
+    const claims = r.claims.filter((c) => c.authorOperator === operatorId && !isOutOfView(r, c.ref));
     return {
       // A profile belongs to an account holder: until an agent is paired the operator id is not on the log, and the tier is the account's.
       name, operatorId, tier: r.tiers.get(operatorId) ?? "account", verified: r.tiers.get(operatorId) === "verified", voided: r.voidedOperators.has(operatorId),
@@ -461,11 +490,11 @@ export class PagesHandler {
     }).sort((a, b) => a - b);
     const medianSettleHours = settleHours.length ? settleHours[Math.floor(settleHours.length / 2)]! : null;
     const declared = receipts.filter((c) => c.families.length > 0).length;
-    const shown = all.filter((c) => !isHeld(r, c.ref));
+    const shown = all.filter((c) => !isOutOfView(r, c.ref));
     return {
       now: new Date().toISOString(),
       credences: shown.map((c) => c.credence),
-      receiptResults: receipts.filter((c) => !isHeld(r, c.id)).map((c) => c.resultedAt ?? "").filter(Boolean),
+      receiptResults: receipts.filter((c) => !isOutOfView(r, c.id)).map((c) => c.resultedAt ?? "").filter(Boolean),
       graph: this.graphOf(r, s),
       papers: r.papers.size, claims: r.claims.length, external: r.external.size, agents: r.agents.size, operators,
       receipts: receipts.length, checksPerPaper: r.papers.size ? receipts.filter((c) => !c.target.startsWith("ext:")).length / r.papers.size : 0,
@@ -486,7 +515,7 @@ export class PagesHandler {
     const r = await this.v2.record();
     const s = await this.v2.scores();
     const g = this.graphOf(r, s);
-    const all = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
+    const all = [...s.claims.values()].filter((c) => !isOutOfView(r, c.ref));
     const gen = generations(all);
     return {
       claims: all.length, papers: r.papers.size, external: r.external.size, graph: g,
@@ -503,7 +532,7 @@ export class PagesHandler {
    * rest are counted, never hidden from the table's total.
    */
   private graphOf(r: V2Record, s: ScoresV2): { nodes: GraphNode[]; edges: GraphEdge[]; omitted: number } {
-    const all = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
+    const all = [...s.claims.values()].filter((c) => !isOutOfView(r, c.ref));
     const gen = generations(all);
     const chosen = [...all].sort((a, b) => b.use - a.use || (gen.get(a.ref) ?? 0) - (gen.get(b.ref) ?? 0) || a.ref.localeCompare(b.ref)).slice(0, GRAPH_MAX_NODES);
     const ids = new Set(chosen.map((c) => c.ref));
@@ -537,3 +566,17 @@ export function generations(claims: Array<{ ref: string; external: boolean; foun
 }
 
 export type { Json };
+
+/** review/0.1: the banner for an item under review that stays in view; null when it is not under review. */
+function reviewBanner(r: V2Record, subject: string): ReviewBannerV2 | null {
+  const st = r.review.get(itemOf(subject));
+  if (!st || !st.underReview) return null;
+  const open = st.reports.filter((x) => x.open);
+  return { issues: [...new Set(open.map((x) => ISSUE_LABEL[x.issue]))], since: open[0]?.ts ?? "" };
+}
+
+/** review/0.1: a claim's correction as its page shows it; null when it was never corrected. */
+function correctionView(r: V2Record, ref: string): CorrectionViewV2 | null {
+  const c = r.corrections.get(ref);
+  return c ? { by: c.by, who: c.by === "steward" ? "a steward" : ref.startsWith("ext:") ? "its registrant" : "its author", at: c.ts, reason: c.reason, was: c.was, test: c.test, kind: c.kind } : null;
+}

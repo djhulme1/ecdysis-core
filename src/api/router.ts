@@ -807,6 +807,8 @@ async function routeRequest(
   // The operator console has its own lock (Cloudflare Access, checked again
   // here) and never falls through to anything public.
   if (isConsolePath(path)) {
+    // With v2 on, the console is retired: stewardship, and the Health page it kept, live at /steward behind their own locks.
+    if (opts.steward) return new Response(null, { status: 303, headers: { location: /^\/operator\/health$/i.test(path) ? "/steward/health" : "/steward", "cache-control": "no-store", "x-robots-tag": "noindex" } });
     if (!opts.console) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
     return handleConsole(req, opts.console);
   }
@@ -1082,12 +1084,13 @@ async function dispatch(
         endpoints: [
           "GET /v1/constitution",
           "GET /v2/record", "GET /v2/frontier?limit=", "GET /v2/challenges?limit=", "GET /v2/challenges/:id", "GET /v2/credence", "GET /v2/heartbeat?agent=", "GET /v2/receipts/:hash", "GET /v2/holds",
-          "GET /v2/arguments?claim=", "GET /v2/arguments/:id",
+          "GET /v2/arguments?claim=", "GET /v2/arguments/:id", "GET /v2/review",
           "GET /v2/governance", "GET /v2/governance/proposals/:id",
           "POST /v2/agents/register", "POST /v2/keys/delegate", "POST /v2/keys/revoke",
           "POST /v2/papers", "POST /v2/claims/external", "POST /v2/challenges", "POST /v2/challenges/withdraw",
           "POST /v2/checks", "POST /v2/checks/result", "POST /v2/reviews", "POST /v2/escalate", "POST /v2/vouch",
           "POST /v2/arguments", "POST /v2/arguments/check", "POST /v2/arguments/answer",
+          "POST /v2/reports", "POST /v2/claims/correct",
           "POST /v2/governance/proposals", "POST /v2/governance/votes", "POST /v2/governance/cosign",
           "POST /v2/agents/doorbell",
           "GET /v1/log/sth", "GET /v1/log/inclusion?seq=", "GET /v1/log/consistency?first=&second=", "GET /v1/log/audit", "GET /v1/log/entries?from=&limit=",
@@ -1235,9 +1238,16 @@ async function dispatch(
   if (method === "GET" && path === "/v1/log/audit") return svc.audit();
   if (method === "GET" && path === "/v1/log/entries") {
     const r = await svc.logEntries(Number(q.get("from") ?? "0"), Number(q.get("limit") ?? "100"));
-    // The v2 log withholds nothing: receipts' outputs are kept off the log (/v2/receipts/:id says when they are revealed), and every payload on it is shown in full.
+    // The v2 log withholds only the words of items a steward withdrew from view, or holds out of view while a report about a
+    // person is reviewed (review/0.1); ids, operators and every number stay, so every score still recomputes. Receipts'
+    // outputs are kept off the log (/v2/receipts/:id says when they are revealed).
     if (opts.v2 && r.status === 200) {
-      const entries: Record<string, Json> = { ...(r.body as Record<string, Json>), withheld: "Nothing on the v2 log is withheld: every payload is shown in full. Receipts' outputs live off the log and are revealed by /v2/receipts/:id once cross-checked or after thirty days." };
+      const b = r.body as Record<string, Json>;
+      const shown = await opts.v2.withholdForReview((Array.isArray(b["entries"]) ? b["entries"] : []) as unknown as Array<Record<string, unknown>>);
+      const entries: Record<string, Json> = {
+        ...b, entries: shown as unknown as Json,
+        withheld: "On the v2 log only words are withheld, and only those of an item withdrawn from view by a steward or held out of view while a report about a person is reviewed (review/0.1: GET /v2/review lists them), together with what belongs to it: a claim from the literature's quote and test, a paper's title, an argument's text and instance, a check's note, an answer's text, a correction's test, old test and reason, a challenge's title and brief. An argument goes with its claim, a check and an answer with their argument and its claim, a correction and a challenge with their claim. Every id, operator, confidence and forecast stays, so every number recomputes; such an entry's payload hash cannot be checked from what is shown. Receipts' outputs live off the log and are revealed by /v2/receipts/:id once cross-checked or after thirty days.",
+      };
       return { status: 200, body: entries as Json };
     }
     return r;
@@ -1275,6 +1285,8 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
       return r;
     }
     if (path === "/v2/credence") return v2.credenceList();
+    // review/0.1: what is under review or withdrawn from view, and every correction; never a reporter's words.
+    if (path === "/v2/review") return v2.reviewList();
     const rc = path.match(/^\/v2\/receipts\/([0-9a-f]{64})$/);
     if (rc) return v2.receipt(rc[1]!);
     // arguments/0.1: one argument by id, or every argument on a claim.
@@ -1308,6 +1320,9 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/arguments/check": return v2.checkArgument(body);
     case "/v2/arguments/answer": return v2.answerArgument(body);
     case "/v2/escalate": return v2.escalate(body);
+    // review/0.1: a verified operator's agent reports a problem with an item; a claim's registrant or author corrects its test once.
+    case "/v2/reports": return v2.reportIssue(body);
+    case "/v2/claims/correct": return v2.correctClaim(body);
     case "/v2/keys/delegate": return v2.delegateKey(body);
     case "/v2/keys/revoke": return v2.revokeKey(body);
     case "/v2/vouch": return v2.vouch(body);

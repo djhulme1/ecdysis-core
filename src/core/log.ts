@@ -78,7 +78,11 @@ export type LogEntryType =
   | "challenge.withdraw" // its proposer or a steward took it off the board, with the reason
   | "argument.file" // an argument about a claim, with the checkable part its grounds require; arguments/0.1
   | "argument.check" // an independent operator's check of an argument: does it hold?
-  | "argument.answer"; // the claim's author's one reply to an argument, for the checkers to read
+  | "argument.answer" // the claim's author's one reply to an argument, for the checkers to read
+  | "content.report" // a problem reported about an item (misquote, unfair test, an allegation about a person, …): it goes under review; review/0.1
+  | "content.withdraw" // a steward withdrew an item from view after review; the fact that it existed stays
+  | "content.restore" // a steward closed the reports on an item (or brought a withdrawn one back): it stands as it was
+  | "claim.correct"; // a claim's test or kind corrected once, before any evidence rested on it
 
 export interface LogEntry {
   seq: number; // 0-based position in the log
