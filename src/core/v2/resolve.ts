@@ -57,6 +57,6 @@ export function resolveV2(entries: V2Entry[], now: Date, params = EARNING_PARAMS
 export function scoreRecord(r: V2Record): { claims: Map<string, ClaimV2>; track: TrackRecord } {
   return computeV2(r.claims, r.evidence, r.uses, {
     vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators,
-    lapses: r.lapses, anchors: r.anchors, arguments: r.argumentEffects, argumentStates: [...r.arguments.values()],
+    lapses: r.lapses, anchors: r.anchors, arguments: r.argumentEffects, argumentStates: r.argumentsInForce,
   });
 }

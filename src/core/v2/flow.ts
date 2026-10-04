@@ -280,6 +280,8 @@ export interface V2Record {
    * here; an R1 hold on the same subject keeps it in `held` regardless.
    */
   withheld: Map<string, WithheldState>;
+  /** The arguments that count: not out of view themselves (R1 or withheld) and not on a claim out of view. */
+  argumentsInForce: ArgumentState[];
   /**
    * The constitution in force, adopted on this log by the founder under
    * reserved power R2 (the first constitution.adopt entry; genesis). Null
@@ -716,7 +718,10 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   for (const op of options.verifiedByRecord ?? []) if (!voidedOperators.has(op)) tiers.set(op, "verified");
 
   const tierOf = (op: string): Tier => tiers.get(op) ?? "unverified";
-  for (const u of uses) u.tier = tierOf(u.operatorId);
+  // A paper out of view (held under R1, or withheld by a steward) relies on nothing while it is out: its uses count towards
+  // no claim's use, as its own claims count towards nothing.
+  const usesInForce = uses.filter((u) => !held.has(u.paper));
+  for (const u of usesInForce) u.tier = tierOf(u.operatorId);
 
   // Arguments (arguments/0.1), now that tiers are known: disowned reports count for nothing; checks settle each argument;
   // the settled arguments' effects on each claim are what credence/0.3 applies. Arguments on frozen claims feed no number.
@@ -739,6 +744,9 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     argumentsByClaim.set(a.claim, [...(argumentsByClaim.get(a.claim) ?? []), a]);
   }
   const frozenRef = (ref: string) => held.has(ref) || (ref.indexOf("#") > 0 && held.has(ref.slice(0, ref.indexOf("#"))));
+  // The arguments that count: not out of view themselves, nor on a claim out of view. The track record scores only these,
+  // as the claims' numbers use only these: a withheld argument credits its arguer with nothing.
+  const argumentsInForce = [...args.values()].filter((a) => !held.has(a.id) && !frozenRef(a.claim));
   const argumentEffectsByClaim = new Map<string, ClaimArgumentsInput>();
   for (const [ref, list] of argumentsByClaim) {
     if (frozenRef(ref)) continue;
@@ -792,5 +800,5 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, constitution, arguments: args, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, constitution, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
 }

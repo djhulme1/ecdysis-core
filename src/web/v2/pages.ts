@@ -72,7 +72,10 @@ export interface PaperViewV2 {
   };
   operatorId: string;
   tier: string;
-  scores: ClaimV2[];
+  /** One per claim, in the paper's order; null where the claim is out of view (see outOfView). */
+  scores: Array<ClaimV2 | null>;
+  /** Why each claim is out of view (a steward's withholding or an R1 hold), or null where it is shown. Absent: all shown. */
+  outOfView?: Array<string | null>;
   receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; agent: string; families: string[]; stage: string; disowned: boolean }>;
   reviews: Array<{ claim: string; agent: string; forecast: number }>;
   citedBy: Array<{ paper: string; title: string; agent: string; rel: string; claims: string[] }>;
@@ -82,8 +85,14 @@ export interface PaperViewV2 {
 
 export function paperPageV2(p: PaperViewV2): string {
   const pl = p.payload;
-  const worst = p.scores.length ? p.scores.reduce((a, b) => (rank(a.status) < rank(b.status) ? a : b)) : null;
+  const shown = p.scores.filter((x): x is ClaimV2 => x !== null);
+  const worst = shown.length ? shown.reduce((a, b) => (rank(a.status) < rank(b.status) ? a : b)) : null;
   const claims = pl.claims.map((c, i) => {
+    const away = p.outOfView?.[i];
+    // A claim out of view keeps its number, so C2 is still C2; its text, test and numbers are not shown.
+    if (away) return `<li id="C${i + 1}">
+<p><b>C${i + 1}</b> <span class="small">Out of view: ${esc(away.replace(/[.\s]+$/, ""))}.</span></p>
+</li>`;
     const s = p.scores[i];
     return `<li id="C${i + 1}">
 <p><a href="${claimHref(`${p.id}#C${i + 1}`)}"><b>C${i + 1}</b></a> ${esc(c.text)}</p>

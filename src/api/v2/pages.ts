@@ -4,7 +4,7 @@
  * is a function of the log, so a stale page is merely a little old).
  */
 
-import type { V2Service } from "./service.js";
+import { hiddenNote, type V2Service } from "./service.js";
 import type { V2Governance } from "./governance.js";
 import type { Accounts } from "./accounts.js";
 import { V2Feeds } from "./feed.js";
@@ -264,10 +264,12 @@ export class PagesHandler {
     return {
       id, cid: p.cid, ts: p.ts, payload, operatorId: p.operatorId, tier: r.tiers.get(p.operatorId) ?? "unverified",
       promote: { citation: citation(site, citable), bibtex: bibtex(site, citable), share: { text: paperShare(site, p, statuses).text, links: shareLinks("paper", id) }, badge: `${site}/badge/paper/${id}.svg`, page: `${site}/p/${id}` },
-      scores: p.claims.filter((ref) => !isHeld(r, ref)).map((ref) => s.claims.get(ref)!).filter(Boolean),
+      // Aligned with the paper's claims: a claim out of view keeps its place, with a note in place of its text and numbers.
+      scores: p.claims.map((ref) => (isHeld(r, ref) ? null : s.claims.get(ref) ?? null)),
+      outOfView: p.claims.map((ref) => (isHeld(r, ref) ? hiddenNote(r, ref) : null)),
       receipts: [...r.checks.values()].filter((c) => refs.has(c.target) && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, agent: c.handle, families: c.families, stage: c.stage, disowned: c.disowned })),
       reviews: r.evidence.filter((e) => e.kind === "review" && refs.has(e.claim)).map((e) => ({ claim: e.claim, agent: e.agent, forecast: r.forecasts.get(`${e.claim}|${e.agent}`) ?? 0.5 })),
-      citedBy: [...r.papers.values()].filter((q) => q.id !== id && r.uses.some((u) => u.paper === q.id && refs.has(u.claim))).map((q) => ({ paper: q.id, title: q.title, agent: q.handle, rel: "relies on", claims: r.uses.filter((u) => u.paper === q.id && refs.has(u.claim)).map((u) => u.claim.split("#")[1]!) })),
+      citedBy: [...r.papers.values()].filter((q) => q.id !== id && !isHeld(r, q.id) && r.uses.some((u) => u.paper === q.id && refs.has(u.claim))).map((q) => ({ paper: q.id, title: q.title, agent: q.handle, rel: "relies on", claims: r.uses.filter((u) => u.paper === q.id && refs.has(u.claim)).map((u) => u.claim.split("#")[1]!) })),
     };
   }
 
@@ -301,7 +303,7 @@ export class PagesHandler {
     const evidence = r.evidence.filter((e) => e.claim === ref).map((e) => ({ id: e.id, kind: e.kind, confirms: e.confirms, agent: e.agent, operatorId: e.operatorId, tier: e.tier, families: e.families, weight: null }));
     const receipts = [...r.checks.values()].filter((c) => c.target === ref && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq)
       .map((c) => ({ id: c.id, kind: c.kind, outcome: c.outcome, agent: c.handle, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, verifiedBy: c.verifiedBy.length, disputedBy: c.disputedBy.length, ...(c.requires.length ? { requires: c.requires.length, auditable: c.verifiedBy.length > 0 } : {}) }));
-    const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref).map((u) => u.paper))].map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
+    const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref && !isHeld(r, u.paper)).map((u) => u.paper))].map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
     const site = `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
     const promote = { share: { text: claimShare(site, ref, text, score).text, links: shareLinks("claim", ref) }, badge: `${site}/badge/claim/${paperId}/${label}.svg`, page: paperId.startsWith("ext:") ? `${site}/x/${paperId.slice(4)}/${label}` : `${site}/p/${paperId}/${label}` };
     // arguments/0.1: every argument on the claim, with its checks and the author's answer; frozen ones are left out.
