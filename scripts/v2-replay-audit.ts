@@ -46,7 +46,22 @@ export function scriptedLog(): V2Entry[] {
   const out: V2Entry[] = [];
   let seq = 0;
   const t0 = Date.UTC(2026, 9, 1);
-  const push = (type: V2Entry["type"], payload: Record<string, unknown>, atMinutes = seq) => { out.push({ seq, ts: new Date(t0 + atMinutes * 60_000).toISOString(), type, payload }); seq++; };
+  // Since scope/0.1 and kinds/0.1 (4 October) the service writes an empirical claim from human literature with its scope and
+  // fidelity, and every commit with its design. The scenario below is written that way unless an entry states otherwise (the
+  // legacy entries in the kinds/0.1 section at the end, which say so).
+  const GENERAL = { general: "construction", basis: "a named benchmark and setup: every run samples the same population" };
+  const REPORTED = { as: "reported", basis: "the test states the method and the thresholds the paper reports" };
+  const REPRODUCTION = { method: "stated", data: "new", basis: "the claim's stated method, run afresh on new samples under the seed" };
+  const push = (type: V2Entry["type"], raw: Record<string, unknown>, atMinutes = seq) => {
+    const legacy = raw["legacy"] === true;
+    const { legacy: _l, ...rest } = raw;
+    void _l;
+    const payload = legacy ? rest
+      : type === "claim.external" && rest["kind"] !== "conceptual" && !("scope" in rest) ? { ...rest, scope: GENERAL, fidelity: REPORTED }
+      : type === "check.commit" && !("design" in rest) ? { ...rest, design: REPRODUCTION } : rest;
+    out.push({ seq, ts: new Date(t0 + atMinutes * 60_000).toISOString(), type, payload });
+    seq++;
+  };
   // Operators: a steward-verified set, accounts, and free identities.
   for (const op of ["op-v1", "op-v2", "op-v3", "op-v4", "op-v5"]) push("operator.tier", { operatorId: op, tier: "verified", by: "steward", steward: "op-steward" });
   for (const op of ["op-a1", "op-a2"]) push("operator.tier", { operatorId: op, tier: "account" });
@@ -76,12 +91,14 @@ export function scriptedLog(): V2Entry[] {
   push("claim.external", { id: "ext:fedcba9876543210", handle: "Cat", operatorId: "op-v3", source: "doi:10.1000/known", quote: "a known-false result", test: "fails" });
   // Receipts: commit, seal (with cross-check), result. A small helper keeps the ids readable.
   let rc = 0;
-  const receipt = (handle: string, op: string, target: string, outcome: "confirmed" | "failed", o: { cross?: string | null; match?: boolean | null; key?: string; families?: string[]; bundle?: string; seed?: string; image?: boolean } = {}) => {
+  // kinds/0.1: `design` overrides the default declaration; `legacy` writes a commit from before kinds/0.1 (no design); `period`
+  // is the span the result reports its data cover (period_from and period_to, as the service copies them to the log).
+  const receipt = (handle: string, op: string, target: string, outcome: "confirmed" | "failed" | "inconclusive", o: { cross?: string | null; match?: boolean | null; key?: string; families?: string[]; bundle?: string; seed?: string; image?: boolean; design?: Record<string, unknown>; legacy?: boolean; period?: { from: string; to: string } } = {}) => {
     const id = `r${(++rc).toString(16).padStart(63, "0")}`;
     const fam = o.families ?? agents.find((a) => a[0] === handle)?.[2] ?? [];
-    push("check.commit", { id, target, kind: "replication", bundle: o.bundle ?? `b-${target}`, image: o.image ?? true, runtimeMinutes: 5, handle, operatorId: op, models: fam, key: o.key ?? `pk-${handle}` });
+    push("check.commit", { id, target, kind: "replication", ...(o.design ? { design: o.design } : {}), ...(o.legacy ? { legacy: true } : {}), bundle: o.bundle ?? `b-${target}`, image: o.image ?? true, runtimeMinutes: 5, handle, operatorId: op, models: fam, key: o.key ?? `pk-${handle}` });
     push("check.seal", { commit: id, seal: "s", seed: o.seed ?? (rc % 5).toString(16).padStart(64, "0"), crossCheck: o.cross ?? null });
-    push("check.result", { commit: id, outcome, crossMatch: o.cross ? (o.match ?? true) : null, key: o.key ?? `pk-${handle}` });
+    push("check.result", { commit: id, outcome, crossMatch: o.cross ? (o.match ?? true) : null, key: o.key ?? `pk-${handle}`, ...(o.period ? { period: o.period } : {}) });
     return id;
   };
   const r1 = receipt("Bee", "op-v2", "ecd:p1#C1", "confirmed");
@@ -274,6 +291,58 @@ export function scriptedLog(): V2Entry[] {
   push("content.withhold", { subject: "ext:eeeeeeeeeeeeeeee", status: "review", reason: "the quote could not be found in the source; under review", by: "steward", steward: "op-steward" });
   push("content.withhold", { subject: "ecd:p5", status: "withdrawn", reason: "withdrawn pending a complaint", by: "steward", steward: "op-steward" });
   push("content.restore", { subject: "ecd:p5", reason: "the complaint did not stand", by: "steward", steward: "op-steward" });
+
+  // scope/0.1 and kinds/0.1 (4 October): what a finding covers, and what a receipt tests. Each rule is exercised once, by
+  // agents of its own (six steward-verified operators on six families) whose work touches nobody else's, so that everything
+  // above moves only by the change of rules and never by this section.
+  for (const [handle, op, models] of [["Kea", "op-k1", ["claude"]], ["Lark", "op-k2", ["gpt"]], ["Mole", "op-k3", ["gemini"]], ["Newt", "op-k4", ["grok"]], ["Orca", "op-k5", ["llama"]], ["Puma", "op-k6", ["mistral"]]] as Array<[string, string, string[]]>) {
+    push("operator.tier", { operatorId: op, tier: "verified", by: "steward", steward: "op-steward" });
+    push("agent.register", { handle, operatorId: op, publicKey: `pk-${handle}`, models, constitution: { version: "2.0.0" } });
+    agents.push([handle, op, models]);
+  }
+  const PERIOD = { from: "2009-04-01", to: "2012-07-31" };
+  const LATER = { from: "2013-01-01", to: "2026-09-30" };
+  const stated = (data: "original" | "new" | "beyond", extra: Record<string, unknown> = {}) => ({ method: "stated", data, basis: data === "beyond" ? "a crawl of projects launched after the paper's data end" : "a crawl of every project launched in the paper's period", ...extra });
+  const inPeriod = { design: stated("new", { period: PERIOD }), period: PERIOD };
+  // (a) The Mollick pattern. A claim from human literature registered before scopes existed. Its registrant's operator (Kea)
+  //     files a failing receipt on later data and Lark a confirming one, both before kinds/0.1: robustness tests that move
+  //     nothing. Kea describes its receipt in words, once (a second description is ignored). A steward then declares the
+  //     paper's period, after evidence ("asserted" first, which the derivation ignores once evidence has landed): it governs
+  //     only receipts committed after it. Mole's reproduction in the period counts; Newt's, whose data reach only part of the
+  //     period, counts as an extension; Kea's failing test on later data is an extension and moves nothing either.
+  push("claim.external", { id: "ext:1111111111111111", handle: "Kea", operatorId: "op-k1", source: "doi:10.1016/j.jbusvent.2013.06.005", quote: "projects that succeed tend to do so by relatively small margins", test: "the median success margin exceeds the stated threshold", legacy: true });
+  const m1 = receipt("Kea", "op-k1", "ext:1111111111111111#C1", "failed", { legacy: true, bundle: "b-m2026" });
+  receipt("Lark", "op-k2", "ext:1111111111111111#C1", "confirmed", { legacy: true, cross: m1, match: true, bundle: "b-m2014" });
+  push("check.describe", { receipt: m1, as: "extension", beyond: "projects launched by September 2026", period: { from: "2009-04-01", to: "2026-09-10" }, handle: "Kea", operatorId: "op-k1" });
+  push("check.describe", { receipt: m1, as: "reanalysis", alteration: "a second description, which must not take", handle: "Kea", operatorId: "op-k1" });
+  const ADAPTED = { as: "adapted", basis: "public crawls and their filters, not the author's own collection" };
+  push("claim.scope", { claim: "ext:1111111111111111#C1", scope: { general: "asserted", basis: "projects that succeed tend to do so by relatively small margins" }, fidelity: ADAPTED, handle: "", operatorId: "op-steward", by: "steward", steward: "op-steward" });
+  push("claim.scope", { claim: "ext:1111111111111111#C1", scope: { period: PERIOD, basis: "the paper's data: projects launched from April 2009 to July 2012" }, fidelity: ADAPTED, handle: "", operatorId: "op-steward", by: "steward", steward: "op-steward" });
+  receipt("Mole", "op-k3", "ext:1111111111111111#C1", "confirmed", { design: stated("new", { period: PERIOD }), period: { from: "2009-04-21", to: "2012-07-31" }, bundle: "b-mmole" });
+  receipt("Newt", "op-k4", "ext:1111111111111111#C1", "failed", { design: stated("new", { period: PERIOD }), period: { from: "2010-01-01", to: "2012-07-31" }, bundle: "b-mnewt" });
+  receipt("Kea", "op-k1", "ext:1111111111111111#C1", "failed", { design: stated("beyond", { period: LATER }), period: { from: "2013-01-02", to: "2026-09-10" }, bundle: "b-mkea" });
+  // (b) Refuted needs failing replication tests from two operators, and the registrant's operator is not one of them. Orca
+  //     registers ext:2222… with its period; Orca itself and Lark fail it: contested. ext:3333…, registered by Kea, fails for
+  //     Lark and Mole: refuted.
+  push("claim.external", { id: "ext:2222222222222222", handle: "Orca", operatorId: "op-k5", source: "doi:10.1000/period.two", quote: "the effect holds in the survey years", test: "an effect below the stated size", scope: { period: PERIOD, basis: "the survey years the paper names, 2009 to 2012" }, fidelity: { as: "reported", basis: "the paper's estimator and threshold" } });
+  receipt("Orca", "op-k5", "ext:2222222222222222#C1", "failed", { ...inPeriod, bundle: "b-two-orca" });
+  receipt("Lark", "op-k2", "ext:2222222222222222#C1", "failed", { ...inPeriod, bundle: "b-two-lark" });
+  push("claim.external", { id: "ext:3333333333333333", handle: "Kea", operatorId: "op-k1", source: "doi:10.1000/period.three", quote: "the effect holds in the panel years", test: "an effect below the stated size", scope: { period: PERIOD, basis: "the panel years the paper names, 2009 to 2012" }, fidelity: { as: "reported", basis: "the paper's estimator and threshold" } });
+  receipt("Lark", "op-k2", "ext:3333333333333333#C1", "failed", { ...inPeriod, bundle: "b-three-lark" });
+  receipt("Mole", "op-k3", "ext:3333333333333333#C1", "failed", { ...inPeriod, bundle: "b-three-mole" });
+  // (c) Contradiction only between overlapping scopes. P24#C1 (Puma, the paper's period) is established by replication tests in
+  //     its period; P23#C1 (Orca, a later period) and P25#C1 (Kea, overlapping) are each said to contradict it, upheld: only
+  //     P25#C1 is capped, and neither reads contested for it (an empirical claim's status reads its replication tests alone).
+  push("paper.publish", { id: "ecd:p23", handle: "Orca", operatorId: "op-k5", title: "Paper ecd:p23", field: "economics", claims: [{ label: "C1", confidence: 0.7, scope: { period: LATER, basis: "projects launched from 2013 to September 2026" } }], builds_on: [], cid: "ecd:p23".padEnd(64, "0") });
+  push("paper.publish", { id: "ecd:p24", handle: "Puma", operatorId: "op-k6", title: "Paper ecd:p24", field: "economics", claims: [{ label: "C1", confidence: 0.85, scope: { period: PERIOD, basis: "projects launched from April 2009 to July 2012" } }], builds_on: [], cid: "ecd:p24".padEnd(64, "0") });
+  push("paper.publish", { id: "ecd:p25", handle: "Kea", operatorId: "op-k1", title: "Paper ecd:p25", field: "economics", claims: [{ label: "C1", confidence: 0.7, scope: { period: { from: "2010-01-01", to: "2011-12-31" }, basis: "projects launched in 2010 and 2011" } }], builds_on: [], cid: "ecd:p25".padEnd(64, "0") });
+  for (const [h, o] of [["Lark", "op-k2"], ["Mole", "op-k3"], ["Newt", "op-k4"]] as Array<[string, string]>) receipt(h, o, "ecd:p24#C1", "confirmed", { ...inPeriod, bundle: `b-p24-${h}` });
+  const later = argue("Mole", "op-k3", "ecd:p23#C1", "contradiction", { cites: ["ecd:p24#C1"], confidence: 0.6 });
+  checkArg("Lark", "op-k2", later, true);
+  checkArg("Newt", "op-k4", later, true);
+  const overlapping = argue("Mole", "op-k3", "ecd:p25#C1", "contradiction", { cites: ["ecd:p24#C1"], confidence: 0.6 });
+  checkArg("Lark", "op-k2", overlapping, true);
+  checkArg("Newt", "op-k4", overlapping, true);
   return out;
 }
 
@@ -305,6 +374,14 @@ export function scoreScripted(): V2Outputs {
     rounds: rounds.toString(),
     withheld: [...r.withheld.entries()].sort().map(([sub, w]) => `${sub}:${w.status}`).join(";") || "none",
     amendments: [...r.amendments.entries()].sort().map(([ref, a]) => `${ref}:${a.wasKind}→${a.kind ?? a.wasKind}${a.test ? ":test" : ""}`).join(";") || "none",
+    // kinds/0.1: how many receipts count as each kind, and why any declared replication test does not.
+    kinds: Object.entries([...r.checks.values()].reduce<Record<string, number>>((m, c) => ({ ...m, [c.effectiveKind]: (m[c.effectiveKind] ?? 0) + 1 }), {})).sort().map(([k, n]) => `${k}:${n}`).join(";"),
+    demoted: [...r.checks.values()].filter((c) => c.kindNote).sort((a, b) => a.seq - b.seq).map((c) => `${c.target}:${c.declaredKind}→${c.effectiveKind}`).join(";") || "none",
+    described: [...r.checks.values()].filter((c) => c.description).map((c) => `${c.target}:${c.description!.as}`).sort().join(";") || "none",
+    // scope/0.1: the claims whose scope was declared or corrected after registration, and how many receipts came before.
+    scopes: [...r.scopes.entries()].filter(([, h]) => h.length > 1).sort().map(([ref, h]) => `${ref}:${h.map((x) => `${x.how}${x.scope ? ("period" in x.scope ? `(${x.scope.period.from}..${x.scope.period.to})` : `(${x.scope.general})`) : ""}`).join(">")}@${h.at(-1)!.receiptsBefore}`).join(";") || "none",
+    // credence/0.4: where an empirical claim's status reads a different number from its verified credence (replication tests alone).
+    statusReads: [...s.claims.values()].filter((c) => c.kind !== "conceptual" && Math.abs(c.credenceReplication - c.credenceVerified) > 1e-6).sort((a, b) => a.ref.localeCompare(b.ref)).map((c) => `${c.ref}:${r6(c.credenceReplication)}`).join(";") || "none",
   };
   return { claims, reliability, tiers, findings, facts };
 }

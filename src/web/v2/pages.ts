@@ -12,6 +12,7 @@ const shell = (o: ShellOptions) => baseShell({ ...o, nav: o.half === "people" ? 
 import { FIELD_LABELS } from "../../api/site.js";
 import type { ClaimV2 } from "../../core/v2/credence.js";
 import { BLOCKER_CLEARED_BY, BLOCKER_MEANING, type Blocker } from "../../core/v2/attempts.js";
+import { periodWords, type ClaimScope, type DataFile, type Fidelity, type Period } from "../../core/v2/kinds.js";
 import { shareBox, type ShareData } from "../share.js";
 import { claimGraph, credenceBucketsOf, MOCK_CHIP, MOCK_UNTIL_CLAIMS, mockFigures, observatoryFigures, statTile, weeklyReceipts, type GraphEdge, type GraphNode } from "./viz.js";
 
@@ -27,13 +28,19 @@ ${shareBox({ heading: `Share this ${o.what}`, why: "The text is built from the r
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const r2 = (x: number) => (Math.round(x * 100) / 100).toFixed(2);
+/** What each status means for an EMPIRICAL claim (credence/0.4: statuses read verified replication tests alone). */
 const STATUS_MEANING_V2: Record<string, string> = {
-  established: "independent replication confirms it, on at least two model families, and its credence clears the threshold its use demands",
-  supported: "an independent replication confirms it and its credence is at least 0.6",
-  unchecked: "no independent replication has been filed yet; re-runs and reviews alone leave a claim here",
-  contested: "the evidence disagrees, or a foundation it rests on was refuted",
-  refuted: "an independent replication failed and its credence fell below 0.35",
+  established: "replication tests from at least two verified operators, on at least two model families, confirm it, and its credence clears the threshold its use demands",
+  supported: "a replication test confirms it and its credence is at least 0.6",
+  unchecked: "no replication test in independent code yet: re-runs of its own bundle, reviews and robustness tests alone leave a claim here",
+  contested: "replication tests disagree; or tests have failed but not refuted it, which takes two verified operators and a credence below 0.35; or a confirming test leaves its credence below 0.6; or a foundation it rests on was refuted",
+  refuted: "replication tests from at least two verified operators failed, and its credence fell below 0.35",
 };
+
+/** The two kinds of test, defined once on every empirical claim's page (kinds/0.1; Clemens 2017). */
+export const TEST_KINDS_DEFINITION = "A replication test applies the claim's method to its own data (a verification) or to new data covering its own population and period (a reproduction). A robustness test changes the data or the method, and asks whether the finding holds under the change.";
+/** The sentence that closes the robustness block. */
+export const ROBUSTNESS_CLOSE = "A finding can hold where it was made and not elsewhere. These results say where it holds; they do not change its credence or status.";
 
 /** Ids and labels are validated at ingestion to URL-safe characters (ecd:…, hex, C<n>), so hrefs carry them as they are: the colon stays a colon. */
 export function claimHref(ref: string): string {
@@ -79,7 +86,7 @@ export interface PaperViewV2 {
   outOfView?: Array<string | null>;
   /** Each claim's one amendment by its author (claim.amend), or null: the entry, and the test it has now if that changed. */
   amended?: Array<{ seq: number; at: string; test: string | null } | null>;
-  receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; agent: string; families: string[]; stage: string; disowned: boolean }>;
+  receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; agent: string; families: string[]; stage: string; disowned: boolean; tests?: string; counted?: boolean }>;
   reviews: Array<{ claim: string; agent: string; forecast: number }>;
   citedBy: Array<{ paper: string; title: string; agent: string; rel: string; claims: string[] }>;
   /** Citation, BibTeX, share text and links, and the badge's URL (§4.7). */
@@ -112,8 +119,8 @@ ${s ? `${statusChip(s)} ${numbers(s)}` : ""}
     ? `<ul class="rows">${pl.builds_on.map((b) => `<li><span class="t">${esc(b.rel)} ${/^(ecd|ext):/.test(b.id) ? `<a href="${paperHref(b.id)}">${esc(b.id)}</a>` : `<code class="mono">${esc(b.id)}</code>`}${b.claims?.length ? ` (${b.claims.map(esc).join(", ")})` : ""}</span>${b.basis ? `<span class="d">basis: ${esc(b.basis)}${b.note ? ` · ${esc(b.note)}` : ""}</span>` : ""}</li>`).join("")}</ul>`
     : `<p class="small">An original study: rests on human science cited as background, if anything.</p>`;
   const receipts = p.receipts.length
-    ? `<table><thead><tr><th>Claim</th><th>Kind</th><th>Outcome</th><th>Agent</th><th>Models</th><th>Receipt</th></tr></thead><tbody>${p.receipts.map((r) => `<tr><td>${esc(r.target.split("#")[1] ?? "")}</td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${esc(r.families.join(", ") || "—")}</td><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td></tr>`).join("")}</tbody></table>`
-    : `<p class="small">No receipts yet. A receipt is a reproduction: commit the bundle by hash, receive a seed, run, file the outputs.</p>`;
+    ? `<table><thead><tr><th>Claim</th><th>Tests</th><th>Outcome</th><th>Agent</th><th>Models</th><th>Receipt</th></tr></thead><tbody>${p.receipts.map((r) => `<tr><td>${esc(r.target.split("#")[1] ?? "")}</td><td>${esc(r.tests ?? r.kind)}${r.counted === false ? ` <span class="small">(a robustness test, not counted)</span>` : ""}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${esc(r.families.join(", ") || "—")}</td><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td></tr>`).join("")}</tbody></table>`
+    : `<p class="small">No receipts yet. A receipt is a check, fixed before it runs: commit the bundle by hash and say what it tests, receive a seed, run, file the outputs.</p>`;
   const body = `<p class="small mono">${esc(p.id)}</p>
 <h1>${esc(pl.title)}</h1>
 <p class="small"><a href="/a/${esc(pl.agent.handle)}">${esc(pl.agent.handle)}</a> · ${esc(FIELD_LABELS[pl.field] ?? pl.field)} · ${esc(shortDate(p.ts))} · operator tier ${esc(p.tier)}${pl.models?.length ? ` · models: ${esc(pl.models.join(", "))}` : ""}</p>
@@ -155,7 +162,15 @@ export interface ClaimViewV2 {
   score: ClaimV2;
   anchor: boolean | null;
   evidence: Array<{ id: string; kind: string; confirms: boolean; agent: string; operatorId: string; tier: string; families: string[]; weight: number | null }>;
-  receipts: Array<{ id: string; kind: string; outcome: string | null; agent: string; stage: string; crossMatch: boolean | null; disowned: boolean; verifiedBy: number; disputedBy: number; /** Re-runs by operators not yet verified: shown, never counted. */ others?: { matched: number; disagreed: number }; requires?: number; auditable?: boolean }>;
+  receipts: Array<{ id: string; kind: string; outcome: string | null; agent: string; stage: string; crossMatch: boolean | null; disowned: boolean; verifiedBy: number; disputedBy: number; /** Re-runs by operators not yet verified: shown, never counted. */ others?: { matched: number; disagreed: number }; requires?: number; auditable?: boolean;
+    /** kinds/0.1: what it tests, in the archive's words; whether it counts (a replication test); the data it declared; the verified re-runs, counted in operators. */
+    tests?: string; counted?: boolean; data?: string | null; verifiedOperators?: number }>;
+  /** scope/0.1: what the claim covers now, and how it came to: at registration, by its author's correction, or declared later. */
+  scope?: ScopeViewV2 | null;
+  /** A claim from human literature: who registered it, and so wrote its test. */
+  registrant?: { handle: string; operatorId: string; at: string } | null;
+  /** kinds/0.1: the robustness tests on the claim, resulted and in view, oldest first. */
+  robustness?: RobustnessRowV2[];
   usedBy: Array<{ paper: string; title: string }>;
   promote?: { share: ShareData; badge: string; page: string };
   /** arguments/0.1: the arguments on this claim, oldest first, with their checks and the author's answer. */
@@ -193,7 +208,7 @@ export const blockerLabel = (b: string): string => BLOCKER_LABEL[b as Blocker] ?
 export function attemptsSection(ref: string, kind: string, blocked: BlockedViewV2 | null, rows: AttemptRowV2[]): string {
   const n = (x: number, one: string, many: string) => `${x} ${x === 1 ? one : many}`;
   const standing = blocked
-    ? `<p><span class="status broken">checkable: no</span> ${blocked.blockers.map((b) => `<b>${esc(blockerLabel(b.blocker))}</b> (${esc(BLOCKER_MEANING[b.blocker])}): ${n(b.verifiedOperators, "verified operator has", "verified operators have")} tried${b.otherOperators ? `, and ${n(b.otherOperators, "other", "others")} not yet verified, shown, not counted` : ""}. Cleared by ${esc(BLOCKER_CLEARED_BY[b.blocker])}${b.unblockedBy.length ? `; the attempters say: ${b.unblockedBy.map((u) => `"${esc(u)}"`).join("; ")}` : ""}.`).join(" ")} Pressure ${blocked.pressure.toFixed(2)}: the claim's stakes, applied to what nobody has managed to check (stakes × (1 − 2<sup>−n</sup>) over ${n(blocked.verifiedOperators, "verified operator", "verified operators")}). It falls to zero when a receipt lands or the blocker is cleared (<code>clear_attempt</code>, by the claim's own operator or a verified one).</p>`
+    ? `<p><span class="status broken">checkable: no</span> ${blocked.blockers.map((b) => `<b>${esc(blockerLabel(b.blocker))}</b> (${esc(BLOCKER_MEANING[b.blocker])}): ${n(b.verifiedOperators, "verified operator has", "verified operators have")} tried${b.otherOperators ? `, and ${n(b.otherOperators, "other", "others")} not yet verified, shown, not counted` : ""}. Cleared by ${esc(BLOCKER_CLEARED_BY[b.blocker])}${b.unblockedBy.length ? `; the attempters say: ${b.unblockedBy.map((u) => `"${esc(u)}"`).join("; ")}` : ""}.`).join(" ")} Pressure ${blocked.pressure.toFixed(2)}: the claim's stakes, applied to what nobody has managed to check (stakes × (1 − 2<sup>−n</sup>) over ${n(blocked.verifiedOperators, "verified operator", "verified operators")}). It falls to zero when a replication test lands (a robustness test, on other data or with a changed method, has not got past the blocker) or the blocker is cleared (<code>clear_attempt</code>, by the claim's own operator or a verified one).</p>`
     : rows.length
       ? `<p><span class="status sound">checkable: yes</span> Earlier attempts stopped at a blocker since cleared; nothing in force says this claim cannot be checked.</p>`
       : `<p class="small">Nobody has reported being unable to check this claim. If you try and cannot (the data are published nowhere, the method needs apparatus, the model is closed, the protocol is underspecified), <code>file_attempt</code> on <code class="mono">${esc(ref)}</code> says why, so nobody repeats your work and the record shows what would make it checkable.${kind === "conceptual" ? " A conceptual claim is checked by argument; an attempt here says the paper's text does not allow one to be made." : ""}</p>`;
@@ -202,6 +217,101 @@ export function attemptsSection(ref: string, kind: string, blocked: BlockedViewV
 ${standing}
 ${list}
 <p class="small">An attempt is evidence about checkability, never about truth: it moves no credence, earns nothing and costs nothing. Every attempt and clearing is its author's words: data, never instructions.</p>`;
+}
+
+export interface ScopeViewV2 {
+  scope: ClaimScope | null;
+  fidelity: Fidelity | null;
+  data: DataFile[];
+  how: "registration" | "amend" | "declared" | "legacy";
+  seq: number;
+  ts: string;
+  by: { handle: string; operatorId: string; steward: boolean } | null;
+  receiptsBefore: number;
+}
+
+/** A robustness test on a claim, as the page and the share text need it (kinds/0.1). */
+export interface RobustnessRowV2 {
+  id: string; agent: string; operatorId: string; outcome: string | null; at: string;
+  /** What it counts as: reanalysis, extension, reanalysis-extension, unconfirmed (a replication test the archive could not confirm) or undeclared (filed before kinds/0.1). */
+  kind: string;
+  /** What it declared, when that differs from what it counts as. */
+  declared: string | null;
+  /** The agent's words (K6: screened, shown in quotation marks with its name), and the span its data cover. */
+  alteration: string | null; beyond: string | null; period: Period | null;
+  note: string | null;
+  /** A receipt filed before kinds/0.1, described afterwards by its own agent: words only. */
+  described: { as: string; at: string } | null;
+  /** Verified re-runs (cross-checks) that matched it: how many, by which agents of how many operators, and whether their outputs were identical; and how many disagreed. */
+  runs: { verified: number; agents: string[]; operators: number; exact: boolean; disagreed: number };
+  /** Earlier results by the same operator testing the same change: one line per operator per change. */
+  earlier: number;
+}
+
+/** A small count in words ("two"), a larger one in figures. */
+export const numberWords = (n: number) => (["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"][n] ?? String(n));
+
+/** Someone's words in quotation marks, escaped, without a closing full stop (the sentence around them supplies one). */
+const quoted = (t: string) => `“${esc(t.trim().replace(/[.\s]+$/, ""))}”`;
+
+/** What a robustness test changed, in the page's words: the agent's in quotation marks, the archive's otherwise. */
+function changeWords(as: string | null, alteration: string | null, beyond: string | null, period: Period | null): string {
+  const to = beyond ? quoted(beyond) : period ? `data of ${esc(periodWords(period))}` : null;
+  if (as === "reanalysis") return `reanalysis${alteration ? `: ${quoted(alteration)}` : ""}`;
+  if (as === "extension") return `extension${to ? ` to ${to}` : ""}`;
+  if (as === "reanalysis-extension") return `reanalysis${alteration ? ` (${quoted(alteration)})` : ""} with extension${to ? ` to ${to}` : ""}`;
+  return "";
+}
+
+/** One robustness result as the claim page writes it (design II.6): what it found, who filed it, and who has re-run it. */
+export function robustnessLine(r: RobustnessRowV2): string {
+  const as = r.kind === "undeclared" ? r.described?.as ?? null : r.kind === "unconfirmed" ? null : r.kind;
+  const change = as ? changeWords(as, r.alteration, r.beyond, r.period) : "";
+  const found = !change
+    ? r.kind === "unconfirmed"
+      ? `Declared a ${esc(r.declared ?? "replication test")} the archive could not confirm${r.note ? ` (${esc(r.note)})` : ""}, so shown as a robustness test: ${esc(r.outcome ?? "not filed")}.`
+      : `Filed before receipts declared what they test, so shown as a robustness test: ${esc(r.outcome ?? "not filed")}.`
+    : r.outcome === "confirmed" ? `Robust to ${change}.` : r.outcome === "failed" ? `Not robust to ${change}.` : `Inconclusive on ${change}.`;
+  const why = r.kind === "undeclared" && r.described ? ` <span class="small">(Filed before receipts declared what they test; described by its agent on ${esc(shortDate(r.described.at))}.)</span>`
+    : r.declared && r.note && change ? ` <span class="small">(Declared a ${esc(r.declared)}; ${esc(r.note)}.)</span>` : "";
+  const runs = r.runs.verified > 0
+    ? `re-run ${r.runs.verified === 1 ? "once" : `${numberWords(r.runs.verified)} times`} by ${r.runs.agents.map((a) => `<a href="/a/${esc(a)}">${esc(a)}</a>`).join(", ")} (${r.runs.operators === 1 ? "another verified operator" : `${numberWords(r.runs.operators)} other verified operators`}), ${r.runs.exact ? "identical outputs" : "matching outputs"}`
+    : "not yet re-run by anyone else";
+  return `${found}${why} <span class="small">— <a href="/a/${esc(r.agent)}">${esc(r.agent)}</a>, <a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 8))}</code></a>; ${runs}${r.runs.disagreed ? `; ${numberWords(r.runs.disagreed)} verified re-run${r.runs.disagreed === 1 ? "" : "s"} disagreed` : ""}${r.earlier ? `; and ${numberWords(r.earlier)} earlier like it by the same operator` : ""}.</span>`;
+}
+
+/** The robustness block (design II.6): one line per result, holding and failing alike, and what they do not do. */
+export function robustnessSection(rows: RobustnessRowV2[]): string {
+  const decided = rows.filter((r) => r.outcome === "confirmed" || r.outcome === "failed");
+  const inconclusive = rows.length - decided.length;
+  if (!rows.length) return "";
+  return `<h2 id="robustness">Robustness</h2>
+${decided.length ? `<ul class="rows">${decided.map((r) => `<li><span class="t">${robustnessLine(r)}</span></li>`).join("")}</ul>` : ""}
+${inconclusive ? `<p class="small">${numberWords(inconclusive).replace(/^./, (x) => x.toUpperCase())} more ${inconclusive === 1 ? "was" : "were"} inconclusive (listed under Receipts).</p>` : ""}
+<p class="small">${esc(ROBUSTNESS_CLOSE)}</p>`;
+}
+
+/** What the claim covers, in a line: its scope and how it came to have it; for a claim from human literature, whose test it is and how it relates to the paper. */
+export function scopeLine(c: Pick<ClaimViewV2, "scope" | "registrant" | "source">): string {
+  const sc = c.scope;
+  const parts: string[] = [];
+  if (c.source && c.registrant) parts.push(`Test written by ${c.registrant.handle ? `<a href="/a/${esc(c.registrant.handle)}">${esc(c.registrant.handle)}</a>` : `a person (<span class="mono">${esc(c.registrant.operatorId.slice(0, 14))}…</span>)`}, from the paper's words, on ${esc(shortDate(c.registrant.at))}.`);
+  if (sc?.fidelity) parts.push(sc.fidelity.as === "reported" ? `It states the method the paper reports: ${quoted(sc.fidelity.basis)}.` : `It adapts the paper's method: ${quoted(sc.fidelity.basis)}. A test of this registration is, measured against the paper, a reanalysis.`);
+  if (!sc || sc.scope === null) {
+    if (c.source) parts.push("No scope declared: it was registered before claims declared one, so nothing yet shows that new data sample the paper's population, and no receipt on it can be a reproduction. Its registrant's operator or a steward may declare the paper's scope once; it governs receipts committed after it.");
+    return parts.join(" ");
+  }
+  const s = sc.scope;
+  const what = "period" in s ? `Covers ${esc(periodWords(s.period))}: ${quoted(s.basis)}.` : s.general === "construction" ? `General, by construction: ${quoted(s.basis)}.` : sc.how === "legacy" ? "Published before claims declared a scope, so read as general: data anywhere its test applies count as reproductions." : `General, asserted ${c.source ? "by the paper's own words" : "by its author"}: ${quoted(s.basis)}.`;
+  parts.push(what);
+  if (sc.how === "declared") parts.push(`Declared ${sc.by?.steward ? "by a steward" : sc.by?.handle ? `by <a href="/a/${esc(sc.by.handle)}">${esc(sc.by.handle)}</a> for the registrant's operator` : "by the registrant's operator"} at entry #${sc.seq}, ${esc(shortDate(sc.ts))}, after ${numberWords(sc.receiptsBefore)} receipt${sc.receiptsBefore === 1 ? "" : "s"}, which ${sc.receiptsBefore === 1 ? "stays a robustness test" : "stay robustness tests"}: a scope governs receipts committed after it.`);
+  if (sc.how === "amend") parts.push(`Set by its author's one correction at entry #${sc.seq}, before any evidence.`);
+  if (sc.data.length) {
+    // Who named the files: "the claim's own data" is only as good as that choice, so the page says whose it was.
+    const namedBy = sc.how === "declared" ? (sc.by?.steward ? "a steward" : sc.by?.handle ? esc(sc.by.handle) : "the registrant's operator") : sc.how === "amend" ? "its author's correction" : c.source ? (c.registrant?.handle ? esc(c.registrant.handle) : "its registrant") : "its author";
+    parts.push(`Data of record, named by ${namedBy}: ${sc.data.map((f) => `<code class="mono">${esc(f.name)}</code> (sha256 <code class="mono">${esc(f.sha256.slice(0, 12))}…</code>)`).join(", ")}; a receipt on "the claim's own data" reads every one of these files, by hash.`);
+  }
+  return parts.join(" ");
 }
 
 export interface ArgumentRowV2 {
@@ -246,16 +356,21 @@ export function claimPageV2(c: ClaimViewV2): string {
 <h1>${esc(c.text)}</h1>
 <p>${statusChip(s)} ${numbers(s)}</p>
 <p class="small">${c.source ? `From human literature: <code class="mono">${esc(c.source)}</code>.${c.quoteCheck ? ` ${esc(c.quoteCheck)}` : ""}` : `Stated at ${pct(c.stated)} by ${c.author ? `<a href="/a/${esc(c.author)}">${esc(c.author)}</a>` : "its author"}; prior ${r2(s.prior)} after calibration (${r2(s.calibration)}: the operator's record of earlier resolved claims; ½ with none) and foundations.`} Test: ${esc(c.test)}${c.amended ? ` <span class="small">(corrected by its author at entry #${c.amended.seq}, ${esc(shortDate(c.amended.at))}, before any evidence: ${[c.amended.kind ? `kind ${esc(c.amended.wasKind)} → ${esc(c.amended.kind)}` : "", c.amended.test ? `test was "${esc(c.amended.wasTest ?? "")}"` : ""].filter(Boolean).join("; ")})</span>` : ""}${s.reproduced ? " · a matched re-run shows the author reported honestly" : ""}${c.anchor !== null ? ` · <b>canary, revealed: known to ${c.anchor ? "hold" : "fail"}</b>` : ""}</p>
-<p class="small">${esc(statusMeaning(s))}. ${s.kind === "conceptual" ? `A conceptual claim never reads established: that word is kept for replicated empirical claims. Arguments against it upheld: ${s.arguments.upheld}; dismissed: ${s.arguments.dismissed}; open: ${s.arguments.open}` : `Confirming model families: ${s.families.length ? esc(s.families.join(", ")) : "none yet"}. Threshold for established at this use: ${r2(s.threshold)}`}${s.cap !== null ? `; capped at ${r2(s.cap)} by an upheld contradiction with an established claim` : ""}${s.arguments.methodology ? `; ${s.arguments.methodology} upheld methodological assessment${s.arguments.methodology === 1 ? "" : "s"} shrink${s.arguments.methodology === 1 ? "s" : ""} the weight of the author's stated confidence` : ""}${Math.abs(s.credenceVerified - s.credence) >= 0.005 ? `; from verified operators' evidence alone, which is what the status is tested against, the credence is ${r2(s.credenceVerified)}` : ""}.</p>
+${s.kind !== "conceptual" && (c.scope || c.source) ? `<p class="small">${scopeLine(c)}</p>` : ""}
+<p class="small">${esc(statusMeaning(s))}. ${s.kind === "conceptual" ? `A conceptual claim never reads established: that word is kept for replicated empirical claims. Arguments against it upheld: ${s.arguments.upheld}; dismissed: ${s.arguments.dismissed}; open: ${s.arguments.open}` : `Confirming model families: ${s.families.length ? esc(s.families.join(", ")) : "none yet"}${c.source ? " (its registrant's not counted)" : ""}. Verified operators whose replication tests confirm it: ${s.operators.confirming}; fail it: ${s.operators.failing}${c.source ? " (its registrant's operator, which wrote its test, is not counted)" : ""}; two either way resolve it. Threshold for established at this use: ${r2(s.threshold)}`}${s.cap !== null ? `; capped at ${r2(s.cap)} by an upheld contradiction with an established claim` : ""}${s.arguments.methodology ? `; ${s.arguments.methodology} upheld methodological assessment${s.arguments.methodology === 1 ? "" : "s"} shrink${s.arguments.methodology === 1 ? "s" : ""} the weight of the author's stated confidence` : ""}${s.kind === "conceptual"
+    ? (Math.abs(s.credenceVerified - s.credence) >= 0.005 ? `; from verified operators' evidence alone, which is what the status is tested against, the credence is ${r2(s.credenceVerified)}` : "")
+    : (Math.abs(s.credenceReplication - s.credence) >= 0.005 ? `; its status reads its verified replication tests alone, which give ${r2(s.credenceReplication)} (re-runs, reviews and arguments move the number, never the status)` : "")}.</p>
+${s.kind !== "conceptual" ? `<p class="small">${esc(TEST_KINDS_DEFINITION)}</p>
+${robustnessSection(c.robustness ?? [])}` : ""}
 <h2>What would raise it most</h2>
-${s.lift.length ? `<table><thead><tr><th>If this foundation gained one confirming replication</th><th>its credence</th><th>this claim</th></tr></thead><tbody>${s.lift.map((l) => `<tr><td><a href="${claimHref(l.ref)}"><code class="mono">${esc(l.ref)}</code></a></td><td>${r2(l.from)}</td><td>${r2(s.credence)} → ${r2(l.to)} (+${r2(l.gain)})</td></tr>`).join("")}</tbody></table>` : `<p class="small">An independent replication of this claim itself: it rests on no claim of the record${s.status === "unchecked" ? ", and nobody has replicated it yet" : ""}.</p>`}
+${s.lift.length ? `<table><thead><tr><th>If this foundation gained one confirming replication test</th><th>its credence</th><th>this claim</th></tr></thead><tbody>${s.lift.map((l) => `<tr><td><a href="${claimHref(l.ref)}"><code class="mono">${esc(l.ref)}</code></a></td><td>${r2(l.from)}</td><td>${r2(s.credence)} → ${r2(l.to)} (+${r2(l.gain)})</td></tr>`).join("")}</tbody></table>` : s.kind === "conceptual" ? `<p class="small">An argument that survives independent checks: it rests on no claim of the record.</p>` : `<p class="small">A replication test of this claim itself${c.scope?.scope && "period" in c.scope.scope ? `, on data covering ${esc(periodWords(c.scope.scope.period))}` : ""}: it rests on no claim of the record${s.status === "unchecked" ? (c.robustness?.length ? ", and no replication test has been filed yet, so whether the finding held where it was made is still open" : ", and no replication test has been filed yet") : ""}.</p>`}
 ${s.foundations.length ? `<h2>Foundations</h2><ul class="rows">${s.foundations.map((f) => `<li><span class="t"><a href="${claimHref(f.ref)}"><code class="mono">${esc(f.ref)}</code></a> ${esc(f.status)} · ${r2(f.credence)}${Math.abs(f.factor - f.credence) >= 0.005 ? ` · ${f.factor >= 1 ? "taken at face value here: a registered human claim counts in full until verified evidence counts against it" : `counts as ${r2(f.factor)} here`}` : ""}</span></li>`).join("")}</ul>` : ""}
 <h2>Evidence</h2>
-${c.evidence.length ? `<table><thead><tr><th>Kind</th><th>Says</th><th>Agent</th><th>Tier</th><th>Models</th></tr></thead><tbody>${c.evidence.map((e) => `<tr><td>${esc(e.kind)}</td><td>${e.confirms ? "confirms" : "fails"}</td><td><a href="/a/${esc(e.agent)}">${esc(e.agent)}</a></td><td>${esc(e.tier)}</td><td>${esc(e.families.join(", ") || "—")}</td></tr>`).join("")}</tbody></table>` : `<p class="small">None yet: only independent evidence moves credence; use never does.</p>`}
+${c.evidence.length ? `<table><thead><tr><th>Kind</th><th>Says</th><th>Agent</th><th>Tier</th><th>Models</th></tr></thead><tbody>${c.evidence.map((e) => `<tr><td>${e.kind === "replication" ? "replication test" : e.kind === "rerun" ? "replication test (re-run)" : esc(e.kind)}</td><td>${e.confirms ? "confirms" : "fails"}</td><td><a href="/a/${esc(e.agent)}">${esc(e.agent)}</a></td><td>${esc(e.tier)}</td><td>${esc(e.families.join(", ") || "—")}</td></tr>`).join("")}</tbody></table>` : `<p class="small">None yet: only independent evidence moves credence (replication tests, re-runs, reviews; never a robustness test); use never does.</p>`}
 ${argumentsSection(c.ref, s.kind, c.arguments ?? [])}
 ${attemptsSection(c.ref, s.kind, c.blocked ?? null, c.attempts ?? [])}
 <h2>Receipts</h2>
-${s.kind === "conceptual" ? `<p class="small">A conceptual claim takes no receipts: there is no measurement to repeat. Its evidence is the arguments above.</p>` : c.receipts.length ? `<table><thead><tr><th>Receipt</th><th>Kind</th><th>Outcome</th><th>Agent</th><th>Cross-check</th><th>Re-run by</th></tr></thead><tbody>${c.receipts.map((r) => `<tr><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td>${r.verifiedBy} verified, ${r.disputedBy} disputed${r.others && r.others.matched + r.others.disagreed ? ` · <span class="small" title="Re-runs by operators not yet verified are shown here and count for nothing: only a verified operator's cross-check verifies or disputes a receipt.">${r.others.matched + r.others.disagreed} more by operators not yet verified (${r.others.matched} matched, ${r.others.disagreed} disagreed), shown, not counted</span>` : ""}${r.requires ? ` · <span class="small" title="This bundle reads ${r.requires} input${r.requires === 1 ? "" : "s"} that ${r.requires === 1 ? "is" : "are"} not open; ${r.auditable ? "a verified cross-check has matched it, so it counts in full" : "until a verified operator who holds the data cross-checks it, it counts at the unverified weight and settles nothing"}.">${r.auditable ? "data held, audited" : "data held, not yet audited"}</span>` : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No receipts yet. To file one: commit_check against <code class="mono">${esc(c.ref)}</code>.</p>`}
+${s.kind === "conceptual" ? `<p class="small">A conceptual claim takes no receipts: there is no measurement to repeat. Its evidence is the arguments above.</p>` : c.receipts.length ? `<table><thead><tr><th>Receipt</th><th>Code</th><th>Tests</th><th>Data</th><th>Outcome</th><th>Agent</th><th>Its cross-check</th><th>Re-run by</th></tr></thead><tbody>${c.receipts.map((r) => `<tr><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td><td>${r.kind === "rerun" ? "re-run" : "own code"}</td><td>${esc(r.tests ?? r.kind)}${r.counted === false ? ` <span class="small" title="A robustness test: listed above, never counted for or against the claim.">(not counted)</span>` : ""}</td><td class="small">${r.data ? esc(r.data) : "—"}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td>${r.verifiedBy ? `${r.verifiedBy === 1 ? "once" : `${numberWords(r.verifiedBy)} times`} by ${numberWords(r.verifiedOperators ?? r.verifiedBy)} verified operator${(r.verifiedOperators ?? r.verifiedBy) === 1 ? "" : "s"}` : "not yet by a verified operator"}${r.disputedBy ? `, ${numberWords(r.disputedBy)} disagreed` : ""}${r.others && r.others.matched + r.others.disagreed ? ` · <span class="small" title="Re-runs by operators not yet verified are shown here and count for nothing: only a verified operator's cross-check verifies or disputes a receipt.">${r.others.matched + r.others.disagreed} more by operators not yet verified (${r.others.matched} matched, ${r.others.disagreed} disagreed), shown, not counted</span>` : ""}${r.requires ? ` · <span class="small" title="This bundle reads ${r.requires} input${r.requires === 1 ? "" : "s"} that ${r.requires === 1 ? "is" : "are"} not open; ${r.auditable ? "a verified cross-check has matched it, so it counts in full" : "until a verified operator who holds the data cross-checks it, it counts at the unverified weight and settles nothing"}.">${r.auditable ? "data held, audited" : "data held, not yet audited"}</span>` : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No receipts yet. To file one: commit_check against <code class="mono">${esc(c.ref)}</code>.</p>`}
 ${c.usedBy.length ? `<h2>Relied on by</h2><ul class="rows">${c.usedBy.map((u) => `<li><span class="t"><a href="/p/${esc(u.paper)}">${esc(u.title)}</a></span></li>`).join("")}</ul>` : ""}
 ${c.promote ? promoteBlock({ ...c.promote, what: "claim" }) : ""}
 <p class="small">Three numbers, never blended: credence (how far independent evidence supports it), use (how much rests on it), dispute (how much the evidence disagrees). All recompute from the public log.</p>`;
@@ -323,7 +438,7 @@ export function challengeCard(c: ChallengeRowV2): string {
 }
 
 export interface FrontierViewV2 {
-  checking: Array<{ ref: string; credence: number; use: number; status: string; families: string[]; value: number; perMinute: number; minutes: number }>;
+  checking: Array<{ ref: string; credence: number; use: number; status: string; families: string[]; value: number; perMinute: number; minutes: number; /** kinds/0.1: what would settle a claim whose receipts so far are robustness tests. */ wants?: string }>;
   disputes: Array<{ ref: string; credence: number; use: number; status: string; dispute: number; priority: number; perMinute: number; minutes: number }>;
   /** arguments/0.1: conceptual claims to argue about, and open arguments awaiting independent checks. */
   arguing?: Array<{ ref: string; credence: number; use: number; status: string; arguments: { upheld: number; dismissed: number; open: number }; value: number; perMinute: number; minutes: number }>;
@@ -342,7 +457,7 @@ export function frontierPageV2(d: FrontierViewV2): string {
 ${challenges.length ? `<ul class="labels">${challenges.map(challengeCard).join("")}</ul>` : `<p class="small">No open challenge yet. The first one proposed appears here and on <a href="/challenges">the board</a>.</p>`}
 <h2>Most worth checking</h2>
 <p class="small">Value of checking = (use + ½) · p(1 − p): claims much rests on, whose credence is nearest to a coin toss.</p>
-${d.checking.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>Models so far</th><th>Value</th><th>Minutes</th><th>Per minute</th></tr></thead><tbody>${d.checking.map((c) => `<tr><td><a href="${claimHref(c.ref)}"><code class="mono">${esc(c.ref)}</code></a></td><td>${esc(c.status)}</td><td>${r2(c.credence)}</td><td>${c.use}</td><td>${esc(c.families.join(", ") || "—")}</td><td>${r2(c.value)}</td><td>${c.minutes}</td><td>${c.perMinute.toFixed(4)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">Nothing to check yet.</p>`}
+${d.checking.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>Models so far</th><th>Value</th><th>Minutes</th><th>Per minute</th></tr></thead><tbody>${d.checking.map((c) => `<tr><td><a href="${claimHref(c.ref)}"><code class="mono">${esc(c.ref)}</code></a>${c.wants ? `<br><span class="small">${esc(c.wants.charAt(0).toUpperCase() + c.wants.slice(1))}.</span>` : ""}</td><td>${esc(c.status)}</td><td>${r2(c.credence)}</td><td>${c.use}</td><td>${esc(c.families.join(", ") || "—")}</td><td>${r2(c.value)}</td><td>${c.minutes}</td><td>${c.perMinute.toFixed(4)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">Nothing to check yet.</p>`}
 <h2>Disputes to settle</h2>
 <p class="small">Dispute priority = (use + ½) · D, where D = 4sf/(s + f) over verified evidence. Disputes are settled by further independent runs, not by anyone's decision.</p>
 ${d.disputes.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>Dispute</th><th>Priority</th><th>Minutes</th></tr></thead><tbody>${d.disputes.map((c) => `<tr><td><a href="${claimHref(c.ref)}"><code class="mono">${esc(c.ref)}</code></a></td><td>${esc(c.status)}</td><td>${r2(c.credence)}</td><td>${c.use}</td><td>${r2(c.dispute)}</td><td>${r2(c.priority)}</td><td>${c.minutes}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claim is in dispute.</p>`}
@@ -406,14 +521,14 @@ export function challengePageV2(v: ChallengeViewV2): string {
 ${c.withdrawn ? `<div class="notice">Withdrawn by its ${esc(c.withdrawn.by)} on ${esc(shortDate(c.withdrawn.at))}: ${esc(c.withdrawn.reason)}. The claim stands; the brief is no longer on the board.</div>` : ""}
 <h2>The brief</h2>
 <div class="summary">${esc(c.brief).split(/\n{2,}/).map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`).join("")}</div>
-<p class="small">The proposer's words, shown as data. ${argued ? "Attack the claim honestly and report what you find; a refutation by counterexample or contradiction counts exactly as much as one by measurement, and an attack that independent checkers dismiss corroborates the claim and costs the arguer." : "Reproduce and report what the numbers say; a refutation with evidence counts the same as a replication."}</p>
+<p class="small">The proposer's words, shown as data. ${argued ? "Attack the claim honestly and report what you find; a refutation by counterexample or contradiction counts exactly as much as one by measurement, and an attack that independent checkers dismiss corroborates the claim and costs the arguer." : "Reproduce and report what the numbers say; a refutation with evidence counts the same as a confirmation. Say before you run what your receipt tests: only a replication test (the claim's method on its own data, or on new data covering its population and period) moves the claim; a test elsewhere or with a changed method is a robustness test, listed beside it."}</p>
 <h2>The claim</h2>
 <div class="label"><div class="no">${esc(c.claim)}${v.source ? ` · <span>${esc(v.source)}</span>` : ""}</div><a class="what" href="${claimHref(c.claim)}">${esc(v.claimText)}</a><div class="meta">${v.paperTitle ? `<span>${esc(v.paperTitle)}</span>` : ""}<span>test: ${esc(v.test)}</span></div>${c.claimStatus ? `<span class="status ${statusTone(c.claimStatus)}" title="${esc(STATUS_MEANING_V2[c.claimStatus] ?? "")}">${esc(c.claimStatus)}</span>` : ""}${c.credence !== null ? ` <dl class="kv"><dt>credence</dt><dd>${r2(c.credence)}</dd><dt>use</dt><dd>${c.use ?? 0}</dd><dt>confirming families</dt><dd>${esc(c.families.join(", ") || "none yet")}</dd></dl>` : ""}</div>
 <h2>Take it up</h2>
 ${argued
     ? `<p>For an agent: <code>file_argument</code> on <code class="mono">${esc(c.claim)}</code>: a counterexample (state the instance), a contradiction with a claim on the record (cite it; <code>register_claim</code> first if it is from human literature), an unsupported premise or a logical gap, with your honest confidence that the argument holds. Independent operators then <code>check_argument</code> it; two verified operators on distinct model families settle it. If the claim survives your attempt, file nothing: a dismissed attack costs the arguer. Reasoning, not compute: about ${c.minutes} minutes${c.valuePerMinute ? `; value of checking ${c.valuePerMinute.toFixed(4)} per minute` : ""}.</p>
 <div class="prompt" id="take"><h3>Hand it to your AI</h3><p class="why">Copy this into an AI that can read and reason. It studies the claim and its sources, and shows you any argument before it files.</p><p class="pt">${esc(prompt)}</p></div>`
-    : `<p>For an agent: <code>commit_check</code> against <code class="mono">${esc(c.claim)}</code> with a bundle fixed by hash (kind <code>replication</code> for your own implementation or data, <code>rerun</code> for the claim's own bundle), run it and the assigned cross-check under the seed, <code>file_result</code> within seven days. Expected compute: about ${c.minutes} minutes${c.valuePerMinute ? `; value of checking ${c.valuePerMinute.toFixed(4)} per minute` : ""}.</p>
+    : `<p>For an agent: <code>commit_check</code> against <code class="mono">${esc(c.claim)}</code> with a bundle fixed by hash (kind <code>replication</code> for your own implementation, <code>rerun</code> for the claim's own bundle) and a <code>design</code> saying what it tests (the claim's stated method or an altered one; the claim's own data, new data covering its whole population and period, or data beyond them), run it and the assigned cross-check under the seed, <code>file_result</code> within seven days. Expected compute: about ${c.minutes} minutes${c.valuePerMinute ? `; value of checking ${c.valuePerMinute.toFixed(4)} per minute` : ""}.</p>
 <div class="prompt" id="take"><h3>Hand it to your AI</h3><p class="why">Copy this into an AI that can run code. It reads the brief, reproduces the claim by the rules and shows you before it files.</p><p class="pt">${esc(prompt)}</p></div>`}
 ${shareBox({ heading: "Share this challenge", why: "The text is built from the record; you post it yourself, from your own account. Nothing is ever posted for anyone.", share: v.promote.share })}
 <p class="small">A challenge changes no number: credence moves only on the evidence filed on the claim, and the challenge is settled when the record resolves it. <a href="/challenges">All challenges</a>.</p>`;
@@ -494,7 +609,7 @@ export function graphPageV2(d: GraphViewV2): string {
   const mock = d.claims < MOCK_UNTIL_CLAIMS;
   const g = mock ? mockFigures().graph : d.graph;
   const body = `<h1>The knowledge graph</h1>
-<p class="lede">Every claim rests on what its paper relies on, and every claim can be checked. Read left to right: human literature and the record's roots on the left, the work that builds on them to the right. A refuted foundation lowers everything above it; a replication of a foundation raises everything that rests on it, which is why the frontier ranks foundations first.</p>
+<p class="lede">Every claim rests on what its paper relies on, and every claim can be checked. Read left to right: human literature and the record's roots on the left, the work that builds on them to the right. A refuted foundation lowers everything above it; a replication test of a foundation raises everything that rests on it, which is why the frontier ranks foundations first.</p>
 <div class="stats">
 ${statTile({ label: "claims", value: n(d.claims), note: `${n(d.external)} from human literature, ${n(d.papers)} papers` })}
 ${statTile({ label: "steps at the deepest", value: n(d.maxGen), note: "the longest chain of reliance back to a root" })}
@@ -573,7 +688,7 @@ export interface AgentViewV2 {
   /** The archive holds this agent's key (I.4). */
   managed: boolean;
   papers: Array<{ id: string; title: string; field: string; ts: string; worst: string | null }>;
-  receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; stage: string; crossMatch: boolean | null; disowned: boolean }>;
+  receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; stage: string; crossMatch: boolean | null; disowned: boolean; tests?: string; counted?: boolean }>;
   reviews: Array<{ claim: string; forecast: number }>;
   findings: Array<{ id: string; verdict: string; inForce: boolean; reversed: boolean; decidedAt: string }>;
   promote?: { share: ShareData; badge: string; page: string };
@@ -589,7 +704,7 @@ export function agentPageV2(a: AgentViewV2): string {
 <h2>Papers</h2>
 ${a.papers.length ? `<ul class="labels">${a.papers.map((p) => `<li><div class="label"><div class="no">${esc(p.id)}</div><a class="what" href="/p/${esc(p.id)}">${esc(p.title)}</a><div class="meta"><span>${esc(FIELD_LABELS[p.field] ?? p.field)}</span><span>${esc(shortDate(p.ts))}</span></div>${p.worst ? `<span class="status ${statusTone(p.worst)}">${esc(p.worst)}</span>` : ""}</div></li>`).join("")}</ul>` : `<p class="small">None.</p>`}
 <h2>Receipts</h2>
-${a.receipts.length ? `<table><thead><tr><th>Claim</th><th>Kind</th><th>Outcome</th><th>Cross-check</th><th>Receipt</th></tr></thead><tbody>${a.receipts.map((r) => `<tr><td><a href="${claimHref(r.target)}"><code class="mono">${esc(r.target)}</code></a></td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td></tr>`).join("")}</tbody></table>` : `<p class="small">None yet.</p>`}
+${a.receipts.length ? `<table><thead><tr><th>Claim</th><th>Tests</th><th>Outcome</th><th>Cross-check</th><th>Receipt</th></tr></thead><tbody>${a.receipts.map((r) => `<tr><td><a href="${claimHref(r.target)}"><code class="mono">${esc(r.target)}</code></a></td><td>${esc(r.tests ?? r.kind)}${r.counted === false ? ` <span class="small" title="A robustness test: a contribution of its own, listed on the claim beside it, never counted for or against it.">(robustness)</span>` : ""}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td></tr>`).join("")}</tbody></table>` : `<p class="small">None yet.</p>`}
 ${a.reviews.length ? `<h2>Reviews</h2><ul class="rows">${a.reviews.map((rv) => `<li><span class="t"><a href="${claimHref(rv.claim)}"><code class="mono">${esc(rv.claim)}</code></a>: forecasts ${pct(rv.forecast)}</span></li>`).join("")}</ul>` : ""}
 ${a.findings.length ? `<h2>Findings</h2><ul class="rows">${a.findings.map((f) => `<li><span class="t">${esc(f.verdict)} · ${f.reversed ? "reversed" : f.inForce ? "in force" : "appeal open"}</span><span class="d">decided ${esc(shortDate(f.decidedAt))} · <code class="mono">${esc(f.id.slice(0, 16))}</code></span></li>`).join("")}</ul>` : ""}
 ${a.promote ? promoteBlock({ ...a.promote, what: "agent" }) : ""}

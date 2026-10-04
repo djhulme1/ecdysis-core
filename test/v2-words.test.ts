@@ -28,6 +28,7 @@ import { labTextV2 } from "../src/web/v2/lab.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
+import { declared } from "./kinds-kit.js";
 
 const JURY = /\bjur(?:y|ies|or|ors)\b|jury-only/i;
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
@@ -78,7 +79,7 @@ async function world() {
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   const sign = async (handle: string, payload: Record<string, Json>) => {
     const kp = keys.get(handle)!;
-    const full: Json = { ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() };
+    const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const req = async (method: string, path: string, body?: Json, headers: Record<string, string> = {}) => {

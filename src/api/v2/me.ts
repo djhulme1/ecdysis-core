@@ -12,6 +12,8 @@ import { isHeld } from "../../core/v2/flow.js";
 import { FIELDS } from "../../core/schema.js";
 import { Accounts, ALERTS, clearCookie, cookie, setCookie, type Alert, type Digest, type Preferences, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
+import { fidelityFromForm, scopeFromForm } from "../../core/v2/kinds.js";
+import { scopeFormValues } from "../../web/v2/scope-form.js";
 import type { OAuth } from "./oauth.js";
 import type { V2Governance } from "./governance.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
@@ -253,7 +255,8 @@ export class MeHandler {
         return this.redirect("/me?ok=Notifications+saved.");
       }
       case "/me/challenges/propose": {
-        const r = await this.o.v2.proposeChallengeByPerson(signed.account.operatorId, { claim: f.get("claim") ?? "", source: f.get("source") ?? "", quote: f.get("quote") ?? "", test: f.get("test") ?? "", kind: f.get("kind") ?? "", title: f.get("title") ?? "", brief: f.get("brief") ?? "", scale: f.get("scale") ?? "", wants: f.get("wants") ?? "" });
+        const sf = scopeFormValues((n) => f.get(n));
+        const r = await this.o.v2.proposeChallengeByPerson(signed.account.operatorId, { claim: f.get("claim") ?? "", source: f.get("source") ?? "", quote: f.get("quote") ?? "", test: f.get("test") ?? "", kind: f.get("kind") ?? "", scope: scopeFromForm(sf.scope), fidelity: fidelityFromForm(sf.fidelity), title: f.get("title") ?? "", brief: f.get("brief") ?? "", scale: f.get("scale") ?? "", wants: f.get("wants") ?? "" });
         if (r.status !== 201) {
           const b = r.body as Record<string, unknown>;
           const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[];

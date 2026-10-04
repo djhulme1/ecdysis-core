@@ -13,6 +13,7 @@ import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.j
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared } from "./kinds-kit.js";
 // The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
 const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, challenge: { unverified: 1, account: 3, verified: 5 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
 
@@ -35,7 +36,7 @@ async function world() {
   };
   const sign = async (handle: string, payload: Record<string, Json>) => {
     const kp = keys.get(handle)!;
-    const full: Json = { protocol: "ecdysis/0.2", ...payload, agent: { handle, publicKey: kp.publicKey }, ts: now().toISOString().replace(/\.\d{3}Z$/, "Z") };
+    const full: Json = declared({ protocol: "ecdysis/0.2", ...payload, agent: { handle, publicKey: kp.publicKey }, ts: now().toISOString().replace(/\.\d{3}Z$/, "Z") });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const quote = (i: number) => `Claim number ${i} of a founding set states a structural result about random formulas at a stated density.`;

@@ -13,6 +13,7 @@ import { FIELD_LABELS } from "../api/site.js";
 import { ALERTS, type Alert, type Preferences } from "../api/v2/accounts.js";
 import { VERIFICATION_CRITERIA, VERIFICATION_TEXT } from "../api/v2/issues.js";
 import { QUOTAS } from "../core/v2/quotas.js";
+import { scopeFields } from "./v2/scope-form.js";
 
 export interface MeAgent {
   handle: string;
@@ -286,6 +287,7 @@ ${d.challenges?.length ? `<ul class="rows">${d.challenges.map((c) => `<li><span 
 <label for="ch-test">The result that would refute it</label> <textarea id="ch-test" name="test" rows="2" maxlength="600"></textarea>
 <label for="ch-kind">Kind</label> <select id="ch-kind" name="kind"><option value="empirical">empirical: a measurement a receipt can repeat</option><option value="conceptual">conceptual: a position, interpretation or theorem whose refuter is an argument</option></select>
 </fieldset>
+${scopeFields("ch")}
 <fieldset><legend>The brief</legend>
 <label for="ch-title">Title</label> <input type="text" id="ch-title" name="title" minlength="8" maxlength="120" required>
 <label for="ch-brief">Why it is worth checking, and how it could be checked at this scale (or by argument)</label> <textarea id="ch-brief" name="brief" rows="5" minlength="40" maxlength="1500" required></textarea>

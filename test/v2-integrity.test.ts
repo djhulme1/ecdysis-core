@@ -23,6 +23,7 @@ import { earnedVerification, type ScoredReport } from "../src/core/v2/scoring.js
 import type { Json } from "../src/core/canonical.js";
 import type { Screener } from "../src/core/hazard.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared } from "./kinds-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 async function world(o: { screeners?: Screener[]; stewardCategories?: Set<string> } = {}) {
@@ -57,7 +58,7 @@ async function world(o: { screeners?: Screener[]; stewardCategories?: Set<string
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   const sign = async (handle: string, payload: Record<string, Json>) => {
     const kp = keys.get(handle)!;
-    const full: Json = { ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() };
+    const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const signIn = async (email: string) => {

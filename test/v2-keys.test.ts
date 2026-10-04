@@ -17,6 +17,7 @@ import { CHECK_KEYS_MAX, MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "..
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared } from "./kinds-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const DAY = 24 * 3600 * 1000;
@@ -41,7 +42,7 @@ async function world() {
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   /** Sign `payload` for `handle` with `kp` (the main key by default), naming kp's public key in agent.publicKey. */
   const sign = async (handle: string, payload: Record<string, Json>, kp: KeyPairB64 = main.get(handle)!) => {
-    const full: Json = { ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() };
+    const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const tick = (ms: number) => { clock.t += ms; };

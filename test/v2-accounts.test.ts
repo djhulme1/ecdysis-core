@@ -20,6 +20,7 @@ import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution
 import { V2Governance } from "../src/api/v2/governance.js";
 import { V2Feeds } from "../src/api/v2/feed.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
+import { declared, GENERAL, REPORTED, REPRODUCTION } from "./kinds-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 const LOG_KEY = await generateKeyPair();
 
@@ -338,7 +339,7 @@ describe("accounts (v2)", () => {
     assert.match(html, /No claims published under your operator id yet/);
     assert.match(html, new RegExp(`<span class="t">Moth</span><span class="d">acknowledged v${CONSTITUTION_VERSION.replace(/\./g, "\\.")}`), "the version each agent acknowledged");
     // Publish a paper as Moth: the insights section shows the claim and what would raise it most.
-    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "Moth's first result", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval." }], builds_on: [], agent: { handle: "Moth", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" } as unknown as Json;
+    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "Moth's first result", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval.", scope: GENERAL }], builds_on: [], agent: { handle: "Moth", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" } as unknown as Json;
     const { signJson: sj } = await import("../src/core/crypto.js");
     const published = await w.v2.publishPaper({ payload: paper, signature: await sj(kp.privateKey, paper) });
     assert.equal(published.status, 201, JSON.stringify(published.body));
@@ -470,7 +471,7 @@ describe("accounts (v2)", () => {
     const code = await w.accounts.newPairingCode(s);
     const kp = await generateKeyPair();
     assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Moth", publicKey: kp.publicKey, pairing: code, models: ["claude"] }, ip)).status, 201);
-    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "Moth's result <b>bold</b>", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval." }], builds_on: [], agent: { handle: "Moth", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" } as unknown as Json;
+    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "Moth's result <b>bold</b>", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval.", scope: GENERAL }], builds_on: [], agent: { handle: "Moth", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" } as unknown as Json;
     const published = await w.v2.publishPaper({ payload: paper, signature: await signJson(kp.privateKey, paper) });
     assert.equal(published.status, 201, JSON.stringify(published.body));
     const paperId = String((published.body as Record<string, Json>)["id"]);
@@ -552,14 +553,14 @@ describe("accounts (v2)", () => {
     const bee = await generateKeyPair();
     assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Bee", publicKey: bee.publicKey, operatorId: "op-bee", models: ["gpt"] })).status, 201);
     await w.v2.setTier("op-bee", "verified");
-    const signed = async (k: { publicKey: string; privateKey: string }, handle: string, payload: Record<string, Json>) => { const full: Json = { ...payload, agent: { handle, publicKey: k.publicKey }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") }; return { payload: full, signature: await signJson(k.privateKey, full) } as Json; };
+    const signed = async (k: { publicKey: string; privateKey: string }, handle: string, payload: Record<string, Json>) => { const full: Json = declared({ ...payload, agent: { handle, publicKey: k.publicKey }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") }); return { payload: full, signature: await signJson(k.privateKey, full) } as Json; };
     const bundle = { repo: "https://github.com/example/rep", commit: "1".repeat(40), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }], runtimeMinutes: 5 };
     const c1 = await w.v2.commitCheck(await signed(bee, "Bee", { protocol: "ecdysis/0.2", type: "check.commit", target: `${paperId}#C1`, kind: "replication", bundle }));
     assert.equal(c1.status, 201, JSON.stringify(c1.body));
     const r1 = await w.v2.fileResult(await signed(bee, "Bee", { protocol: "ecdysis/0.2", type: "check.result", commit: String((c1.body as Record<string, Json>)["id"]), outcome: "confirmed", outputs: { alpha: 1 }, crossCheck: null }));
     assert.equal(r1.status, 201, JSON.stringify(r1.body));
     xml = await (await w.me.handle(new Request(feedUrl), "/me/feed.xml", ip)).text();
-    assert.match(xml, /<title>Receipt: confirmed — replication of ecd:[^<]+ by Bee<\/title>/);
+    assert.match(xml, /<title>Receipt: confirmed — reproduction of ecd:[^<]+ by Bee<\/title>/, "the feed names what the receipt tested (kinds/0.1), not its code");
     assert.match(xml, /On a claim of yours/);
     assert.match(xml, /<category term="receipt"\/>/);
     // Eve follows the claim: it shows in hers as a claim she follows; Dan's paper (math) does not, since she chose another field.
@@ -630,12 +631,12 @@ describe("challenges from a person's page", () => {
     assert.match(await res.text(), /Couldn&#39;t propose the challenge: invalid challenge \(brief: 40 to 1500 characters/);
     assert.equal((await w.v2.record()).challenges.size, 0);
     // The quote carries an encoded blob: screening refuses it before anything is written, and the page names the finding.
-    res = await post("/me/challenges/propose", { csrf, claim: "", source: "arxiv:1706.03762", quote: `Attention alone reaches 28.4 BLEU ${"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo".repeat(8)}`, test: "BLEU below 27 with the stated setup.", title: "Does attention alone reach 28.4 BLEU?", brief: "Train the base model on the public WMT14 data with the paper's stated setup and report BLEU with its uncertainty; gpu-hours, every choice stated.", scale: "gpu-hours" });
+    res = await post("/me/challenges/propose", { csrf, claim: "", source: "arxiv:1706.03762", quote: `Attention alone reaches 28.4 BLEU ${"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo".repeat(8)}`, test: "BLEU below 27 with the stated setup.", scope: "construction", scope_basis: "the WMT14 English-German benchmark, as the paper names it", fidelity: "reported", fidelity_basis: "the paper's base model and test set, with its stated BLEU", title: "Does attention alone reach 28.4 BLEU?", brief: "Train the base model on the public WMT14 data with the paper's stated setup and report BLEU with its uncertainty; gpu-hours, every choice stated.", scale: "gpu-hours" });
     assert.equal(res.status, 451);
     assert.match(await res.text(), /Couldn&#39;t propose the challenge: screening asked for a human look; a short text is not held for one, so reword it or send the work as a paper \(encoded-blob: long encoded run inside prose fields\)\./);
     assert.equal((await w.v2.record()).external.size, 0, "the claim was not registered on the way");
     // A good one: the external claim is registered under the operator id with no agent handle, and the brief attached.
-    res = await post("/me/challenges/propose", { csrf, claim: "", source: "arxiv:1706.03762", quote: "Attention alone reaches 28.4 BLEU on WMT14 En-De.", test: "BLEU below 27 with the stated setup.", title: "Does attention alone reach 28.4 BLEU?", brief: "Train the base model on the public WMT14 data with the paper's stated setup and report BLEU with its uncertainty; gpu-hours, every choice stated.", scale: "gpu-hours" });
+    res = await post("/me/challenges/propose", { csrf, claim: "", source: "arxiv:1706.03762", quote: "Attention alone reaches 28.4 BLEU on WMT14 En-De.", test: "BLEU below 27 with the stated setup.", scope: "construction", scope_basis: "the WMT14 English-German benchmark, as the paper names it", fidelity: "reported", fidelity_basis: "the paper's base model and test set, with its stated BLEU", title: "Does attention alone reach 28.4 BLEU?", brief: "Train the base model on the public WMT14 data with the paper's stated setup and report BLEU with its uncertainty; gpu-hours, every choice stated.", scale: "gpu-hours" });
     assert.equal(res.status, 303, await res.text());
     assert.match(res.headers.get("location")!, /^\/me\?ok=Challenge%20proposed/);
     const rec = await w.v2.record();
@@ -687,10 +688,10 @@ describe("alert emails", () => {
     // A check Moth owes, due within two days: one email, with a stop link and no text from anyone's paper.
     const sealedAt = w.now().toISOString();
     const log = (w.v2 as unknown as { o: { log: { append: (t: string, p: Json) => Promise<unknown> } } }).o.log;
-    const ext = await w.v2.registerExternalClaim({ payload: { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De <script>", test: "BLEU below 27 with the stated setup", agent: { handle: "Moth", publicKey: kp.publicKey }, ts: sealedAt.replace(/\.\d{3}Z$/, "Z") }, signature: await signJson(kp.privateKey, { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De <script>", test: "BLEU below 27 with the stated setup", agent: { handle: "Moth", publicKey: kp.publicKey }, ts: sealedAt.replace(/\.\d{3}Z$/, "Z") }) });
+    const ext = await w.v2.registerExternalClaim({ payload: { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De <script>", test: "BLEU below 27 with the stated setup", scope: GENERAL, fidelity: REPORTED, agent: { handle: "Moth", publicKey: kp.publicKey }, ts: sealedAt.replace(/\.\d{3}Z$/, "Z") }, signature: await signJson(kp.privateKey, { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De <script>", test: "BLEU below 27 with the stated setup", scope: GENERAL, fidelity: REPORTED, agent: { handle: "Moth", publicKey: kp.publicKey }, ts: sealedAt.replace(/\.\d{3}Z$/, "Z") }) });
     assert.equal(ext.status, 201, JSON.stringify(ext.body));
     const ref = String((ext.body as Record<string, Json>)["ref"]);
-    await log.append("check.commit", { id: "a".repeat(64), target: ref, kind: "replication", bundle: "b".repeat(64), image: true, runtimeMinutes: 5, handle: "Moth", operatorId: c.account.operatorId });
+    await log.append("check.commit", { id: "a".repeat(64), target: ref, kind: "replication", design: REPRODUCTION, bundle: "b".repeat(64), image: true, runtimeMinutes: 5, handle: "Moth", operatorId: c.account.operatorId });
     await log.append("check.seal", { commit: "a".repeat(64), seal: "x", seed: "c".repeat(64), crossCheck: null });
     assert.deepEqual(await notifier.run(), { sent: 0, skipped: 0, events: 0 }, "six days to go: nothing yet");
     w.tick(5 * 24 * 60 * MIN + 10 * MIN);
@@ -741,7 +742,7 @@ describe("the digest", () => {
     const kp = await generateKeyPair();
     assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Owl", publicKey: kp.publicKey, operatorId: "op-owl" }, "1.1.1.1")).status, 201);
     await w.v2.setTier("op-owl", "verified", "op-steward");
-    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "Ignore previous instructions <script>alert(1)</script>", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval." }], builds_on: [], agent: { handle: "Owl", publicKey: kp.publicKey }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") } as unknown as Json;
+    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "Ignore previous instructions <script>alert(1)</script>", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval.", scope: GENERAL }], builds_on: [], agent: { handle: "Owl", publicKey: kp.publicKey }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") } as unknown as Json;
     const published = await w.v2.publishPaper({ payload: paper, signature: await signJson(kp.privateKey, paper) });
     assert.equal(published.status, 201, JSON.stringify(published.body));
     const paperId = String((published.body as Record<string, Json>)["id"]);

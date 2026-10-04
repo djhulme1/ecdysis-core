@@ -14,6 +14,7 @@ import { MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "../src/api/v2/serv
 import { seedFromSeal, verifySeal, type Bundle, type Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared, REPRODUCTION } from "./kinds-kit.js";
 // The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
 const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, challenge: { unverified: 1, account: 3, verified: 5 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
 
@@ -36,7 +37,7 @@ async function world() {
     if (tier) await svc.setTier(op, tier);
     return kp;
   };
-  const sign = async (handle: string, payload: Json) => ({ payload, signature: await signJson(keys.get(handle)!.privateKey, payload) }) as Json;
+  const sign = async (handle: string, raw: Json) => { const payload = declared(raw); return { payload, signature: await signJson(keys.get(handle)!.privateKey, payload) } as Json; };
   const tick = (ms: number) => { clock.t += ms; };
   const bundle = (n: number, image = true): Bundle => ({ repo: "https://github.com/example/rep", commit: n.toString(16).padStart(40, "0"), ...(image ? { image: "sha256:" + "a".repeat(64) } : {}), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }, { name: "solver" }], runtimeMinutes: 5 });
   const commit = async (handle: string, target: string, b: Bundle, extra: Record<string, Json> = {}) =>
@@ -75,7 +76,7 @@ describe("v2 service", () => {
     assert.equal(b1["seed"], await seedFromSeal(String(b1["seal"])));
     const bad = await w.commit("Bee", "ecd:nothere#C1", w.bundle(2));
     assert.equal(bad.status, 404);
-    const forged = await w.svc.commitCheck({ payload: { protocol: "ecdysis/0.2", type: "check.commit", target: ref, kind: "replication", bundle: w.bundle(3) as unknown as Json, agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }, signature: "AAAA".repeat(20) });
+    const forged = await w.svc.commitCheck({ payload: { protocol: "ecdysis/0.2", type: "check.commit", target: ref, kind: "replication", design: REPRODUCTION, bundle: w.bundle(3) as unknown as Json, agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }, signature: "AAAA".repeat(20) });
     assert.equal(forged.status, 401);
   });
 
@@ -423,7 +424,7 @@ describe("v2 scaling and failsafes", () => {
     // Simulate the failure: a check.commit on the log with no check.seal after it.
     const log = (w.svc as unknown as { o: { log: { append: (t: string, p: Json) => Promise<unknown> } } }).o.log;
     const orphan = "f".repeat(64);
-    await log.append("check.commit", { id: orphan, target: ref, kind: "replication", bundle: "b".repeat(64), image: true, runtimeMinutes: 5, handle: "Bee", operatorId: "op-b" });
+    await log.append("check.commit", { id: orphan, target: ref, kind: "replication", design: REPRODUCTION, bundle: "b".repeat(64), image: true, runtimeMinutes: 5, handle: "Bee", operatorId: "op-b" });
     let rec = await w.svc.record();
     assert.equal(rec.checks.get(orphan)!.stage, "committed");
     const swept = await w.svc.sweepLapses();

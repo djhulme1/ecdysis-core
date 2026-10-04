@@ -9,6 +9,7 @@
 
 import type { ClaimV2 } from "../../core/v2/credence.js";
 import type { PaperState } from "../../core/v2/flow.js";
+import { periodWords, type Period } from "../../core/v2/kinds.js";
 import { badgeSvg, FIELD_LABELS } from "../site.js";
 
 /** One square per claim, by status: the result is the post. */
@@ -77,19 +78,63 @@ export function paperShare(site: string, p: PaperState, statuses: string[]): { t
   return { url, text: `Ecdysis paper by AI agent ${p.handle}: "${cut(p.title, 80)}"\n${t.squares} ${plural(statuses.length, "claim")}: ${t.text}\n${url}` };
 }
 
-/** The share text for a claim: its status and credence, and which model families confirm it. */
-export function claimShare(site: string, ref: string, text: string, score: ClaimV2): { text: string; url: string } {
+/** A robustness result as a share line needs it: its kind, outcome, period and whether a verified operator has re-run it. */
+export interface ShareRobustness { kind: string; outcome: string | null; period: Period | null; described: { as: string } | null; runs: { verified: number } }
+
+const NUMBER = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+const numberWord = (n: number) => NUMBER[n] ?? String(n);
+const sameMonths = (a: Period, b: Period) => a.from.slice(0, 7) === b.from.slice(0, 7) && a.to.slice(0, 7) === b.to.slice(0, 7);
+
+/**
+ * A robustness result in the ARCHIVE's words only (design II.6): the kind its receipt declared before its seed, and the
+ * period its data cover (declared before the seed, reported by the result and compared exactly by every cross-check). Never
+ * an agent's words, which reach the claim's page in quotation marks with the agent's name; never a description written after
+ * the outcome; never the claim's own period, which would read as a verdict on the claim where the change was in population.
+ * Null when there is no such line to write: the post then gives the number of results instead.
+ */
+export function robustnessShareLine(r: ShareRobustness, claimPeriod: Period | null = null): string | null {
+  if (r.kind !== "extension" && r.kind !== "reanalysis" && r.kind !== "reanalysis-extension") return null;
+  const data = r.period && !(claimPeriod && sameMonths(r.period, claimPeriod)) ? ` to data of ${periodWords(r.period)}` : "";
+  const change = r.kind === "extension" ? `extension${data}` : r.kind === "reanalysis" ? "a reanalysis" : `a reanalysis with extension${data}`;
+  return r.outcome === "confirmed" ? `robust to ${change}` : r.outcome === "failed" ? `not robust to ${change}` : null;
+}
+
+/**
+ * The share text for a claim (credence/0.4, kinds/0.1): its status, which reads replication tests alone ("unchecked" is
+ * written "no replication test yet"), its credence and which model families confirm it; "as registered" for a claim from
+ * human literature, whose test its registrant wrote. Robustness results appear all or not at all: their lines, in the
+ * archive's words, only when there are at most two and every one has been re-run by another verified operator; else their
+ * number. Earlier receipts are re-run more often, so featuring only the re-run ones, or the first two, would favour whichever
+ * came first. No sequence of robustness results, and no single operator, can make this compose "refuted".
+ */
+export function claimShare(site: string, ref: string, text: string, score: ClaimV2, o: { external?: boolean; robustness?: ShareRobustness[]; claimPeriod?: Period | null; reruns?: number } = {}): { text: string; url: string } {
   const [paper, label] = ref.split("#");
   const url = paper!.startsWith("ext:") ? `${site}/x/${paper!.slice(4)}/${label}` : `${site}/p/${paper}/${label}`;
   const families = score.families.length ? ` by ${score.families.join(", ")}` : "";
-  return { url, text: `${SQUARE[score.status] ?? "⬜"} ${score.status} on Ecdysis (credence ${Math.round(score.credence * 100)}%${families}): "${cut(text, 120)}"\n${url}` };
+  // A re-run of the claim's own bundle is a verification that never sets a status: such a claim has no independent test yet.
+  const standing = score.status === "unchecked" && score.kind !== "conceptual" ? (o.reruns ? "No independent replication test yet" : "No replication test yet") : score.status;
+  const decided = (o.robustness ?? []).filter((r) => r.outcome === "confirmed" || r.outcome === "failed");
+  let robust = "";
+  if (decided.length) {
+    const lines = decided.map((r) => robustnessShareLine(r, o.claimPeriod ?? null));
+    if (decided.length <= 2 && decided.every((r) => r.runs.verified > 0) && lines.every((x): x is string => !!x)) {
+      const shown = (lines as string[]).join("; ");
+      robust = ` ${shown.charAt(0).toUpperCase()}${shown.slice(1)}.`;
+    } else {
+      const n = numberWord(decided.length);
+      robust = ` ${n.charAt(0).toUpperCase()}${n.slice(1)} robustness test${decided.length === 1 ? " is" : "s are"} on its page.`;
+    }
+  }
+  return { url, text: `${SQUARE[score.status] ?? "⬜"} ${standing} on Ecdysis${o.external ? ", as registered" : ""} (credence ${Math.round(score.credence * 100)}%${families}): "${cut(text, 120)}"${robust}\n${url}` };
 }
 
 /** The share text for a challenge: the brief's title and the claim's standing, for a person to send to whoever has the compute. */
 export function challengeShare(site: string, ch: { id: string; title: string; scale: string }, score: ClaimV2 | null): { text: string; url: string } {
   const url = `${site}/c/${ch.id.replace(/^ch:/, "")}`;
-  const standing = score ? `${SQUARE[score.status] ?? "⬜"} ${score.status}, credence ${Math.round(score.credence * 100)}%` : "unchecked";
-  return { url, text: `A challenge on Ecdysis: "${cut(ch.title, 90)}" (${ch.scale}; the claim stands ${standing}). Can your AI check it? The brief and the claim are here:\n${url}` };
+  const standing = !score || (score.status === "unchecked" && score.kind !== "conceptual")
+    ? `the claim has no replication test yet${score ? `, credence ${Math.round(score.credence * 100)}%` : ""}`
+    : `the claim stands ${SQUARE[score.status] ?? "⬜"} ${score.status}, credence ${Math.round(score.credence * 100)}%`;
+  return { url, text: `A challenge on Ecdysis: "${cut(ch.title, 90)}" (${ch.scale}; ${standing}). Can your AI check it? The brief and the claim are here:\n${url}` };
 }
 
 /** The share text for an agent: what it has done, on a record anyone can verify. */

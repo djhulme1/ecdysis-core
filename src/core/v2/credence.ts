@@ -1,7 +1,25 @@
 /**
- * credence/0.3 — one score per claim, moved only by evidence (Ecdysis v2;
+ * credence/0.4 — one score per claim, moved only by evidence (Ecdysis v2;
  * design: claude/ecdysis-v2-design.md §5; sanity check §5; arguments:
- * claude/ecdysis-conceptual-claims-design.md).
+ * claude/ecdysis-conceptual-claims-design.md; scope and receipt kinds:
+ * claude/ecdysis-scope-design.md).
+ *
+ * credence/0.4 (4 October 2026) keeps 0.3's arithmetic and changes what is
+ * evidence and how a status is read:
+ *   - only REPLICATION TESTS are evidence among receipts (kinds/0.1, decided
+ *     in flow.ts): a verification or a reproduction of the claim as scoped.
+ *     A robustness test (reanalysis, extension) moves nothing here;
+ *   - an empirical claim's STATUS is tested against the credence its
+ *     verified replication tests give on their own (with its prior and
+ *     foundations). Re-runs, reviews and settled arguments still move the
+ *     displayed credence and the dispute number, never the status;
+ *   - REFUTED, like established, needs two distinct verified operators, and
+ *     for a claim from human literature neither count includes the operator
+ *     that registered it (which wrote its test). One failing replication
+ *     test reads contested;
+ *   - an upheld contradiction caps the number only, and only between claims
+ *     whose scopes overlap (a claim about 2013–2026 cannot contradict one
+ *     about 2009–2012). It no longer makes an empirical claim contested.
  *
  *   ℓ(c) = logit(q̃) + Σ_o w_o·e_o,   p = σ(ℓ)
  *   q̃    = ε + (1 − ε)·[½ + ρ_a(q − ½)]·Π_f p(f)
@@ -101,7 +119,9 @@
  * Settled arguments move credence too, through `arguments` in the options:
  *   upheld counterexample (conceptual)   status refuted; log-odds −counterexampleStep
  *   upheld contradiction with an         credence capped at 1 − (its credence) while it
- *     ESTABLISHED claim                  stays established; status contested
+ *     ESTABLISHED claim                  stays established; a conceptual claim reads
+ *                                        contested (credence/0.4: an empirical claim's
+ *                                        number only, and only between overlapping scopes)
  *   upheld logical gap / unsupported     −upheldStep × the arguer's tier weight, one per
  *     premise                            operator
  *   upheld statistical / methodological  the author's calibration ρ_a is multiplied by
@@ -121,8 +141,9 @@
  */
 
 import { ARGUMENT_PARAMS, type ClaimArgumentsInput, type ClaimKind } from "./arguments.js";
+import { scopesOverlap, type ClaimScope } from "./kinds.js";
 
-export const CREDENCE_V2_VERSION = "credence/0.3";
+export const CREDENCE_V2_VERSION = "credence/0.4";
 
 export const CREDENCE_V2_PARAMS = {
   /** A confirming replication: 4:1 evidence. */
@@ -167,6 +188,13 @@ export const CREDENCE_V2_PARAMS = {
   /** ...filed by at least this many distinct verified operators (one receipt declaring two models is one operator's word). */
   operatorsForEstablished: 2,
   /**
+   * credence/0.4: refuted needs failing replication tests from at least this many distinct verified operators, as established
+   * needs confirming ones. One discrepant replication can be chance alone (Clemens 2017, Table 1), and a single test is too
+   * little to put "refuted" beside anyone's words. It also keeps the leave-one-out track record fair: a lone failure no longer
+   * resolves a claim, so a lone confirmation is no longer scored as wrong.
+   */
+  operatorsForRefuted: 2,
+  /**
    * Log-odds pass unchanged up to ±softLogOdds and are compressed smoothly
    * beyond, never exceeding ±maxLogOdds: a prior of exactly 0 or 1, or
    * thirty confirmations, never saturate the arithmetic, so credence stays
@@ -204,6 +232,10 @@ export interface ClaimInput {
   foundations: string[];
   /** Log order. Foundations always come earlier. */
   seq: number;
+  /** scope/0.1: what the claim covers now (null: not declared). Used here only so that claims of disjoint periods cannot contradict. */
+  scope?: ClaimScope | null;
+  /** A claim from human literature: the operator that registered it, and so wrote its test. Its evidence counts, but not towards the two operators a resolution needs. */
+  registrant?: string;
 }
 
 export interface EvidenceInput {
@@ -267,8 +299,12 @@ export interface EvidenceSum {
   sum: number;
   /** The same from VERIFIED operators alone (their checks and their capped reviews): what the truth statuses are tested against (§5.5). */
   sumVerified: number;
-  /** Distinct verified operators whose counted item is a confirming replication. */
+  /** Distinct verified operators whose counted item is a confirming replication (not counting a registrant, see ClaimInput). */
   confirmingOperators: number;
+  /** Distinct verified operators whose counted item is a failing replication (not counting a registrant). */
+  failingOperators: number;
+  /** Σ w·e over VERIFIED replication items alone: what an empirical claim's status is tested against (credence/0.4). */
+  replicationSum: number;
   /** Distinct verified operators whose counted item is a replication or re-run, confirming or failing: the voices a resolution rests on. */
   replicatingOperators: number;
   /** Weighted confirming and disconfirming evidence mass, VERIFIED operators only (what can resolve a claim): the dispute number's inputs. */
@@ -304,8 +340,12 @@ export interface ClaimV2 {
   prior: number;
   logOdds: number;
   credence: number;
-  /** Credence from verified operators' evidence alone: the number the truth statuses are tested against (§5.5). */
+  /** Credence from verified operators' evidence alone (§5.5): what a foundation from human literature contributes, and a conceptual claim's status is tested against. */
   credenceVerified: number;
+  /** credence/0.4: credence from verified replication tests alone (with prior and foundations): what an empirical claim's status is tested against. */
+  credenceReplication: number;
+  /** Distinct verified operators whose replication tests confirm and fail it, not counting a registrant: two either way resolve it. */
+  operators: { confirming: number; failing: number };
   s: number;
   f: number;
   dispute: number;
@@ -440,38 +480,36 @@ function linkedTo(op: string, earlier: string[], vouchLinked?: (a: string, b: st
  * latest), weighted, summed. Pass a prefix of a claim's items to get its
  * log-odds at any moment (scoring.ts).
  */
-export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: CredenceV2Options = {}): EvidenceSum {
+export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: CredenceV2Options = {}, registrant?: string): EvidenceSum {
   const best = new Map<string, EvidenceInput>();
   for (const e of items) {
     if (o.voided?.(e)) continue;
     const cur = best.get(e.operatorId);
     if (!cur || RANK[e.kind] > RANK[cur.kind] || (RANK[e.kind] === RANK[cur.kind] && e.seq > cur.seq)) best.set(e.operatorId, e);
   }
+  const voices = [...best.values()].sort((a, b) => a.seq - b.seq);
   let checks = 0;
   let unverified = 0; // every item, check or review, from an operator who is not verified
   let reviews = 0; // verified operators' reviews
   let s = 0;
   let f = 0;
-  let sReplication = 0;
-  let fReplication = 0;
-  let confirmingReplication = false;
-  let failingReplication = false;
   let reproduced = false;
-  let confirmingOperators = 0;
   let replicatingOperators = 0;
-  const confirmingFamilies = new Set<string>();
   // Only VERIFIED items set the families that discount later ones: an unverified sybil declaring every family (its own
   // weight capped at ln 3 all together) could otherwise multiply every later verified replication by a half per sybil.
   const earlier: EarlierItem[] = [];
   const earlierOperators: string[] = [];
   const counted: CountedItem[] = [];
-  for (const e of [...best.values()].sort((a, b) => a.seq - b.seq)) {
+  const weigh = (e: EvidenceInput, before: EarlierItem[], beforeOps: string[]) => {
     // inputs/0.1: a receipt the audit cannot yet reach is weighed as an unverified operator's, whatever its operator's tier.
     const tier: Tier = e.auditable === false ? "unverified" : e.tier;
     const omega = Math.max(0, Math.min(1, o.reliability ? o.reliability(e.agent) : P.omega0));
-    const diversity = diversityFactor(e.families, e.confirms, earlier);
-    const linked = linkedTo(e.operatorId, earlierOperators, o.vouchLinked, o.ringLinked) ? 0.5 : 1;
-    const w = independence(e.operatorId, authorOperator, o.vouchLinked, o.ringLinked) * P.tier[tier] * omega * diversity * linked;
+    const diversity = diversityFactor(e.families, e.confirms, before);
+    const linked = linkedTo(e.operatorId, beforeOps, o.vouchLinked, o.ringLinked) ? 0.5 : 1;
+    return { tier, w: independence(e.operatorId, authorOperator, o.vouchLinked, o.ringLinked) * P.tier[tier] * omega * diversity * linked };
+  };
+  for (const e of voices) {
+    const { tier, w } = weigh(e, earlier, earlierOperators);
     if (w <= 0) continue;
     if (tier === "verified") earlier.push({ families: e.families, confirms: e.confirms });
     earlierOperators.push(e.operatorId);
@@ -486,51 +524,79 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
     } else {
       ev = e.confirms ? P.confirm : -P.refute;
       if (tier === "verified") checks += w * ev; else unverified += w * ev;
-      if (tier === "verified") {
-        if (e.confirms) {
-          confirmingReplication = true;
-          confirmingOperators++;
-          if (e.families.length === 0) confirmingFamilies.add("?");
-          for (const fam of e.families) confirmingFamilies.add(fam);
-        } else failingReplication = true;
-      }
     }
     if (tier === "verified") {
       if (e.kind !== "review") replicatingOperators++;
       if (e.confirms) s += w * MASS[e.kind];
       else f += w * MASS[e.kind];
-      if (e.kind === "replication") {
-        if (e.confirms) sReplication += w;
-        else fReplication += w;
-      }
     }
     counted.push({ item: e, weight: w, e: ev });
+  }
+  // credence/0.4: what an empirical claim's status reads. The VERIFIED replication tests alone, each weighed against the
+  // replication tests before it (model diversity, links between operators) and never against a review or a re-run that came
+  // first, which would let those discount a test and so move a status they may not touch. A claim's registrant's test counts
+  // in the sum, never towards the two operators, or the model families, that a resolution needs.
+  let sReplication = 0;
+  let fReplication = 0;
+  let replicationSum = 0;
+  let confirmingReplication = false;
+  let failingReplication = false;
+  let confirmingOperators = 0;
+  let failingOperators = 0;
+  const confirmingFamilies = new Set<string>();
+  const earlierTests: EarlierItem[] = [];
+  const earlierTesters: string[] = [];
+  for (const e of voices) {
+    if (e.kind !== "replication") continue;
+    const { tier, w } = weigh(e, earlierTests, earlierTesters);
+    if (w <= 0) continue;
+    if (tier === "verified") earlierTests.push({ families: e.families, confirms: e.confirms });
+    earlierTesters.push(e.operatorId);
+    if (tier !== "verified") continue;
+    replicationSum += w * (e.confirms ? P.confirm : -P.refute);
+    const counts = !registrant || e.operatorId !== registrant;
+    if (e.confirms) {
+      sReplication += w;
+      confirmingReplication = true;
+      if (counts) {
+        confirmingOperators++;
+        if (e.families.length === 0) confirmingFamilies.add("?");
+        for (const fam of e.families) confirmingFamilies.add(fam);
+      }
+    } else {
+      fReplication += w;
+      failingReplication = true;
+      if (counts) failingOperators++;
+    }
   }
   const cappedReviews = Math.max(-P.reviewCap, Math.min(P.reviewCap, reviews));
   const cappedUnverified = Math.max(-P.unverifiedCap, Math.min(P.unverifiedCap, unverified));
   return {
     sum: checks + cappedUnverified + cappedReviews, sumVerified: checks + cappedReviews,
-    s, f, sReplication, fReplication, confirmingReplication, failingReplication, confirmingOperators, replicatingOperators, confirmingFamilies, reproduced, counted,
+    s, f, sReplication, fReplication, confirmingReplication, failingReplication, confirmingOperators, failingOperators, replicationSum, replicatingOperators, confirmingFamilies, reproduced, counted,
   };
 }
 
-/** The status rules (sanity check §5.3), in order. Statuses come from verified replications only. */
+/** The status rules (sanity check §5.3), in order. Statuses come from verified replication tests only. */
 export function statusOf(x: {
-  /** Credence from VERIFIED evidence alone (§5.5): a crowd of cheap identities can move the displayed number a little, never a status. */
+  /** credence/0.4: the credence the claim's VERIFIED REPLICATION TESTS give on their own, with its prior and foundations. Nothing else reaches a status. */
   credence: number;
   /** Weighted confirming and failing mass from verified REPLICATIONS alone: a dissenting review never makes a claim contested. */
   sReplication: number; fReplication: number;
   threshold: number;
   confirmingReplication: boolean; failingReplication: boolean;
   /** Distinct DECLARED model families among the verified confirming replications (familyCount). */
-  confirmingFamilies: number; confirmingOperators?: number; foundationRefuted: boolean;
+  confirmingFamilies: number; confirmingOperators?: number;
+  /** Distinct verified operators whose failing replication test counts (absent: as many as refuted needs, for callers that predate credence/0.4). */
+  failingOperators?: number;
+  foundationRefuted: boolean;
 }): ClaimStatusV2 {
   const mass = x.sReplication + x.fReplication;
   const r = mass > 0 ? x.sReplication / mass : 0;
   const anyReplication = x.confirmingReplication || x.failingReplication;
   // A dispute is between replications: reviews and re-runs, however they disagree, never make a claim contested (the dispute number still ranks it).
   if (x.sReplication > 0 && x.fReplication > 0 && 4 * r * (1 - r) >= P.contestedAt) return "contested";
-  if (x.credence <= P.refutedBelow && x.failingReplication) return "refuted";
+  if (x.credence <= P.refutedBelow && x.failingReplication && (x.failingOperators ?? P.operatorsForRefuted) >= P.operatorsForRefuted) return "refuted";
   if (x.foundationRefuted) return "contested";
   // Established: two or more independent verified replications (distinct operators) on two or more declared model families.
   if (x.credence >= x.threshold && x.confirmingReplication && x.confirmingFamilies >= P.familiesForEstablished && (x.confirmingOperators ?? P.operatorsForEstablished) >= P.operatorsForEstablished) return "established";
@@ -609,13 +675,15 @@ export function computeCredenceV2(
 ): Map<string, ClaimV2> {
   const first = credencePass(claims, evidence, uses, o, new Map());
   const caps = new Map<string, number>();
+  const scopeOf = new Map(claims.map((c) => [c.ref, c.scope] as const));
   for (const c of claims) {
     const a = o.arguments?.get(c.ref);
     if (!a || a.contradictions.length === 0) continue;
     let cap = Infinity;
     for (const ref of a.contradictions) {
       const cited = first.get(ref);
-      if (cited && ref !== c.ref && cited.status === "established") cap = Math.min(cap, 1 - cited.credence);
+      // credence/0.4: two claims whose periods do not meet are about different things and cannot contradict each other.
+      if (cited && ref !== c.ref && cited.status === "established" && scopesOverlap(c.scope, scopeOf.get(ref))) cap = Math.min(cap, 1 - cited.credence);
     }
     if (cap < Infinity) caps.set(c.ref, Math.max(1e-6, cap));
   }
@@ -656,7 +724,7 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     // arguments/0.1: each upheld methodological assessment halves the weight of the author's stated confidence.
     const calibration = (c.calibration ?? calibrationOf(record.get(c.authorOperator) ?? [])) * ARGUMENT_PARAMS.methodologyFactor ** (args?.methodology ?? 0);
     const prior = priorOf(c.stated, calibration, found.map(foundationFactor));
-    const ev = sumEvidence(byClaim.get(c.ref) ?? [], c.authorOperator, o);
+    const ev = sumEvidence(byClaim.get(c.ref) ?? [], c.authorOperator, o, c.registrant);
     const arg = sumArguments(args);
     const cap = caps.get(c.ref) ?? null;
     const capped = (p: number) => (cap === null ? p : Math.min(p, cap));
@@ -664,19 +732,20 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     const credence = capped(sigma(clampLogOdds(logit(prior) + total)));
     const logOdds = logit(credence);
     const credenceVerified = capped(sigma(clampLogOdds(logit(prior) + ev.sumVerified + arg.verified)));
+    // credence/0.4: an empirical claim's status reads its verified replication tests alone. A contradiction cap still caps the
+    // number above, but neither it nor a review, a re-run or an argument reaches the status.
+    const credenceReplication = sigma(clampLogOdds(logit(prior) + ev.replicationSum));
     const use = [...(useBy.get(c.ref)?.values() ?? [])].reduce((x, y) => x + y, 0);
     const threshold = thresholdOf(use);
     const foundationRefuted = found.some((x) => x.status === "refuted");
     const statusAt = (bar: number): ClaimStatusV2 => {
       if (kind === "conceptual") return conceptualStatusOf(credenceVerified, args, cap !== null);
-      const st = statusOf({
-        credence: credenceVerified, sReplication: ev.sReplication, fReplication: ev.fReplication, threshold: bar,
+      return statusOf({
+        credence: credenceReplication, sReplication: ev.sReplication, fReplication: ev.fReplication, threshold: bar,
         confirmingReplication: ev.confirmingReplication, failingReplication: ev.failingReplication,
-        confirmingFamilies: familyCount(ev.confirmingFamilies), confirmingOperators: ev.confirmingOperators,
+        confirmingFamilies: familyCount(ev.confirmingFamilies), confirmingOperators: ev.confirmingOperators, failingOperators: ev.failingOperators,
         foundationRefuted,
       });
-      // An upheld contradiction with an established claim leaves an empirical claim contested too, unless the evidence already refutes it.
-      return cap !== null && st !== "refuted" ? "contested" : st;
     };
     const status = statusAt(threshold);
     // Resolved at the bar for zero use: a citation raises what a claim must clear to READ established, never what a record is judged against.
@@ -685,7 +754,8 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     const dispute = disputeOf(ev.s, ev.f);
     sums.set(c.ref, total);
     out.set(c.ref, {
-      ref: c.ref, paper: c.paper, external: c.external === true, kind, cap, calibration, prior, logOdds, credence, credenceVerified, s: ev.s, f: ev.f, dispute, use, threshold, status, resolved,
+      ref: c.ref, paper: c.paper, external: c.external === true, kind, cap, calibration, prior, logOdds, credence, credenceVerified, credenceReplication,
+      operators: { confirming: ev.confirmingOperators, failing: ev.failingOperators }, s: ev.s, f: ev.f, dispute, use, threshold, status, resolved,
       arguments: { upheld: args?.upheldAttacks.length ?? 0, dismissed: args?.dismissedAttacks.length ?? 0, open: args?.open ?? 0, methodology: args?.methodology ?? 0, counterexample: args?.refuted ?? false },
       reproduced: ev.reproduced,
       families: [...ev.confirmingFamilies].filter((x) => x !== "?").sort(),

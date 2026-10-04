@@ -39,6 +39,7 @@
 import type { Json } from "../canonical.js";
 import { hashJson, sha256, toHex } from "../canonical.js";
 import { signJson, verifyJson } from "../crypto.js";
+import { designProblems, PERIOD_OUTPUTS, type Design } from "./kinds.js";
 
 export const RECEIPT_PROTOCOL = "ecdysis/0.2";
 export const SEAL_STATEMENT = "check.seal/v1";
@@ -125,7 +126,16 @@ export interface CheckCommit {
   protocol: typeof RECEIPT_PROTOCOL;
   type: "check.commit";
   target: string;
+  /** About code: "rerun" re-runs the original's own bundle on its own data; "replication" is the agent's own implementation. */
   kind: CheckKind;
+  /**
+   * kinds/0.1: what this receipt tests, declared before the seed. Did it use
+   * the claim's stated method, and are its data the claim's own, new data
+   * covering its whole population and period, or data beyond them? The
+   * archive derives the kind (verification, reproduction, reanalysis,
+   * extension) and checks what it can (kinds.ts). Required.
+   */
+  design: Design;
   bundle: Bundle;
   /**
    * Optional: the model or models this check used (free text, normalised to
@@ -352,7 +362,13 @@ function checkAgent(v: unknown, errors: string[]): void {
 function checkOutputs(v: unknown, where: string, errors: string[]): void {
   if (!v || typeof v !== "object" || Array.isArray(v)) { errors.push(`${where}: an object of named outputs`); return; }
   const entries = Object.entries(v as Record<string, unknown>);
-  if (entries.length === 0 || entries.length > MAX_OUTPUTS) errors.push(`${where}: 1 to ${MAX_OUTPUTS} outputs`);
+  // The two period outputs are reserved (kinds/0.1): they report the span the data cover and never count against the cap.
+  const counted = entries.filter(([k]) => !(PERIOD_OUTPUTS as readonly string[]).includes(k)).length;
+  if (entries.length === 0 || counted > MAX_OUTPUTS) errors.push(`${where}: 1 to ${MAX_OUTPUTS} outputs, besides period_from and period_to`);
+  for (const k of PERIOD_OUTPUTS) {
+    const x = (v as Record<string, unknown>)[k];
+    if (x !== undefined && !(typeof x === "number" && Number.isInteger(x) && x >= 10000101 && x <= 99991231)) errors.push(`${where}.${k}: a date as a YYYYMMDD integer, computed from the data`);
+  }
   for (const [k, x] of entries) {
     if (!NAME.test(k)) errors.push(`${where}.${k}: names are a letter then letters, digits, _ . - (max 40)`);
     if (!(typeof x === "number" && Number.isFinite(x)) && !(typeof x === "string" && x.length <= 200)) errors.push(`${where}.${k}: a finite number or a string of at most 200 characters`);
@@ -366,7 +382,8 @@ export function validateCheckCommit(p: unknown): { ok: true; value: CheckCommit 
   if (c.protocol !== RECEIPT_PROTOCOL) errors.push(`protocol: "${RECEIPT_PROTOCOL}"`);
   if (c.type !== "check.commit") errors.push('type: "check.commit"');
   if (typeof c.target !== "string" || !TARGET.test(c.target)) errors.push('target: "<paper-id>#C<n>"');
-  if (c.kind !== "rerun" && c.kind !== "replication") errors.push('kind: "rerun" or "replication"');
+  if (c.kind !== "rerun" && c.kind !== "replication") errors.push('kind: "rerun" (the original\'s own bundle, re-run) or "replication" (your own implementation): this is about code; design says what the receipt tests');
+  errors.push(...designProblems(c.design, c.kind === "rerun" || c.kind === "replication" ? c.kind : undefined));
   if (c.models !== undefined) {
     if (!Array.isArray(c.models) || c.models.length === 0 || c.models.length > 8) errors.push("models: optional; 1 to 8 model names (e.g. [\"claude-opus-5-5\"])");
     else for (const m of c.models) if (typeof m !== "string" || m.trim().length < 2 || m.length > 80) errors.push("models[]: 2 to 80 characters each");
@@ -381,9 +398,12 @@ export function validateCheckCommit(p: unknown): { ok: true; value: CheckCommit 
     if (b.imageRef !== undefined && (typeof b.imageRef !== "string" || b.imageRef.length > 300 || !/^[a-z0-9][a-z0-9._\/-]{0,200}@sha256:[0-9a-f]{64}$/.test(b.imageRef) || (typeof b.image === "string" && !b.imageRef.endsWith(`@${b.image}`)))) errors.push('bundle.imageRef: "<registry/name>@<image digest>", ending in the pinned digest');
     if (typeof b.run !== "string" || b.run.length < 1 || b.run.length > 500) errors.push("bundle.run: the command, 1 to 500 characters");
     if (!(typeof b.runtimeMinutes === "number" && Number.isFinite(b.runtimeMinutes) && b.runtimeMinutes > 0 && b.runtimeMinutes <= 7 * 24 * 60)) errors.push("bundle.runtimeMinutes: expected minutes on one CPU, 0 < m ≤ 10080");
-    if (!Array.isArray(b.outputs) || b.outputs.length === 0 || b.outputs.length > MAX_OUTPUTS) errors.push(`bundle.outputs: 1 to ${MAX_OUTPUTS} declared outputs`);
+    // The reserved period outputs (kinds/0.1) may be listed and never count against the cap; a cross-check compares them exactly.
+    if (!Array.isArray(b.outputs) || b.outputs.length === 0 || b.outputs.filter((o) => !(PERIOD_OUTPUTS as readonly string[]).includes((o as OutputSpec | null)?.name as string)).length > MAX_OUTPUTS) errors.push(`bundle.outputs: 1 to ${MAX_OUTPUTS} declared outputs, besides period_from and period_to`);
     else for (const o of b.outputs as OutputSpec[]) {
       if (!o || typeof o.name !== "string" || !NAME.test(o.name)) errors.push("bundle.outputs[].name: a letter then letters, digits, _ . - (max 40)");
+      // kinds/0.1: the span the data cover is compared exactly by every cross-check and every finding, whatever a bundle says.
+      if (o && (PERIOD_OUTPUTS as readonly string[]).includes(o.name) && ((o.tolerance ?? 0) !== 0 || o.relative === true)) errors.push(`bundle.outputs: ${o.name} is compared exactly; it takes no tolerance`);
       if (o?.tolerance !== undefined && !(typeof o.tolerance === "number" && o.tolerance >= 0 && Number.isFinite(o.tolerance))) errors.push("bundle.outputs[].tolerance: a number ≥ 0");
       if (o?.relative !== undefined && typeof o.relative !== "boolean") errors.push("bundle.outputs[].relative: true or false");
     }

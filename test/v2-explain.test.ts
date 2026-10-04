@@ -150,12 +150,16 @@ describe("the landing page's case", () => {
 
   it("draws the worked example from the credence rules themselves", () => {
     const steps = claimTrace();
-    assert.deepEqual(steps.map((s) => s.status), ["unchecked", "unchecked", "supported", "established", "supported", "contested"]);
-    for (let k = 1; k < 4; k++) assert.ok(steps[k]!.credence > steps[k - 1]!.credence, `evidence at step ${k + 1} raises credence`);
-    assert.equal(steps[4]!.credence, steps[3]!.credence, "use never adds to credence");
-    assert.ok(steps[4]!.bar > steps[3]!.bar, "use raises the bar");
-    assert.ok(steps[3]!.credence >= steps[3]!.bar && steps[4]!.credence < steps[4]!.bar, "the claim falls below the raised bar");
-    assert.ok(steps[5]!.credence < steps[4]!.credence, "a failure lowers it");
+    // credence/0.4: a status reads replication tests alone, so the reviews come after the claim is established and change
+    // the number, never the status; every gauge's status agrees with where its number sits against the bar.
+    assert.deepEqual(steps.map((s) => s.status), ["unchecked", "supported", "supported", "established", "established", "supported", "contested"]);
+    for (let k = 1; k < 5; k++) assert.ok(steps[k]!.credence > steps[k - 1]!.credence, `evidence at step ${k + 1} raises credence`);
+    assert.ok(steps[2]!.credence < steps[2]!.bar && steps[3]!.credence >= steps[3]!.bar, "two replication tests from agents with no record are not over the bar; a third is");
+    assert.equal(steps[5]!.credence, steps[4]!.credence, "use never adds to credence");
+    assert.ok(steps[5]!.bar > steps[4]!.bar, "use raises the bar");
+    assert.ok(steps[4]!.credence >= steps[4]!.bar && steps[5]!.credence < steps[5]!.bar, "the claim falls below the raised bar");
+    assert.ok(steps[6]!.credence < steps[5]!.credence, "a failure lowers it");
+    for (const s of steps) if (s.status === "established") assert.ok(s.credence >= s.bar, `${s.what}: established only over the bar`);
     const html = landingPageV2(LANDING);
     for (const s of steps) assert.ok(html.includes(`style="width:${(s.credence * 100).toFixed(1)}%"`), `the gauge shows ${s.what}`);
   });

@@ -22,6 +22,7 @@ import { structuralScreener } from "../src/core/hazard.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import type { Json } from "../src/core/canonical.js";
+import { declared } from "./kinds-kit.js";
 import {
   lastSlot, nextResearch, parseRoutine, researchDue, RINGS_PER_DAY, slotOffset, webhookProblem, type RingReason,
 } from "../src/core/wake.js";
@@ -72,7 +73,7 @@ async function world(o: { sealSecret?: string | null; readOnly?: boolean } = {})
   };
   const signed = async (handle: string, extra: Record<string, Json>, at = now) => {
     const kp = keys.get(handle)!;
-    const payload = { protocol: "ecdysis/0.1", agent: { handle, publicKey: kp.publicKey }, ts: iso(at), ...extra } as Json;
+    const payload = declared({ protocol: "ecdysis/0.1", agent: { handle, publicKey: kp.publicKey }, ts: iso(at), ...extra } as Json);
     return { payload, signature: await signJson(kp.privateKey, payload) } as Json;
   };
   return {
@@ -686,7 +687,7 @@ describe("v2 agents' doorbells", () => {
     const resolveAgent = async (handle: string) => (handle === "Moth-2" ? { publicKey: main.publicKey } : null);
     const bells = w.make({ resolveAgent });
     const envelope = async (kp: KeyPairB64, extra: Record<string, Json>, protocol = "ecdysis/0.2") => {
-      const payload = { protocol, agent: { handle: "Moth-2", publicKey: kp.publicKey }, ts: iso(w.now), ...extra } as Json;
+      const payload = declared({ protocol, agent: { handle: "Moth-2", publicKey: kp.publicKey }, ts: iso(w.now), ...extra } as Json);
       return { payload, signature: await signJson(kp.privateKey, payload) } as Json;
     };
     const limiter = new MemoryRateLimiter(1000);
@@ -708,7 +709,7 @@ describe("v2 agents' doorbells", () => {
     assert.equal((await w.store.getDoorbell("Moth-2"))!.status, "stopped");
     assert.equal((await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self" }))).status, 200, "and set again");
     const nobody = await generateKeyPair();
-    const payload = { protocol: "ecdysis/0.2", agent: { handle: "Nobody", publicKey: nobody.publicKey }, ts: iso(w.now), type: "doorbell.set", kind: "self" } as Json;
+    const payload = declared({ protocol: "ecdysis/0.2", agent: { handle: "Nobody", publicKey: nobody.publicKey }, ts: iso(w.now), type: "doorbell.set", kind: "self" } as Json);
     assert.equal((await post("/v2/agents/doorbell", { payload, signature: await signJson(nobody.privateKey, payload) })).status, 401, "unknown to the log: refused");
   });
 });
@@ -728,7 +729,7 @@ describe("the Worker's doorbell wiring", () => {
     const delegate = { protocol: "ecdysis/0.2", type: "key.delegate", key: check.publicKey, scope: "reports", agent: { handle: "Moth-3", publicKey: main.publicKey }, ts: ts() } as Json;
     assert.equal((await v2.delegateKey({ payload: delegate, signature: await signJson(main.privateKey, delegate) })).status, 201);
     const envelope = async (kp: KeyPairB64, extra: Record<string, Json>) => {
-      const payload = { protocol: "ecdysis/0.2", agent: { handle: "Moth-3", publicKey: kp.publicKey }, ts: ts(), ...extra } as Json;
+      const payload = declared({ protocol: "ecdysis/0.2", agent: { handle: "Moth-3", publicKey: kp.publicKey }, ts: ts(), ...extra } as Json);
       return { payload, signature: await signJson(kp.privateKey, payload) } as Json;
     };
     const env = { STH_SIGNING_KEY_PKCS8: logKey.privateKey };

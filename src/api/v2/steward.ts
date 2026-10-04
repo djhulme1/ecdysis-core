@@ -12,6 +12,8 @@ import { APPEAL_MS } from "../../core/v2/receipts.js";
 import { ME_HEADERS, sameOrigin } from "./me.js";
 import { cookie, type Accounts, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
+import { fidelityFromForm, scopeFromForm } from "../../core/v2/kinds.js";
+import { scopeFormValues } from "../../web/v2/scope-form.js";
 import type { CanaryRegistry } from "./canaries.js";
 import type { IssueRegistry } from "./issues.js";
 import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, healthPage, overviewPage, peoplePage, refusedPage, type AgentRow, type HealthSwitch, type PersonRow, type VerificationRequestRow } from "../../web/steward.js";
@@ -174,7 +176,8 @@ export class StewardHandler {
       }
       case "/steward/content/challenge-seed": {
         // A founding challenge, seeded by this steward under their operator id: screened like any brief, outside the daily quota.
-        const r = await this.o.v2.proposeChallengeBySteward(steward, { claim: f.get("claim") ?? "", source: f.get("source") ?? "", quote: f.get("quote") ?? "", test: f.get("test") ?? "", kind: f.get("kind") ?? "", title: f.get("title") ?? "", brief: f.get("brief") ?? "", scale: f.get("scale") ?? "", wants: f.get("wants") ?? "" });
+        const sf = scopeFormValues((n) => f.get(n));
+        const r = await this.o.v2.proposeChallengeBySteward(steward, { claim: f.get("claim") ?? "", source: f.get("source") ?? "", quote: f.get("quote") ?? "", test: f.get("test") ?? "", kind: f.get("kind") ?? "", scope: scopeFromForm(sf.scope), fidelity: fidelityFromForm(sf.fidelity), title: f.get("title") ?? "", brief: f.get("brief") ?? "", scale: f.get("scale") ?? "", wants: f.get("wants") ?? "" });
         if (r.status !== 201) {
           const b = r.body as Record<string, unknown>;
           const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[];
@@ -192,13 +195,26 @@ export class StewardHandler {
         let seeded = 0;
         for (const [i, raw] of seeds.entries()) {
           const x = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-          const r = await this.o.v2.proposeChallengeBySteward(steward, { claim: typeof x["claim"] === "string" ? x["claim"] : "", source: x["source"] ?? "", quote: x["quote"] ?? "", test: x["test"] ?? "", kind: x["kind"] ?? "", title: x["title"] ?? "", brief: x["brief"] ?? "", scale: x["scale"] ?? "", wants: x["wants"] ?? "" });
+          const r = await this.o.v2.proposeChallengeBySteward(steward, { claim: typeof x["claim"] === "string" ? x["claim"] : "", source: x["source"] ?? "", quote: x["quote"] ?? "", test: x["test"] ?? "", kind: x["kind"] ?? "", scope: x["scope"], fidelity: x["fidelity"], data: x["data"], title: x["title"] ?? "", brief: x["brief"] ?? "", scale: x["scale"] ?? "", wants: x["wants"] ?? "" });
           const b = r.body as Record<string, unknown>;
           if (r.status === 201) { seeded++; outcomes.push(`${i + 1}: seeded ${String(b["id"])}`); }
           else { const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[]; outcomes.push(`${i + 1}: ${r.status} ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}`); }
         }
         const summary = `${seeded} of ${seeds.length} seeded. ${outcomes.join(" · ")}`;
         return seeded === seeds.length ? this.redirect(`/steward/content?ok=${encodeURIComponent(summary.slice(0, 1500))}`) : this.page("/steward/content", signed, url, seeded ? summary.slice(0, 1500) : null, seeded ? null : summary.slice(0, 1500));
+      }
+      case "/steward/content/scope": {
+        // scope/0.1: what a claim from human literature registered before scopes existed covers, declared once under this
+        // steward's operator id. It governs receipts committed from now on; never act on a claim your own operator registered
+        // or checked without saying so in the basis, and leave a contested reading to the other steward.
+        const sf = scopeFormValues((n) => f.get(n));
+        const r = await this.o.v2.declareScopeBySteward(steward, { claim: (f.get("claim") ?? "").trim(), scope: scopeFromForm(sf.scope), fidelity: fidelityFromForm(sf.fidelity) });
+        if (r.status !== 201) {
+          const b = r.body as Record<string, unknown>;
+          const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[];
+          return this.page("/steward/content", signed, url, null, `Couldn't declare the scope: ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}.`);
+        }
+        return this.redirect(`/steward/content?ok=${encodeURIComponent(String((r.body as Record<string, unknown>)["note"] ?? "Declared."))}#scopes`);
       }
       case "/steward/content/withhold": {
         const r = await this.o.v2.withholdContent(f.get("subject"), f.get("status"), f.get("reason"), steward);
@@ -352,7 +368,7 @@ export class StewardHandler {
           complaints: (await this.o.issues!.complaintsFor(i.id)).map((c) => ({ at: c.at, text: c.text, contact: c.contact })),
           flags: (await this.o.issues!.flagsFor(i.id)).map((x) => ({ at: x.at, handle: x.handle, operatorId: x.operatorId, stake: x.stake, detail: x.detail })),
         })));
-        return this.html(200, contentPage({ holds: await this.o.v2.holds(100), challenges, issues, withheld: await this.o.v2.withheldItems(), csrf, fresh }, flash, problem, who));
+        return this.html(200, contentPage({ holds: await this.o.v2.holds(100), challenges, issues, withheld: await this.o.v2.withheldItems(), unscoped: await this.o.v2.unscopedClaims(), csrf, fresh }, flash, problem, who));
       }
       case "/steward/health": {
         if (!this.o.health) return this.html(404, refusedPage("Health is not configured on this deployment."));

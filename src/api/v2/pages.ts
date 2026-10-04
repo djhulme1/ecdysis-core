@@ -10,7 +10,8 @@ import type { Accounts } from "./accounts.js";
 import { V2Feeds } from "./feed.js";
 import { agentBadge, agentShare, bibtex, challengeShare, citation, claimBadge, claimShare, missingBadge, paperBadge, paperShare, shareIntent, shareLinks, type SharePlatform } from "./promote.js";
 import { CHALLENGE_NOTES } from "../../core/v2/challenges.js";
-import { isHeld, withheldOf } from "../../core/v2/flow.js";
+import { isHeld, scopeAt, withheldOf, type CheckState } from "../../core/v2/flow.js";
+import { periodWords, testsWords } from "../../core/v2/kinds.js";
 import { inDefaultLists } from "../../core/v2/visibility.js";
 import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
 import { pressure } from "../../core/v2/attempts.js";
@@ -29,7 +30,7 @@ import { mcpUrlFor } from "../../web/launch.js";
 import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
 import { escapeXml } from "../site.js";
 import { ARTICLES, CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
-import { agentPageV2, challengePageV2, challengesPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, withheldPageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
+import { agentPageV2, challengePageV2, challengesPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, withheldPageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2, type RobustnessRowV2 } from "../../web/v2/pages.js";
 import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
 import type { V2Record } from "../../core/v2/flow.js";
 
@@ -99,6 +100,52 @@ export interface PagesOptions {
   waitUntil?: (p: Promise<unknown>) => void;
   /** The quote scout's results, when configured: the claim page says whether a registered quote was found in its source. */
   quotes?: QuoteCheckStore | null;
+}
+
+
+
+/** The data a receipt declared, in a few words: its period, else its basis, else what its agent described afterwards. */
+export function dataWords(c: Pick<CheckState, "design" | "description" | "emitted">): string | null {
+  const d = c.design;
+  if (d?.period) return c.emitted && (c.emitted.from !== d.period.from || c.emitted.to !== d.period.to) ? `${periodWords(d.period)} (its data: ${periodWords(c.emitted)})` : periodWords(d.period);
+  if (d) return d.data === "original" ? "the claim's own data" : `“${d.basis.length > 90 ? `${d.basis.slice(0, 89).trimEnd()}…` : d.basis}”`;
+  if (c.description?.period) return `${periodWords(c.description.period)} (described later)`;
+  return null;
+}
+
+/** What a claim's share text needs besides its score: whether it is from human literature, its robustness results, its period, its re-runs. */
+export function shareContext(r: V2Record, ref: string, robustness: RobustnessRowV2[]): { external: boolean; robustness: RobustnessRowV2[]; claimPeriod: { from: string; to: string } | null; reruns: number } {
+  const scope = scopeAt(r, ref)?.scope ?? null;
+  return { external: ref.startsWith("ext:"), robustness, claimPeriod: scope && "period" in scope ? scope.period : null, reruns: r.evidence.filter((e) => e.claim === ref && e.kind === "rerun").length };
+}
+
+/**
+ * The robustness tests on a claim (kinds/0.1): every resulted receipt in view that is not a replication test, oldest first,
+ * one line per operator per change (the latest; the earlier ones counted), with its verified re-runs counted by operator.
+ */
+export function robustnessRows(r: V2Record, ref: string): RobustnessRowV2[] {
+  const rows: Array<RobustnessRowV2 & { key: string; seq: number }> = [];
+  for (const c of [...r.checks.values()].filter((x) => x.target === ref && x.stage === "resulted" && !x.disowned && !x.replicationTest && !isHeld(r, x.id)).sort((a, b) => a.seq - b.seq)) {
+    const d = c.design;
+    const desc = c.description;
+    const demoted = !!d && c.declaredKind !== c.effectiveKind;
+    const verifying = c.verifiedBy.map((id) => r.checks.get(id)).filter((x): x is CheckState => !!x);
+    const row: RobustnessRowV2 = {
+      id: c.id, agent: c.handle, operatorId: c.operatorId, outcome: c.outcome, at: c.resultedAt ?? c.committedAt,
+      kind: c.effectiveKind, declared: demoted ? c.declaredKind : null,
+      alteration: d?.alteration ?? desc?.alteration ?? null, beyond: d?.beyond ?? desc?.beyond ?? null,
+      period: c.emitted ?? d?.period ?? desc?.period ?? null, note: c.kindNote,
+      described: !d && desc ? { as: desc.as, at: desc.ts } : null,
+      runs: { verified: verifying.length, agents: [...new Set(verifying.map((x) => x.handle))], operators: new Set(verifying.map((x) => x.operatorId)).size, exact: verifying.length > 0 && verifying.every((x) => x.crossExact !== false), disagreed: c.disputedBy.length },
+      earlier: 0,
+    };
+    const as = row.kind === "undeclared" ? row.described?.as ?? "undeclared" : row.kind;
+    const key = `${c.operatorId}|${as}|${row.alteration ?? ""}|${row.beyond ?? ""}|${row.period ? `${row.period.from}..${row.period.to}` : ""}|${c.outcome}`;
+    const before = rows.findIndex((x) => x.key === key);
+    if (before >= 0) { const was = rows[before]!; rows.splice(before, 1); rows.push({ ...row, key, seq: c.seq, earlier: was.earlier + 1 }); }
+    else rows.push({ ...row, key, seq: c.seq });
+  }
+  return rows.sort((a, b) => a.seq - b.seq).map(({ key: _k, seq: _s, ...row }) => { void _k; void _s; return row; });
 }
 
 export class PagesHandler {
@@ -283,7 +330,7 @@ export class PagesHandler {
       scores: p.claims.map((ref) => (isHeld(r, ref) ? null : s.claims.get(ref) ?? null)),
       outOfView: p.claims.map((ref) => (isHeld(r, ref) ? hiddenNote(r, ref) : null)),
       amended: p.claims.map((ref) => { const am = r.amendments.get(ref); return am ? { seq: am.seq, at: am.ts, test: am.test ?? null } : null; }),
-      receipts: [...r.checks.values()].filter((c) => refs.has(c.target) && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, agent: c.handle, families: c.families, stage: c.stage, disowned: c.disowned })),
+      receipts: [...r.checks.values()].filter((c) => refs.has(c.target) && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, agent: c.handle, families: c.families, stage: c.stage, disowned: c.disowned, tests: testsWords(c), counted: c.replicationTest })),
       reviews: r.evidence.filter((e) => e.kind === "review" && refs.has(e.claim)).map((e) => ({ claim: e.claim, agent: e.agent, forecast: r.forecasts.get(`${e.claim}|${e.agent}`) ?? 0.5 })),
       citedBy: [...r.papers.values()].filter((q) => q.id !== id && !isHeld(r, q.id) && r.uses.some((u) => u.paper === q.id && refs.has(u.claim))).map((q) => ({ paper: q.id, title: q.title, agent: q.handle, rel: "relies on", claims: r.uses.filter((u) => u.paper === q.id && refs.has(u.claim)).map((u) => u.claim.split("#")[1]!) })),
     };
@@ -318,10 +365,23 @@ export class PagesHandler {
     if (am?.test) test = am.test;
     const evidence = r.evidence.filter((e) => e.claim === ref).map((e) => ({ id: e.id, kind: e.kind, confirms: e.confirms, agent: e.agent, operatorId: e.operatorId, tier: e.tier, families: e.families, weight: null }));
     const receipts = [...r.checks.values()].filter((c) => c.target === ref && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq)
-      .map((c) => ({ id: c.id, kind: c.kind, outcome: c.outcome, agent: c.handle, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, verifiedBy: c.verifiedBy.length, disputedBy: c.disputedBy.length, others: { matched: c.otherCrossChecks.filter((x) => x.match).length, disagreed: c.otherCrossChecks.filter((x) => !x.match).length }, ...(c.requires.length ? { requires: c.requires.length, auditable: c.verifiedBy.length > 0 } : {}) }));
+      .map((c) => ({
+        id: c.id, kind: c.kind, outcome: c.outcome, agent: c.handle, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, verifiedBy: c.verifiedBy.length, disputedBy: c.disputedBy.length,
+        others: { matched: c.otherCrossChecks.filter((x) => x.match).length, disagreed: c.otherCrossChecks.filter((x) => !x.match).length }, ...(c.requires.length ? { requires: c.requires.length, auditable: c.verifiedBy.length > 0 } : {}),
+        // kinds/0.1: what it tests, whether it counts, the data it declared, and its verified re-runs counted in operators.
+        tests: testsWords(c), counted: c.replicationTest, data: dataWords(c),
+        verifiedOperators: new Set(c.verifiedBy.map((id) => r.checks.get(id)?.operatorId).filter(Boolean)).size,
+      }));
+    // scope/0.1: what the claim covers now, and how; for a claim from human literature, who wrote its test.
+    const st = scopeAt(r, ref);
+    const scope = st ? { scope: st.scope, fidelity: st.fidelity, data: st.data, how: st.how, seq: st.seq, ts: st.ts, by: st.by, receiptsBefore: st.receiptsBefore } : null;
+    const ext = paperId.startsWith("ext:") ? r.external.get(paperId) : undefined;
+    const registered = ext ? (r.scopes.get(ref)?.[0]?.ts ?? null) : null;
+    const registrant = ext ? { handle: ext.handle, operatorId: ext.operatorId, at: registered ?? "" } : null;
+    const robustness = robustnessRows(r, ref);
     const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref && !isHeld(r, u.paper)).map((u) => u.paper))].map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
     const site = `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
-    const promote = { share: { text: claimShare(site, ref, text, score).text, links: shareLinks("claim", ref) }, badge: `${site}/badge/claim/${paperId}/${label}.svg`, page: paperId.startsWith("ext:") ? `${site}/x/${paperId.slice(4)}/${label}` : `${site}/p/${paperId}/${label}` };
+    const promote = { share: { text: claimShare(site, ref, text, score, shareContext(r, ref, robustness)).text, links: shareLinks("claim", ref) }, badge: `${site}/badge/claim/${paperId}/${label}.svg`, page: paperId.startsWith("ext:") ? `${site}/x/${paperId.slice(4)}/${label}` : `${site}/p/${paperId}/${label}` };
     // arguments/0.1: every argument on the claim, with its checks and the author's answer; frozen ones are left out.
     const args = (r.argumentsByClaim.get(ref) ?? []).filter((a) => !r.held.has(a.id)).map((a) => ({
       id: a.id, stance: a.stance, grounds: a.grounds, text: a.text, cites: a.cites, instance: a.instance, confidence: a.confidence, agent: a.handle, tier: a.tier, filedAt: a.ts, status: a.status, disowned: a.disowned,
@@ -335,7 +395,7 @@ export class PagesHandler {
     }));
     const bl = r.blockers.get(ref);
     const blocked = bl ? { verifiedOperators: bl.verifiedOperators, pressure: pressure(score.use, bl.verifiedOperators), blockers: bl.blockers.map((b) => ({ blocker: b.blocker, verifiedOperators: b.verifiedOperators, otherOperators: b.otherOperators, attempts: b.attempts.length, unblockedBy: b.unblockedBy.slice(0, 3) })) } : null;
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args, attempts, blocked, computedFrom: r.head };
+    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, scope, registrant, robustness, usedBy, promote, arguments: args, attempts, blocked, computedFrom: r.head };
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {
@@ -360,7 +420,7 @@ export class PagesHandler {
         const st = p.claims.map((ref) => s.claims.get(ref)?.status).filter((x): x is NonNullable<typeof x> => !!x);
         return { id: p.id, title: p.title, field: p.field, ts: p.ts, worst: st.length ? st.reduce((x, y) => (rank(x) < rank(y) ? x : y)) : null };
       }),
-      receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed" && !isHeld(r, c.id)).sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned })),
+      receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed" && !isHeld(r, c.id)).sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, tests: testsWords(c), counted: c.replicationTest })),
       reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle).map((e) => ({ claim: e.claim, forecast: r.forecasts.get(`${e.claim}|${handle}`) ?? 0.5 })),
       findings: r.findings.filter((f) => f.oddAgent === handle).map((f) => ({ id: f.id, verdict: f.verdict, inForce: f.inForce, reversed: f.reversed, decidedAt: f.decidedAt })),
     };
@@ -426,7 +486,7 @@ export class PagesHandler {
         const env = (await this.v2.envelope(r.papers.get(paperId)?.cid ?? "")) as { payload?: PaperV2Payload } | null;
         text = env?.payload?.claims[Number(label.slice(1)) - 1]?.text ?? null;
       }
-      return text === null ? null : shareIntent(platform, claimShare(site, ref, text, score));
+      return text === null ? null : shareIntent(platform, claimShare(site, ref, text, score, shareContext(r, ref, robustnessRows(r, ref))));
     }
     const a = r.agents.get(ref);
     if (!a) return null;

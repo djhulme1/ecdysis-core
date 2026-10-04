@@ -1340,6 +1340,9 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/checks/result": return v2.fileResult(body);
     case "/v2/reviews": return v2.fileReview(body);
     case "/v2/claims/amend": return v2.amendClaim(body);
+    // scope/0.1 and kinds/0.1: a scope for a claim registered before scopes existed; words for a receipt filed before kinds.
+    case "/v2/claims/scope": return v2.declareScope(body);
+    case "/v2/checks/describe": return v2.describeReceipt(body);
     // arguments/0.1: an argument on a claim, an independent check of one, the author's one answer.
     case "/v2/arguments": return v2.fileArgument(body);
     case "/v2/arguments/check": return v2.checkArgument(body);

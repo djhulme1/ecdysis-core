@@ -9,13 +9,18 @@ import assert from "node:assert/strict";
 import { deriveV2, type V2Entry, type V2EntryType } from "../src/core/v2/flow.js";
 import { computeV2 } from "../src/core/v2/scoring.js";
 import { APPEAL_MS } from "../src/core/v2/receipts.js";
+import { GENERAL, REPORTED, REPRODUCTION } from "./kinds-kit.js";
 
 function log() {
   const entries: V2Entry[] = [];
   let t = Date.UTC(2026, 9, 2, 12, 0, 0);
+  // What the service writes since scope/0.1 and kinds/0.1: an empirical claim from human literature with its scope and
+  // fidelity, a commit with its design (test/kinds-kit.ts). An entry that states its own keeps them.
   const add = (type: V2EntryType, payload: Record<string, unknown>, dtMs = 60_000) => {
     t += dtMs;
-    entries.push({ seq: entries.length, ts: new Date(t).toISOString(), type, payload });
+    const p = type === "claim.external" && payload["kind"] !== "conceptual" && !("scope" in payload) ? { ...payload, scope: GENERAL, fidelity: REPORTED }
+      : type === "check.commit" && !("design" in payload) ? { ...payload, design: REPRODUCTION } : payload;
+    entries.push({ seq: entries.length, ts: new Date(t).toISOString(), type, payload: p });
     return entries.length - 1;
   };
   return { entries, add, now: () => new Date(t) };

@@ -17,6 +17,7 @@ import { deriveV2, type V2Entry } from "../src/core/v2/flow.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared } from "./kinds-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 async function world() {
@@ -37,7 +38,7 @@ async function world() {
   };
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   const sign = async (handle: string, payload: Record<string, Json>) => {
-    const full: Json = { ...payload, agent: { handle, publicKey: keys.get(handle)!.publicKey }, ts: ts() };
+    const full: Json = declared({ ...payload, agent: { handle, publicKey: keys.get(handle)!.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(keys.get(handle)!.privateKey, full) } as Json;
   };
   const bundle = (n: number): Bundle => ({ repo: "https://github.com/example/rep", commit: n.toString(16).padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "effect", tolerance: 0.01 }, { name: "n" }], runtimeMinutes: 5 });
@@ -75,7 +76,7 @@ describe("the claim page", () => {
     const id1 = String(w.b(c1)["id"]);
     assert.equal((await w.result("Ant", id1, "failed", { effect: 0.42, n: 48526 }, null)).status, 201);
     let p = await w.page(path);
-    assert.match(p.text, /0 verified, 0 disputed/);
+    assert.match(p.text, /not yet by a verified operator/);
     assert.doesNotMatch(p.text, /not yet verified/, "nobody has re-run it");
     // Bee, at the account tier, is handed Ant's receipt as its cross-check and matches it: shown on Ant's row, counted nowhere.
     w.tick(60_000);
@@ -89,7 +90,7 @@ describe("the claim page", () => {
     assert.deepEqual(rec.checks.get(id1)!.verifiedBy, [], "an account-tier cross-check verifies nothing");
     assert.equal(rec.checks.get(id1)!.otherCrossChecks.length, 1);
     p = await w.page(path);
-    assert.match(p.text, /0 verified, 0 disputed · <span class="small"[^>]*>1 more by operators not yet verified \(1 matched, 0 disagreed\), shown, not counted<\/span>/);
+    assert.match(p.text, /not yet by a verified operator · <span class="small"[^>]*>1 more by operators not yet verified \(1 matched, 0 disagreed\), shown, not counted<\/span>/);
     assert.match(p.text, /inconclusive/, "Bee's own receipt is listed too");
     // The footer names the log head the figures came from: the last entry, Bee's result.
     const last = w.rows().at(-1)!;
@@ -99,7 +100,7 @@ describe("the claim page", () => {
     w.tick(60_000);
     assert.equal((await w.svc.setTier("op-b", "verified", "op-steward")).status, 200);
     p = await w.page(path);
-    assert.match(p.text, /1 verified, 0 disputed/);
+    assert.match(p.text, /once by one verified operator/, "re-runs are counted in operators as well as runs");
     assert.doesNotMatch(p.text, /not yet verified/);
     const head = w.rows().at(-1)!;
     assert.equal(head.type, "operator.tier");

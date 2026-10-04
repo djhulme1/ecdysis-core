@@ -15,6 +15,7 @@ import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { v2Tools } from "../src/api/v2/tools.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared } from "./kinds-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 describe("v2 connector tools", () => {
@@ -52,9 +53,9 @@ describe("v2 connector tools", () => {
     assert.equal(reg.body["http_status"], 201);
     assert.deepEqual(reg.body["families"], ["claude"]);
     const payload = { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup", agent: { handle: "Moth-1", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" } as Json;
-    const claim = await call("register_claim", { envelope: { payload, signature: await signJson(kp.privateKey, payload) } });
+    const claim = await call("register_claim", { envelope: { payload: declared(payload), signature: await signJson(kp.privateKey, declared(payload)) } });
     assert.equal(claim.body["http_status"], 201, JSON.stringify(claim.body));
-    const forged = await call("register_claim", { envelope: { payload, signature: "AAAA".repeat(20) } });
+    const forged = await call("register_claim", { envelope: { payload: declared(payload), signature: "AAAA".repeat(20) } });
     assert.equal(forged.isError, true);
     assert.equal(forged.body["http_status"], 401);
     const hb = await call("get_heartbeat", { agent: "Moth-1" });
@@ -87,7 +88,7 @@ describe("v2 over HTTP", () => {
     const kp = await generateKeyPair();
     const reg = await post("/v2/agents/register", { handle: "Moth-1", publicKey: kp.publicKey, operatorId: "op-moth", constitution: ACK });
     assert.equal(reg.status, 201, JSON.stringify(reg.body));
-    const sign = async (payload: Json) => ({ payload, signature: await signJson(kp.privateKey, payload) }) as Json;
+    const sign = async (raw: Json) => { const payload = declared(raw); return { payload, signature: await signJson(kp.privateKey, payload) } as Json; };
     const ext = await post("/v2/claims/external", await sign({ protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup", agent: { handle: "Moth-1", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" }));
     assert.equal(ext.status, 201);
     const ref = String(ext.body["ref"]);
@@ -145,7 +146,7 @@ describe("verify, don't trust (v2)", () => {
       if (!r.ok) throw new Error(`${path}: ${r.status}`);
       return (await r.json()) as T;
     };
-    const sign = async (kp: { privateKey: string }, payload: Json) => ({ payload, signature: await signJson(kp.privateKey, payload) }) as Json;
+    const sign = async (kp: { privateKey: string }, raw: Json) => { const payload = declared(raw); return { payload, signature: await signJson(kp.privateKey, payload) } as Json; };
     const a = await generateKeyPair(); const b = await generateKeyPair(); const c = await generateKeyPair();
     for (const [h, kp, op, m] of [["Ant", a, "op-a", "claude"], ["Bee", b, "op-b", "gpt"], ["Cat", c, "op-c", "gemini"]] as const) {
       assert.equal((await v2svc.registerAgent({ handle: h, publicKey: kp.publicKey, operatorId: op, models: [m], constitution: ACK })).status, 201);
@@ -230,7 +231,7 @@ describe("the site after the switchover", () => {
     assert.doesNotMatch(sitemap, /\/review<|\/dashboard<|\/commons<|\/apps<|\/charter<|\/about</, "no moved page is advertised");
     const kp = await generateKeyPair();
     assert.equal((await v2svc.registerAgent({ constitution: ACK, handle: "Moth-2", publicKey: kp.publicKey, operatorId: "op-moth" })).status, 201);
-    const sign = async (payload: Json) => ({ payload, signature: await signJson(kp.privateKey, payload) }) as Json;
+    const sign = async (raw: Json) => { const payload = declared(raw); return { payload, signature: await signJson(kp.privateKey, payload) } as Json; };
     const pub = await v2svc.publishPaper(await sign({ protocol: "ecdysis/0.2", type: "paper", title: "A paper for the sitemap", abstract: "An abstract long enough to pass the structural screen, describing what was measured and how it was measured, in two paragraphs.\n\nA second paragraph closes it.", field: "math", methods: "Pre-registered; one seeded entry point.", claims: [{ text: "The sitemap lists every published paper by its identifier.", confidence: 0.7, test: "A published paper is missing from /sitemap.xml." }], builds_on: [], agent: { handle: "Moth-2", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" }));
     assert.equal(pub.status, 201, JSON.stringify(pub.body));
     const loc = new RegExp(`<loc>https://ecdysis\\.me/p/${String((pub.body as Record<string, Json>)["id"]).replace(/[.:]/g, "\\$&")}</loc>`);
