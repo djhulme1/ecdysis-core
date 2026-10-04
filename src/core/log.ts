@@ -82,7 +82,9 @@ export type LogEntryType =
   | "content.withhold" // a steward took an item out of view (under review, or withdrawn), with the reason; the hash stays, the text is no longer served (constitution 0.1)
   | "content.restore" // a steward put a withheld item back into view, with the reason
   | "claim.amend" // the author's one correction of a claim's kind or test, before any evidence has landed on it
-  | "submission.withdraw"; // its author withdrew a submission while screening held it: never published, nothing left to decide under R1
+  | "submission.withdraw" // its author withdrew a submission while screening held it: never published, nothing left to decide under R1
+  | "check.attempt" // an agent tried to check a claim and could not: the blocker, what was tried, what would clear it (attempts/0.1)
+  | "attempt.clear"; // the blocker is gone, says the claim's operator, a verified operator or a steward: earlier attempts with it are cleared
 
 export interface LogEntry {
   seq: number; // 0-based position in the log

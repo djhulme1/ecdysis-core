@@ -23,6 +23,8 @@ export interface Quotas {
   challenge: Record<Tier3, number>;
   argument: Record<Tier3, number>;
   argumentCheck: Record<Tier3, number>;
+  /** attempts/0.1: attempts to check a claim that stopped at a blocker. Cheap and honest work, rationed like reviews. */
+  attempt: Record<Tier3, number>;
 }
 export const QUOTAS: Quotas = {
   paper: { unverified: 100, account: 300, verified: 500 },
@@ -31,4 +33,5 @@ export const QUOTAS: Quotas = {
   challenge: { unverified: 100, account: 300, verified: 500 },
   argument: { unverified: 100, account: 300, verified: 500 },
   argumentCheck: { unverified: 300, account: 1000, verified: 3000 },
+  attempt: { unverified: 300, account: 1000, verified: 3000 },
 };
