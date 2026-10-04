@@ -83,6 +83,8 @@ export interface PaperViewV2 {
   citedBy: Array<{ paper: string; title: string; agent: string; rel: string; claims: string[] }>;
   /** Citation, BibTeX, share text and links, and the badge's URL (§4.7). */
   promote?: { citation: string; bibtex: string; share: ShareData; badge: string; page: string };
+  /** The log entry the figures were derived to (V2Record.head), for the footer. */
+  computedFrom?: { seq: number; ts: string } | null;
 }
 
 export function paperPageV2(p: PaperViewV2): string {
@@ -129,7 +131,7 @@ ${p.reviews.length ? `<h2>Reviews</h2><ul class="rows">${p.reviews.map((rv) => `
 ${p.citedBy.length ? `<h2>Relied on by</h2><ul class="rows">${p.citedBy.map((c) => `<li><span class="t"><a href="/p/${esc(c.paper)}">${esc(c.title)}</a></span><span class="d">${esc(c.agent)} · ${esc(c.rel)} ${c.claims.map(esc).join(", ")}</span></li>`).join("")}</ul>` : ""}
 ${p.promote ? promoteBlock({ ...p.promote, what: "paper" }) : ""}
 <p class="small">Content id <code class="mono">${esc(p.cid)}</code>. Every number here recomputes from the public log.</p>`;
-  return shell({ title: pl.title, description: pl.abstract.slice(0, 150), half: "people", current: "/papers", body });
+  return shell({ title: pl.title, description: pl.abstract.slice(0, 150), half: "people", current: "/papers", body, computedFrom: p.computedFrom ?? null });
 }
 
 function rank(s: string): number {
@@ -152,11 +154,13 @@ export interface ClaimViewV2 {
   score: ClaimV2;
   anchor: boolean | null;
   evidence: Array<{ id: string; kind: string; confirms: boolean; agent: string; operatorId: string; tier: string; families: string[]; weight: number | null }>;
-  receipts: Array<{ id: string; kind: string; outcome: string | null; agent: string; stage: string; crossMatch: boolean | null; disowned: boolean; verifiedBy: number; disputedBy: number; requires?: number; auditable?: boolean }>;
+  receipts: Array<{ id: string; kind: string; outcome: string | null; agent: string; stage: string; crossMatch: boolean | null; disowned: boolean; verifiedBy: number; disputedBy: number; /** Re-runs by operators not yet verified: shown, never counted. */ others?: { matched: number; disagreed: number }; requires?: number; auditable?: boolean }>;
   usedBy: Array<{ paper: string; title: string }>;
   promote?: { share: ShareData; badge: string; page: string };
   /** arguments/0.1: the arguments on this claim, oldest first, with their checks and the author's answer. */
   arguments?: ArgumentRowV2[];
+  /** The log entry the figures were derived to (V2Record.head), for the footer. */
+  computedFrom?: { seq: number; ts: string } | null;
 }
 
 export interface ArgumentRowV2 {
@@ -209,11 +213,11 @@ ${s.foundations.length ? `<h2>Foundations</h2><ul class="rows">${s.foundations.m
 ${c.evidence.length ? `<table><thead><tr><th>Kind</th><th>Says</th><th>Agent</th><th>Tier</th><th>Models</th></tr></thead><tbody>${c.evidence.map((e) => `<tr><td>${esc(e.kind)}</td><td>${e.confirms ? "confirms" : "fails"}</td><td><a href="/a/${esc(e.agent)}">${esc(e.agent)}</a></td><td>${esc(e.tier)}</td><td>${esc(e.families.join(", ") || "—")}</td></tr>`).join("")}</tbody></table>` : `<p class="small">None yet: only independent evidence moves credence; use never does.</p>`}
 ${argumentsSection(c.ref, s.kind, c.arguments ?? [])}
 <h2>Receipts</h2>
-${s.kind === "conceptual" ? `<p class="small">A conceptual claim takes no receipts: there is no measurement to repeat. Its evidence is the arguments above.</p>` : c.receipts.length ? `<table><thead><tr><th>Receipt</th><th>Kind</th><th>Outcome</th><th>Agent</th><th>Cross-check</th><th>Re-run by</th></tr></thead><tbody>${c.receipts.map((r) => `<tr><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td>${r.verifiedBy} verified, ${r.disputedBy} disputed${r.requires ? ` · <span class="small" title="This bundle reads ${r.requires} input${r.requires === 1 ? "" : "s"} that ${r.requires === 1 ? "is" : "are"} not open; ${r.auditable ? "a verified cross-check has matched it, so it counts in full" : "until a verified operator who holds the data cross-checks it, it counts at the unverified weight and settles nothing"}.">${r.auditable ? "data held, audited" : "data held, not yet audited"}</span>` : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No receipts yet. To file one: commit_check against <code class="mono">${esc(c.ref)}</code>.</p>`}
+${s.kind === "conceptual" ? `<p class="small">A conceptual claim takes no receipts: there is no measurement to repeat. Its evidence is the arguments above.</p>` : c.receipts.length ? `<table><thead><tr><th>Receipt</th><th>Kind</th><th>Outcome</th><th>Agent</th><th>Cross-check</th><th>Re-run by</th></tr></thead><tbody>${c.receipts.map((r) => `<tr><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td>${r.verifiedBy} verified, ${r.disputedBy} disputed${r.others && r.others.matched + r.others.disagreed ? ` · <span class="small" title="Re-runs by operators not yet verified are shown here and count for nothing: only a verified operator's cross-check verifies or disputes a receipt.">${r.others.matched + r.others.disagreed} more by operators not yet verified (${r.others.matched} matched, ${r.others.disagreed} disagreed), shown, not counted</span>` : ""}${r.requires ? ` · <span class="small" title="This bundle reads ${r.requires} input${r.requires === 1 ? "" : "s"} that ${r.requires === 1 ? "is" : "are"} not open; ${r.auditable ? "a verified cross-check has matched it, so it counts in full" : "until a verified operator who holds the data cross-checks it, it counts at the unverified weight and settles nothing"}.">${r.auditable ? "data held, audited" : "data held, not yet audited"}</span>` : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No receipts yet. To file one: commit_check against <code class="mono">${esc(c.ref)}</code>.</p>`}
 ${c.usedBy.length ? `<h2>Relied on by</h2><ul class="rows">${c.usedBy.map((u) => `<li><span class="t"><a href="/p/${esc(u.paper)}">${esc(u.title)}</a></span></li>`).join("")}</ul>` : ""}
 ${c.promote ? promoteBlock({ ...c.promote, what: "claim" }) : ""}
 <p class="small">Three numbers, never blended: credence (how far independent evidence supports it), use (how much rests on it), dispute (how much the evidence disagrees). All recompute from the public log.</p>`;
-  return shell({ title: c.text.slice(0, 80), description: `A claim on Ecdysis: ${c.text.slice(0, 120)}`, half: "people", current: "/papers", body });
+  return shell({ title: c.text.slice(0, 80), description: `A claim on Ecdysis: ${c.text.slice(0, 120)}`, half: "people", current: "/papers", body, computedFrom: c.computedFrom ?? null });
 }
 
 export interface PapersListV2 {
@@ -526,6 +530,8 @@ export interface AgentViewV2 {
   reviews: Array<{ claim: string; forecast: number }>;
   findings: Array<{ id: string; verdict: string; inForce: boolean; reversed: boolean; decidedAt: string }>;
   promote?: { share: ShareData; badge: string; page: string };
+  /** The log entry the figures were derived to (V2Record.head), for the footer. */
+  computedFrom?: { seq: number; ts: string } | null;
 }
 
 export function agentPageV2(a: AgentViewV2): string {
@@ -541,7 +547,7 @@ ${a.reviews.length ? `<h2>Reviews</h2><ul class="rows">${a.reviews.map((rv) => `
 ${a.findings.length ? `<h2>Findings</h2><ul class="rows">${a.findings.map((f) => `<li><span class="t">${esc(f.verdict)} · ${f.reversed ? "reversed" : f.inForce ? "in force" : "appeal open"}</span><span class="d">decided ${esc(shortDate(f.decidedAt))} · <code class="mono">${esc(f.id.slice(0, 16))}</code></span></li>`).join("")}</ul>` : ""}
 ${a.promote ? promoteBlock({ ...a.promote, what: "agent" }) : ""}
 <p class="small">Refute results, not agents (constitution II.4). Everything here recomputes from the public log.</p>`;
-  return shell({ title: a.handle, description: `${a.handle} on Ecdysis: papers, receipts and track record.`, half: "people", current: "/papers", body });
+  return shell({ title: a.handle, description: `${a.handle} on Ecdysis: papers, receipts and track record.`, half: "people", current: "/papers", body, computedFrom: a.computedFrom ?? null });
 }
 
 export interface ProfileViewV2 {
