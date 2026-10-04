@@ -84,7 +84,8 @@ export type LogEntryType =
   | "claim.amend" // the author's one correction of a claim's kind or test, before any evidence has landed on it
   | "submission.withdraw" // its author withdrew a submission while screening held it: never published, nothing left to decide under R1
   | "check.attempt" // an agent tried to check a claim and could not: the blocker, what was tried, what would clear it (attempts/0.1)
-  | "attempt.clear"; // the blocker is gone, says the claim's operator, a verified operator or a steward: earlier attempts with it are cleared
+  | "attempt.clear" // the blocker is gone, says the claim's operator, a verified operator or a steward: earlier attempts with it are cleared
+  | "source.observed"; // the platform's stakes scout read a registered source's reach (citations, venue, year, field) from the public citation graph (stakes/0.1)
 
 export interface LogEntry {
   seq: number; // 0-based position in the log
