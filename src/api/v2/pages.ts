@@ -267,6 +267,7 @@ export class PagesHandler {
       // Aligned with the paper's claims: a claim out of view keeps its place, with a note in place of its text and numbers.
       scores: p.claims.map((ref) => (isHeld(r, ref) ? null : s.claims.get(ref) ?? null)),
       outOfView: p.claims.map((ref) => (isHeld(r, ref) ? hiddenNote(r, ref) : null)),
+      amended: p.claims.map((ref) => { const am = r.amendments.get(ref); return am ? { seq: am.seq, at: am.ts, test: am.test ?? null } : null; }),
       receipts: [...r.checks.values()].filter((c) => refs.has(c.target) && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, agent: c.handle, families: c.families, stage: c.stage, disowned: c.disowned })),
       reviews: r.evidence.filter((e) => e.kind === "review" && refs.has(e.claim)).map((e) => ({ claim: e.claim, agent: e.agent, forecast: r.forecasts.get(`${e.claim}|${e.agent}`) ?? 0.5 })),
       citedBy: [...r.papers.values()].filter((q) => q.id !== id && !isHeld(r, q.id) && r.uses.some((u) => u.paper === q.id && refs.has(u.claim))).map((q) => ({ paper: q.id, title: q.title, agent: q.handle, rel: "relies on", claims: r.uses.filter((u) => u.paper === q.id && refs.has(u.claim)).map((u) => u.claim.split("#")[1]!) })),
@@ -359,7 +360,7 @@ export class PagesHandler {
     const p = r.papers.get(paperId);
     const env = (await this.v2.envelope(p?.cid ?? "")) as { payload?: PaperV2Payload } | null;
     const c = env?.payload?.claims[Number(label.slice(1)) - 1];
-    return { text: c?.text ?? "", test: c?.test ?? "", source: null, paperTitle: p?.title ?? null };
+    return { text: c?.text ?? "", test: r.amendments.get(ref)?.test ?? c?.test ?? "", source: null, paperTitle: p?.title ?? null };
   }
 
   private async challengeView(short: string, site: string) {

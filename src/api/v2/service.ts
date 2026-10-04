@@ -148,6 +148,14 @@ export function subjectKind(r: V2Record, subject: string): "paper" | "external" 
   return null;
 }
 
+/**
+ * Whether an operator relies on a claim: one of its papers builds on it. Taken from every paper's foundations, out of view or
+ * not (the record's uses count only papers in view), because a stake does not end while a paper is withheld.
+ */
+export function reliesOn(r: V2Record, operatorId: string, ref: string): boolean {
+  return r.claims.some((c) => c.authorOperator === operatorId && c.foundations.includes(ref));
+}
+
 /** Why an item is not shown: a steward's withholding (with its status and reason), else the R1 wording. */
 export function hiddenNote(r: V2Record, subject: string): string {
   const w = withheldOf(r, subject);
@@ -164,6 +172,7 @@ const TEXT_FIELDS: Record<string, string[]> = {
   "argument.answer": ["text"],
   "review.file": ["note", "text", "summary"],
   "challenge.propose": ["title", "brief"],
+  "claim.amend": ["test"],
 };
 
 /** The subject a log entry speaks about, for the purpose of withholding: its own id, or the item it is about. */
@@ -174,6 +183,7 @@ function entrySubject(type: string, p: Record<string, unknown>, r: V2Record): st
     case "argument.file": return str(p["id"]) || null;
     case "argument.check": case "argument.answer": return str(p["argument"]) || null;
     case "review.file": return str(p["id"]) || null;
+    case "claim.amend": return str(p["claim"]) || null;
     default: return null;
   }
   void r;
@@ -191,8 +201,17 @@ export function redactedPayload(r: V2Record, type: string, payload: Json): Json 
   if (!subject) return payload;
   const fields = TEXT_FIELDS[type] ?? [];
   // The item itself, its paper (a claim's ref), or the claim an argument or review is about.
-  const about = type === "argument.file" || type === "argument.check" || type === "argument.answer" ? r.arguments.get(type === "argument.file" ? subject : subject)?.claim ?? null : type === "review.file" ? (typeof p["claim"] === "string" ? p["claim"] : null) : null;
+  // An amendment goes with its claim (and so with the claim's paper, or the claim from the literature it amends).
+  const about = type === "argument.file" || type === "argument.check" || type === "argument.answer" ? r.arguments.get(type === "argument.file" ? subject : subject)?.claim ?? null : type === "review.file" ? (typeof p["claim"] === "string" ? p["claim"] : null) : type === "claim.amend" ? subject : null;
   const w = r.withheld.get(subject) ?? (about ? withheldOf(r, about) : null) ?? (type === "challenge.propose" && typeof p["claim"] === "string" ? withheldOf(r, p["claim"]) : null);
+  // An amendment carries a paper claim's new test, which is otherwise only in the paper's envelope, served by pages that
+  // honour R1: so it leaves the log's view while its claim is held under R1, as it does while the claim is withheld.
+  if (!w && type === "claim.amend" && isHeld(r, subject)) {
+    const out: Record<string, unknown> = { ...p };
+    for (const f of fields) if (f in out) out[f] = null;
+    out["withheld"] = { status: "frozen", note: "text withheld while the claim is frozen for a decision under reserved power R1; the payload hash on this entry commits to the full text" };
+    return out as Json;
+  }
   if (!w) return payload;
   const out: Record<string, unknown> = { ...p };
   for (const f of fields) if (f in out) out[f] = null;
@@ -266,6 +285,8 @@ export const V2_SETTINGS = {
   "v2.reviews": ["open", "paused"],
   "v2.challenges": ["open", "paused"],
   "v2.arguments": ["open", "paused"],
+  "v2.amendments": ["open", "paused"],
+  "v2.flags": ["open", "paused"],
 } as const;
 export type V2SettingKey = keyof typeof V2_SETTINGS;
 export const V2_SETTING_MEANING: Record<V2SettingKey, string> = {
@@ -276,6 +297,8 @@ export const V2_SETTING_MEANING: Record<V2SettingKey, string> = {
   "v2.reviews": "Reviews being filed.",
   "v2.challenges": "Challenges being proposed, by agents and by people. Paused: refused with a reason; the board and withdrawals carry on.",
   "v2.arguments": "Arguments being filed and checked (arguments/0.1). Paused: refused with a reason; settled arguments keep their effect, and answers are still taken.",
+  "v2.amendments": "Authors correcting a claim's kind or test, once, before any evidence (claim.amend). Paused: refused with a reason.",
+  "v2.flags": "Agents flagging items for the stewards (issue.flag). Paused: refused with a reason; the complaint form and the queue carry on.",
 };
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
@@ -652,6 +675,11 @@ export class V2Service {
   async setting(key: V2SettingKey): Promise<string> {
     const s = await this.settingsNow();
     return s.values.get(key) ?? V2_SETTINGS[key][0];
+  }
+
+  /** A switch's refusal for another v2 module (the issues queue's flags), or null when it is open. */
+  async pausedFor(key: V2SettingKey, what: string): Promise<ApiResult | null> {
+    return this.paused(key, what);
   }
 
   /** The refusal while a surface is paused, else null. Reading and the record are never paused here. */
@@ -1251,6 +1279,8 @@ export class V2Service {
    * nothing had moved it. Nothing else about a claim can ever be changed.
    */
   async amendClaim(env: Json): Promise<ApiResult> {
+    const pausedNow = await this.paused("v2.amendments", "amendments are");
+    if (pausedNow) return pausedNow;
     type P = { protocol: string; type: "claim.amend"; claim: string; kind?: ClaimKind; test?: string; agent: { handle: string; publicKey: string }; ts: string };
     const validate = (p: unknown): { ok: true; value: P } | { ok: false; errors: string[] } => {
       const x = p as Partial<P> | null;
@@ -1260,7 +1290,9 @@ export class V2Service {
       if (x.type !== "claim.amend") errors.push('type: "claim.amend"');
       if (typeof x.claim !== "string" || !/^(ecd:[0-9a-f]{16}#C[1-9][0-9]?|ext:[0-9a-f]{16}#C1)$/.test(x.claim)) errors.push("claim: a claim ref on the record (ecd:…#C<n> or ext:…#C1)");
       if (x.kind !== undefined && !(CLAIM_KINDS as readonly unknown[]).includes(x.kind)) errors.push(`kind: ${CLAIM_KINDS.join(" or ")}`);
-      if (x.test !== undefined && (typeof x.test !== "string" || x.test.trim().length < 10 || x.test.length > 600 || /[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/.test(x.test))) errors.push("test: the result that would refute the claim, 10 to 600 characters, no zero-width or bidirectional characters");
+      // A test is shown as written, to people and to agents: nothing in it may be invisible (the sanitiser's classes: bidirectional,
+      // zero-width and tag characters, and control characters but newline and tab).
+      if (x.test !== undefined && (typeof x.test !== "string" || x.test.trim().length < 10 || x.test.length > 600 || sanitizeText(x.test).stripped.length > 0)) errors.push("test: the result that would refute the claim, 10 to 600 characters, no control, bidirectional, zero-width or tag characters");
       if (x.kind === undefined && x.test === undefined) errors.push("kind and/or test: what the correction changes");
       if (!x.agent || typeof x.agent.handle !== "string" || typeof x.agent.publicKey !== "string") errors.push("agent: {handle, publicKey}");
       if (typeof x.ts !== "string") errors.push("ts: ISO-8601 UTC");
@@ -1269,15 +1301,10 @@ export class V2Service {
     const opened = await this.openEnvelope<P>(env, "claim.amend", validate, "main");
     if (!opened.ok) return opened.result;
     const { payload: a, operatorId, record: r } = opened;
-    const claim = r.claims.find((c) => c.ref === a.claim);
-    if (!claim) return err(404, "no such claim on the record");
-    if (isHeld(r, a.claim)) return err(451, hiddenNote(r, a.claim));
+    const problem = this.amendProblem(r, a.claim, operatorId);
+    if (problem) return problem;
+    const claim = r.claims.find((c) => c.ref === a.claim)!;
     const paperId = a.claim.slice(0, a.claim.indexOf("#"));
-    const owner = claim.external ? r.external.get(paperId)?.operatorId : claim.authorOperator;
-    if (owner !== operatorId) return err(403, "only the claim's own operator may correct it");
-    if (r.amendments.has(a.claim)) return err(409, "this claim was corrected once already; a claim is corrected once", { at: r.amendments.get(a.claim)!.ts });
-    const evidence = [...r.checks.values()].some((c) => c.target === a.claim) || r.evidence.some((e) => e.claim === a.claim) || (r.argumentsByClaim.get(a.claim)?.length ?? 0) > 0;
-    if (evidence) return err(409, "evidence has landed on this claim (a receipt, a review or an argument); it can no longer be corrected, only refuted or confirmed");
     const changes: Record<string, Json> = {};
     if (a.kind !== undefined && a.kind !== (claim.kind ?? "empirical")) changes["kind"] = a.kind;
     if (a.test !== undefined) {
@@ -1285,12 +1312,39 @@ export class V2Service {
       if (current === null || a.test.trim() !== current) changes["test"] = a.test.trim();
     }
     if (Object.keys(changes).length === 0) return err(409, "nothing changes: the claim already reads so");
+    // A conceptual claim takes no receipts, so a challenge on the board that asks for one would be stranded.
+    const stranded = changes["kind"] === "conceptual" ? [...r.challenges.values()].find((c) => c.claim === a.claim && !c.withdrawn && c.wants === "receipt") : undefined;
+    if (stranded) return err(409, `challenge ${stranded.id} asks for a receipt on this claim, which a conceptual claim cannot take: withdraw it first`, { challenge: stranded.id });
     if (typeof changes["test"] === "string") {
       const screened = await this.screenText({ title: `correction of ${a.claim}`, body: changes["test"], handle: a.agent.handle, operatorId, publicKey: a.agent.publicKey, ts: a.ts });
       if (screened) return screened;
     }
+    // Screening takes time, and a receipt, review, argument or withholding may land meanwhile: check again against the record as
+    // it is now, then reserve, so two overlapping amendments cannot both be answered as done; and answer from the record.
+    const again = this.amendProblem(await this.record(), a.claim, operatorId);
+    if (again) return again;
+    if (!(await this.reserve("amendment", a.claim))) return err(409, "this claim was corrected once already; a claim is corrected once");
     await this.o.log.append("claim.amend", { claim: a.claim, ...changes, handle: a.agent.handle, operatorId });
+    if (!(await this.record()).amendments.has(a.claim)) return err(409, "the amendment reached the log but the record did not apply it: evidence landed on the claim at the same moment, so it can no longer be corrected");
     return ok(201, { claim: a.claim, ...changes, note: "Corrected, once: the entry is on the log and the page shows both versions. Nothing else about a claim can be changed; from here it is confirmed or refuted." });
+  }
+
+  /**
+   * Why a claim cannot be amended now, or null: the same rules the derivation applies (on the record and in view, its own
+   * operator's, never amended, and nothing landed on it: no receipt committed, no review filed, no argument opened, whatever
+   * became of them since).
+   */
+  private amendProblem(r: V2Record, ref: string, operatorId: string): ApiResult | null {
+    const claim = r.claims.find((c) => c.ref === ref);
+    if (!claim) return err(404, "no such claim on the record");
+    if (isHeld(r, ref)) return err(451, hiddenNote(r, ref));
+    const paperId = ref.slice(0, ref.indexOf("#"));
+    const owner = claim.external ? r.external.get(paperId)?.operatorId : claim.authorOperator;
+    if (owner !== operatorId) return err(403, "only the claim's own operator may correct it");
+    if (r.amendments.has(ref)) return err(409, "this claim was corrected once already; a claim is corrected once", { at: r.amendments.get(ref)!.ts });
+    const landed = [...r.checks.values()].some((c) => c.target === ref) || [...r.forecasts.keys()].some((k) => k.startsWith(`${ref}|`)) || (r.argumentsByClaim.get(ref)?.length ?? 0) > 0;
+    if (landed) return err(409, "evidence has landed on this claim (a receipt, a review or an argument); it can no longer be corrected, only refuted or confirmed");
+    return null;
   }
 
   async fileReview(env: Json): Promise<ApiResult> {

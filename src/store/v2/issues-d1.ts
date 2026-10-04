@@ -1,8 +1,8 @@
 /**
- * The issues queue and the complaints behind it, on D1 (migration 0018). Off
- * the log; read by stewards only.
+ * The issues queue and the complaints and flags behind it, on D1 (migrations
+ * 0018 and 0020). Off the log; read by stewards only.
  */
-import type { ComplaintRow, IssueKind, IssueRow, IssueSource, IssueStatus, IssueStore } from "../../api/v2/issues.js";
+import type { ComplaintRow, FlagKind, FlagRow, IssueKind, IssueRow, IssueSource, IssueStatus, IssueStore } from "../../api/v2/issues.js";
 
 export class D1IssueStore implements IssueStore {
   constructor(private db: D1Database) {}
@@ -45,5 +45,32 @@ export class D1IssueStore implements IssueStore {
   async complaintsSince(ipHash: string, sinceIso: string) {
     const r = await this.db.prepare("SELECT COUNT(*) AS n FROM v2_complaints WHERE ip_hash = ?1 AND at >= ?2").bind(ipHash, sinceIso).first<{ n: number }>();
     return Number(r?.n ?? 0);
+  }
+  private flag(r: Record<string, unknown>): FlagRow {
+    return { id: String(r["id"]), issueId: String(r["issue_id"]), subject: String(r["subject"]), kind: String(r["kind"]) as FlagKind, operatorId: String(r["operator_id"]), handle: String(r["handle"]), stake: Number(r["stake"]) === 1, detail: String(r["detail"] ?? ""), at: String(r["at"]) };
+  }
+  async putFlag(row: FlagRow) {
+    await this.db.prepare("INSERT OR IGNORE INTO v2_flags (id, issue_id, subject, kind, operator_id, handle, stake, detail, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")
+      .bind(row.id, row.issueId, row.subject, row.kind, row.operatorId, row.handle, row.stake ? 1 : 0, row.detail, row.at).run();
+  }
+  async hasFlag(id: string) {
+    return !!(await this.db.prepare("SELECT 1 AS x FROM v2_flags WHERE id = ?1").bind(id).first<{ x: number }>());
+  }
+  async flagsFor(issueId: string) {
+    const rs = await this.db.prepare("SELECT * FROM v2_flags WHERE issue_id = ?1 ORDER BY at ASC LIMIT 100").bind(issueId).all<Record<string, unknown>>();
+    return (rs.results ?? []).map((r) => this.flag(r));
+  }
+  async flagsSince(operatorId: string, sinceIso: string) {
+    const r = await this.db.prepare("SELECT COUNT(*) AS n FROM v2_flags WHERE operator_id = ?1 AND at >= ?2").bind(operatorId, sinceIso).first<{ n: number }>();
+    return Number(r?.n ?? 0);
+  }
+  async flagOn(issueId: string, operatorId: string) {
+    const r = await this.db.prepare("SELECT * FROM v2_flags WHERE issue_id = ?1 AND operator_id = ?2 LIMIT 1").bind(issueId, operatorId).first<Record<string, unknown>>();
+    return r ? this.flag(r) : null;
+  }
+  async flagOutcomes(operatorId: string, limit: number) {
+    const rs = await this.db.prepare("SELECT i.status AS status FROM v2_flags f JOIN v2_issues i ON i.id = f.issue_id WHERE f.operator_id = ?1 AND i.status != 'open' ORDER BY f.at DESC LIMIT ?2")
+      .bind(operatorId, Math.min(Math.max(1, limit), 100)).all<{ status: string }>();
+    return (rs.results ?? []).map((r) => String(r.status) as IssueStatus);
   }
 }

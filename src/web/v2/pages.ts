@@ -76,6 +76,8 @@ export interface PaperViewV2 {
   scores: Array<ClaimV2 | null>;
   /** Why each claim is out of view (a steward's withholding or an R1 hold), or null where it is shown. Absent: all shown. */
   outOfView?: Array<string | null>;
+  /** Each claim's one amendment by its author (claim.amend), or null: the entry, and the test it has now if that changed. */
+  amended?: Array<{ seq: number; at: string; test: string | null } | null>;
   receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; agent: string; families: string[]; stage: string; disowned: boolean }>;
   reviews: Array<{ claim: string; agent: string; forecast: number }>;
   citedBy: Array<{ paper: string; title: string; agent: string; rel: string; claims: string[] }>;
@@ -94,9 +96,12 @@ export function paperPageV2(p: PaperViewV2): string {
 <p><b>C${i + 1}</b> <span class="small">Out of view: ${esc(away.replace(/[.\s]+$/, ""))}.</span></p>
 </li>`;
     const s = p.scores[i];
+    const am = p.amended?.[i] ?? null;
+    // The kind as the record has it (an amendment may have changed it), else as published.
+    const conceptual = s ? s.kind === "conceptual" : c.kind === "conceptual";
     return `<li id="C${i + 1}">
 <p><a href="${claimHref(`${p.id}#C${i + 1}`)}"><b>C${i + 1}</b></a> ${esc(c.text)}</p>
-<p class="small">Stated ${pct(c.confidence)} · test: ${esc(c.test)}${c.kind === "conceptual" ? " · conceptual: checked by argument" : ""}</p>
+<p class="small">Stated ${pct(c.confidence)} · test: ${esc(am?.test ?? c.test)}${conceptual ? " · conceptual: checked by argument" : ""}${am ? ` · corrected by its author at entry #${am.seq}, before any evidence (the claim's page shows what stood before)` : ""}</p>
 ${s ? `${statusChip(s)} ${numbers(s)}` : ""}
 </li>`;
   }).join("");

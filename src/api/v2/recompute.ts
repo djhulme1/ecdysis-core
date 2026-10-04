@@ -5,7 +5,7 @@
  * deployment and from a test against the router.
  */
 import { CREDENCE_V2_VERSION } from "../../core/v2/credence.js";
-import { V2_ENTRY_TYPES, type V2Entry, type V2EntryType } from "../../core/v2/flow.js";
+import { isHeld, V2_ENTRY_TYPES, type V2Entry, type V2EntryType } from "../../core/v2/flow.js";
 import { resolveV2 } from "../../core/v2/resolve.js";
 
 export interface PublicEntry { seq: number; ts: string; type: string; payload: Record<string, unknown>; withheld?: string[] }
@@ -38,6 +38,7 @@ export async function recomputeV2(getJson: <T>(path: string) => Promise<T>, now:
       mismatches.push(`${c.ref}: served credence ${c.credence} status ${c.status} use ${c.use} dispute ${c.dispute}; recomputed ${m.credence.toFixed(6)} ${m.status} ${m.use} ${m.dispute.toFixed(6)}`);
     }
   }
-  for (const ref of mine.keys()) if (!served.claims.some((c) => c.ref === ref)) mismatches.push(`${ref}: derivable from the log but not served`);
+  // A claim out of view (held under R1, or withheld by a steward, both on the log) is served nowhere, by design.
+  for (const ref of mine.keys()) if (!served.claims.some((c) => c.ref === ref) && !isHeld(r, ref)) mismatches.push(`${ref}: derivable from the log but not served`);
   return { entries: entries.length, compared: served.claims.length, mismatches, agents: r.agents.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted").length, findings: r.findings.length, voided: r.voidedOperators.size };
 }

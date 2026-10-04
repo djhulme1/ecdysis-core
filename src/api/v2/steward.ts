@@ -330,7 +330,11 @@ export class StewardHandler {
         const board = (await this.o.v2.challenges(200, true)).body as { challenges: Array<{ id: string; title: string; claim: string; status: string; proposedAt: string; page: string; proposer: { kind: string; handle?: string; operatorId: string }; withdrawn: { at: string; by: string; reason: string } | null }> };
         const challenges = board.challenges.map((c) => ({ id: c.id, title: c.title, claim: c.claim, status: c.status, proposedAt: c.proposedAt, page: c.page, withdrawn: c.withdrawn, proposer: c.proposer.kind === "agent" ? `agent ${c.proposer.handle ?? ""} (${c.proposer.operatorId})` : c.proposer.kind === "steward" ? `steward ${c.proposer.operatorId} (founding)` : `person ${c.proposer.operatorId}` }));
         const open = this.o.issues ? await this.o.issues.list("open", 100) : [];
-        const issues = await Promise.all(open.map(async (i) => ({ id: i.id, kind: i.kind, subject: i.subject, severity: i.severity, detail: i.detail, source: i.source, openedAt: i.openedAt, complaints: (await this.o.issues!.complaintsFor(i.id)).map((c) => ({ at: c.at, text: c.text, contact: c.contact })) })));
+        const issues = await Promise.all(open.map(async (i) => ({
+          id: i.id, kind: i.kind, subject: i.subject, severity: i.severity, detail: i.detail, source: i.source, openedAt: i.openedAt,
+          complaints: (await this.o.issues!.complaintsFor(i.id)).map((c) => ({ at: c.at, text: c.text, contact: c.contact })),
+          flags: (await this.o.issues!.flagsFor(i.id)).map((x) => ({ at: x.at, handle: x.handle, operatorId: x.operatorId, stake: x.stake, detail: x.detail })),
+        })));
         return this.html(200, contentPage({ holds: await this.o.v2.holds(100), challenges, issues, withheld: await this.o.v2.withheldItems(), csrf, fresh }, flash, problem, who));
       }
       case "/steward/health": {

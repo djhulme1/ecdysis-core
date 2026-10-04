@@ -373,3 +373,32 @@ describe("the account store against SQLite, every migration applied", { skip: !s
     assert.equal(rec.agents.get("Moth")!.operatorId, c.account.operatorId, "the log keeps the operator id and the agent");
   });
 });
+
+describe("the issues store against SQLite, every migration applied", { skip: !sqlite && "node:sqlite is not available" }, () => {
+  it("keeps flags with their issues: once per envelope, counted per operator and day, with the outcomes of decided issues newest first", async () => {
+    const { D1IssueStore } = await import("../src/store/v2/issues-d1.js");
+    const db = migrated();
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((t) => t.name);
+    assert.ok(tables.includes("v2_flags"));
+    const store = new D1IssueStore(d1Over(db));
+    const issue = (id: string, status: "open" | "dismissed" | "acted", at: string) => store.putIssue({ id, kind: "quote-mismatch", subject: "ext:0123456789abcdef", severity: 1, detail: "Flagged by an agent.", source: "scout", status, openedAt: at, decidedAt: status === "open" ? null : at, decidedBy: status === "open" ? null : "op-s", note: null });
+    const flag = (id: string, issueId: string, at: string, operatorId = "op-scout") => store.putFlag({ id, issueId, subject: "ext:0123456789abcdef", kind: "quote-mismatch", operatorId, handle: "Scout", stake: id === "f1", detail: "The quote is not in the source.", at });
+    await issue("i1", "dismissed", "2026-10-03T09:00:00Z");
+    await issue("i2", "acted", "2026-10-03T10:00:00Z");
+    await issue("i3", "open", "2026-10-04T09:00:00Z");
+    await flag("f1", "i1", "2026-10-03T09:00:00Z");
+    await flag("f2", "i2", "2026-10-03T10:00:00Z");
+    await flag("f3", "i3", "2026-10-04T09:00:00Z");
+    await flag("f3", "i3", "2026-10-04T09:30:00Z"); // the same envelope again: ignored
+    await flag("g1", "i3", "2026-10-04T09:10:00Z", "op-other");
+    assert.ok(await store.hasFlag("f3"));
+    assert.ok(!(await store.hasFlag("f4")));
+    assert.deepEqual((await store.flagsFor("i3")).map((f) => [f.id, f.operatorId, f.stake, f.at]), [["f3", "op-scout", false, "2026-10-04T09:00:00Z"], ["g1", "op-other", false, "2026-10-04T09:10:00Z"]]);
+    assert.equal((await store.flagsFor("i1"))[0]!.stake, true);
+    assert.equal(await store.flagsSince("op-scout", "2026-10-04T00:00:00Z"), 1);
+    assert.equal(await store.flagsSince("op-scout", "2026-10-01T00:00:00Z"), 3);
+    assert.equal((await store.flagOn("i3", "op-other"))!.id, "g1");
+    assert.equal(await store.flagOn("i1", "op-other"), null);
+    assert.deepEqual(await store.flagOutcomes("op-scout", 10), ["acted", "dismissed"], "decided issues only, newest flag first");
+  });
+});

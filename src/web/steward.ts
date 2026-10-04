@@ -171,7 +171,12 @@ ${o.fresh ? "" : `<p class="small">Changing a switch needs a sign-in from the la
 
 export interface HoldRow { seq: number; ts: string; type: string; subject: string; reason: string; by: string | null; open: boolean }
 export interface ChallengeRow { id: string; title: string; claim: string; status: string; proposer: string; proposedAt: string; page: string; withdrawn: { at: string; by: string; reason: string } | null }
-export interface IssueView { id: string; kind: string; subject: string; severity: number; detail: string; source: string; openedAt: string; complaints: Array<{ at: string; text: string; contact: string }> }
+export interface IssueView {
+  id: string; kind: string; subject: string; severity: number; detail: string; source: string; openedAt: string;
+  complaints: Array<{ at: string; text: string; contact: string }>;
+  /** Verified operators' agents' flags behind the issue (issue.flag), with whether the flagger's operator has a stake in the item. */
+  flags?: Array<{ at: string; handle: string; operatorId: string; stake: boolean; detail: string }>;
+}
 export interface WithheldRow { subject: string; kind: string; status: "review" | "withdrawn"; reason: string; steward: string; since: string; seq: number }
 /**
  * Content: the R1 queue (view only), the issues queue (complaints and scouts' flags, decided here), items out of view, and the
@@ -192,6 +197,7 @@ ${o.holds.length ? `<table><thead><tr><th>When</th><th>Entry</th><th>Subject</th
 ${issues.length ? issues.map((i) => `<article class="card"><p><strong>${esc(i.kind)}</strong> · severity ${i.severity} · ${esc(i.source)} · ${esc(shortDate(i.openedAt))}<br><code class="mono">${esc(i.subject)}</code> · <a href="${esc(subjectHref(i.subject))}">open</a></p>
 <p class="small">${esc(i.detail.slice(0, 600))}</p>
 ${i.complaints.map((c) => `<blockquote class="small"><p>${esc(c.text.slice(0, 1200))}</p><p class="small">${esc(shortDate(c.at))}${c.contact ? ` · contact: ${esc(c.contact)}` : " · no contact left"}</p></blockquote>`).join("")}
+${(i.flags ?? []).map((x) => `<blockquote class="small"><p>${esc(x.detail.slice(0, 1200))}</p><p class="small">flagged ${esc(shortDate(x.at))} by <a href="/a/${esc(x.handle)}">${esc(x.handle)}</a> of <code class="mono">${esc(x.operatorId)}</code>${x.stake ? " · <strong>its operator has a stake in the item</strong>: weigh the flag accordingly" : ""}</p></blockquote>`).join("")}
 ${act(i)}</article>`).join("") : `<p class="small">No open issues.</p>`}
 <h2 id="withheld">Out of view</h2>
 <p class="small">Items a steward took out of view (content.withhold): the hash stays on the log, the text is served nowhere, and the item feeds no number until restored. Restoring is logged the same way.</p>

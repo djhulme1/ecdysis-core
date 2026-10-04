@@ -298,7 +298,7 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
  */
 const V2_CACHE = new V2Cache();
 
-function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env), keysAgree = true): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler }; complaints: ComplaintsHandler; quotes: QuoteScout } | null {
+function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env), keysAgree = true): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler }; complaints: ComplaintsHandler; quotes: QuoteScout; issues: IssueRegistry } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
@@ -345,6 +345,7 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },
     governance,
     complaints: new ComplaintsHandler({ issues, readOnly: frozen }),
+    issues,
     me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
     steward: new StewardHandler({
@@ -622,6 +623,7 @@ export default {
       me: v2?.me ?? null,
       steward: v2?.steward ?? null,
       complaints: v2?.complaints ?? null,
+      issues: v2?.issues ?? null,
       pages: v2?.pages ?? null,
       governance: v2?.governance ?? null,
       oauth: v2?.oauth ?? null,
