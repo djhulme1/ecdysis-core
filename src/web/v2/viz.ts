@@ -21,7 +21,8 @@
  * them. The threshold is MOCK_UNTIL_CLAIMS claims on the record.
  */
 
-import { esc } from "../design.js";
+import { esc, statusTone } from "../design.js";
+import { computeCredenceV2, CREDENCE_V2_VERSION, type ClaimInput, type ClaimStatusV2, type EvidenceInput, type EvidenceKind, type UseInput } from "../../core/v2/credence.js";
 
 /** Below this many claims on the record, the figures are the mock set, labelled. */
 export const MOCK_UNTIL_CLAIMS = 20;
@@ -187,6 +188,72 @@ export function receiptFigure(): string {
   ];
   return `<figure class="fig receipt"><figcaption><span class="fig-title">The anatomy of a receipt</span><span class="fig-caption">A reproduction done the archive's way. Determinism is observed, not declared; a disagreement opens a finding, never a verdict.</span></figcaption>
 <ol class="flow">${boxes.map(([t, a, b]) => `<li><b>${esc(t!)}</b><span>${esc(a!)}</span><small>${esc(b!)}</small></li>`).join("")}</ol>
+</figure>`;
+}
+
+/* ------------------------------------------------------------------------ */
+/* One claim under test: the rules in force, worked through.                 */
+
+export interface TraceStep {
+  what: string;
+  why: string;
+  credence: number;
+  /** The bar for "established" at that moment: τ(U), which rises with use. */
+  bar: number;
+  status: ClaimStatusV2;
+}
+
+/**
+ * A hypothetical claim taken through six moments, each scored by
+ * computeCredenceV2 itself, so the figure can never drift from the rules:
+ * change the rules and the figure changes with them (and the test that pins
+ * the story fails, on purpose). The claim, its operators and its papers are
+ * made up and named as such; every checker is a verified operator with no
+ * track record yet, so each counts at the newcomer's reliability.
+ */
+export function claimTrace(): TraceStep[] {
+  const claim: ClaimInput = { ref: "example#C1", paper: "example", authorOperator: "op-author", stated: 0.7, foundations: [], seq: 1 };
+  const evidence: EvidenceInput[] = [];
+  const uses: UseInput[] = [];
+  const steps: TraceStep[] = [];
+  let seq = 2;
+  const file = (kind: EvidenceKind, confirms: boolean, operatorId: string, families: string[], agent = operatorId) =>
+    evidence.push({ id: `example-${seq}`, claim: claim.ref, kind, confirms, agent, operatorId, tier: "verified", families, seq: seq++ });
+  const moment = (what: string, why: string) => {
+    const c = computeCredenceV2([claim], evidence, uses).get(claim.ref)!;
+    steps.push({ what, why, credence: c.credence, bar: c.threshold, status: c.status });
+  };
+  moment("Published", "Its author states 70% confidence. Nobody has checked it yet.");
+  file("review", true, "op-reviewer-1", []);
+  file("review", true, "op-reviewer-2", []);
+  moment("Two independent reviews agree", "Reviews count a little, and can never establish a claim.");
+  for (let k = 0; k < 1000; k++) file("replication", true, "op-farm", ["claude"], `farm-${k}`);
+  moment("One operator's 1,000 agents all confirm it", "A thousand copies count once: one operator, one voice.");
+  file("replication", true, "op-second", ["gpt"]);
+  moment("A second operator, on another model family, confirms it", "Two independent operators and two model families, over the bar: established.");
+  for (let k = 0; k < 10; k++) uses.push({ claim: claim.ref, paper: `later-${k}`, operatorId: `op-citing-${k}`, tier: "verified" });
+  moment("Ten later papers come to rely on it", "The bar rises with use: what much rests on must be surer.");
+  file("replication", false, "op-third", ["gemini"]);
+  moment("A third operator's replication fails", "A failure weighs more than a success, and the disagreement is shown, not netted away.");
+  return steps;
+}
+
+let traceSteps: TraceStep[] | null = null;
+
+/**
+ * The worked example as a figure: one row per moment, each with a gauge of
+ * the claim's credence, the bar for "established" marked in the one orange,
+ * the number and the status chip. HTML, so it stacks on a phone and reads
+ * to a screen reader as the list it is.
+ */
+export function traceFigure(): string {
+  const steps = (traceSteps ??= claimTrace());
+  const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+  const two = (x: number) => x.toFixed(2);
+  const rows = steps.map((s) => `<li><div class="tx"><b>${esc(s.what)}</b><span>${esc(s.why)}</span></div><div class="tm"><span class="gauge" role="img" aria-label="Credence ${two(s.credence)}; the bar for established ${two(s.bar)}"><span class="fill" style="width:${pct(s.credence)}"></span><span class="bar" style="left:${pct(s.bar)}"></span></span><span class="tv">${two(s.credence)}</span><span class="status ${statusTone(s.status)}">${esc(s.status)}</span></div></li>`).join("");
+  return `<figure class="fig trace-fig" id="f-trace"><figcaption><span class="fig-title">One claim, under test</span><span class="fig-caption">A worked example: the rules in force (${esc(CREDENCE_V2_VERSION)}) applied to a hypothetical claim, checked by agents with no track record yet. Every number is computed by the code that scores the live record.</span></figcaption>
+<ol class="trace">${rows}</ol>
+<p class="trace-key"><span><i class="k-fill" aria-hidden="true"></i>Credence</span><span><i class="k-bar" aria-hidden="true"></i>The bar for established, which rises with use</span></p>
 </figure>`;
 }
 
