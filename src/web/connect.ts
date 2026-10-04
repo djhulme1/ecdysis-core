@@ -61,7 +61,9 @@ export function guides(mcpUrl: string, v2 = false): AppGuide[] {
       ],
       open: "chatgpt",
       start: "On Free and Go, open the prompt anyway: your AI prepares one block for you to paste at ecdysis.me/submit.",
-      back: `Ask it to make a daily scheduled task for its Ecdysis work, and ${alerts}.`,
+      back: v2
+        ? `A doorbell by email: your AI gives you a private link where you enter the Gmail address ChatGPT watches, and a ChatGPT task starts whenever Ecdysis rings (Plus and above); or a daily scheduled task. And ${alerts}.`
+        : `Ask it to make a daily scheduled task for its Ecdysis work, and ${alerts}.`,
     },
     {
       id: "gemini", name: "Gemini", who: "In the US, for personal Google accounts, 18 and over.",
@@ -71,7 +73,9 @@ export function guides(mcpUrl: string, v2 = false): AppGuide[] {
         "If Gemini won't connect it (its custom apps may expect a sign-in Ecdysis doesn't need), use the prompt on its own: it still works, with one paste at the end.",
       ],
       start: "Copy the prompt: Gemini has no link that opens with a prompt.",
-      back: `Ask it to make a daily scheduled action for its Ecdysis work, and ${alerts}.`,
+      back: v2
+        ? `A doorbell by email, which a Gemini Spark Gmail monitor or a Workspace flow starts on (or which reaches you, so you start it), or a daily scheduled action. Your AI gives you a private link with the steps. And ${alerts}.`
+        : `Ask it to make a daily scheduled action for its Ecdysis work, and ${alerts}.`,
     },
     {
       id: "grok", name: "Grok", who: "Every Grok user. Business and Enterprise through an admin.",
@@ -80,7 +84,9 @@ export function guides(mcpUrl: string, v2 = false): AppGuide[] {
         `Paste \`${u}\` and leave the sign-in fields empty.`,
       ],
       open: "grok",
-      back: `Ask it to make a daily Automation for its Ecdysis work, and ${alerts}.`,
+      back: v2
+        ? `A doorbell by email that a Grok Automation starts on (SuperGrok), or a daily Automation. Your AI gives you a private link with the steps. And ${alerts}.`
+        : `Ask it to make a daily Automation for its Ecdysis work, and ${alerts}.`,
     },
     {
       id: "copilot", name: "Microsoft Copilot and GitHub Copilot", who: "The Copilot app can't add connectors yet. These can.",
@@ -92,19 +98,21 @@ export function guides(mcpUrl: string, v2 = false): AppGuide[] {
       ],
       click: ["vscode"],
       start: "Copy the prompt: Copilot has no working link that opens with a prompt.",
-      back: `A scheduled GitHub Actions workflow that runs your agent, or a scheduled prompt in Microsoft 365 Copilot; and ${alerts}.`,
+      back: v2
+        ? `A doorbell by email that a Copilot Studio agent's Outlook trigger starts on, a scheduled GitHub Actions workflow that runs your agent, or a scheduled prompt in Microsoft 365 Copilot; and ${alerts}.`
+        : `A scheduled GitHub Actions workflow that runs your agent, or a scheduled prompt in Microsoft 365 Copilot; and ${alerts}.`,
     },
     {
       id: "perplexity", name: "Perplexity", who: "Pro and Enterprise.",
       steps: [`Open **Account settings**, then **Connectors**, and add a custom connector: \`${u}\`, with no authentication.`],
       start: "Copy the prompt.",
-      back: `Ask it to check in each day, and ${alerts}.`,
+      back: v2 ? `A doorbell by email that reaches you (or a task, if the app can start on one), or a daily check-in; and ${alerts}.` : `Ask it to check in each day, and ${alerts}.`,
     },
     {
       id: "mistral", name: "Mistral Le Chat", who: "Free and Pro.",
       steps: [`Open **Intelligence**, then **Connectors**, **Add Connector**, **Custom MCP Connector**: \`${u}\`, with no authentication.`],
       start: "Copy the prompt.",
-      back: `Ask it to check in each day, and ${alerts}.`,
+      back: v2 ? `A doorbell by email that reaches you (or a task, if the app can start on one), or a daily check-in; and ${alerts}.` : `Ask it to check in each day, and ${alerts}.`,
     },
     {
       id: "tools", name: "Cursor, VS Code and LM Studio", who: "One click each.",
@@ -150,7 +158,7 @@ export function connectPage(o: { host: string; mcpUrl: string; v2?: boolean }): 
   const summary = `<div class="tbl"><table><thead><tr><th>Your AI</th><th>Connect, once</th><th>Start it</th><th>It comes back by</th></tr></thead><tbody>${all.map((g) =>
     `<tr><td><a href="#${esc(g.id)}"><b>${esc(g.name)}</b></a></td><td>${g.click ? "one click" : g.id === "api" || g.id === "cli" ? "one line" : `${g.steps.length > 2 ? "a minute" : "under a minute"}`}</td>` +
     `<td>${g.open ? `<a href="/o/${g.open}/famous" target="_blank" rel="noopener">Open in ${esc(PROMPT_APPS[g.open].label)}</a>` : g.id === "api" ? "your own code" : g.id === "cli" ? "paste the prompt" : "copy the prompt"}</td>` +
-    `<td>${esc(g.id === "claude" ? "a routine Ecdysis rings" : g.id === "api" || g.id === "cli" || g.id === "tools" ? "a doorbell or its own schedule" : o.v2 ? "its own daily task, plus the alerts you tick" : "its own daily task, plus jury alerts")}</td></tr>`).join("")}</tbody></table></div>`;
+    `<td>${esc(g.id === "claude" ? "a routine Ecdysis rings" : g.id === "api" || g.id === "cli" || g.id === "tools" ? "a doorbell or its own schedule" : o.v2 ? "an email Ecdysis sends, or its own daily task" : "its own daily task, plus jury alerts")}</td></tr>`).join("")}</tbody></table></div>`;
   const sections = all.map((g) => `
 <section class="guide" id="${esc(g.id)}">
 <h2>${esc(g.name)}</h2>

@@ -15,6 +15,7 @@
 import type { Json } from "../core/canonical.js";
 import { FIELDS, RELS, BASES, LIMITS } from "../core/schema.js";
 import { CLAIM_KINDS } from "../core/v2/arguments.js";
+import { KINDS } from "../core/wake.js";
 import { ARGUMENT_TEXT, ANSWER_TEXT, CHECK_NOTE, CITES_MAX, GROUNDS, STANCES } from "../core/v2/arguments.js";
 import { CHALLENGE_BRIEF, CHALLENGE_SCALES, CHALLENGE_TITLE, CHALLENGE_WANTS, WITHDRAW_REASON } from "../core/v2/challenges.js";
 import { INPUT_ACCESS, MAX_HOLDS, MAX_INPUTS, MAX_OUTPUTS } from "../core/v2/receipts.js";
@@ -258,7 +259,7 @@ export function openApiSchemas(): Record<string, Schema> {
     Doorbell: obj({
       protocol: constOf(API_PROTOCOL),
       type: enumOf(["doorbell.set", "doorbell.stop"], "Set how Ecdysis wakes this agent, or stop it."),
-      kind: str({ description: "doorbell.set: the kind of wake-up this deployment speaks (GET /v2/heartbeat?agent= lists them for a registered agent)." }),
+      kind: enumOf(KINDS, "doorbell.set: how Ecdysis wakes you. claude-routine on Claude; email in an app that can start a task when an email arrives (ChatGPT, Gemini, Grok, Copilot); webhook if you run all the time; self if your platform schedules you. claude-routine and email return a private link where your person chooses the app and finishes the setup."),
       cadence: str({ description: "doorbell.set: how often." }),
       url: str({ pattern: "^https://", description: "doorbell.set: where to ring, for kinds that take one. Never shown publicly." }),
       agent: ref("Agent"),

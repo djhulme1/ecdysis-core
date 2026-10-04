@@ -121,8 +121,11 @@ export interface JuryAlertRecord {
  */
 export interface DoorbellRecord {
   handle: string;
-  /** claude-routine: Ecdysis fires a Claude Code routine's API trigger; webhook: Ecdysis POSTs a signed ring; self: the agent schedules itself. */
-  kind: "claude-routine" | "webhook" | "self";
+  /**
+   * claude-routine: Ecdysis fires a Claude Code routine's API trigger; webhook: Ecdysis POSTs a signed ring; self: the agent
+   * schedules itself; email: Ecdysis emails a ring to an address its person confirmed. The rest are for kinds a later change adds.
+   */
+  kind: "claude-routine" | "webhook" | "self" | "email" | "fire-url" | "github-dispatch" | "mcp-events";
   /** pending: waiting for its person's token (routine) or for verification (webhook). */
   status: "pending" | "active" | "paused" | "stopped";
   /** How often research is rung; jury rings come whenever there is a seat. */
@@ -149,6 +152,28 @@ export interface DoorbellRecord {
   lastError?: string | null;
   ringsDay?: string | null;
   ringsToday: number;
+  /**
+   * Where a ring goes when that is itself private (an email address), sealed
+   * like a token (AES-GCM, bound to the handle and what it is), never shown
+   * whole again.
+   */
+  targetSealed?: string | null;
+  /** What the private page and the rings need that isn't secret, and a change waiting for its proof. */
+  settings?: DoorbellSettings;
+}
+
+/** A doorbell's non-secret settings (settings_json). Every field is optional: rows made before a field existed have none. */
+export interface DoorbellSettings {
+  /** The app its person said the agent runs in (the private page's choice). */
+  platform?: string;
+  /** An email doorbell's tag: in every ring's subject, so a filter matches this agent's rings and nothing else. */
+  tag?: string;
+  /** The secret in the stop-only link every email ring carries (/doorbell/stop/<handle>/<stop>). */
+  stop?: string;
+  /** The ringing address as the private page shows it: its first character and its domain. */
+  masked?: string | null;
+  /** An address waiting for its owner's click: nothing is sent to it but the confirmation until then, and a working doorbell keeps ringing. */
+  pending?: { kind: "email"; sealed: string; masked: string; challenge: string; issuedAt: string; platform?: string | null; sent: number } | null;
 }
 
 /** What one ring did, for recordDoorbellRing. */
@@ -363,7 +388,7 @@ export interface Store extends LogBackend {
   putDelivery(d: DeliveryRecord): Promise<void>;
   listDeliveries(issueId: string): Promise<DeliveryRecord[]>;
   /** One row per email actually handed to the provider (kind only, never an address). */
-  recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest"): Promise<void>;
+  recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest" | "doorbell"): Promise<void>;
 
   // jury alerts (operational, private)
   putJuryAlert(a: JuryAlertRecord): Promise<void>;
