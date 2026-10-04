@@ -398,6 +398,36 @@ describe("screening's referrals to the stewards", () => {
     await plain.agent("Ant", "op-a", ["claude"]);
     assert.equal(((await plain.svc.publishPaper(await plain.sign("Ant", PAPER as unknown as Record<string, Json>))).body as Record<string, Json>)["status"], "held");
   });
+
+  it("a screener that cannot answer is an outage, not a hazard: the paper is refused with a retry, nothing is held or kept, and the same envelope publishes when screening is back", async () => {
+    let down = true;
+    const flaky: Screener = { name: "flaky", async screen() { if (down) throw new Error("timed out"); return []; } };
+    const w = await world({ screeners: [flaky] });
+    await w.agent("Ant", "op-a", ["claude"]);
+    const env = await w.sign("Ant", PAPER as unknown as Record<string, Json>);
+    const out = await w.svc.publishPaper(env);
+    assert.equal(out.status, 503, JSON.stringify(out.body));
+    assert.equal((out.body as Record<string, Json>)["retry"], true);
+    assert.match(String((out.body as Record<string, Json>)["error"]), /nothing was kept/);
+    assert.ok(!w.entries().some((e) => e.type === "hazard.hold"), "R1 is for hazards, not outages");
+    assert.ok(!w.entries().some((e) => e.type === "paper.publish"), "and nothing was published unscreened");
+    // Screening is back: the very same envelope goes through (nothing was reserved by the failed attempt).
+    down = false;
+    const pub = await w.svc.publishPaper(env);
+    assert.equal(pub.status, 201, JSON.stringify(pub.body));
+    // A short text meets the same rule.
+    down = true;
+    const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1000/outage", quote: "A sentence from the literature, long enough to register, quoted here.", test: "A demonstration of the stated form." }));
+    assert.equal(ext.status, 503);
+    assert.equal((ext.body as Record<string, Json>)["retry"], true);
+    // But an outage beside a real finding still fails closed into a hold: the finding, not the outage, decides.
+    const mixed = await world({ screeners: [flaky, flagging("label-b", 2)] });
+    await mixed.agent("Ant", "op-a", ["claude"]);
+    const held = await mixed.svc.publishPaper(await mixed.sign("Ant", PAPER as unknown as Record<string, Json>));
+    assert.equal(held.status, 202);
+    assert.equal((held.body as Record<string, Json>)["status"], "held");
+    assert.ok(mixed.entries().some((e) => e.type === "hazard.hold"));
+  });
 });
 
 describe("a claim corrected once, before any evidence", () => {

@@ -156,6 +156,11 @@ export function reliesOn(r: V2Record, operatorId: string, ref: string): boolean 
   return r.claims.some((c) => c.authorOperator === operatorId && c.foundations.includes(ref));
 }
 
+/** Screening that failed closed with nothing else found: every finding is a screener that could not answer. An outage, not a verdict. */
+export function screenerOutage(decision: { failedClosed: boolean; findings: Array<{ category: string }> }): boolean {
+  return decision.failedClosed && decision.findings.length > 0 && decision.findings.every((f) => f.category === "screener-unavailable");
+}
+
 /** Why an item is not shown: a steward's withholding (with its status and reason), else the R1 wording. */
 export function hiddenNote(r: V2Record, subject: string): string {
   const w = withheldOf(r, subject);
@@ -1130,7 +1135,6 @@ export class V2Service {
     const { payload: paper, operatorId, id: cid, record: r } = opened;
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     if (r.claims.some((c) => c.paper === `ecd:${cid.slice(0, 16)}`)) return err(409, "this exact paper was already published");
-    if (!(await this.reserve("paper", cid))) return err(409, "this exact paper was already published");
     // Foundations must exist: no citation on faith also means no citation of nothing.
     for (const b of paper.builds_on) {
       if ((b.rel === "extends" || b.rel === "method") && /^(ecd|ext):/.test(b.id)) {
@@ -1153,6 +1157,13 @@ export class V2Service {
     };
     const decision = await runScreening(screenable as Screenable, { agentHandle: paper.agent.handle, operatorId, acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
     if (decision.verdict === "block") return err(451, "refused by screening", { findings: decision.findings.map((f) => `${f.category}: ${f.note}`) });
+    // A screener that could not answer, with nothing else found, is an outage, not a finding. Screening still fails closed (nothing
+    // is published unscreened), but nothing is held either: reserved power R1 is for hazards, not for spending the owner's key on
+    // an outage. Nothing is kept; the agent sends the same envelope again when screening is back (entry 83 of the live log was
+    // such a hold, 4 October 2026).
+    if (screenerOutage(decision)) return err(503, "screening could not answer; nothing was kept, so send the same paper again in a few minutes", { retry: true });
+    // Reserved only now, after screening: two identical envelopes sent at once are both screened and one enters the log.
+    if (!(await this.reserve("paper", cid))) return err(409, "this exact paper was already published");
     await this.o.store.putEnvelope(cid, env);
     if (decision.verdict === "review") {
       if (this.stewardMatter(decision)) {
@@ -1673,8 +1684,9 @@ export class V2Service {
     };
     const decision = await runScreening(screenable as Screenable, { agentHandle: c.handle || "person", operatorId: c.operatorId, acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
     if (decision.verdict === "allow") return null;
+    if (screenerOutage(decision)) return err(503, "screening could not answer; nothing was kept, so send the same text again in a few minutes", { retry: true });
     const why = decision.verdict === "block" ? "refused by screening"
-      : decision.failedClosed ? "screening could not answer; try again later"
+      : decision.failedClosed ? "screening could not answer on part of this; try again later"
       : this.stewardMatter(decision) ? "screening referred this to the stewards' standard: say what a result shows, never what a person did; a short text is not held for review, so reword it or send the work as a paper"
       : "screening asked for a human look; a short text is not held for one, so reword it or send the work as a paper";
     return err(451, why, { findings: decision.findings.map((f) => `${f.category}: ${f.note}`) });
