@@ -28,6 +28,8 @@ export interface StewardOptions {
 }
 
 const MAX_FORM = 8 * 1024;
+/** The bulk seed form carries up to 25 briefs of 1500 characters with their quotes and tests, URL-encoded: it has its own ceiling. */
+const MAX_SEED_FORM = 96 * 1024;
 const SESSION_COOKIE = "ecd_s";
 
 export function isStewardPath(path: string): boolean {
@@ -66,8 +68,9 @@ export class StewardHandler {
     if (method !== "POST") return this.page(path, signed, url, flash, null);
 
     const len = Number(req.headers.get("content-length") ?? "0");
-    const text = len > MAX_FORM ? "" : await req.text();
-    if (len > MAX_FORM || text.length > MAX_FORM) return this.html(413, refusedPage("That form was too large."));
+    const maxForm = path === "/steward/content/challenge-seed-many" ? MAX_SEED_FORM : MAX_FORM;
+    const text = len > maxForm ? "" : await req.text();
+    if (len > maxForm || text.length > maxForm) return this.html(413, refusedPage("That form was too large."));
     const f = new URLSearchParams(text);
     if (!(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.page("/steward", signed, url, null, "That form had expired. Please try again.");
     if (this.o.readOnly) return this.page("/steward", signed, url, null, "Ecdysis isn't taking changes at the moment.");
@@ -106,6 +109,23 @@ export class StewardHandler {
           return this.page("/steward/content", signed, url, null, `Couldn't seed the challenge: ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}.`);
         }
         return this.redirect(`/steward/content?ok=${encodeURIComponent("Founding challenge seeded. It is on the board under your operator id, named as a steward's seed.")}`);
+      }
+      case "/steward/content/challenge-seed-many": {
+        // Several founding challenges in one act: a JSON array pasted into the form, each seeded as above; the reply says which went on.
+        let seeds: unknown;
+        try { seeds = JSON.parse(f.get("seeds") ?? ""); } catch { return this.page("/steward/content", signed, url, null, "Couldn't read the seeds: paste a JSON array of {source, quote, test, kind, title, brief, scale, wants}."); }
+        if (!Array.isArray(seeds) || seeds.length === 0 || seeds.length > 25) return this.page("/steward/content", signed, url, null, "Couldn't read the seeds: a JSON array of 1 to 25 objects.");
+        const outcomes: string[] = [];
+        let seeded = 0;
+        for (const [i, raw] of seeds.entries()) {
+          const x = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+          const r = await this.o.v2.proposeChallengeBySteward(steward, { claim: typeof x["claim"] === "string" ? x["claim"] : "", source: x["source"] ?? "", quote: x["quote"] ?? "", test: x["test"] ?? "", kind: x["kind"] ?? "", title: x["title"] ?? "", brief: x["brief"] ?? "", scale: x["scale"] ?? "", wants: x["wants"] ?? "" });
+          const b = r.body as Record<string, unknown>;
+          if (r.status === 201) { seeded++; outcomes.push(`${i + 1}: seeded ${String(b["id"])}`); }
+          else { const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[]; outcomes.push(`${i + 1}: ${r.status} ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}`); }
+        }
+        const summary = `${seeded} of ${seeds.length} seeded. ${outcomes.join(" · ")}`;
+        return seeded === seeds.length ? this.redirect(`/steward/content?ok=${encodeURIComponent(summary.slice(0, 1500))}`) : this.page("/steward/content", signed, url, seeded ? summary.slice(0, 1500) : null, seeded ? null : summary.slice(0, 1500));
       }
       case "/steward/content/challenge-withdraw": {
         const r = await this.o.v2.withdrawChallengeBySteward(f.get("id") ?? "", f.get("reason") ?? "", steward);

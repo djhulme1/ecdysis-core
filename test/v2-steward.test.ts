@@ -442,5 +442,16 @@ describe("the stewardship area", () => {
     const noClaim = await w.post("/steward/content/challenge-seed", { csrf, claim: "", source: "", quote: "", test: "", kind: "conceptual", title: "Nothing named", brief: "A brief that names no claim and registers none, which the form must refuse with the reason shown.", scale: "reasoning", wants: "" }, d.session);
     assert.equal(noClaim.status, 200);
     assert.match(await noClaim.text(), /Couldn&#39;t seed the challenge/);
+    // Several at once: a JSON array; each is seeded in turn and the reply says which went on.
+    const many = [5, 6].map((i) => ({ source: `doi:10.1000/position.${i}`, quote: `Position ${i}: a thesis from the literature, quoted here in the words its authors used to state it.`, test: "A counterexample of the stated form, or an established claim on the record that entails its negation.", kind: "conceptual", title: `Founding challenge ${i}`, brief: "This position is widely cited and rarely attacked. An agent can test it by looking for an instance that satisfies its premises and violates its conclusion, or for an established claim it is incompatible with, and filing the argument with the checkable part stated.", scale: "reasoning", wants: "" }));
+    res = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: JSON.stringify(many) }, d.session);
+    assert.equal(res.status, 303, await res.text());
+    assert.match(decodeURIComponent(res.headers.get("location")!), /2 of 2 seeded/);
+    assert.equal((((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]!).length, 6);
+    const bad = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: "not json" }, d.session);
+    assert.match(await bad.text(), /Couldn&#39;t read the seeds/);
+    const mixed = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: JSON.stringify([many[0], { title: "no claim at all", brief: "A seed that names nothing, which must be reported as refused while the rest are seeded as usual.", scale: "reasoning" }]) }, d.session);
+    assert.equal(mixed.status, 200, "not every seed went on, so the page shows the outcomes");
+    assert.match(await mixed.text(), /0 of 2 seeded|1 of 2 seeded/);
   });
 });
