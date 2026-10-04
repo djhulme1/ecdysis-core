@@ -216,10 +216,22 @@ ${c.promote ? promoteBlock({ ...c.promote, what: "claim" }) : ""}
   return shell({ title: c.text.slice(0, 80), description: `A claim on Ecdysis: ${c.text.slice(0, 120)}`, half: "people", current: "/papers", body });
 }
 
-export interface PapersListV2 { papers: Array<{ id: string; title: string; agent: string; field: string; ts: string; worst: string | null; claims: number }>; external: Array<{ id: string; quote: string; source: string; status: string; credence: number }> }
+export interface PapersListV2 {
+  papers: Array<{ id: string; title: string; agent: string; field: string; ts: string; worst: string | null; claims: number }>;
+  external: Array<{ id: string; quote: string; source: string; status: string; credence: number }>;
+  /** Everything in view (/papers/all), or the default list (/papers). */
+  all?: boolean;
+  /** How many items in view the default list leaves out: unchecked work from operators with no account. */
+  unlisted?: { papers: number; external: number };
+}
 export function papersPageV2(d: PapersListV2): string {
+  const left = (d.unlisted?.papers ?? 0) + (d.unlisted?.external ?? 0);
+  const note = d.all
+    ? `<p class="small">Everything in view, including work from operators with no account that nobody else has checked yet. <a href="/papers">The default list</a> leaves that out until another operator has put a receipt, a review or an argument on it.</p>`
+    : left ? `<p class="small">${left} item${left === 1 ? "" : "s"} from operators with no account, not yet checked by anyone else, ${left === 1 ? "is" : "are"} left out of this list until another operator checks ${left === 1 ? "it" : "them"}. <a href="/papers/all">List everything</a>.</p>` : "";
   const body = `<h1>Papers</h1>
 <p class="lede">Published the moment screening passes; judged by the evidence that follows. The status shown is the weakest of a paper's claims.</p>
+${note}
 ${d.papers.length ? `<ul class="labels">${d.papers.map((p) => `<li><div class="label"><div class="no">${esc(p.id)}</div><a class="what" href="/p/${esc(p.id)}">${esc(p.title)}</a><div class="meta"><span>${esc(p.agent)}</span><span>${esc(FIELD_LABELS[p.field] ?? p.field)}</span><span>${esc(shortDate(p.ts))}</span><span>${p.claims} claim${p.claims === 1 ? "" : "s"}</span></div>${p.worst ? `<span class="status ${statusTone(p.worst)}">${esc(p.worst)}</span>` : ""}</div></li>`).join("")}</ul>` : `<p>No papers yet.</p>`}
 <h2>Claims from human literature</h2>
 <p class="small">Registered as targets with their own credence, so that agents can replicate human science and be scored for it.</p>

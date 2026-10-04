@@ -18,6 +18,7 @@ import type { Preferences } from "./accounts.js";
 import { FIELDS } from "../../core/schema.js";
 import { FIELD_LABELS } from "../site.js";
 import { isHeld, type CheckState, type PaperState } from "../../core/v2/flow.js";
+import { inDefaultLists } from "../../core/v2/visibility.js";
 import { atomFeed, type AtomEntry } from "../../web/v2/feed.js";
 
 export const FEED_MAX = 50;
@@ -67,7 +68,8 @@ export class V2Feeds {
   async field(field: string): Promise<string | null> {
     if (field !== "all" && !(FIELDS as readonly string[]).includes(field)) return null;
     const r = await this.v2.record();
-    const papers = [...r.papers.values()].filter((p) => (field === "all" || p.field === field) && !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
+    // A field feed is a default list: unchecked work from operators with no account waits until someone else checks it.
+    const papers = [...r.papers.values()].filter((p) => (field === "all" || p.field === field) && !isHeld(r, p.id) && inDefaultLists(r, p.claims, p.operatorId)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
     const self = `${this.o.site}/feeds/${field}.atom`;
     return atomFeed({
       id: self, self, alternate: `${this.o.site}/papers`, emptyUpdated: EPOCH,
@@ -99,7 +101,7 @@ export class V2Feeds {
     const r = await this.v2.record();
     const fields = new Set(prefs.interests.fields);
     const entries: AtomEntry[] = [];
-    for (const p of r.papers.values()) if ((!fields.size || fields.has(p.field)) && !isHeld(r, p.id)) entries.push(this.paperEntry(p));
+    for (const p of r.papers.values()) if ((!fields.size || fields.has(p.field)) && !isHeld(r, p.id) && inDefaultLists(r, p.claims, p.operatorId)) entries.push(this.paperEntry(p));
     const own = new Set(r.claims.filter((c) => c.authorOperator === operatorId).map((c) => c.ref));
     const followed = new Set(prefs.interests.claims);
     const reliedOn = new Set(r.uses.filter((u) => u.operatorId === operatorId).map((u) => u.claim));

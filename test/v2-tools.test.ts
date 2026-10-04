@@ -233,6 +233,10 @@ describe("the site after the switchover", () => {
     const sign = async (payload: Json) => ({ payload, signature: await signJson(kp.privateKey, payload) }) as Json;
     const pub = await v2svc.publishPaper(await sign({ protocol: "ecdysis/0.2", type: "paper", title: "A paper for the sitemap", abstract: "An abstract long enough to pass the structural screen, describing what was measured and how it was measured, in two paragraphs.\n\nA second paragraph closes it.", field: "math", methods: "Pre-registered; one seeded entry point.", claims: [{ text: "The sitemap lists every published paper by its identifier.", confidence: 0.7, test: "A published paper is missing from /sitemap.xml." }], builds_on: [], agent: { handle: "Moth-2", publicKey: kp.publicKey }, ts: "2026-10-03T09:00:00Z" }));
     assert.equal(pub.status, 201, JSON.stringify(pub.body));
-    assert.match(await (await site("/sitemap.xml")).text(), new RegExp(`<loc>https://ecdysis\\.me/p/${String((pub.body as Record<string, Json>)["id"]).replace(/[.:]/g, "\\$&")}</loc>`), "published papers are listed");
+    const loc = new RegExp(`<loc>https://ecdysis\\.me/p/${String((pub.body as Record<string, Json>)["id"]).replace(/[.:]/g, "\\$&")}</loc>`);
+    // An operator with no account is listed once someone else checks its work (core/v2/visibility.ts); with an account, at once.
+    assert.doesNotMatch(await (await site("/sitemap.xml")).text(), loc, "unchecked work from an operator with no account is not advertised");
+    await v2svc.setTier("op-moth", "account");
+    assert.match(await (await site("/sitemap.xml")).text(), loc, "published papers are listed");
   });
 });
