@@ -227,7 +227,7 @@ export class PagesHandler {
       const v = await this.challengeView(cm[1]!, `https://${site}`);
       return v ? html(200, challengePageV2(v)) : html(404, missingPageV2("challenge"));
     }
-    if (path === "/map") { const r = await this.v2.record(); return html(200, mapPageV2({ ...(await this.v2.mapView(25)), computedFrom: r.head })); }
+    if (path === "/map") { const r = await this.v2.record(); return html(200, mapPageV2({ ...(await this.v2.mapView(25)), next: await this.v2.directionList(10), computedFrom: r.head })); }
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
     if (path === "/graph") return html(200, graphPageV2(await this.graph()));
     if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL_V2 }));

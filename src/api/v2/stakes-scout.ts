@@ -28,11 +28,30 @@
  * Both indexes are open (OpenAlex CC0; Semantic Scholar's open API) and both
  * ask for a named user agent and a gentle pace: one source a second here, a
  * few sources a run.
+ *
+ * direction/0.1: for each field the record has sources in, the scout also
+ * reads the field's most-cited works from OpenAlex, once a month, into the
+ * candidates store (not the log: they are direction, never a number about
+ * any claim), so the heartbeat and the map can say which load-bearing works
+ * are not yet on the record.
  */
 
 import type { TransparencyLog } from "../../core/log.js";
 import type { V2Service } from "./service.js";
 import type { ObservationProvider } from "../../core/v2/stakes.js";
+import type { Candidate } from "../../core/v2/direction.js";
+
+/** Where the registration candidates live between runs (ops state in production, memory in tests). */
+export interface CandidateStore {
+  get(): Promise<CandidateSet | null>;
+  put(set: CandidateSet): Promise<void>;
+}
+export interface CandidateSet {
+  /** By OpenAlex field id. */
+  fields: Record<string, { field: string; observedAt: string; works: Candidate[] }>;
+}
+/** Works read per field: enough to direct a season's registrations, few enough to read in one request. */
+export const CANDIDATES_PER_FIELD = 25;
 
 /** How often a source is asked about again. Citation counts move slowly; a month keeps the record current enough and the indexes unbothered. */
 export const REFRESH_MS = 30 * 24 * 3600 * 1000;
@@ -58,6 +77,8 @@ export interface StakesScoutOptions {
   pause?: (ms: number) => Promise<void>;
   /** Named in the user agent, as both indexes ask. */
   contact?: string;
+  /** direction/0.1: where the fields' most-cited works are kept for the registration queue. Absent: none are read. */
+  candidates?: CandidateStore;
 }
 
 export class StakesScout {
@@ -74,9 +95,9 @@ export class StakesScout {
    * Observe up to `limit` sources due for it (never observed first, then the stalest), then any field those sources sit in
    * whose totals are missing or a month old: the map's denominator (map/0.1).
    */
-  async run(limit = 5): Promise<{ observed: number; unresolved: number; errors: number; fields: number }> {
+  async run(limit = 5): Promise<{ observed: number; unresolved: number; errors: number; fields: number; candidates: number }> {
     const r = await this.o.v2.record();
-    const out = { observed: 0, unresolved: 0, errors: 0, fields: 0 };
+    const out = { observed: 0, unresolved: 0, errors: 0, fields: 0, candidates: 0 };
     const cutoff = this.now().getTime() - REFRESH_MS;
     const sources = new Map<string, string>(); // lower-cased → as registered
     for (const [id, x] of r.external) if (!r.held.has(id) && x.source) sources.set(x.source.toLowerCase(), x.source);
@@ -117,7 +138,46 @@ export class StakesScout {
       await this.o.log.append("field.observed", { field: got.field || field, fieldId, works: got.works, citedBy: got.citedBy });
       out.fields++;
     }
+    // direction/0.1: the registration queue. For each field, its most-cited works, a month old or missing, one request each.
+    if (this.o.candidates) {
+      const set = (await this.o.candidates.get()) ?? { fields: {} };
+      let changed = false;
+      for (const [fieldId, field] of [...fieldIds.entries()].sort()) {
+        const last = set.fields[fieldId]?.observedAt ?? null;
+        if (last !== null && Date.parse(last) >= cutoff) continue;
+        if (!first) await this.pause(PAUSE_MS);
+        first = false;
+        const works = await this.observeCandidates(fieldId, field);
+        if (!works) { out.errors++; continue; }
+        set.fields[fieldId] = { field, observedAt: this.now().toISOString(), works };
+        changed = true;
+        out.candidates += works.length;
+      }
+      if (changed) await this.o.candidates.put(set);
+    }
     return out;
+  }
+
+  /** A field's most-cited works in OpenAlex, as registration candidates: those with a DOI or an arXiv id, since a claim needs a source. Null on any failure. */
+  async observeCandidates(fieldId: string, field: string): Promise<Candidate[] | null> {
+    try {
+      const mailto = encodeURIComponent(this.o.contact ?? "replies@ecdysis.me");
+      const url = `https://api.openalex.org/works?filter=primary_topic.field.id:${encodeURIComponent(fieldId)},type:article&sort=cited_by_count:desc&per-page=${CANDIDATES_PER_FIELD}&select=id,doi,title,cited_by_count,publication_year,ids&mailto=${mailto}`;
+      const res = await this.fetchImpl(url, { headers: { "user-agent": this.ua(), accept: "application/json" } });
+      if (!res.ok) return null;
+      const body = (await res.json().catch(() => null)) as { results?: Array<{ id?: string; doi?: string | null; title?: string | null; cited_by_count?: number; publication_year?: number | null; ids?: Record<string, string> }> } | null;
+      if (!body || !Array.isArray(body.results)) return null;
+      const at = this.now().toISOString();
+      const out: Candidate[] = [];
+      for (const w of body.results) {
+        const source = candidateSource(w.doi ?? null, w.ids ?? {});
+        if (!source || typeof w.id !== "string" || typeof w.cited_by_count !== "number") continue;
+        out.push({ work: w.id, source, title: (typeof w.title === "string" ? w.title : "").trim().slice(0, 300), citedBy: Math.max(0, Math.floor(w.cited_by_count)), year: typeof w.publication_year === "number" ? w.publication_year : null, field, observedAt: at });
+      }
+      return out;
+    } catch {
+      return null;
+    }
   }
 
   /** A field's totals in OpenAlex: works and citations to them. Null on any failure (left for the next run). */
@@ -211,3 +271,12 @@ interface S2Paper {
 }
 
 const round3 = (x: number) => Math.round(x * 1000) / 1000;
+
+/** The source string a registration would use for a work: its arXiv id when it has one (the quote scout reads arXiv abstracts), else its DOI; null for a work with neither. */
+export function candidateSource(doi: string | null, ids: Record<string, string>): string | null {
+  const arxiv = typeof ids["arxiv"] === "string" ? ids["arxiv"].replace(/^https?:\/\/arxiv\.org\/abs\//i, "").replace(/v\d+$/, "").trim() : "";
+  if (arxiv) return `arxiv:${arxiv.toLowerCase()}`;
+  const d = (doi ?? "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim().toLowerCase();
+  if (/^10\.48550\/arxiv\./.test(d)) return `arxiv:${d.slice("10.48550/arxiv.".length)}`;
+  return d ? `doi:${d}` : null;
+}

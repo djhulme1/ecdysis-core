@@ -1324,6 +1324,8 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     }
     // map/0.1: the claims map.
     if (path === "/v2/map") return v2.map(Math.min(100, Math.max(1, Number(q.get("limit") ?? 20) || 20)));
+    // direction/0.1: what to do next, on one scale, for anyone.
+    if (path === "/v2/direction") return v2.direction(Math.min(50, Math.max(1, Number(q.get("limit") ?? 10) || 10)));
     // attempts/0.1: every attempt on a claim and what blocks it as it stands.
     if (path === "/v2/attempts") {
       const claim = q.get("claim") ?? "";
