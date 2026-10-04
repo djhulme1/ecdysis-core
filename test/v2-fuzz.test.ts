@@ -61,6 +61,12 @@ function entry(r: ReturnType<typeof rng>, seq: number, type: V2EntryType): V2Ent
     case "canary.reveal": p = { claim: target, outcome: r.pick(["confirmed", "refuted", "x"]) }; break;
     case "hazard.hold": p = { subject: r.pick([target, id, "ecd:1", ""]), reason: "r" }; break;
     case "hazard.release": p = { subject: r.pick([target, id, "ecd:1"]), decision: r.pick(["release", "reject", undefined]) }; break;
+    case "challenge.propose": p = { id: r.pick(["ch:0123456789abcdef", "ch:x", ""]), claim: target, title: "t", brief: "b", scale: r.pick(["cpu-minutes", "reasoning", "x"]), wants: r.pick(["receipt", "argument", "x", undefined]), handle, operatorId, proposer: r.pick(["agent", "person", "steward", "x"]) }; break;
+    case "challenge.withdraw": p = { id: r.pick(["ch:0123456789abcdef", "ch:x"]), reason: "r", by: r.pick(["proposer", "steward", "x"]) }; break;
+    // arguments/0.1: arguments, checks and answers, well-formed and not.
+    case "argument.file": p = { id: r.pick(["a".repeat(64), "b".repeat(64), "short", ""]), claim: target, stance: r.pick(["refutes", "qualifies", "supports", "x"]), grounds: r.pick(["counterexample", "contradiction", "unsupported-premise", "logical-gap", "statistical-insufficiency", "methodological-flaw", "x"]), text: "t", cites: r.pick([[target], ["ecd:1#C1", 3], "ecd:1#C1", null, undefined]), instance: r.pick([null, { text: "i" }, { bundle: { repo: "https://x", commit: "c", run: "r" } }, "i", 5, []]), confidence: r.pick([0.8, 0.2, 0, 1, 2, -1, "x", NaN]), handle, operatorId, models: r.pick([["gpt"], undefined]) }; break;
+    case "argument.check": p = { id: r.pick(["c".repeat(64), ""]), argument: r.pick(["a".repeat(64), "b".repeat(64), "nothere"]), holds: r.pick([true, false, "yes", 1, null]), note: "n", handle, operatorId, models: r.pick([["claude"], ["gpt", "claude"], undefined]), key: r.pick([undefined, "ck"]) }; break;
+    case "argument.answer": p = { argument: r.pick(["a".repeat(64), "b".repeat(64), "nothere"]), text: "x", handle, operatorId }; break;
     default: p = {};
   }
   // Tear fields out or corrupt them, sometimes wholesale.
@@ -89,7 +95,7 @@ describe("the derivation is total", () => {
       }
       let out;
       try {
-        out = computeV2(rec.claims, rec.evidence, rec.uses, { vouchLinked: rec.vouchLinked, ringLinked: rec.ringLinked, voidedOperators: rec.voidedOperators, fabricators: rec.fabricators, lapses: rec.lapses, anchors: rec.anchors });
+        out = computeV2(rec.claims, rec.evidence, rec.uses, { vouchLinked: rec.vouchLinked, ringLinked: rec.ringLinked, voidedOperators: rec.voidedOperators, fabricators: rec.fabricators, lapses: rec.lapses, anchors: rec.anchors, arguments: rec.argumentEffects, argumentStates: [...rec.arguments.values()] });
       } catch (e) {
         assert.fail(`computeV2 threw on trial ${trial}: ${String(e)}\n${JSON.stringify(log).slice(0, 2000)}`);
       }
@@ -100,6 +106,8 @@ describe("the derivation is total", () => {
         assert.ok(c.credence >= 0 && c.credence <= 1, `trial ${trial}: credence in [0, 1]`);
       }
       for (const [agent, rel] of out.track.reliability) assert.ok(Number.isFinite(rel) && rel >= 0 && rel <= 1, `trial ${trial}: reliability of ${agent} = ${rel}`);
+      for (const a of rec.arguments.values()) assert.ok(a.status === "open" || a.status === "upheld" || a.status === "dismissed", `trial ${trial}: argument ${a.id} status ${a.status}`);
+      for (const c of out.claims.values()) if (c.cap !== null) assert.ok(c.cap > 0 && c.cap < 1 && c.credence <= c.cap + 1e-9, `trial ${trial}: cap ${c.cap} on ${c.ref}`);
     }
     assert.ok(entries > 40_000, `a real exercise (${entries} entries)`);
   });
