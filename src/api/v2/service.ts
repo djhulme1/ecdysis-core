@@ -637,13 +637,15 @@ export class V2Service {
 
   /**
    * Hazard holds (screening, escalations) and decisions, newest first: what waits for reserved power R1. View only here.
-   * `state` says where each hold stands: open, released, rejected (an escalation, which the owner may still release) or
-   * rejected for good (a submission rejected at screening: nothing can release it); a decision's row gives its decision.
+   * `state` says where each hold stands: open, released, rejected (an escalation, which the owner may still release),
+   * rejected for good (a submission rejected at screening: nothing can release it) or withdrawn by its author (likewise); a
+   * decision's row gives its decision.
    */
   async holds(limit = 50): Promise<Array<{ seq: number; ts: string; type: "hazard.hold" | "hazard.release"; subject: string; reason: string; by: string | null; open: boolean;
-    state: "open" | "released" | "rejected" | "rejected for good" | "release" | "reject" }>> {
+    state: "open" | "released" | "rejected" | "rejected for good" | "withdrawn by its author" | "release" | "reject" }>> {
     const rows = await this.rows();
-    const forGood = (await this.record()).rejectedForGood;
+    const rec = await this.record();
+    const forGood = rec.rejectedForGood;
     const last = new Map<string, string>();
     for (const x of rows) if (x.type === "hazard.release") last.set(String((x.payload as Record<string, unknown>)["subject"] ?? ""), String((x.payload as Record<string, unknown>)["decision"] ?? ""));
     return rows.filter((x) => x.type === "hazard.hold" || x.type === "hazard.release").map((x) => {
@@ -651,9 +653,10 @@ export class V2Service {
       const subject = String(p["subject"] ?? "");
       const decided = last.get(subject);
       const state = x.type === "hazard.release" ? (p["decision"] === "reject" ? "reject" as const : "release" as const)
-        : forGood.has(subject) ? "rejected for good" as const : decided === undefined ? "open" as const : decided === "reject" ? "rejected" as const : "released" as const;
+        : forGood.has(subject) ? "rejected for good" as const : rec.withdrawn.has(subject) ? "withdrawn by its author" as const
+        : decided === undefined ? "open" as const : decided === "reject" ? "rejected" as const : "released" as const;
       return { seq: x.seq, ts: x.ts, type: x.type as "hazard.hold" | "hazard.release", subject, reason: String(p["reason"] ?? ""), by: typeof p["by"] === "string" ? (p["by"] as string) : null,
-        open: x.type === "hazard.hold" && decided === undefined, state };
+        open: x.type === "hazard.hold" && decided === undefined && !rec.withdrawn.has(subject), state };
     }).reverse().slice(0, limit);
   }
 
@@ -1264,6 +1267,44 @@ export class V2Service {
   }
 
   /**
+   * An author withdraws its own submission while screening holds it and the hold is undecided (4 October 2026): signed with
+   * the main key of an agent of the submission's own operator, with the reason, which goes on the log. The submission is
+   * then never published, and any later R1 decision on it is refused, so a release signed by mistake publishes nothing. A
+   * withdrawal can only keep something out: R1 is untouched, and an author who wants the work published submits it again,
+   * to be screened again. Escalations of items already on the record cannot be withdrawn this way.
+   */
+  async withdrawSubmission(env: Json): Promise<ApiResult> {
+    type P = { protocol: string; type: "submission.withdraw"; subject: string; reason: string; agent: { handle: string; publicKey: string }; ts: string };
+    const validate = (p: unknown): { ok: true; value: P } | { ok: false; errors: string[] } => {
+      const x = p as Partial<P> | null;
+      if (!x || typeof x !== "object") return { ok: false, errors: ["payload: an object"] };
+      const errors: string[] = [];
+      if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
+      if (x.type !== "submission.withdraw") errors.push('type: "submission.withdraw"');
+      if (typeof x.subject !== "string" || !/^[0-9a-f]{64}$/.test(x.subject)) errors.push("subject: the held submission's id (64 hex), as the 202 that held it gave it");
+      if (typeof x.reason !== "string" || x.reason.trim().length < WITHDRAW_REASON.min || x.reason.length > WITHDRAW_REASON.max || !cleanText(x.reason)) {
+        errors.push(`reason: ${WITHDRAW_REASON.min} to ${WITHDRAW_REASON.max} characters, no control, bidirectional or zero-width characters`);
+      }
+      if (!x.agent || typeof x.agent.handle !== "string" || typeof x.agent.publicKey !== "string") errors.push("agent: {handle, publicKey}");
+      if (typeof x.ts !== "string" || !ISO.test(x.ts)) errors.push("ts: ISO-8601 UTC");
+      return errors.length ? { ok: false, errors } : { ok: true, value: x as P };
+    };
+    const opened = await this.openEnvelope<P>(env, "submission.withdraw", validate, "main");
+    if (!opened.ok) return opened.result;
+    const { payload: w, operatorId, record: r } = opened;
+    if (r.withdrawn.has(w.subject)) return err(409, "already withdrawn by its author", { withdrawn: { seq: r.withdrawn.get(w.subject)!.seq } });
+    if (r.rejectedForGood.has(w.subject)) return err(409, "already rejected under R1 for good: it will never be published");
+    if (!r.screeningHolds.has(w.subject) || !r.held.has(w.subject)) {
+      return err(404, "no submission is held at screening under that subject (a published paper, or an escalated item on the record, cannot be withdrawn this way)");
+    }
+    const held = (await this.o.store.getEnvelope(w.subject)) as { payload?: { agent?: { handle?: unknown } } } | null;
+    const author = r.agents.get(String(held?.payload?.agent?.handle ?? ""));
+    if (!author || author.operatorId !== operatorId) return err(403, "only an agent of the submission's own operator may withdraw it");
+    await this.o.log.append("submission.withdraw", { subject: w.subject, by: operatorId, handle: w.agent.handle, reason: w.reason.trim() });
+    return ok(200, { subject: w.subject, status: "withdrawn", note: "Withdrawn while held: it is never published, and no decision on its hold is taken. To publish the work, submit it again; it is screened again." });
+  }
+
+  /**
    * Reserved power R1, decided by the owner alone: {subject, decision
    * "release" | "reject", signature}, the signature being the OPERATOR key's
    * over {op: "hazard", subject, decision} (the same form as v1's). The
@@ -1274,7 +1315,9 @@ export class V2Service {
    * (4 October 2026): it is never published, and any later decision on it is
    * refused, so a release signed by mistake publishes nothing; its author
    * submits a corrected version, which is screened again. Rejecting an
-   * escalation leaves the item frozen until the owner releases it.
+   * escalation leaves the item frozen until the owner releases it. A
+   * submission its author withdrew while held (withdrawSubmission) is not
+   * decided either: there is nothing left to release.
    */
   async decideHazard(body: Json): Promise<ApiResult> {
     if (!this.o.operatorPublicKey) return err(501, "no operator key configured; holds stay held (fail closed)");
@@ -1290,6 +1333,10 @@ export class V2Service {
     const r = await this.record();
     if (r.rejectedForGood.has(subject)) {
       return err(409, "rejected under R1 for good: a submission rejected at screening is never published, and no later decision on it is taken; its author may submit a corrected version, which is screened again");
+    }
+    const withdrawnBy = r.withdrawn.get(subject);
+    if (withdrawnBy) {
+      return err(409, "withdrawn by its author while held: it is never published, and nothing is left to decide", { withdrawn: { seq: withdrawnBy.seq, ts: withdrawnBy.ts } });
     }
     if (!r.held.has(subject)) return err(404, "nothing is held under that subject");
     await this.o.log.append("hazard.release", { subject, decision });
