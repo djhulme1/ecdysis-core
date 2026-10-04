@@ -29,16 +29,20 @@ export interface ResolvedV2 {
   rounds: number;
 }
 
-/** A safety stop no honest log reaches: the set grows by at least one operator a round, and operators are finite. */
-const MAX_ROUNDS = 64;
+/**
+ * Rounds after which the iteration stops where it stands. Each round admits a new generation of operators whose
+ * verification rested on the previous one's; a chain that deep is not a record anyone has, and a cap, applied the same way
+ * by everyone who replays the log, keeps the derivation a bounded, deterministic function whatever a log contains.
+ */
+export const MAX_ROUNDS = 32;
 
 export function resolveV2(entries: V2Entry[], now: Date, params = EARNING_PARAMS): ResolvedV2 {
   const earned = new Map<string, EarnedVerification>();
-  for (let round = 1; round <= MAX_ROUNDS; round++) {
+  for (let round = 1; ; round++) {
     const record = deriveV2(entries, now, { verifiedByRecord: new Set(earned.keys()) });
     const scores = scoreRecord(record);
     const verified = (op: string) => record.tiers.get(op) === "verified";
-    const newly = earnedVerification(scores.track.reports, verified, record.voidedOperators, round, params);
+    const newly = round > MAX_ROUNDS ? new Map<string, EarnedVerification>() : earnedVerification(scores.track.reports, verified, record.voidedOperators, round, params);
     // An operator earned earlier but voided since drops out: the derivation above already refused it the tier.
     for (const op of [...earned.keys()]) if (record.voidedOperators.has(op)) earned.delete(op);
     if (newly.size === 0) {
@@ -47,7 +51,6 @@ export function resolveV2(entries: V2Entry[], now: Date, params = EARNING_PARAMS
     }
     for (const [op, e] of newly) earned.set(op, e);
   }
-  throw new Error("verification by record did not converge");
 }
 
 /** The numbers for a derived record, as the service and the audit compute them. */
