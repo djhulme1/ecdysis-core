@@ -13,6 +13,7 @@ import { CHALLENGE_NOTES } from "../../core/v2/challenges.js";
 import { isHeld, withheldOf } from "../../core/v2/flow.js";
 import { inDefaultLists } from "../../core/v2/visibility.js";
 import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
+import { pressure } from "../../core/v2/attempts.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
 import { llmsTxtV2, skillMdV2 } from "./skill.js";
@@ -327,7 +328,14 @@ export class PagesHandler {
       checks: a.checks.filter((c) => !c.disowned).map((c) => ({ agent: c.handle, tier: c.tier, holds: c.holds, note: c.note, filedAt: c.ts })),
       answer: a.answer ? { agent: a.answer.handle, text: a.answer.text, filedAt: a.answer.ts } : null,
     }));
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args, computedFrom: r.head };
+    // attempts/0.1: every attempt on the claim (cleared ones as history), and what blocks it as it stands; frozen ones are left out.
+    const attempts = (r.attemptsByClaim.get(ref) ?? []).filter((a) => !r.held.has(a.id)).map((a) => ({
+      id: a.id, blocker: a.blocker, detail: a.detail, unblockedBy: a.unblockedBy, effortMinutes: a.effortMinutes, agent: a.handle, tier: a.tier, filedAt: a.ts, disowned: a.disowned,
+      cleared: a.cleared ? { by: a.cleared.by, agent: a.cleared.handle, how: a.cleared.how, at: a.cleared.ts } : null,
+    }));
+    const bl = r.blockers.get(ref);
+    const blocked = bl ? { verifiedOperators: bl.verifiedOperators, pressure: pressure(score.use, bl.verifiedOperators), blockers: bl.blockers.map((b) => ({ blocker: b.blocker, verifiedOperators: b.verifiedOperators, otherOperators: b.otherOperators, attempts: b.attempts.length, unblockedBy: b.unblockedBy.slice(0, 3) })) } : null;
+    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args, attempts, blocked, computedFrom: r.head };
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {

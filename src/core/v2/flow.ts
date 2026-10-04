@@ -34,6 +34,8 @@
  *   content.restore    {subject, reason, by: steward, steward}
  *   claim.amend        {claim, kind?, test?, handle, operatorId}         the author's one correction before any evidence (4 Oct 2026)
  *   submission.withdraw {subject, by, handle, reason}               the author withdraws its submission while screening holds it (4 Oct 2026)
+ *   check.attempt      {id, claim, blocker, detail, unblockedBy, effortMinutes?, handle, operatorId, models?, key?}  attempts/0.1: tried, could not check, and why
+ *   attempt.clear      {id, claim, blocker, how, handle, operatorId}   the blocker is gone: every earlier attempt with it on the claim is cleared
  *
  * Paper claims and external claims may carry kind: "conceptual" (arguments/0.1); absent means empirical.
  *
@@ -96,6 +98,7 @@ import { APPEAL_MS } from "./receipts.js";
 import { CHALLENGE_SCALES, CHALLENGE_WANTS, type ChallengeScale, type ChallengeState, type ChallengeWants } from "./challenges.js";
 import { argumentEffects, GROUNDS, settleArgument, STANCES, type ArgumentCheckState, type ArgumentState, type ClaimArgumentsInput, type ClaimKind, type Grounds, type Stance } from "./arguments.js";
 import type { EarnedVerification } from "./scoring.js";
+import { BLOCKERS, summariseBlockers, type AttemptState, type Blocker, type ClaimBlockers, type ClearState } from "./attempts.js";
 
 export type V2EntryType =
   | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
@@ -103,7 +106,8 @@ export type V2EntryType =
   | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt"
   | "challenge.propose" | "challenge.withdraw"
   | "argument.file" | "argument.check" | "argument.answer"
-  | "content.withhold" | "content.restore" | "claim.amend" | "submission.withdraw";
+  | "content.withhold" | "content.restore" | "claim.amend" | "submission.withdraw"
+  | "check.attempt" | "attempt.clear";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
@@ -112,6 +116,7 @@ export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "challenge.propose", "challenge.withdraw",
   "argument.file", "argument.check", "argument.answer",
   "content.withhold", "content.restore", "claim.amend", "submission.withdraw",
+  "check.attempt", "attempt.clear",
 ];
 
 export interface V2Entry {
@@ -147,6 +152,8 @@ export interface CheckState {
   otherCrossChecks: Array<{ id: string; match: boolean }>;
   /** The log position of the lapse entry, if the check lapsed. */
   lapsedSeq: number | null;
+  /** The log position of the result entry, once filed: what attempts filed before it are cleared by (attempts/0.1). */
+  resultSeq: number | null;
   /** This receipt duplicated an earlier one's outputs under a different seed: it adds nothing and is not evidence. */
   seedInsensitive: boolean;
   /** Log times of the commit, the seal and the result. */
@@ -297,6 +304,14 @@ export interface V2Record {
   screeningHolds: Set<string>;
   /** The arguments that count: not out of view themselves (R1 or withheld) and not on a claim out of view. */
   argumentsInForce: ArgumentState[];
+  /** Attempts (attempts/0.1), by id: tried to check a claim and could not, with the blocker; cleared ones stay, marked. */
+  attempts: Map<string, AttemptState>;
+  /** Attempts by claim ref, in log order. */
+  attemptsByClaim: Map<string, AttemptState[]>;
+  /** Clearing statements (attempt.clear), in log order. */
+  clears: ClearState[];
+  /** What blocks each claim as it stands: uncleared attempts in force, by blocker, with the independent verified operators behind them. Claims with none are absent. */
+  blockers: Map<string, ClaimBlockers>;
   /**
    * The constitution in force, adopted on this log by the founder under
    * reserved power R2 (the first constitution.adopt entry; genesis). Null
@@ -404,6 +419,8 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const withdrawn = new Map<string, { by: string; handle: string; reason: string; seq: number; ts: string }>();
   const withheld = new Map<string, WithheldState>();
   const amendments = new Map<string, AmendmentState>();
+  const attempts = new Map<string, AttemptState>();
+  const clears: ClearState[] = [];
   const syncHeld = (subject: string) => { if (hazardHeld.has(subject) || withheld.has(subject)) held.add(subject); else held.delete(subject); };
   let constitution: V2Record["constitution"] = null;
   let head: V2Record["head"] = null;
@@ -535,7 +552,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
           bundle: str(p["bundle"]), image: p["image"] === true, runtimeMinutes: num(p["runtimeMinutes"], 0),
           handle, operatorId: str(p["operatorId"]),
           families: declared.length ? declared : (agents.get(handle)?.families ?? []),
-          seq: e.seq, stage: "committed", seed: null, crossCheck: null, outcome: null, crossMatch: null, verifiedBy: [], disputedBy: [], otherCrossChecks: [], lapsedSeq: null, seedInsensitive: false,
+          seq: e.seq, stage: "committed", seed: null, crossCheck: null, outcome: null, crossMatch: null, verifiedBy: [], disputedBy: [], otherCrossChecks: [], lapsedSeq: null, resultSeq: null, seedInsensitive: false,
           committedAt: e.ts, sealedAt: null, resultedAt: null,
           key: str(p["key"]) || (agents.get(handle)?.publicKey ?? ""), resultKey: null, disowned: false,
           requires, holds,
@@ -553,6 +570,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         const o = str(p["outcome"]);
         c.stage = "resulted";
         c.resultedAt = e.ts;
+        c.resultSeq = e.seq;
         c.resultKey = str(p["key"]) || (agents.get(c.handle)?.publicKey ?? "");
         c.outcome = o === "confirmed" || o === "failed" || o === "inconclusive" ? o : "inconclusive";
         c.crossMatch = typeof p["crossMatch"] === "boolean" ? (p["crossMatch"] as boolean) : null;
@@ -706,6 +724,36 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         a.answer = { handle: str(p["handle"]), operatorId: str(p["operatorId"]), text: str(p["text"]), seq: e.seq, ts: e.ts };
         break;
       }
+      case "check.attempt": {
+        // attempts/0.1: the claim must be on the record and the blocker one of the seven (the service checks before writing).
+        const id = str(p["id"]);
+        const claim = str(p["claim"]);
+        const handle = str(p["handle"]);
+        const blocker = str(p["blocker"]);
+        if (!id || attempts.has(id) || !claimAuthorOp.has(claim) || !(BLOCKERS as readonly string[]).includes(blocker) || !handle) break;
+        const declared = modelFamilies(p["models"] as string[] | undefined);
+        attempts.set(id, {
+          id, claim, blocker: blocker as Blocker, detail: str(p["detail"]), unblockedBy: str(p["unblockedBy"]),
+          effortMinutes: typeof p["effortMinutes"] === "number" && Number.isFinite(p["effortMinutes"]) && (p["effortMinutes"] as number) > 0 ? (p["effortMinutes"] as number) : null,
+          handle, operatorId: str(p["operatorId"]), tier: "unverified", families: declared.length ? declared : (agents.get(handle)?.families ?? []),
+          seq: e.seq, ts: e.ts, key: str(p["key"]) || (agents.get(handle)?.publicKey ?? ""), disowned: false, cleared: null,
+        });
+        break;
+      }
+      case "attempt.clear": {
+        // The blocker is gone: every attempt with it on the claim filed before this entry is cleared by it. Who may say so is the service's rule.
+        const id = str(p["id"]);
+        const claim = str(p["claim"]);
+        const blocker = str(p["blocker"]);
+        const handle = str(p["handle"]);
+        if (!id || !claimAuthorOp.has(claim) || !(BLOCKERS as readonly string[]).includes(blocker) || !handle) break;
+        const how = str(p["how"]);
+        clears.push({ id, claim, blocker: blocker as Blocker, how, handle, operatorId: str(p["operatorId"]), tier: "unverified", seq: e.seq, ts: e.ts });
+        for (const a of attempts.values()) {
+          if (a.claim === claim && a.blocker === blocker && !a.cleared && a.seq < e.seq) a.cleared = { by: "clear", id, handle, how, seq: e.seq, ts: e.ts };
+        }
+        break;
+      }
     }
   }
 
@@ -798,6 +846,29 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     argumentEffectsByClaim.set(ref, argumentEffects(list.filter((a) => !held.has(a.id)), kind));
   }
 
+  // Attempts (attempts/0.1), now that tiers are known. A receipt that reached a result (confirmed or failed; an inconclusive one got
+  // no further than the attempters) clears every attempt on its claim filed before it: someone got through. Disowned attempts and
+  // attempts out of view count for nothing; the summary per claim counts distinct verified operators, as pressure does.
+  for (const a of attempts.values()) {
+    a.tier = tierOf(a.operatorId);
+    a.disowned = disownedAt(a.key, a.ts);
+  }
+  for (const c of clears) c.tier = tierOf(c.operatorId);
+  for (const c of [...checks.values()].sort((x, y) => (x.resultSeq ?? 0) - (y.resultSeq ?? 0))) {
+    if (c.stage !== "resulted" || c.resultSeq === null || c.disowned || c.outcome === "inconclusive" || held.has(c.id)) continue;
+    for (const a of attempts.values()) {
+      if (a.claim === c.target && !a.cleared && a.seq < c.resultSeq) a.cleared = { by: "receipt", id: c.id, handle: c.handle, how: null, seq: c.resultSeq, ts: c.resultedAt ?? c.committedAt };
+    }
+  }
+  const attemptsByClaim = new Map<string, AttemptState[]>();
+  for (const a of [...attempts.values()].sort((x, y) => x.seq - y.seq)) attemptsByClaim.set(a.claim, [...(attemptsByClaim.get(a.claim) ?? []), a]);
+  const blockers = new Map<string, ClaimBlockers>();
+  for (const [ref, list] of attemptsByClaim) {
+    if (held.has(ref) || (ref.indexOf("#") > 0 && held.has(ref.slice(0, ref.indexOf("#"))))) continue;
+    const summary = summariseBlockers(ref, list, (id) => held.has(id));
+    if (summary.blockers.length) blockers.set(ref, summary);
+  }
+
   // Cross-checks, now that tiers are known: only a VERIFIED operator's cross-check verifies or disputes a receipt (and so can open a
   // finding); a disowned cross-check does neither. Others are kept to be shown, never to decide.
   for (const { later, earlier } of crossChecks) {
@@ -844,5 +915,5 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, withdrawn, screeningHolds: screeningHeld, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, withdrawn, screeningHolds: screeningHeld, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim, attempts, attemptsByClaim, clears, blockers };
 }

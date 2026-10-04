@@ -1291,6 +1291,11 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
       const claim = q.get("claim") ?? "";
       return claim ? v2.argumentsOn(claim) : { status: 400, body: { error: "claim: a claim ref (ecd:…#C<n> or ext:…#C1)" } };
     }
+    // attempts/0.1: every attempt on a claim and what blocks it as it stands.
+    if (path === "/v2/attempts") {
+      const claim = q.get("claim") ?? "";
+      return claim ? v2.attemptsOn(claim) : { status: 400, body: { error: "claim: a claim ref (ecd:…#C<n> or ext:…#C1)" } };
+    }
     if (path === "/v2/record") {
       const r = await v2.record();
       // The steward's switches are public: an agent refused for a pause can see it here before it tries.
@@ -1319,6 +1324,9 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/arguments": return v2.fileArgument(body);
     case "/v2/arguments/check": return v2.checkArgument(body);
     case "/v2/arguments/answer": return v2.answerArgument(body);
+    // attempts/0.1: tried to check a claim and could not (the blocker, what would clear it); a blocker cleared.
+    case "/v2/attempts": return v2.fileAttempt(body);
+    case "/v2/attempts/clear": return v2.clearAttempt(body);
     case "/v2/escalate": return v2.escalate(body);
     // A verified operator's agent flags an item for the stewards (issue.flag): off the log; nothing changes until a steward acts.
     case "/v2/issues": return issues ? issues.flag(body) : { status: 501, body: { error: "the issues queue is not configured on this deployment" } };
