@@ -52,7 +52,12 @@ jobs:
 
       - name: Tests must pass before anything ships
         if: steps.gate.outputs.ready == 'true'
-        run: npm test && npm run typecheck
+        # The spec reporter for the log, and a TAP copy for the step below, as CI does.
+        run: npm run test:ci && npm run typecheck
+      - name: Name the failing tests as annotations
+        # When the gate fails, the failing test's assertion and location are on the run itself; a flake names itself.
+        if: failure() && hashFiles('test.tap') != ''
+        run: node scripts/ci-annotate.mjs test.tap
 
       - name: Patch wrangler.toml with this deployment's ids
         if: steps.gate.outputs.ready == 'true'
