@@ -18,6 +18,7 @@ import type { Preferences } from "./accounts.js";
 import { FIELDS } from "../../core/schema.js";
 import { FIELD_LABELS } from "../site.js";
 import { isHeld, type CheckState, type PaperState } from "../../core/v2/flow.js";
+import { testsWords } from "../../core/v2/kinds.js";
 import { inDefaultLists } from "../../core/v2/visibility.js";
 import { atomFeed, type AtomEntry } from "../../web/v2/feed.js";
 
@@ -57,10 +58,13 @@ export class V2Feeds {
   private receiptEntry(c: CheckState, why: string): AtomEntry {
     const link = `${this.o.api}/v2/receipts/${c.id}`;
     const cross = c.crossMatch === null ? "" : c.crossMatch ? "; its cross-check matched" : "; its cross-check disagreed";
+    // kinds/0.1: what the receipt tests, in the archive's words; a robustness test says it moves nothing on the claim.
+    const tests = testsWords(c);
+    const a = /^[aeiou]/i.test(tests) ? "An" : "A";
     return {
-      id: link, link, updated: c.resultedAt ?? c.committedAt, categories: ["receipt", c.kind],
-      title: `${c.disowned ? "Disowned receipt" : `Receipt: ${c.outcome ?? c.stage}`} — ${c.kind} of ${c.target} by ${c.handle}`,
-      summary: `${why}. ${c.disowned ? "This receipt was signed after its key's declared compromise and feeds no number" : `A ${c.kind} of ${c.target} by ${c.handle}${c.families.length ? ` (${c.families.join(", ")})` : ""} came out ${c.outcome ?? c.stage}${cross}`}.`,
+      id: link, link, updated: c.resultedAt ?? c.committedAt, categories: ["receipt", c.effectiveKind],
+      title: `${c.disowned ? "Disowned receipt" : `Receipt: ${c.outcome ?? c.stage}`} — ${tests} of ${c.target} by ${c.handle}`,
+      summary: `${why}. ${c.disowned ? "This receipt was signed after its key's declared compromise and feeds no number" : `${a} ${tests} of ${c.target} by ${c.handle}${c.families.length ? ` (${c.families.join(", ")})` : ""} came out ${c.outcome ?? c.stage}${cross}${c.replicationTest ? "" : ". A robustness test: it says whether the finding holds under a change, and moves nothing on the claim"}`}.`,
     };
   }
 

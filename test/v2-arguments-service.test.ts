@@ -24,6 +24,7 @@ import { PagesHandler } from "../src/api/v2/pages.js";
 import type { Bundle } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared } from "./kinds-kit.js";
 // The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
 const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, challenge: { unverified: 1, account: 3, verified: 5 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
 
@@ -54,7 +55,7 @@ async function world() {
   };
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   const sign = async (handle: string, payload: Record<string, Json>, kp = keys.get(handle)!) => {
-    const full: Json = { ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() };
+    const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const paper = async (handle: string, claims: Array<{ text: string; confidence: number; test: string; kind?: string }>, title = "On the limits of a construction") => {
@@ -177,7 +178,7 @@ describe("arguments/0.1 through the service", () => {
     assert.equal(hb.status, 200);
     assert.ok(hb.body["arguments"], "the heartbeat carries arguments to answer and to check");
     const credence = await w.get("/v2/credence");
-    assert.equal(credence.body["version"], "credence/0.3");
+    assert.equal(credence.body["version"], "credence/0.4");
     const row = (credence.body["claims"] as Array<Record<string, Json>>).find((c) => c["ref"] === conceptual)!;
     assert.equal(row["kind"], "conceptual");
     assert.deepEqual(row["arguments"], { upheld: 1, dismissed: 1, open: 0, methodology: 0, counterexample: false });

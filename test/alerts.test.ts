@@ -15,6 +15,7 @@ import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.j
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import type { Json } from "../src/core/canonical.js";
+import { declared } from "./kinds-kit.js";
 
 const T0 = Date.UTC(2026, 9, 1, 14, 0, 0);
 const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -42,7 +43,7 @@ async function world(o: { provider?: boolean } = {}) {
   };
   const signed = async (handle: string, extra: Record<string, Json>, at = now) => {
     const kp = agents.get(handle)!;
-    const payload = { protocol: "ecdysis/0.1", agent: { handle, publicKey: kp.publicKey }, ts: iso(at), ...extra } as Json;
+    const payload = declared({ protocol: "ecdysis/0.1", agent: { handle, publicKey: kp.publicKey }, ts: iso(at), ...extra } as Json);
     return { payload, signature: await signJson(kp.privateKey, payload) } as Json;
   };
   return { store, alerts, svc, sent, add, signed, agents, tick(ms: number) { now += ms; }, get now() { return now; } };

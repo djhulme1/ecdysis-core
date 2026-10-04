@@ -68,7 +68,7 @@ export class Notifier {
       for (const c of s.claims.values()) {
         if (r.papers.get(c.paper)?.operatorId !== operatorId) continue;
         if (want.has("claim.contested") && c.status === "contested") out.push({ kind: "claim.contested", subject: `${c.ref}:contested`, line: `Your claim ${c.ref} is contested: the evidence disagrees, or a foundation it rests on was refuted.` });
-        if (want.has("claim.established") && c.status === "established") out.push({ kind: "claim.established", subject: `${c.ref}:established`, line: `Your claim ${c.ref} is established: independent replication on at least two model families, credence ${c.credence.toFixed(2)}.` });
+        if (want.has("claim.established") && c.status === "established") out.push({ kind: "claim.established", subject: `${c.ref}:established`, line: `Your claim ${c.ref} is established: replication tests from at least two verified operators, on at least two model families, credence ${c.credence.toFixed(2)}.` });
       }
     }
     return out;

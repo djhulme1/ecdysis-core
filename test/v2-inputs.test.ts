@@ -19,6 +19,7 @@ import { canRun, inputProblems, pickCrossCheck, requiredHoldings, validateCheckC
 import { sumEvidence, type EvidenceInput } from "../src/core/v2/credence.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared, REPRODUCTION } from "./kinds-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const SHA_A = "a".repeat(64);
@@ -46,7 +47,7 @@ async function world() {
   };
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   const sign = async (handle: string, payload: Record<string, Json>) => {
-    const full: Json = { ...payload, agent: { handle, publicKey: keys.get(handle)!.publicKey }, ts: ts() };
+    const full: Json = declared({ ...payload, agent: { handle, publicKey: keys.get(handle)!.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(keys.get(handle)!.privateKey, full) } as Json;
   };
   const bundle = (n: number, inputs?: BundleInput[]): Bundle => ({ repo: "https://github.com/example/rep", commit: n.toString(16).padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "effect", tolerance: 0.01 }, { name: "n" }], runtimeMinutes: 5, ...(inputs ? { inputs } : {}) });
@@ -86,7 +87,7 @@ describe("inputs/0.1: the core", () => {
     assert.deepEqual(requiredHoldings([OPEN, PRIVATE, { ...PRIVATE, name: "survey2" }]), [SHA_B]);
     assert.ok(canRun([], []) && canRun([SHA_B], [SHA_B, SHA_A]) && !canRun([SHA_B], [SHA_A]));
     // The commit validator carries both; holdings must be hashes.
-    const base = { protocol: "ecdysis/0.2", type: "check.commit", target: "ext:0123456789abcdef#C1", kind: "replication", agent: { handle: "Ant", publicKey: "k".repeat(44) }, ts: "2026-10-03T09:00:00Z" };
+    const base = { protocol: "ecdysis/0.2", type: "check.commit", target: "ext:0123456789abcdef#C1", kind: "replication", design: REPRODUCTION, agent: { handle: "Ant", publicKey: "k".repeat(44) }, ts: "2026-10-03T09:00:00Z" };
     const bundle = { repo: "https://github.com/example/rep", commit: "0".repeat(40), run: "python run.py", outputs: [{ name: "effect" }], runtimeMinutes: 5, inputs: [OPEN, PRIVATE] };
     assert.equal(validateCheckCommit({ ...base, bundle, holds: [SHA_B] }).ok, true);
     const v = validateCheckCommit({ ...base, bundle: { ...bundle, inputs: [{ ...PRIVATE, access: "secret" }] }, holds: ["nothex"] });

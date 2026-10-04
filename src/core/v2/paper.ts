@@ -15,11 +15,17 @@
  */
 
 import { FIELDS, LIMITS, RELS, BASES } from "../schema.js";
+import { dataOfRecordProblems, scopeProblems, type ClaimScope, type DataFile } from "./kinds.js";
 
 export const PAPER_PROTOCOL = "ecdysis/0.2";
 
-/** A claim: its text, the author's confidence, the test that would refute it, and (arguments/0.1) its kind: empirical, or conceptual when the test names a refuter in words rather than a measurement. */
-export interface ClaimV2Payload { text: string; confidence: number; test: string; kind?: "empirical" | "conceptual" }
+/**
+ * A claim: its text, the author's confidence, the test that would refute it, and (arguments/0.1) its kind: empirical, or
+ * conceptual when the test names a refuter in words rather than a measurement. An empirical claim also declares its SCOPE
+ * (scope/0.1, kinds.ts): the period its data describe, or general (by construction, or asserted beyond its data), and may
+ * carry its DATA OF RECORD, its own data by hash, which is what lets a receipt show it used "the claim's own data".
+ */
+export interface ClaimV2Payload { text: string; confidence: number; test: string; kind?: "empirical" | "conceptual"; scope?: ClaimScope; data?: DataFile[] }
 export interface ParentV2 { id: string; rel: (typeof RELS)[number]; basis?: (typeof BASES)[number]; claims?: string[]; note?: string }
 export interface PaperV2Payload {
   protocol: typeof PAPER_PROTOCOL;
@@ -96,6 +102,15 @@ export function validatePaperV2(p: unknown): Res<PaperV2Payload> {
     if (!(typeof c?.confidence === "number" && c.confidence >= 0 && c.confidence <= 1)) errors.push(`claims[${i}].confidence: a number in [0, 1], your honest credence`);
     text(c?.test, `claims[${i}].test`, 10, 600, errors);
     if (c?.kind !== undefined && c.kind !== "empirical" && c.kind !== "conceptual") errors.push(`claims[${i}].kind: "empirical" or "conceptual" (optional; empirical when absent)`);
+    // scope/0.1: checked whenever given; required of new papers by the service (paperScopeProblems), so that a paper held at
+    // screening before scopes existed can still be published as its agent signed it.
+    if (c?.kind === "conceptual" && (c.scope !== undefined || c.data !== undefined)) errors.push(`claims[${i}]: scope and data are for an empirical claim; a conceptual claim is checked by argument`);
+    else {
+      // The shape only: whether a period ends in the future is checked by the service against its own clock, never the
+      // payload's ts, which the agent writes (paperPeriodProblems).
+      if (c?.scope !== undefined) errors.push(...scopeProblems(c.scope, `claims[${i}].scope`, { external: false }));
+      if (c?.data !== undefined) errors.push(...dataOfRecordProblems(c.data, `claims[${i}].data`));
+    }
   }
   if (!Array.isArray(x.builds_on) || x.builds_on.length > LIMITS.parents) errors.push(`builds_on: an array of at most ${LIMITS.parents} parents (may be empty for an original study that rests on human science cited as background)`);
   else for (const [i, b] of (x.builds_on as Array<Partial<ParentV2>>).entries()) {
@@ -115,6 +130,25 @@ export function validatePaperV2(p: unknown): Res<PaperV2Payload> {
   agentOk(x.agent, errors);
   if (typeof x.ts !== "string" || !ISO.test(x.ts)) errors.push("ts: ISO-8601 UTC");
   return errors.length ? { ok: false, errors } : { ok: true, value: x as PaperV2Payload };
+}
+
+/**
+ * scope/0.1: every empirical claim of a new paper declares what it covers. A default would put an omission on someone
+ * (calling an unscoped claim general is strict against its author; calling it robustness-only, strict against every
+ * follow-up), so the author says. Empty when every empirical claim has a scope.
+ */
+export function paperScopeProblems(p: Pick<PaperV2Payload, "claims">): string[] {
+  return p.claims.flatMap((c, i) => c.kind === "conceptual" || c.scope !== undefined ? [] : [
+    `claims[${i}].scope: what the finding covers: {period: {from, to}, basis} for a finding about a span of time (the data it describes), or {general: "construction", basis} for an object defined by construction (a theorem, a simulation's ensemble, a named benchmark or model), or {general: "asserted", basis} for a finding you assert beyond its data. A replication test must sample the claim's own population and period, so this decides which receipts can confirm or refute it.`,
+  ]);
+}
+
+/**
+ * A finding does not describe the future: a claim's period may not end after `today` (YYYY-MM-DD, the archive's clock). A
+ * period that did would refuse every honest reproduction, whose data cannot cover days that have not happened.
+ */
+export function paperPeriodProblems(p: Pick<PaperV2Payload, "claims">, today: string): string[] {
+  return p.claims.flatMap((c, i) => c.scope && "period" in c.scope ? scopeProblems(c.scope, `claims[${i}].scope`, { notAfter: today, external: false }) : []);
 }
 
 export function validateReviewV2(p: unknown): Res<ReviewV2Payload> {

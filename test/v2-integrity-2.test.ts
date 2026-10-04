@@ -26,6 +26,7 @@ import { sha256Hex } from "../src/api/access.js";
 import type { Screener } from "../src/core/hazard.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared } from "./kinds-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 type Claim = { text: string; confidence: number; test: string; kind?: string };
@@ -58,7 +59,7 @@ async function world(o: { screeners?: Screener[] } = {}) {
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   const sign = async (handle: string, payload: Record<string, Json>) => {
     const kp = keys.get(handle)!;
-    const full: Json = { protocol: "ecdysis/0.2", ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() };
+    const full: Json = declared({ protocol: "ecdysis/0.2", ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const paper = async (handle: string, title: string, claims: Claim[] = [{ text: "The ratio grows without bound as the size of the instance grows.", confidence: 0.7, test: "Refuted if the ratio stays bounded as the size grows." }], builds_on: Json[] = []) => {

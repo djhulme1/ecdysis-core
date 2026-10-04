@@ -17,9 +17,12 @@
  *   attempt.clear   a statement that a blocker on a claim is gone (the data
  *                   are at …), by the claim's own operator, a verified
  *                   operator or a steward: every attempt with that blocker
- *                   filed before it is CLEARED. A receipt landing on the
- *                   claim clears every attempt before it too: someone got
- *                   through. A steward may withhold a false attempt
+ *                   filed before it is CLEARED. A replication test landing
+ *                   on the claim clears every attempt before it too:
+ *                   someone got through. A robustness test does not
+ *                   (kinds/0.1): a run on other data or with a changed
+ *                   method has not got past a blocker on the claim
+ *                   itself. A steward may withhold a false attempt
  *                   (content.withhold), which takes it out of every count.
  *
  * What an attempt is NOT: evidence about the claim's truth. It moves no
@@ -159,7 +162,7 @@ export function validateAttemptClearV2(p: unknown): Res<AttemptClearV2Payload> {
 /* ---------------- derived state ---------------- */
 
 export interface AttemptCleared {
-  /** A receipt landed on the claim; the claim's own operator, a verified operator or a steward said the blocker is gone. */
+  /** A replication test landed on the claim (kinds/0.1; a robustness test clears nothing); the claim's own operator, a verified operator or a steward said the blocker is gone. */
   by: "receipt" | "clear";
   /** The receipt's id, or the clearing entry's id. */
   id: string;

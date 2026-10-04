@@ -24,6 +24,7 @@ import { ACCESS_TTL_MS, MemoryOAuthStore, OAuth, redirectProblem } from "../src/
 import { OAuthHandler } from "../src/api/v2/oauth-http.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { GENERAL } from "./kinds-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 type R = Record<string, Json>;
@@ -212,7 +213,7 @@ describe("OAuth 2.1 for the connector, and managed agents (I.4)", () => {
     assert.equal(forbidden.isError, true);
     assert.match(String(forbidden.body["error"]), /keys, vouches, escalations and doorbells stay with the person/);
     // An unsigned write without a managed agent is refused; create one; then it is signed here and labelled managed.
-    const paper = (handle: string) => ({ protocol: "ecdysis/0.2", type: "paper", title: "A managed agent's first paper", abstract: "An abstract long enough to pass the structural screen and say what the paper claims and how it was tested.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval." }], builds_on: [], agent: { handle }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") });
+    const paper = (handle: string) => ({ protocol: "ecdysis/0.2", type: "paper", title: "A managed agent's first paper", abstract: "An abstract long enough to pass the structural screen and say what the paper claims and how it was tested.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval.", scope: GENERAL }], builds_on: [], agent: { handle }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") });
     let pub = await w.mcp("publish_paper", { envelope: { payload: paper("Wren") } }, access);
     assert.equal(pub.isError, true);
     assert.match(String(pub.body["error"]), /not a managed agent of your account/);

@@ -224,17 +224,19 @@ export function claimTrace(): TraceStep[] {
     steps.push({ what, why, credence: c.credence, bar: c.threshold, status: c.status });
   };
   moment("Published", "Its author states 70% confidence. Nobody has checked it yet.");
-  file("review", true, "op-reviewer-1", []);
-  file("review", true, "op-reviewer-2", []);
-  moment("Two independent reviews agree", "Reviews count a little, and can never establish a claim.");
   for (let k = 0; k < 1000; k++) file("replication", true, "op-farm", ["claude"], `farm-${k}`);
   moment("One operator's 1,000 agents all confirm it", "A thousand copies count once: one operator, one voice.");
   file("replication", true, "op-second", ["gpt"]);
-  moment("A second operator, on another model family, confirms it", "Two independent operators and two model families, over the bar: established.");
+  moment("A second operator, on another model family, confirms it", "Two independent replication tests, from agents with no track record yet: not over the bar.");
+  file("replication", true, "op-third", ["gemini"]);
+  moment("A third operator confirms it", "Independent replication tests over the bar, on two or more model families: established.");
+  file("review", true, "op-reviewer-1", []);
+  file("review", true, "op-reviewer-2", []);
+  moment("Two independent reviews agree", "Reviews count a little, and never set a status.");
   for (let k = 0; k < 10; k++) uses.push({ claim: claim.ref, paper: `later-${k}`, operatorId: `op-citing-${k}`, tier: "verified" });
   moment("Ten later papers come to rely on it", "The bar rises with use: what much rests on must be surer.");
-  file("replication", false, "op-third", ["gemini"]);
-  moment("A third operator's replication fails", "A failure weighs more than a success, and the disagreement is shown, not netted away.");
+  file("replication", false, "op-fourth", ["llama"]);
+  moment("A fourth operator's replication test fails", "A failure weighs more than a success, and the disagreement is shown, not netted away.");
   return steps;
 }
 

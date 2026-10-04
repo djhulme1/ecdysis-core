@@ -256,17 +256,18 @@ export function scoreTrackRecord(
       const after = sigma(clampLogOdds(base + sumEvidence([...prefix, item], c.authorOperator, opts).sum));
       // Leave-one-OPERATOR-out: the resolution a report is scored against leaves out everything its operator filed on the
       // claim, so an operator cannot resolve its own report by filing a second one that stands in for the first.
-      const without = sumEvidence(items.filter((e) => e.operatorId !== item.operatorId), c.authorOperator, opts);
+      const without = sumEvidence(items.filter((e) => e.operatorId !== item.operatorId), c.authorOperator, opts, c.registrant);
       // Resolved against the bar at zero use (τ0), never τ(U): use raises the bar a claim must clear to READ established,
       // but a citation must not change what anyone's report is scored against (use never moves credence; §2).
       // A conceptual claim resolves by argument (an upheld counterexample), never by replication; its reviews are scored against that.
+      // credence/0.4: an empirical claim resolves on its verified replication tests alone, as its status reads them.
       const verifiedBase = logit(r.prior) + argSum.verified;
       const status = r.kind === "conceptual"
         ? conceptualStatusOf(sigma(clampLogOdds(verifiedBase + without.sumVerified)), args, r.cap !== null)
         : statusOf({
-          credence: sigma(clampLogOdds(verifiedBase + without.sumVerified)), sReplication: without.sReplication, fReplication: without.fReplication, threshold: thresholdOf(0),
+          credence: sigma(clampLogOdds(logit(r.prior) + without.replicationSum)), sReplication: without.sReplication, fReplication: without.fReplication, threshold: thresholdOf(0),
           confirmingReplication: without.confirmingReplication, failingReplication: without.failingReplication,
-          confirmingFamilies: familyCount(without.confirmingFamilies), confirmingOperators: without.confirmingOperators,
+          confirmingFamilies: familyCount(without.confirmingFamilies), confirmingOperators: without.confirmingOperators, failingOperators: without.failingOperators,
           foundationRefuted,
         });
       const resolved = resolutionOf(status, o.anchors?.get(c.ref));

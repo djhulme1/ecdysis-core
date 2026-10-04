@@ -25,6 +25,7 @@ import { deriveV2 } from "../src/core/v2/flow.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared, declaredForm } from "./kinds-kit.js";
 // The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
 const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, challenge: { unverified: 1, account: 3, verified: 5 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
 
@@ -52,7 +53,7 @@ async function world() {
   };
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   const sign = async (handle: string, payload: Record<string, Json>, kp = keys.get(handle)!) => {
-    const full: Json = { ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() };
+    const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const bundle = (n: number): Bundle => ({ repo: "https://github.com/example/rep", commit: n.toString(16).padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }], runtimeMinutes: 5 });
@@ -132,7 +133,7 @@ describe("challenges: proposing, the board, taking up, withdrawing", () => {
     await w.svc.setTier("op-p", "account");
     const p2 = await w.svc.proposeChallengeByPerson("op-p", { claim: c2, title: "A person's challenge on paper two", brief: w.BRIEF, scale: "cpu-hours" });
     assert.equal(p2.status, 201, JSON.stringify(p2.body));
-    const p3 = await w.svc.proposeChallengeByPerson("op-p", { source: "arxiv:1706.03762", quote: "Attention alone reaches 28.4 BLEU on WMT14 En-De.", test: "BLEU below 27 with the stated setup.", title: "Does attention alone reach 28.4 BLEU?", brief: w.BRIEF, scale: "gpu-hours" });
+    const p3 = await w.svc.proposeChallengeByPerson("op-p", declaredForm({ source: "arxiv:1706.03762", quote: "Attention alone reaches 28.4 BLEU on WMT14 En-De.", test: "BLEU below 27 with the stated setup.", title: "Does attention alone reach 28.4 BLEU?", brief: w.BRIEF, scale: "gpu-hours" }));
     assert.equal(p3.status, 201, JSON.stringify(p3.body));
     assert.match(String(w.b(p3)["claim"]), /^ext:[0-9a-f]{16}#C1$/, "the external claim was registered and the brief attached to it");
     const extRef = String(w.b(p3)["claim"]);
@@ -271,7 +272,7 @@ describe("challenges: proposing, the board, taking up, withdrawing", () => {
     assert.equal(extBlob.status, 451, JSON.stringify(extBlob.body));
     assert.match(String(w.b(extBlob)["error"]), /human look.*not held for one.*reword/);
     assert.doesNotMatch(String(w.b(extBlob)["error"]), /steward can seat/, "no promise the platform does not keep");
-    const formBlob = await w.svc.proposeChallengeByPerson("op-p", { source: "arxiv:2409.00002", quote: `a quote that carries ${BLOB}`, test: "the stated result fails to appear with the stated setup", title: "A brief on a smuggled quote", brief: w.BRIEF, scale: "cpu-minutes" });
+    const formBlob = await w.svc.proposeChallengeByPerson("op-p", declaredForm({ source: "arxiv:2409.00002", quote: `a quote that carries ${BLOB}`, test: "the stated result fails to appear with the stated setup", title: "A brief on a smuggled quote", brief: w.BRIEF, scale: "cpu-minutes" }));
     assert.equal(formBlob.status, 451, JSON.stringify(formBlob.body));
     assert.equal(w.rows().length, before, "neither the claim nor the brief reached the log");
     // Plain text through both doors still passes the same screen.

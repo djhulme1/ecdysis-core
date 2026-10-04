@@ -34,7 +34,12 @@ import { b64urlDecode, b64urlEncode, hashJson } from "../../core/canonical.js";
 import { publicKeyProblem, verifyJson } from "../../core/crypto.js";
 import type { TransparencyLog } from "../../core/log.js";
 import { CREDENCE_V2_VERSION, modelFamilies, type Tier } from "../../core/v2/credence.js";
-import { isHeld, V2_ENTRY_TYPES, withheldOf, type V2Entry, type V2EntryType, type V2Record } from "../../core/v2/flow.js";
+import { isHeld, scopeAt, V2_ENTRY_TYPES, withheldOf, type V2Entry, type V2EntryType, type V2Record } from "../../core/v2/flow.js";
+import {
+  classify, dataHashes, dataOfRecordProblems, descriptionProblems, emittedPeriod, fidelityProblems, isReplicationTest, KIND_WORDS,
+  dataWordsOf, normaliseData, normaliseDescription, normaliseDesign, normaliseFidelity, normaliseScope, PERIOD_OUTPUTS, periodWords, quotesSentence, scopeProblems, within,
+  type ClaimScope, type Classification, type DataFile, type Fidelity,
+} from "../../core/v2/kinds.js";
 import { sanitizeText } from "../../core/sanitize.js";
 import { QUOTAS, type Quotas } from "../../core/v2/quotas.js";
 import { CHALLENGE_CLAIM, CHALLENGE_NOTES, CHALLENGES_PER_CLAIM, CHALLENGES_VERSION, challengeStatus, challengeTextProblems, PROPOSER_WEIGHT, rankChallenges, WITHDRAW_REASON, type ChallengeScale, type ChallengeState, type ChallengeStatus, type ChallengeWants, type RankedChallenge } from "../../core/v2/challenges.js";
@@ -59,7 +64,7 @@ import {
 } from "../../core/v2/receipts.js";
 import type { computeV2 } from "../../core/v2/scoring.js";
 import { resolveV2, scoreRecord } from "../../core/v2/resolve.js";
-import { validateEscalateV2, validatePaperV2, validateReviewV2, type EscalateV2Payload, type PaperV2Payload, type ReviewV2Payload } from "../../core/v2/paper.js";
+import { paperPeriodProblems, paperScopeProblems, validateEscalateV2, validatePaperV2, validateReviewV2, type EscalateV2Payload, type PaperV2Payload, type ReviewV2Payload } from "../../core/v2/paper.js";
 import { runScreening, type Screener, type Screenable } from "../../core/hazard.js";
 import type { PaperPayload } from "../../core/schema.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
@@ -178,6 +183,8 @@ export function hiddenNote(r: V2Record, subject: string): string {
 const TEXT_FIELDS: Record<string, string[]> = {
   "paper.publish": ["title"],
   "claim.external": ["quote", "test"],
+  "check.commit": ["methods"],
+  "check.describe": ["alteration", "beyond"],
   "argument.file": ["text", "instance"],
   "argument.check": ["note"],
   "argument.answer": ["text"],
@@ -188,6 +195,26 @@ const TEXT_FIELDS: Record<string, string[]> = {
   "attempt.clear": ["how"],
 };
 
+/**
+ * An entry's wording taken out of view: its text fields, and (scope/0.1, kinds/0.1) the words inside its structure: a scope's
+ * or a fidelity's basis, a design's basis, alteration and beyond, a data of record's URLs and licences, in an entry or in a
+ * paper's claims. The structure stays (periods, method and data, hashes), so a public replay still reads scopes and classifies
+ * receipts; a withheld item feeds no number anyway, and the payload hash commits to the full text.
+ */
+function redactWords(type: string, p: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...p };
+  for (const f of TEXT_FIELDS[type] ?? []) if (f in out) out[f] = null;
+  const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
+  const words = (v: unknown, keys: string[]) => { const o = obj(v); if (!o) return v; const c = { ...o }; for (const k of keys) if (k in c) c[k] = null; return c; };
+  const files = (v: unknown) => (Array.isArray(v) ? v.map((f) => words(f, ["url", "licence"])) : v);
+  if ("scope" in out) out["scope"] = words(out["scope"], ["basis"]);
+  if ("fidelity" in out) out["fidelity"] = words(out["fidelity"], ["basis"]);
+  if ("data" in out) out["data"] = files(out["data"]);
+  if ("design" in out) out["design"] = words(out["design"], ["basis", "alteration", "beyond"]);
+  if (type === "paper.publish" && Array.isArray(out["claims"])) out["claims"] = (out["claims"] as unknown[]).map((c) => { const o = obj(c); return o ? { ...o, ...("scope" in o ? { scope: words(o["scope"], ["basis"]) } : {}), ...("data" in o ? { data: files(o["data"]) } : {}) } : c; });
+  return out;
+}
+
 /** The subject a log entry speaks about, for the purpose of withholding: its own id, or the item it is about. */
 function entrySubject(type: string, p: Record<string, unknown>, r: V2Record): string | null {
   const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -196,8 +223,10 @@ function entrySubject(type: string, p: Record<string, unknown>, r: V2Record): st
     case "argument.file": return str(p["id"]) || null;
     case "argument.check": case "argument.answer": return str(p["argument"]) || null;
     case "review.file": return str(p["id"]) || null;
-    case "claim.amend": return str(p["claim"]) || null;
+    case "claim.amend": case "claim.scope": return str(p["claim"]) || null;
     case "check.attempt": case "attempt.clear": return str(p["id"]) || null;
+    case "check.commit": return str(p["id"]) || null;
+    case "check.describe": return str(p["receipt"]) || null;
     default: return null;
   }
   void r;
@@ -213,24 +242,78 @@ export function redactedPayload(r: V2Record, type: string, payload: Json): Json 
   const p = payload as Record<string, unknown>;
   const subject = entrySubject(type, p, r);
   if (!subject) return payload;
-  const fields = TEXT_FIELDS[type] ?? [];
-  // The item itself, its paper (a claim's ref), or the claim an argument or review is about.
-  // An amendment goes with its claim (and so with the claim's paper, or the claim from the literature it amends).
-  const about = type === "argument.file" || type === "argument.check" || type === "argument.answer" ? r.arguments.get(type === "argument.file" ? subject : subject)?.claim ?? null : type === "review.file" || type === "check.attempt" || type === "attempt.clear" ? (typeof p["claim"] === "string" ? p["claim"] : null) : type === "claim.amend" ? subject : null;
+  // The item itself, its paper (a claim's ref), or the claim an argument, a review or an attempt is about. An amendment and a declared scope
+  // go with their claim (and so with the claim's paper, or the claim from the literature); a receipt's declaration and a
+  // description of a receipt go with the receipt and with the receipt's claim.
+  const about = type === "argument.file" || type === "argument.check" || type === "argument.answer" ? r.arguments.get(type === "argument.file" ? subject : subject)?.claim ?? null : type === "review.file" || type === "check.attempt" || type === "attempt.clear" ? (typeof p["claim"] === "string" ? p["claim"] : null) : type === "claim.amend" || type === "claim.scope" ? subject
+    : type === "check.commit" ? (typeof p["target"] === "string" ? p["target"] : null)
+    : type === "check.describe" ? (r.checks.get(subject)?.target ?? null) : null;
   const w = r.withheld.get(subject) ?? (about ? withheldOf(r, about) : null) ?? (type === "challenge.propose" && typeof p["claim"] === "string" ? withheldOf(r, p["claim"]) : null);
   // An amendment carries a paper claim's new test, which is otherwise only in the paper's envelope, served by pages that
   // honour R1: so it leaves the log's view while its claim is held under R1, as it does while the claim is withheld.
   if (!w && type === "claim.amend" && isHeld(r, subject)) {
-    const out: Record<string, unknown> = { ...p };
-    for (const f of fields) if (f in out) out[f] = null;
+    const out = redactWords(type, p);
     out["withheld"] = { status: "frozen", note: "text withheld while the claim is frozen for a decision under reserved power R1; the payload hash on this entry commits to the full text" };
     return out as Json;
   }
   if (!w) return payload;
-  const out: Record<string, unknown> = { ...p };
-  for (const f of fields) if (f in out) out[f] = null;
+  const out = redactWords(type, p);
   out["withheld"] = { status: w.status, since: w.ts, entry: w.seq, note: "text withheld from view by a steward; the payload hash on this entry commits to the full text" };
   return out as Json;
+}
+
+/** What a receipt's kind means for its claim, in the archive's words (kinds/0.1). */
+export function kindReply(cls: Classification): Json {
+  const words = KIND_WORDS[cls.effective];
+  return {
+    declared: cls.declared, countsAs: cls.effective,
+    means: cls.replicationTest
+      ? `A replication test (${words}): evidence on the claim, which its credence and status read.`
+      : `A robustness test (${words}): listed on the claim as robust, or not robust, to the change it makes. It never moves the claim's credence or status.`,
+    ...(cls.note ? { note: cls.note } : {}),
+  };
+}
+
+/** How to file a receipt the archive could not confirm as a replication test. */
+function replicationHelp(scope: ClaimScope | null): string {
+  return scope === null
+    ? "This claim was registered before claims declared a scope, so nothing can show that new data sample its population. Its registrant may declare the scope once (declare_scope); receipts committed after that can be replication tests. Until then, declare data \"beyond\": the receipt is listed on the claim as a robustness test."
+    : "Declare what the receipt is: data \"beyond\" for another population or period, or a part of the claim's (an extension), or method \"altered\" for a changed method (a reanalysis). It is listed on the claim as a robustness test and does not move its credence or status.";
+}
+
+/** What to do next with an empirical claim, in the archive's words. */
+const REPLICATION_NEXT = "commit_check against this ref. A replication test (the claim's stated method on its own data, or on new data covering its whole population and period) is evidence on it; any other receipt is a robustness test, listed beside it and never counted for or against it. Say which in design, before the seed.";
+
+/** Why "asserted" is refused for a claim from human literature whose basis is not the registered sentence's own words. */
+const ASSERTED_FROM_QUOTE = 'scope.basis: a claim from human literature is "asserted" general only when the registered sentence itself asserts the finding beyond the paper\'s data, so the basis quotes those words of the quote, exactly; a sentence that reports the paper\'s own figures describes its data, and its scope is their period';
+
+/**
+ * scope/0.1 for a claim from human literature: an empirical one declares the
+ * paper's scope (its data period, or general by construction, or asserted by
+ * its own sentence) and the test's fidelity to the paper's reported method;
+ * a data of record (the paper's own replication files) is optional. A
+ * conceptual claim declares none of them. Empty when nothing is wrong.
+ */
+function externalScopeProblems(x: { kind?: unknown; scope?: unknown; fidelity?: unknown; data?: unknown; quote?: unknown }, today: string): string[] {
+  if (x.kind === "conceptual") return x.scope !== undefined || x.fidelity !== undefined || x.data !== undefined ? ["scope, fidelity and data: for an empirical claim; a conceptual claim is checked by argument"] : [];
+  const errors: string[] = [];
+  if (x.scope === undefined) errors.push('scope: required for an empirical claim: the paper\'s, not yours. {period: {from, to}, basis: the paper\'s words that state the span of its data} for a finding about a population at a time; {general: "construction", basis} when its object is defined by construction (a theorem, a simulation\'s ensemble, a named benchmark or model); {general: "asserted", basis: the words of the quote that assert it beyond the paper\'s data}. Receipts are classified against it: only data covering this population and period can confirm or refute the claim.');
+  else errors.push(...scopeProblems(x.scope, "scope", { notAfter: today, external: true }));
+  if (x.fidelity === undefined) errors.push('fidelity: required for an empirical claim: {as: "reported", basis} when your test states the method the paper reports, or {as: "adapted", basis} when it changes it (another data source, other sample rules, another statistic or other thresholds), saying which. The page shows it beside the test, so nobody mistakes a test of the registration for a test of the paper.');
+  else errors.push(...fidelityProblems(x.fidelity, "fidelity"));
+  if (x.data !== undefined) errors.push(...dataOfRecordProblems(x.data, "data"));
+  const s = normaliseScope(x.scope);
+  if (s && "general" in s && s.general === "asserted" && typeof x.quote === "string" && !quotesSentence(s.basis, x.quote)) errors.push(ASSERTED_FROM_QUOTE);
+  return errors;
+}
+
+/** What a claim from human literature declared, as the log carries it: normalised, nothing else. */
+function externalScopeEntry(x: { kind?: unknown; scope?: unknown; fidelity?: unknown; data?: unknown }): Record<string, Json> {
+  if (x.kind === "conceptual") return {};
+  const scope = normaliseScope(x.scope);
+  const fidelity = normaliseFidelity(x.fidelity);
+  const data = x.data !== undefined ? normaliseData(x.data) : [];
+  return { ...(scope ? { scope: scope as unknown as Json } : {}), ...(fidelity ? { fidelity: fidelity as unknown as Json } : {}), ...(data.length ? { data: data as unknown as Json } : {}) };
 }
 
 export interface V2ServiceOptions {
@@ -314,7 +397,7 @@ export const V2_SETTING_MEANING: Record<V2SettingKey, string> = {
   "v2.reviews": "Reviews being filed.",
   "v2.challenges": "Challenges being proposed, by agents and by people. Paused: refused with a reason; the board and withdrawals carry on.",
   "v2.arguments": "Arguments being filed and checked (arguments/0.1). Paused: refused with a reason; settled arguments keep their effect, and answers are still taken.",
-  "v2.amendments": "Authors correcting a claim's kind or test, once, before any evidence (claim.amend). Paused: refused with a reason.",
+  "v2.amendments": "Authors correcting a claim's kind, test or scope, once, before any evidence (claim.amend), and registrants or stewards declaring the scope of a claim registered before scopes existed (claim.scope). Paused: refused with a reason.",
   "v2.flags": "Agents flagging items for the stewards (issue.flag). Paused: refused with a reason; the complaint form and the queue carry on.",
   "v2.attempts": "Attempts being filed and blockers being cleared (attempts/0.1). Paused: refused with a reason; what is on the record keeps counting.",
 };
@@ -470,7 +553,7 @@ export class V2Service {
     const r = await this.record();
     const s = await this.scoresFor(r);
     const claims = [...s.claims.values()].filter((c) => !isHeld(r, c.ref))
-      .map((c) => ({ ref: c.ref, paper: c.paper, external: c.external, kind: c.kind, prior: c.prior, calibration: c.calibration, credence: c.credence, credenceVerified: c.credenceVerified, cap: c.cap, status: c.status, resolved: c.resolved, use: c.use, dispute: c.dispute, reproduced: c.reproduced, families: c.families, arguments: c.arguments, foundations: c.foundations, lift: c.lift }));
+      .map((c) => ({ ref: c.ref, paper: c.paper, external: c.external, kind: c.kind, prior: c.prior, calibration: c.calibration, credence: c.credence, credenceVerified: c.credenceVerified, credenceReplication: c.credenceReplication, operators: c.operators, cap: c.cap, status: c.status, resolved: c.resolved, use: c.use, dispute: c.dispute, reproduced: c.reproduced, families: c.families, arguments: c.arguments, foundations: c.foundations, lift: c.lift, scope: scopeAt(r, c.ref)?.scope ?? null }));
     return ok(200, { version: CREDENCE_V2_VERSION, claims } as unknown as Json);
   }
 
@@ -883,6 +966,18 @@ export class V2Service {
     if (target.authorOperator && target.authorOperator === operatorId) return err(403, "a check of your own operator's claim weighs nothing (Article 0.5); leave it to others");
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     if (target.kind === "conceptual") return err(422, "target: a conceptual claim has no measurement to repeat; it is checked by argument (file_argument: a counterexample, a contradiction with a claim on the record, an unsupported premise or a logical gap)", { target: c.target, kind: "conceptual" });
+    // kinds/0.1: what the receipt says it tests is checked against what the archive can see, before anything is sealed. A
+    // declaration the checks contradict is refused rather than quietly demoted, so the log never holds one the archive knows
+    // to be untrue (kinds.ts, classify).
+    const design = normaliseDesign(c.design)!;
+    const st = scopeAt(r, c.target);
+    const scope = st?.scope ?? null;
+    if (scope && "period" in scope && !design.period) return err(400, `design.period: this claim covers ${periodWords(scope.period)}; declare the period your data cover`, { claimPeriod: scope.period as unknown as Json });
+    const cls = classify({ design, code: c.kind, scope, record: dataHashes(st?.data), inputs: [...new Set((c.bundle.inputs ?? []).map((i) => i.sha256))].sort() });
+    if (isReplicationTest(cls.declared) && !cls.replicationTest) return err(422, `design: you declared a ${cls.declared}, but ${cls.note}`, { declared: cls.declared, countsAs: cls.effective, help: replicationHelp(scope) });
+    // The words a page shows beside the receipt are screened like any short text that goes on the log.
+    const designWords = await this.screenText({ title: [design.alteration, design.beyond].filter(Boolean).join(" · ") || "what a receipt tests", body: design.basis, handle: c.agent.handle, operatorId, publicKey: c.agent.publicKey, ts: c.ts });
+    if (designWords) return designWords;
     const bundle = await bundleHash(c.bundle);
     const families = modelFamilies(c.models ?? null);
     // inputs/0.1: the bundle's inputs go on the log by name, hash, size and access class (the derivation needs the hash and the
@@ -892,7 +987,7 @@ export class V2Service {
     await this.o.store.putEnvelope(id, env);
     await this.o.store.putBundle(id, c.bundle);
     await this.o.log.append("check.commit", {
-      id, target: c.target, kind: c.kind, bundle, image: !!c.bundle.image, runtimeMinutes: c.bundle.runtimeMinutes,
+      id, target: c.target, kind: c.kind, design: design as unknown as Json, bundle, image: !!c.bundle.image, runtimeMinutes: c.bundle.runtimeMinutes,
       handle: c.agent.handle, operatorId, ...(c.models ? { models: c.models } : {}), ...(c.methods ? { methods: c.methods } : {}),
       ...(inputs.length ? { inputs } : {}), ...(holds.length ? { holds } : {}),
       ...(checkKey ? { key } : {}),
@@ -905,6 +1000,7 @@ export class V2Service {
     return ok(201, {
       id, seal, seed, deadline: new Date(this.now().getTime() + RESULT_DEADLINE_MS).toISOString(),
       families,
+      kind: kindReply(cls),
       ...(requires.length ? { inputs: "This bundle needs inputs that are not open, so until a verified operator's cross-check matches it, this receipt counts at the unverified weight and settles nothing; it is drawn as a cross-check only for checkers who hold those inputs. Report numbers only." } : {}),
       crossCheck: cross ? { receipt: cross, bundle: crossBundle as unknown as Json, seed: crossSeed } : null,
       next: cross
@@ -988,6 +1084,10 @@ export class V2Service {
       bundle: bundle as unknown as Json, bundleHash: c.bundle,
       requires: c.requires, holds: c.holds,
       auditable: c.requires.length === 0 || c.verifiedBy.length > 0,
+      // kinds/0.1: what it declared it tests, what it counts as after every check, and why they differ.
+      design: c.design as unknown as Json, period: (c.emitted ?? null) as unknown as Json,
+      tests: { declared: c.declaredKind, countsAs: c.effectiveKind, replicationTest: c.replicationTest, ...(c.kindNote ? { note: c.kindNote } : {}), words: KIND_WORDS[c.effectiveKind] },
+      description: c.description as unknown as Json,
       outputs: outputs as unknown as Json,
       outputsStatus: c.stage !== "resulted" ? "not filed" : revealed ? "revealed" : disputeOpen ? "withheld while a finding is open" : "withheld until a verified cross-check matches or 30 days pass",
       otherCrossChecks: c.otherCrossChecks as unknown as Json,
@@ -1011,6 +1111,14 @@ export class V2Service {
 
     // inputs/0.1: a bundle on data not everyone may see reports numbers only, so no record can be copied into an output.
     if (check.requires.length && Object.values(res.outputs).some((v) => typeof v !== "number")) return err(422, "outputs: numbers only for a bundle whose inputs are not all open");
+    // kinds/0.1: a commit that declared a period reports the span its data actually cover, computed from the data, and it must lie
+    // within the declaration. A replication test whose data reach only a part of the claim's period counts as an extension.
+    let period: { from: string; to: string } | null = null;
+    if (check.design?.period) {
+      period = emittedPeriod(res.outputs);
+      if (!period) return err(422, "outputs: report the span your data cover as period_from and period_to (YYYYMMDD integers, computed from the data); your commit declared a period", { declared: check.design.period as unknown as Json });
+      if (!within(period, check.design.period)) return err(422, `outputs: your data cover ${periodWords(period)}, outside the period you declared (${periodWords(check.design.period)})`, { declared: check.design.period as unknown as Json, reported: period as unknown as Json });
+    }
     // The cross-check: the earlier receipt's outputs are compared within its declared tolerances, and exactly.
     let crossMatch: boolean | null = null;
     let crossExact: boolean | null = null;
@@ -1020,8 +1128,10 @@ export class V2Service {
       const theirBundle = await this.o.store.getBundle(check.crossCheck);
       if (!theirs || !theirBundle) return err(500, "the cross-checked receipt's outputs are missing");
       if ((r.checks.get(check.crossCheck)?.requires.length ?? 0) > 0 && Object.values(res.crossCheck.outputs).some((v) => typeof v !== "number")) return err(422, "crossCheck.outputs: numbers only for a bundle whose inputs are not all open");
-      crossMatch = compareOutputs(theirs, res.crossCheck.outputs, theirBundle.outputs).match;
-      crossExact = compareOutputs(theirs, res.crossCheck.outputs, theirBundle.outputs.map((o) => ({ name: o.name }))).match;
+      // A receipt that declared a period reported the span its data cover: a re-run must find exactly the same span.
+      const theirSpec = r.checks.get(check.crossCheck)?.design?.period ? [...theirBundle.outputs.filter((o) => !(PERIOD_OUTPUTS as readonly string[]).includes(o.name)), ...PERIOD_OUTPUTS.map((name) => ({ name }))] : theirBundle.outputs;
+      crossMatch = compareOutputs(theirs, res.crossCheck.outputs, theirSpec).match;
+      crossExact = compareOutputs(theirs, res.crossCheck.outputs, theirSpec.map((o) => ({ name: o.name }))).match;
       await this.o.store.putOutputs(`${check.crossCheck}@${res.commit}`, res.crossCheck.outputs);
     } else if (res.crossCheck) {
       return err(422, "crossCheck: the seal assigned none; send null");
@@ -1036,7 +1146,10 @@ export class V2Service {
       if (theirs && seedInsensitive(theirs, res.outputs, spec)) { insensitive = true; break; }
     }
     await this.o.store.putOutputs(res.commit, res.outputs);
-    await this.o.log.append("check.result", { commit: res.commit, outcome: res.outcome, crossMatch, ...(crossExact !== null ? { crossExact } : {}), ...(checkKey ? { key } : {}), ...(insensitive ? { seedInsensitive: true } : {}) });
+    await this.o.log.append("check.result", { commit: res.commit, outcome: res.outcome, crossMatch, ...(crossExact !== null ? { crossExact } : {}), ...(period ? { period } : {}), ...(checkKey ? { key } : {}), ...(insensitive ? { seedInsensitive: true } : {}) });
+    // What the receipt counts as, now that its result has said what its data cover (kinds/0.1).
+    const st = scopeAt(r, check.target, check.seq);
+    const counted = classify({ design: check.design, code: check.kind, scope: st?.scope ?? null, record: dataHashes(st?.data), inputs: check.inputs, emitted: period });
 
     // Only a verified operator's disagreement opens a finding (the derivation counts only their cross-checks as disputes); a
     // non-verified one is recorded and shown, and the frontier asks a verified operator to settle it.
@@ -1052,13 +1165,16 @@ export class V2Service {
     }
     return ok(201, {
       id: res.commit, outcome: res.outcome, crossMatch,
+      kind: kindReply(counted),
       ...(finding ? { finding } : {}),
       ...(insensitive ? { seedInsensitive: true, seedNote: "An earlier receipt of this bundle gave exactly these outputs under a different seed: the bundle ignores ECDYSIS_SEED, so this re-run adds nothing and is not counted as evidence. Bundles should let the seed choose what they sample." } : {}),
       note: crossMatch === false
         ? (verifiedOperator
           ? "Your cross-check disagreed with the earlier receipt. A finding is open: further independent runs decide it. Nobody is voided by a disagreement alone."
           : "Your cross-check disagreed with the earlier receipt. It is recorded and shown on that receipt, but only verified operators' cross-checks open findings; the frontier offers the receipt to a verified operator to re-run. Your person can verify your operator from their account page.")
-        : "Filed. Your outputs stay withheld until another agent cross-checks you; your receipt counts from now.",
+        : counted.replicationTest
+          ? "Filed. Your outputs stay withheld until another agent cross-checks you; your receipt counts from now, as a replication test."
+          : "Filed. Your outputs stay withheld until another agent cross-checks you. It is a robustness test: listed on the claim as robust, or not robust, to the change it makes, and never counted for or against it.",
     });
   }
 
@@ -1090,9 +1206,12 @@ export class V2Service {
     }
     // The run just filed, whose result the derived record does not carry yet.
     if (latest && latest.outputs && !runs.some((x) => x.commit === latest.commit) && independent(latest.by)) runs.push({ by: latest.by, outputs: latest.outputs, commit: latest.commit });
+    // kinds/0.1: a receipt that declared a period reported the span its data cover, and every run must find exactly that span:
+    // the finding settles on the outputs the cross-check compared, so a false span cannot be agreed away on the other numbers.
+    const spec = check.design?.period ? [...bundle.outputs.filter((o) => !(PERIOD_OUTPUTS as readonly string[]).includes(o.name)), ...PERIOD_OUTPUTS.map((name) => ({ name }))] : bundle.outputs;
     // Determinism, observed: at least two independent runs under this seed with exactly identical outputs, on a pinned image.
-    const deterministic = isDeterministic(bundle, largestIdenticalGroup(runs, bundle.outputs));
-    const s = settleRuns(runs.map(({ by, outputs }) => ({ by, outputs })), bundle.outputs, deterministic);
+    const deterministic = isDeterministic(bundle, largestIdenticalGroup(runs, spec));
+    const s = settleRuns(runs.map(({ by, outputs }) => ({ by, outputs })), spec, deterministic);
     if (s.verdict === "open") return { status: "open", runs: runs.length, need: s.need, bundle: check.bundle, seed: check.seed };
     const oddCommit = "odd" in s ? runs.find((x) => x.by === s.odd)?.commit ?? null : null;
     const id = await hashJson({ bundle: check.bundle, seed: check.seed, runs: runs.map((x) => x.commit) });
@@ -1160,6 +1279,10 @@ export class V2Service {
     const opened = await this.openEnvelope<PaperV2Payload>(env, "paper", validatePaperV2, "main");
     if (!opened.ok) return opened.result;
     const { payload: paper, operatorId, id: cid, record: r } = opened;
+    // scope/0.1: every empirical claim of a new paper says what it covers (validatePaperV2 checks a scope's shape wherever it
+    // is given; a paper held at screening before scopes existed is still published, when released, as its agent signed it).
+    const unscoped = [...paperScopeProblems(paper), ...paperPeriodProblems(paper, this.now().toISOString().slice(0, 10))];
+    if (unscoped.length) return err(400, "invalid paper", { detail: unscoped });
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     if (r.claims.some((c) => c.paper === `ecd:${cid.slice(0, 16)}`)) return err(409, "this exact paper was already published");
     // Foundations must exist: no citation on faith also means no citation of nothing.
@@ -1176,8 +1299,10 @@ export class V2Service {
     const quota = await this.overQuota("paper.publish", operatorId, r, QUOTA_PER_DAY);
     if (quota) return quota;
     // Screening, fail-closed, no probation (tiers do that job in v2).
+    // The words a claim's scope gives go on the log with it, so they are screened with the paper.
+    const scopeWords = paper.claims.flatMap((c) => [c.scope?.basis, ...dataWordsOf(c.data)]).filter((b): b is string => typeof b === "string" && b.trim() !== "");
     const screenable: PaperPayload = {
-      protocol: "ecdysis/0.1", type: "paper", title: paper.title, abstract: paper.abstract, field: paper.field,
+      protocol: "ecdysis/0.1", type: "paper", title: paper.title, abstract: scopeWords.length ? [paper.abstract, ...scopeWords].join("\n\n") : paper.abstract, field: paper.field,
       claims: paper.claims.map((c) => ({ text: c.text, confidence: c.confidence })),
       builds_on: paper.builds_on.map((b) => ({ id: b.id, rel: b.rel, ...(b.basis ? { basis: b.basis } : {}), ...(b.claims ? { claims: b.claims } : {}), ...(b.note ? { note: b.note } : {}) })),
       ...(paper.artefacts ? { artefacts: paper.artefacts } : {}), agent: paper.agent, ts: paper.ts,
@@ -1223,7 +1348,12 @@ export class V2Service {
     const id = `ecd:${cid.slice(0, 16)}`;
     await this.o.log.append("paper.publish", {
       id, cid, handle: paper.agent.handle, operatorId, title: paper.title, field: paper.field,
-      claims: paper.claims.map((c, i) => ({ label: `C${i + 1}`, confidence: c.confidence, ...(c.kind === "conceptual" ? { kind: "conceptual" } : {}) })),
+      claims: paper.claims.map((c, i) => {
+        // scope/0.1: what the claim covers, and its data of record, go on the log: the derivation classifies receipts by them.
+        const scope = c.kind === "conceptual" ? null : normaliseScope(c.scope);
+        const data = c.kind === "conceptual" ? [] : normaliseData(c.data);
+        return { label: `C${i + 1}`, confidence: c.confidence, ...(c.kind === "conceptual" ? { kind: "conceptual" } : {}), ...(scope ? { scope: scope as unknown as Json } : {}), ...(data.length ? { data: data as unknown as Json } : {}) };
+      }),
       builds_on: paper.builds_on.map((b) => ({ id: b.id, rel: b.rel, ...(b.basis ? { basis: b.basis } : {}), ...(b.claims ? { claims: b.claims } : {}) })),
       ...(paper.models ? { models: paper.models } : {}),
     });
@@ -1357,6 +1487,10 @@ export class V2Service {
         const opened = await this.openEnvelope<PaperV2Payload>(env, "paper", validatePaperV2, "main");
         if (!opened.ok) return ok(200, { subject, status: "released", published: false, note: "Released, but the paper cannot be published as signed", why: opened.result.body });
         if (r.voidedOperators.has(opened.operatorId)) return ok(200, { subject, status: "released", published: false, note: "Released, but a finding of fabrication against its operator is in force" });
+        // scope/0.1: a paper held before scopes existed is published as its agent signed it (read as general); a period that
+        // ends in the future is refused even so, against the archive's clock.
+        const future = paperPeriodProblems(opened.payload, this.now().toISOString().slice(0, 10));
+        if (future.length) return ok(200, { subject, status: "released", published: false, note: "Released, but the paper cannot be published as signed", why: { error: "invalid paper", detail: future } });
         const published = await this.enterRecord(opened.payload, subject, opened.operatorId, r.tiers.get(opened.operatorId) ?? "unverified");
         return ok(200, { subject, status: "released", published: true, result: published.body });
       }
@@ -1375,7 +1509,8 @@ export class V2Service {
   async amendClaim(env: Json): Promise<ApiResult> {
     const pausedNow = await this.paused("v2.amendments", "amendments are");
     if (pausedNow) return pausedNow;
-    type P = { protocol: string; type: "claim.amend"; claim: string; kind?: ClaimKind; test?: string; agent: { handle: string; publicKey: string }; ts: string };
+    type P = { protocol: string; type: "claim.amend"; claim: string; kind?: ClaimKind; test?: string; scope?: ClaimScope; fidelity?: Fidelity; data?: DataFile[]; agent: { handle: string; publicKey: string }; ts: string };
+    const today = this.now().toISOString().slice(0, 10);
     const validate = (p: unknown): { ok: true; value: P } | { ok: false; errors: string[] } => {
       const x = p as Partial<P> | null;
       if (!x || typeof x !== "object") return { ok: false, errors: ["payload: an object"] };
@@ -1387,7 +1522,13 @@ export class V2Service {
       // A test is shown as written, to people and to agents: nothing in it may be invisible (the sanitiser's classes: bidirectional,
       // zero-width and tag characters, and control characters but newline and tab).
       if (x.test !== undefined && (typeof x.test !== "string" || x.test.trim().length < 10 || x.test.length > 600 || sanitizeText(x.test).stripped.length > 0)) errors.push("test: the result that would refute the claim, 10 to 600 characters, no control, bidirectional, zero-width or tag characters");
-      if (x.kind === undefined && x.test === undefined) errors.push("kind and/or test: what the correction changes");
+      // scope/0.1: a correction may restate what the claim covers, in full (with a claim from human literature's fidelity, and a data of record).
+      const ext = typeof x.claim === "string" && x.claim.startsWith("ext:");
+      if (x.scope !== undefined) errors.push(...scopeProblems(x.scope, "scope", { notAfter: today, external: ext }));
+      if (x.fidelity !== undefined) { if (!ext) errors.push("fidelity: only for a claim from human literature"); else errors.push(...fidelityProblems(x.fidelity, "fidelity")); }
+      if (x.data !== undefined) errors.push(...dataOfRecordProblems(x.data, "data"));
+      if ((x.fidelity !== undefined || x.data !== undefined) && x.scope === undefined) errors.push("fidelity and data: with a scope; a correction restates what the claim covers in full");
+      if (x.kind === undefined && x.test === undefined && x.scope === undefined) errors.push("kind, test and/or scope: what the correction changes");
       if (!x.agent || typeof x.agent.handle !== "string" || typeof x.agent.publicKey !== "string") errors.push("agent: {handle, publicKey}");
       if (typeof x.ts !== "string") errors.push("ts: ISO-8601 UTC");
       return errors.length ? { ok: false, errors } : { ok: true, value: x as P };
@@ -1405,12 +1546,36 @@ export class V2Service {
       const current = claim.external ? r.external.get(paperId)?.test : null;
       if (current === null || a.test.trim() !== current) changes["test"] = a.test.trim();
     }
+    // scope/0.1: what the claim covers after the correction. A conceptual claim declares none; a claim corrected to empirical
+    // declares one unless it has one already; a claim from human literature keeps the paper's rules (fidelity; "asserted" only
+    // by the quote's own words).
+    const st = scopeAt(r, a.claim);
+    const willBe: ClaimKind = (changes["kind"] as ClaimKind | undefined) ?? claim.kind ?? "empirical";
+    if (a.scope !== undefined && willBe === "conceptual") return err(422, "scope: a conceptual claim declares no scope; it is checked by argument");
+    if (changes["kind"] === "empirical" && a.scope === undefined && (!st || st.scope === null || st.how === "legacy")) return err(400, "invalid claim.amend", { detail: ["scope: a claim corrected to empirical declares what it covers (see publish_paper or register_claim)"] });
+    if (a.scope !== undefined) {
+      const scope = normaliseScope(a.scope)!;
+      if (claim.external) {
+        if (a.fidelity === undefined && !st?.fidelity) return err(400, "invalid claim.amend", { detail: ["fidelity: required with a scope for a claim from human literature that has none"] });
+        const quote = r.external.get(paperId)?.quote ?? "";
+        if ("general" in scope && scope.general === "asserted" && !quotesSentence(scope.basis, quote)) return err(422, ASSERTED_FROM_QUOTE);
+      }
+      const fidelity = a.fidelity !== undefined ? normaliseFidelity(a.fidelity) : null;
+      const data = a.data !== undefined ? normaliseData(a.data) : [];
+      const same = JSON.stringify(scope) === JSON.stringify(st?.scope ?? null) && (!fidelity || JSON.stringify(fidelity) === JSON.stringify(st?.fidelity ?? null)) && (a.data === undefined || JSON.stringify(data) === JSON.stringify(st?.data ?? []));
+      if (!same || st?.how === "legacy") {
+        changes["scope"] = scope as unknown as Json;
+        if (fidelity) changes["fidelity"] = fidelity as unknown as Json;
+        if (data.length) changes["data"] = data as unknown as Json;
+      }
+    }
     if (Object.keys(changes).length === 0) return err(409, "nothing changes: the claim already reads so");
     // A conceptual claim takes no receipts, so a challenge on the board that asks for one would be stranded.
     const stranded = changes["kind"] === "conceptual" ? [...r.challenges.values()].find((c) => c.claim === a.claim && !c.withdrawn && c.wants === "receipt") : undefined;
     if (stranded) return err(409, `challenge ${stranded.id} asks for a receipt on this claim, which a conceptual claim cannot take: withdraw it first`, { challenge: stranded.id });
-    if (typeof changes["test"] === "string") {
-      const screened = await this.screenText({ title: `correction of ${a.claim}`, body: changes["test"], handle: a.agent.handle, operatorId, publicKey: a.agent.publicKey, ts: a.ts });
+    const words = [changes["test"], (changes["scope"] as { basis?: string } | undefined)?.basis, (changes["fidelity"] as { basis?: string } | undefined)?.basis, ...dataWordsOf(changes["data"] as Array<{ url?: string; licence?: string }> | undefined)].filter((t): t is string => typeof t === "string" && t.trim() !== "");
+    if (words.length) {
+      const screened = await this.screenText({ title: `correction of ${a.claim}`, body: words.join("\n\n"), handle: a.agent.handle, operatorId, publicKey: a.agent.publicKey, ts: a.ts });
       if (screened) return screened;
     }
     // Screening takes time, and a receipt, review, argument or withholding may land meanwhile: check again against the record as
@@ -1420,7 +1585,7 @@ export class V2Service {
     if (!(await this.reserve("amendment", a.claim))) return err(409, "this claim was corrected once already; a claim is corrected once");
     await this.o.log.append("claim.amend", { claim: a.claim, ...changes, handle: a.agent.handle, operatorId });
     if (!(await this.record()).amendments.has(a.claim)) return err(409, "the amendment reached the log but the record did not apply it: evidence landed on the claim at the same moment, so it can no longer be corrected");
-    return ok(201, { claim: a.claim, ...changes, note: "Corrected, once: the entry is on the log and the page shows both versions. Nothing else about a claim can be changed; from here it is confirmed or refuted." });
+    return ok(201, { claim: a.claim, ...changes, note: "Corrected, once: the entry is on the log and the page shows both versions. Nothing else about a claim can be changed; from here it is confirmed or refuted by replication tests." });
   }
 
   /**
@@ -1730,8 +1895,18 @@ export class V2Service {
     const all = [...s.claims.values()].filter((c) => !isHeld(r, c.ref)); // frozen claims are in no queue
     // attempts/0.1: what blocks a claim rides with it in the checking queue, so an agent sees at a glance what it must be able to clear.
     const blockedOf = (ref: string) => r.blockers.get(ref)?.blockers.map((b) => b.blocker) ?? [];
+    // kinds/0.1: a claim with robustness results and no replication test says what would settle it, and in which period.
+    const robustOnly = (ref: string) => {
+      const mine = [...r.checks.values()].filter((x) => x.target === ref && x.stage === "resulted" && !x.disowned);
+      return mine.length > 0 && mine.every((x) => !x.replicationTest);
+    };
+    const wanted = (ref: string): Record<string, Json> => {
+      if (!robustOnly(ref)) return {};
+      const sc = scopeAt(r, ref)?.scope ?? null;
+      return { wants: sc && "period" in sc ? `a replication test in its own period, ${periodWords(sc.period)}, would settle whether it held where it was made; the receipts so far are robustness tests` : sc === null ? "its receipts so far are robustness tests; it needs its scope declared (declare_scope) before a replication test can count" : "a replication test of the claim itself would settle it; the receipts so far are robustness tests" };
+    };
     const checking = all.filter((c) => c.status !== "established" && c.status !== "refuted")
-      .map((c) => ({ ref: c.ref, credence: round(c.credence), use: c.use, status: c.status, families: c.families, value: round(c.valueOfChecking), perMinute: round(c.valueOfChecking / cost(c.ref), 6), minutes: cost(c.ref), ...(blockedOf(c.ref).length ? { blocked: blockedOf(c.ref) } : {}) }))
+      .map((c) => ({ ref: c.ref, credence: round(c.credence), use: c.use, status: c.status, families: c.families, value: round(c.valueOfChecking), perMinute: round(c.valueOfChecking / cost(c.ref), 6), minutes: cost(c.ref), ...(blockedOf(c.ref).length ? { blocked: blockedOf(c.ref) } : {}), ...(c.kind !== "conceptual" ? wanted(c.ref) : {}) }))
       .sort((a, b) => b.perMinute - a.perMinute).slice(0, limit);
     // attempts/0.1: claims nobody has managed to check, by the pressure on them (stakes × (1 − 2^−n) over n verified operators'
     // uncleared attempts; until stakes/0.1, the stakes are the claim's use), then by the independent operators who tried.
@@ -1825,9 +2000,15 @@ export class V2Service {
 
   /* ---------------- claims ---------------- */
 
-  /** Register a claim from human literature as a target. */
+  /**
+   * Register a claim from human literature as a target. An empirical claim
+   * declares the paper's scope and the test's fidelity to the paper (scope/0.1):
+   * the registrant reads the paper for both, and the page shows them, with the
+   * registrant's name, beside the test it wrote.
+   */
   async registerExternalClaim(env: Json): Promise<ApiResult> {
-    type Ext = { protocol: string; type: "claim.external"; source: string; quote: string; test: string; kind?: ClaimKind; agent: { handle: string; publicKey: string }; ts: string };
+    type Ext = { protocol: string; type: "claim.external"; source: string; quote: string; test: string; kind?: ClaimKind; scope?: ClaimScope; fidelity?: Fidelity; data?: DataFile[]; agent: { handle: string; publicKey: string }; ts: string };
+    const today = this.now().toISOString().slice(0, 10);
     const validate = (p: unknown): { ok: true; value: Ext } | { ok: false; errors: string[] } => {
       const x = p as Partial<Ext> | null;
       const errors: string[] = [];
@@ -1838,6 +2019,7 @@ export class V2Service {
       if (typeof x.quote !== "string" || x.quote.length < 10 || x.quote.length > 600) errors.push("quote: the claim as the paper states it, 10 to 600 characters");
       if (typeof x.test !== "string" || x.test.length < 10 || x.test.length > 600) errors.push("test: the result that would refute it, 10 to 600 characters");
       if (x.kind !== undefined && !(CLAIM_KINDS as readonly unknown[]).includes(x.kind)) errors.push(`kind: ${CLAIM_KINDS.join(" or ")} (optional; empirical when absent)`);
+      errors.push(...externalScopeProblems(x, today));
       if (!x.agent || typeof x.agent.handle !== "string" || typeof x.agent.publicKey !== "string") errors.push("agent: {handle, publicKey}");
       if (typeof x.ts !== "string") errors.push("ts: ISO-8601 UTC");
       return errors.length ? { ok: false, errors } : { ok: true, value: x as Ext };
@@ -1849,14 +2031,29 @@ export class V2Service {
     const { payload: c, operatorId, record: r } = opened;
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     const id = `ext:${(await hashJson({ source: c.source.toLowerCase(), quote: c.quote.trim() })).slice(0, 16)}`;
-    if (r.external.has(id)) return ok(200, { id, ref: `${id}#C1`, note: "already registered" });
+    if (r.external.has(id)) return ok(200, this.alreadyRegistered(r, id));
     const quota = await this.overQuota("claim.external", operatorId, r, EXTERNAL_PER_DAY);
     if (quota) return quota;
-    const screened = await this.screenText({ title: c.quote, body: c.test, handle: c.agent.handle, operatorId, publicKey: c.agent.publicKey, ts: c.ts });
+    const declared = externalScopeEntry(c);
+    const screened = await this.screenText({ title: c.quote, body: [c.test, c.scope?.basis, c.fidelity?.basis, ...dataWordsOf(c.data)].filter(Boolean).join("\n\n"), handle: c.agent.handle, operatorId, publicKey: c.agent.publicKey, ts: c.ts });
     if (screened) return screened;
-    if (!(await this.reserve("external", id))) return ok(200, { id, ref: `${id}#C1`, note: "already registered" });
-    await this.o.log.append("claim.external", { id, handle: c.agent.handle, operatorId, source: c.source, quote: c.quote, test: c.test, ...(c.kind === "conceptual" ? { kind: "conceptual" } : {}) });
-    return ok(201, { id, ref: `${id}#C1`, kind: c.kind ?? "empirical", next: c.kind === "conceptual" ? "file_argument on this ref to attack or qualify it; independent operators then check_argument" : "commit_check against this ref to replicate it" });
+    if (!(await this.reserve("external", id))) return ok(200, this.alreadyRegistered(await this.record(), id));
+    await this.o.log.append("claim.external", { id, handle: c.agent.handle, operatorId, source: c.source, quote: c.quote, test: c.test, ...(c.kind === "conceptual" ? { kind: "conceptual" } : {}), ...declared });
+    return ok(201, {
+      id, ref: `${id}#C1`, kind: c.kind ?? "empirical", ...declared,
+      next: c.kind === "conceptual" ? "file_argument on this ref to attack or qualify it; independent operators then check_argument" : REPLICATION_NEXT,
+    });
+  }
+
+  /** The reply to a registration of a sentence already on the record: its ref, and whether it still needs a scope. */
+  private alreadyRegistered(r: V2Record, id: string): Json {
+    const ref = `${id}#C1`;
+    const claim = r.claims.find((c) => c.ref === ref);
+    const unscoped = !!claim && claim.kind !== "conceptual" && (scopeAt(r, ref)?.scope ?? null) === null;
+    return {
+      id, ref, note: "already registered: the id is the hash of the source and the quote, so the same sentence is registered once",
+      ...(unscoped ? { scope: "none declared: it was registered before claims declared a scope. Its registrant's operator or a steward may declare it once (declare_scope); until then, receipts on it are robustness tests." } : {}),
+    };
   }
 
   /**
@@ -1888,7 +2085,7 @@ export class V2Service {
    * handle, as it writes a key a person issues. The same source and quote
    * rules, pause and quota as an agent's registration.
    */
-  async registerExternalClaimByPerson(operatorId: string, f: { source: unknown; quote: unknown; test: unknown; kind?: unknown }, seeding = false): Promise<ApiResult> {
+  async registerExternalClaimByPerson(operatorId: string, f: { source: unknown; quote: unknown; test: unknown; kind?: unknown; scope?: unknown; fidelity?: unknown; data?: unknown }, seeding = false): Promise<ApiResult> {
     const pausedNow = await this.paused("v2.external", "external claims are");
     if (pausedNow) return pausedNow;
     const errors: string[] = [];
@@ -1897,22 +2094,203 @@ export class V2Service {
     if (typeof f.source !== "string" || !/^(arxiv:\S{5,40}|doi:10\.\d{4,9}\/\S{1,120})$/i.test(f.source)) errors.push("source: arxiv:<id> or doi:<doi>");
     if (typeof f.quote !== "string" || f.quote.trim().length < 10 || f.quote.length > 600) errors.push("quote: the claim as the paper states it, 10 to 600 characters");
     if (typeof f.test !== "string" || f.test.trim().length < 10 || f.test.length > 600) errors.push("test: the result that would refute it, 10 to 600 characters");
+    // scope/0.1: the same declarations an agent's registration makes (externalScopeProblems).
+    const declaring = { kind, scope: f.scope, fidelity: f.fidelity, data: f.data, quote: typeof f.quote === "string" ? f.quote.trim() : f.quote };
+    errors.push(...externalScopeProblems(declaring, this.now().toISOString().slice(0, 10)));
     if (errors.length) return err(400, "invalid claim", { detail: errors });
     const source = f.source as string, quote = (f.quote as string).trim(), test = (f.test as string).trim();
     const r = await this.record();
     if (!operatorId) return err(400, "operatorId");
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     const id = `ext:${(await hashJson({ source: source.toLowerCase(), quote })).slice(0, 16)}`;
-    if (r.external.has(id)) return ok(200, { id, ref: `${id}#C1`, note: "already registered" });
+    if (r.external.has(id)) return ok(200, this.alreadyRegistered(r, id));
     if (!seeding) {
       const quota = await this.overQuota("claim.external", operatorId, r, EXTERNAL_PER_DAY);
       if (quota) return quota;
     }
-    const screened = await this.screenText({ title: quote, body: test, handle: "", operatorId, publicKey: null, ts: this.now().toISOString() });
+    const declared = externalScopeEntry(declaring);
+    const bases = [(declared["scope"] as { basis?: string } | undefined)?.basis, (declared["fidelity"] as { basis?: string } | undefined)?.basis, ...dataWordsOf(declared["data"] as Array<{ url?: string; licence?: string }> | undefined)];
+    const screened = await this.screenText({ title: quote, body: [test, ...bases].filter(Boolean).join("\n\n"), handle: "", operatorId, publicKey: null, ts: this.now().toISOString() });
     if (screened) return screened;
-    if (!(await this.reserve("external", id))) return ok(200, { id, ref: `${id}#C1`, note: "already registered" });
-    await this.o.log.append("claim.external", { id, handle: "", operatorId, source, quote, test, by: seeding ? "steward" : "person", ...(kind === "conceptual" ? { kind } : {}) });
-    return ok(201, { id, ref: `${id}#C1`, kind });
+    if (!(await this.reserve("external", id))) return ok(200, this.alreadyRegistered(await this.record(), id));
+    await this.o.log.append("claim.external", { id, handle: "", operatorId, source, quote, test, by: seeding ? "steward" : "person", ...(kind === "conceptual" ? { kind } : {}), ...declared });
+    return ok(201, { id, ref: `${id}#C1`, kind, ...declared });
+  }
+
+  /* ---------------- scope/0.1 for older claims; kinds/0.1 words for older receipts ---------------- */
+
+  /**
+   * Declare what a claim from human literature covers, once, when it was
+   * registered before claims declared a scope (claim.scope), signed with the
+   * main key of an agent of the operator that registered it. A steward may do
+   * the same from the console (declareScopeBySteward). It governs receipts
+   * committed after it only, so it cannot turn evidence already filed into a
+   * replication test, or a replication test into an extension; and once
+   * anything has landed on the claim it may declare only a period or a
+   * definition by construction, never "asserted", the one choice that needs
+   * judgement. The page shows who declared it, at which entry, after how many
+   * receipts.
+   */
+  async declareScope(env: Json): Promise<ApiResult> {
+    type P = { protocol: string; type: "claim.scope"; claim: string; scope: ClaimScope; fidelity: Fidelity; data?: DataFile[]; agent: { handle: string; publicKey: string }; ts: string };
+    const validate = (p: unknown): { ok: true; value: P } | { ok: false; errors: string[] } => {
+      const x = p as Partial<P> | null;
+      if (!x || typeof x !== "object") return { ok: false, errors: ["payload: an object"] };
+      const errors: string[] = [];
+      if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
+      if (x.type !== "claim.scope") errors.push('type: "claim.scope"');
+      errors.push(...this.scopeDeclarationProblems(x));
+      if (!x.agent || typeof x.agent.handle !== "string" || typeof x.agent.publicKey !== "string") errors.push("agent: {handle, publicKey}");
+      if (typeof x.ts !== "string" || !ISO.test(x.ts)) errors.push("ts: ISO-8601 UTC");
+      return errors.length ? { ok: false, errors } : { ok: true, value: x as P };
+    };
+    const pausedNow = await this.paused("v2.amendments", "corrections and scope declarations are");
+    if (pausedNow) return pausedNow;
+    const opened = await this.openEnvelope<P>(env, "claim.scope", validate, "main");
+    if (!opened.ok) return opened.result;
+    const { payload: d, operatorId, id, record: r } = opened;
+    const done = await this.seatScope(r, { claim: d.claim, scope: d.scope, fidelity: d.fidelity, data: d.data, operatorId, handle: d.agent.handle, steward: false, publicKey: d.agent.publicKey, ts: d.ts });
+    if (done.status === 201) await this.o.store.putEnvelope(id, env);
+    return done;
+  }
+
+  /**
+   * Claims from human literature that are empirical and declare no scope (registered before scope/0.1): until a scope is
+   * declared, none of their receipts can be a reproduction. For the stewards' page, oldest first.
+   */
+  async unscopedClaims(): Promise<Array<{ claim: string; source: string; quote: string; registrant: string; operatorId: string; receipts: number; evidence: boolean }>> {
+    const r = await this.record();
+    return r.claims.filter((c) => c.external && c.kind !== "conceptual" && !isHeld(r, c.ref) && (scopeAt(r, c.ref)?.scope ?? null) === null).map((c) => {
+      const ext = r.external.get(c.paper)!;
+      const receipts = [...r.checks.values()].filter((x) => x.target === c.ref).length;
+      const evidence = receipts > 0 || [...r.forecasts.keys()].some((k) => k.startsWith(`${c.ref}|`)) || (r.argumentsByClaim.get(c.ref)?.length ?? 0) > 0;
+      return { claim: c.ref, source: ext.source, quote: ext.quote, registrant: ext.handle, operatorId: ext.operatorId, receipts, evidence };
+    });
+  }
+
+  /** A steward declares a claim's scope from the console: the same rules as its registrant's, logged under the steward's operator id. */
+  async declareScopeBySteward(steward: string, f: { claim?: unknown; scope?: unknown; fidelity?: unknown; data?: unknown }): Promise<ApiResult> {
+    if (!steward) return err(400, "steward");
+    const pausedNow = await this.paused("v2.amendments", "corrections and scope declarations are");
+    if (pausedNow) return pausedNow;
+    const errors = this.scopeDeclarationProblems(f);
+    if (errors.length) return err(400, "invalid claim.scope", { detail: errors });
+    return this.seatScope(await this.record(), { claim: f.claim as string, scope: f.scope as ClaimScope, fidelity: f.fidelity as Fidelity, data: f.data as DataFile[] | undefined, operatorId: steward, handle: "", steward: true, publicKey: null, ts: this.now().toISOString() });
+  }
+
+  private scopeDeclarationProblems(x: { claim?: unknown; scope?: unknown; fidelity?: unknown; data?: unknown }): string[] {
+    const errors: string[] = [];
+    if (typeof x.claim !== "string" || !/^ext:[0-9a-f]{16}#C1$/.test(x.claim)) errors.push("claim: a claim from human literature on the record (ext:…#C1); an agent's own claim declares its scope when it is published, or in its one correction (amend_claim)");
+    errors.push(...scopeProblems(x.scope, "scope", { notAfter: this.now().toISOString().slice(0, 10), external: true }));
+    errors.push(...fidelityProblems(x.fidelity, "fidelity"));
+    if (x.data !== undefined) errors.push(...dataOfRecordProblems(x.data, "data"));
+    return errors;
+  }
+
+  /** Why a claim's scope cannot be declared now, or null. */
+  private scopeProblem(r: V2Record, ref: string, operatorId: string, steward: boolean, scope: ClaimScope): ApiResult | null {
+    const claim = r.claims.find((c) => c.ref === ref);
+    if (!claim) return err(404, "no such claim on the record");
+    if (!claim.external) return err(422, "an agent's own claim declares its scope when it is published, or in its one correction (amend_claim)");
+    if (claim.kind === "conceptual") return err(422, "a conceptual claim declares no scope; it is checked by argument");
+    if (isHeld(r, ref)) return err(451, hiddenNote(r, ref));
+    const ext = r.external.get(ref.slice(0, ref.indexOf("#")));
+    if (!ext) return err(404, "no such claim on the record");
+    if (!steward && ext.operatorId !== operatorId) return err(403, "only the operator that registered this claim, or a steward, may declare its scope");
+    const declared = (r.scopes.get(ref) ?? []).find((h) => h.scope !== null);
+    if (declared) return err(409, `this claim's scope is already declared (${declared.how === "declared" ? "by a declaration" : declared.how === "amend" ? "by its correction" : "at its registration"}, ${declared.ts.slice(0, 10)}); a scope is declared once`, { scope: declared.scope as unknown as Json });
+    if ("general" in scope && scope.general === "asserted") {
+      const landed = [...r.checks.values()].some((c) => c.target === ref) || [...r.forecasts.keys()].some((k) => k.startsWith(`${ref}|`)) || (r.argumentsByClaim.get(ref)?.length ?? 0) > 0;
+      if (landed) return err(422, 'scope: evidence has landed on this claim, so it may be declared only a period (the paper\'s data period, in the paper\'s words) or general by construction; never "asserted", which would turn every convenient dataset into a test of it');
+      if (!quotesSentence(scope.basis, ext.quote)) return err(422, ASSERTED_FROM_QUOTE);
+    }
+    return null;
+  }
+
+  private async seatScope(r: V2Record, c: { claim: string; scope: ClaimScope; fidelity: Fidelity; data?: DataFile[] | undefined; operatorId: string; handle: string; steward: boolean; publicKey: string | null; ts: string }): Promise<ApiResult> {
+    if (r.voidedOperators.has(c.operatorId) && !c.steward) return err(403, "a finding of fabrication against this operator is in force");
+    const scope = normaliseScope(c.scope)!;
+    const fidelity = normaliseFidelity(c.fidelity)!;
+    const data = c.data !== undefined ? normaliseData(c.data) : [];
+    const problem = this.scopeProblem(r, c.claim, c.operatorId, c.steward, scope);
+    if (problem) return problem;
+    const screened = await this.screenText({ title: `scope of ${c.claim}`, body: [scope.basis, fidelity.basis, ...dataWordsOf(data)].join("\n\n"), handle: c.handle, operatorId: c.operatorId, publicKey: c.publicKey, ts: c.ts });
+    if (screened) return screened;
+    // Screening takes time: check again against the record as it is now, then reserve, so two declarations cannot both land.
+    const now = await this.record();
+    const again = this.scopeProblem(now, c.claim, c.operatorId, c.steward, scope);
+    if (again) return again;
+    // Reserved per attempt: two declarations sent at once cannot both enter the log, but one the derivation turned away (a
+    // receipt landed at the same moment as an "asserted") does not stop the claim being declared later.
+    const attempts = (await this.rows()).filter((x) => x.type === "claim.scope" && (x.payload as Record<string, unknown>)["claim"] === c.claim).length;
+    if (!(await this.reserve("scope", `${c.claim}|${attempts}`))) return err(409, "another declaration of this claim's scope is being written; look at the claim, and declare again if it still has none");
+    const receiptsBefore = [...now.checks.values()].filter((x) => x.target === c.claim).length;
+    const { entry } = await this.o.log.append("claim.scope", {
+      claim: c.claim, scope: scope as unknown as Json, fidelity: fidelity as unknown as Json, ...(data.length ? { data: data as unknown as Json } : {}),
+      handle: c.handle, operatorId: c.operatorId, ...(c.steward ? { by: "steward", steward: c.operatorId } : {}),
+    });
+    // Answer from the record: the declaration in force must be this entry. Another one may have landed first, or evidence may
+    // have landed at the same moment as an "asserted"; either way this one was not applied, and the reply says so.
+    const applied = (await this.record()).scopes.get(c.claim)?.find((h) => h.how === "declared");
+    if (!applied) return err(409, "the declaration reached the log but the record did not apply it: evidence landed on the claim at the same moment, so it may now be declared only a period or general by construction; declare again");
+    if (applied.seq !== entry.seq) return err(409, `another declaration of this claim's scope reached the log first (entry #${applied.seq}); this one was not applied, since a scope is declared once`, { scope: applied.scope as unknown as Json });
+    return ok(201, {
+      claim: c.claim, scope: scope as unknown as Json, fidelity: fidelity as unknown as Json, ...(data.length ? { data: data as unknown as Json } : {}), receiptsBefore,
+      note: `Declared, once. It governs receipts committed from now on${receiptsBefore ? `: the ${receiptsBefore === 1 ? "receipt" : `${receiptsBefore} receipts`} already on the claim stay${receiptsBefore === 1 ? "s" : ""} a robustness test${receiptsBefore === 1 ? "" : "s"}, whatever ${receiptsBefore === 1 ? "it" : "they"} tested` : ""}. A replication test of it now declares its design against this scope${"period" in scope ? `, with its data's period exactly ${periodWords(scope.period)}` : ""}.`,
+    });
+  }
+
+  /**
+   * Words for a receipt committed before receipts said what they test
+   * (check.describe): its own agent may describe it once, afterwards, as a
+   * reanalysis, an extension or both. It changes the words on the claim's page
+   * and never a number: a declaration made after the outcome was known can
+   * never make a receipt a replication test. Signed by the agent's main key
+   * or a check key, as the receipt's own reports are.
+   */
+  async describeReceipt(env: Json): Promise<ApiResult> {
+    type P = { protocol: string; type: "check.describe"; receipt: string; as: string; alteration?: string; beyond?: string; period?: { from: string; to: string }; agent: { handle: string; publicKey: string }; ts: string };
+    const validate = (p: unknown): { ok: true; value: P } | { ok: false; errors: string[] } => {
+      const x = p as Partial<P> | null;
+      if (!x || typeof x !== "object") return { ok: false, errors: ["payload: an object"] };
+      const errors: string[] = [];
+      if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
+      if (x.type !== "check.describe") errors.push('type: "check.describe"');
+      if (typeof x.receipt !== "string" || !HEX64_ID.test(x.receipt)) errors.push("receipt: the receipt's 64-hex id");
+      errors.push(...descriptionProblems(x));
+      if (!x.agent || typeof x.agent.handle !== "string" || typeof x.agent.publicKey !== "string") errors.push("agent: {handle, publicKey}");
+      if (typeof x.ts !== "string" || !ISO.test(x.ts)) errors.push("ts: ISO-8601 UTC");
+      return errors.length ? { ok: false, errors } : { ok: true, value: x as P };
+    };
+    const opened = await this.openEnvelope<P>(env, "check.describe", validate, "reports");
+    if (!opened.ok) return opened.result;
+    const { payload: d, operatorId, id, record: r } = opened;
+    const problem = (rec: V2Record): ApiResult | null => {
+      const c = rec.checks.get(d.receipt);
+      if (!c) return err(404, "no such receipt");
+      if (c.handle !== d.agent.handle || c.operatorId !== operatorId) return err(403, "only the agent that committed a receipt may describe it");
+      if (isHeld(rec, c.id) || isHeld(rec, c.target)) return err(451, hiddenNote(rec, isHeld(rec, c.id) ? c.id : c.target));
+      if (c.design) return err(409, "this receipt declared what it tests before its seed; that declaration stands, and nothing after the outcome can change it");
+      if (c.description) return err(409, "this receipt was described once already", { at: c.description.ts });
+      return null;
+    };
+    const before = problem(r);
+    if (before) return before;
+    const description = normaliseDescription(d)!;
+    const words = [description.alteration, description.beyond].filter((t): t is string => typeof t === "string" && t.trim() !== "");
+    if (words.length) {
+      const screened = await this.screenText({ title: `description of receipt ${d.receipt.slice(0, 8)}`, body: words.join("\n\n"), handle: d.agent.handle, operatorId, publicKey: d.agent.publicKey, ts: d.ts });
+      if (screened) return screened;
+    }
+    const again = problem(await this.record());
+    if (again) return again;
+    if (!(await this.reserve("describe", d.receipt))) return err(409, "this receipt was described once already");
+    await this.o.store.putEnvelope(id, env);
+    await this.o.log.append("check.describe", { receipt: d.receipt, ...(description as unknown as Record<string, Json>), handle: d.agent.handle, operatorId });
+    return ok(201, {
+      receipt: d.receipt, ...(description as unknown as Record<string, Json>),
+      note: "Described, once: the claim's page shows these words with your name and the date. Words only: the receipt stays a robustness test, and no number moves.",
+    });
   }
 
   /* ---------------- challenges (challenges/0.1) ---------------- */
@@ -1953,7 +2331,7 @@ export class V2Service {
    * claim from human literature is registered first (under the same quota
    * as any registration) and the brief attaches to it.
    */
-  async proposeChallengeByPerson(operatorId: string, f: { claim?: unknown; source?: unknown; quote?: unknown; test?: unknown; kind?: unknown; title: unknown; brief: unknown; scale: unknown; wants?: unknown }): Promise<ApiResult> {
+  async proposeChallengeByPerson(operatorId: string, f: { claim?: unknown; source?: unknown; quote?: unknown; test?: unknown; kind?: unknown; scope?: unknown; fidelity?: unknown; data?: unknown; title: unknown; brief: unknown; scale: unknown; wants?: unknown }): Promise<ApiResult> {
     return this.proposeChallengeFor(operatorId, "person", f);
   }
 
@@ -1964,12 +2342,12 @@ export class V2Service {
    * the board can say who chose it. Stewards are accountable people; a seed
    * is their public act, withdrawable like any brief, and it moves no number.
    */
-  async proposeChallengeBySteward(steward: string, f: { claim?: unknown; source?: unknown; quote?: unknown; test?: unknown; kind?: unknown; title: unknown; brief: unknown; scale: unknown; wants?: unknown }): Promise<ApiResult> {
+  async proposeChallengeBySteward(steward: string, f: { claim?: unknown; source?: unknown; quote?: unknown; test?: unknown; kind?: unknown; scope?: unknown; fidelity?: unknown; data?: unknown; title: unknown; brief: unknown; scale: unknown; wants?: unknown }): Promise<ApiResult> {
     if (!steward) return err(400, "steward");
     return this.proposeChallengeFor(steward, "steward", f);
   }
 
-  private async proposeChallengeFor(operatorId: string, proposer: "person" | "steward", f: { claim?: unknown; source?: unknown; quote?: unknown; test?: unknown; kind?: unknown; title: unknown; brief: unknown; scale: unknown; wants?: unknown }): Promise<ApiResult> {
+  private async proposeChallengeFor(operatorId: string, proposer: "person" | "steward", f: { claim?: unknown; source?: unknown; quote?: unknown; test?: unknown; kind?: unknown; scope?: unknown; fidelity?: unknown; data?: unknown; title: unknown; brief: unknown; scale: unknown; wants?: unknown }): Promise<ApiResult> {
     const pausedNow = await this.paused("v2.challenges", "challenges are");
     if (pausedNow) return pausedNow;
     if (!operatorId) return err(400, "operatorId");
@@ -1981,7 +2359,7 @@ export class V2Service {
     if (errors.length) return err(400, "invalid challenge", { detail: errors });
     if (registering) {
       // A steward's seed registers the claim outside the daily quota too; the claim is screened and written like any other.
-      const reg = await this.registerExternalClaimByPerson(operatorId, { source: (f.source as string).trim(), quote: f.quote, test: f.test, kind: f.kind }, proposer === "steward");
+      const reg = await this.registerExternalClaimByPerson(operatorId, { source: (f.source as string).trim(), quote: f.quote, test: f.test, kind: f.kind, scope: f.scope, fidelity: f.fidelity, data: f.data }, proposer === "steward");
       if (reg.status !== 201 && reg.status !== 200) return reg;
       claim = String((reg.body as Record<string, Json>)["ref"]);
     }

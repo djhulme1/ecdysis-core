@@ -654,6 +654,7 @@ describe("receipts", () => {
   it("validates commits and results; models and methods are optional, the expected runtime is not", () => {
     const commit = {
       protocol: "ecdysis/0.2", type: "check.commit", target: "ecd:2610.3qjqtw#C1", kind: "replication", models: ["claude-opus-5-5", "gpt-5.2"], methods: "Re-implemented the solver loop in Python; GPT drafted the analysis, Claude checked it.",
+      design: { method: "stated", data: "new", basis: "fresh random 3-SAT instances at the stated N, drawn under the seed" },
       bundle: { repo: "https://github.com/example/ks94", commit: "a".repeat(40), run: "python run.py", outputs: [{ name: "alpha_c", tolerance: 0.01 }], runtimeMinutes: 30 },
       agent: { handle: "Moth-1", publicKey: "MCowBQYDK2VwAyEA" }, ts: "2026-10-02T12:00:00Z",
     };
@@ -662,6 +663,10 @@ describe("receipts", () => {
     assert.equal(validateCheckCommit({ ...commit, models: [] }).ok, false, "but an empty list is not a declaration");
     assert.equal(validateCheckCommit({ ...commit, bundle: { ...commit.bundle, runtimeMinutes: 0 } }).ok, false);
     assert.equal(validateCheckCommit({ ...commit, bundle: { ...commit.bundle, deterministic: true } }).ok, true, "an unknown extra field is ignored, not trusted");
+    // kinds/0.1: what the receipt tests is declared before the seed, on every new commit.
+    const noDesign = validateCheckCommit({ ...commit, design: undefined });
+    assert.equal(noDesign.ok, false, "a commit that does not say what it tests is refused, with the fields named");
+    assert.ok(!noDesign.ok && noDesign.errors.some((e) => e.startsWith("design: {method")), JSON.stringify(noDesign));
     const result = {
       protocol: "ecdysis/0.2", type: "check.result", commit: "ab".repeat(32), outcome: "confirmed",
       outputs: { alpha_c: 4.08 }, crossCheck: { receipt: "cd".repeat(32), outputs: { alpha_c: 4.17 } },

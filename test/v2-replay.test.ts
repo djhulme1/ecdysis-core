@@ -34,6 +34,23 @@ describe("the v2 replay audit", () => {
     assert.equal(a.facts["rounds"], "3", "two rounds earned, a third added nobody");
     assert.equal(a.facts["amendments"], "ecd:p16#C3:empirical→conceptual:test", "one correction stands; the second, and one after evidence, do not");
     assert.match(a.claims["ecd:p16#C3"]!, /conceptual/);
+    // scope/0.1 and kinds/0.1 (4 October): receipts filed before kinds/0.1 move nothing; a scope declared after evidence
+    // governs later receipts only, and "asserted" is refused once evidence has landed; a replication test whose data reach part
+    // of the period is an extension; a description is words, once; refuted needs two operators besides the registrant's; a
+    // contradiction caps only a claim whose scope overlaps.
+    for (const t of ["claim.scope", "check.describe"]) assert.ok(types.has(t as never), `${t} is exercised`);
+    assert.equal(a.facts["kinds"], "extension:2;reproduction:71;undeclared:2");
+    assert.equal(a.facts["scopes"], "ext:1111111111111111#C1:legacy>declared(2009-04-01..2012-07-31)@2", "the period, declared after two receipts; the earlier \"asserted\" was ignored");
+    assert.equal(a.facts["described"], "ext:1111111111111111#C1:extension", "described once; the second description did not take");
+    assert.equal(a.facts["demoted"], "ext:1111111111111111#C1:reproduction→extension", "data reaching only part of the period make an extension");
+    assert.match(a.claims["ext:1111111111111111#C1"]!, / supported /, "one reproduction in the paper's period; the failures on other data move nothing");
+    assert.match(a.claims["ext:2222222222222222#C1"]!, / contested /, "two failures, one of them the registrant's own: contested, not refuted");
+    assert.match(a.claims["ext:3333333333333333#C1"]!, / refuted /, "two operators' failing replication tests, neither the registrant's: refuted");
+    assert.match(a.claims["ecd:p24#C1"]!, / established /);
+    assert.doesNotMatch(a.claims["ecd:p23#C1"]!, /cap/, "a later period cannot contradict an earlier one");
+    assert.match(a.claims["ecd:p25#C1"]!, /unchecked .* cap /, "an overlapping one is capped, and its status still reads its replication tests alone");
+    assert.match(a.claims["ecd:p4#C1"]!, / contested /, "one verified operator's failure no longer refutes (it did under credence/0.3)");
+    assert.equal(a.reliability["Gnu"], "0.500000", "so Gnu's lone confirmation of it is no longer scored as wrong");
   });
 
   it("matches the committed baseline (run npm run audit:v2 -- --update to move it deliberately)", () => {

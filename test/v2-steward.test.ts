@@ -17,6 +17,7 @@ import { sha256Hex } from "../src/api/access.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared } from "./kinds-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const MIN = 60 * 1000;
@@ -58,7 +59,7 @@ async function world() {
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   const sign = async (handle: string, payload: Record<string, Json>) => {
     const kp = keys.get(handle)!;
-    const full: Json = { ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() };
+    const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const bundle = (n: number): Bundle => ({ repo: "https://github.com/example/rep", commit: n.toString(16).padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }, { name: "solver" }], runtimeMinutes: 5 });

@@ -7,6 +7,7 @@
  */
 
 import { esc, shell, shortDate } from "./design.js";
+import { scopeFields } from "./v2/scope-form.js";
 import type { CanaryView } from "../api/v2/canaries.js";
 import { VERIFICATION_CRITERIA } from "../api/v2/issues.js";
 
@@ -202,8 +203,12 @@ export interface WithheldRow { subject: string; kind: string; status: "review" |
  * Content: the R1 queue (view only), the issues queue (complaints and scouts' flags, decided here), items out of view, and the
  * challenge board, where a steward may withdraw a brief with the reason on the log.
  */
-export function contentPage(o: { holds: HoldRow[]; challenges?: ChallengeRow[]; issues?: IssueView[]; withheld?: WithheldRow[]; csrf?: string; fresh?: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
+/** A claim from human literature with no declared scope (scope/0.1), for the stewards to declare from the paper's words. */
+export interface UnscopedRow { claim: string; source: string; quote: string; registrant: string; operatorId: string; receipts: number; evidence: boolean }
+
+export function contentPage(o: { holds: HoldRow[]; challenges?: ChallengeRow[]; issues?: IssueView[]; withheld?: WithheldRow[]; unscoped?: UnscopedRow[]; csrf?: string; fresh?: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
   const challenges = o.challenges ?? [];
+  const unscoped = o.unscoped ?? [];
   const issues = o.issues ?? [];
   const withheld = o.withheld ?? [];
   const act = (issue: IssueView) => !o.csrf ? "" : `<form method="post" action="/steward/content/issue" class="stack"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="id" value="${esc(issue.id)}">
@@ -229,6 +234,13 @@ ${o.csrf ? `<h3>Take an item out of view</h3>
 <label for="wh-status">State</label> <select id="wh-status" name="status"><option value="review">under review: hidden while you look</option><option value="withdrawn">withdrawn from view</option></select>
 <label for="wh-reason">Reason (public, on the log; the ground, never the words)</label> <input type="text" id="wh-reason" name="reason" minlength="10" maxlength="400" required>
 <p><button class="btn quiet" type="submit">Take out of view</button></p></form>` : ""}
+<h2 id="scopes">Scopes to declare</h2>
+<p class="small">Claims from human literature registered before claims declared a scope (scope/0.1). Until one is declared, nothing can show that new data sample the paper's population, so every receipt on the claim is a robustness test. Declare it from the paper's own words: its data's period, quoted in the basis, or general by construction. Once anything has landed on a claim, "asserted" is refused. A declaration governs receipts committed after it only, and goes on the log under your operator id. Leave a claim your own operator registered or checked to the other steward, unless you say so in the basis.</p>
+${unscoped.length ? `<table><thead><tr><th>Claim</th><th>The sentence</th><th>Registered by</th><th>Receipts</th></tr></thead><tbody>${unscoped.map((u) => `<tr><td><a href="${esc(subjectHref(u.claim.slice(0, u.claim.indexOf("#"))))}"><code class="mono">${esc(u.claim)}</code></a><br><span class="small">${esc(u.source)}</span></td><td class="small">“${esc(u.quote.slice(0, 240))}${u.quote.length > 240 ? "…" : ""}”</td><td class="small">${u.registrant ? `<a href="/a/${esc(u.registrant)}">${esc(u.registrant)}</a>` : "a person"} of <code class="mono">${esc(u.operatorId)}</code></td><td>${u.receipts}${u.evidence ? `<br><span class="small">evidence landed: a period or construction only</span>` : ""}</td></tr>`).join("")}</tbody></table>
+${o.csrf ? `<form method="post" action="/steward/content/scope"><input type="hidden" name="csrf" value="${esc(o.csrf)}">
+<label for="sp-claim">The claim</label> <select id="sp-claim" name="claim" required>${unscoped.map((u) => `<option value="${esc(u.claim)}">${esc(u.claim)}: ${esc(u.quote.slice(0, 70))}${u.quote.length > 70 ? "…" : ""}</option>`).join("")}</select>
+${scopeFields("sp", false)}
+<p><button class="btn" type="submit">Declare the scope, once</button></p></form>` : ""}` : `<p class="small">Every empirical claim on the record declares its scope.</p>`}
 <h2>Challenges</h2>
 <p class="small">Every brief on the board, by whoever proposed it. Withdrawing one takes it off the board with your reason on the log under your operator id; the proposal stays on the log. Use it for a brief that is hostile, a duplicate or impossible to follow, never for one you merely disagree with: the record settles claims, stewards do not.</p>
 ${challenges.length ? `<table><thead><tr><th>When</th><th>Challenge</th><th>Claim</th><th>Proposer</th><th>State</th><th>Withdraw</th></tr></thead><tbody>${challenges.map((c) => `<tr><td>${esc(shortDate(c.proposedAt))}</td><td><a href="${esc(c.page)}">${esc(c.title.slice(0, 80))}</a><br><code class="mono small">${esc(c.id)}</code></td><td><code class="mono">${esc(c.claim)}</code></td><td class="small">${esc(c.proposer)}</td><td>${esc(c.status)}${c.withdrawn ? `<br><span class="small">by ${esc(c.withdrawn.by)}: ${esc(c.withdrawn.reason.slice(0, 120))}</span>` : ""}</td><td>${c.withdrawn || !o.csrf ? "" : `<form method="post" action="/steward/content/challenge-withdraw"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="id" value="${esc(c.id)}"><label for="cw-${esc(c.id.slice(3))}" class="sr">Reason</label><input id="cw-${esc(c.id.slice(3))}" name="reason" minlength="10" maxlength="400" required placeholder="reason (on the log)"> <button class="btn quiet" type="submit">Withdraw</button></form>`}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No challenges proposed yet.</p>`}
@@ -243,6 +255,7 @@ ${o.csrf ? `<form method="post" action="/steward/content/challenge-seed"><input 
 <label for="sc-test">What would refute it</label> <textarea id="sc-test" name="test" rows="2" maxlength="600"></textarea>
 <label for="sc-kind">Kind</label> <select id="sc-kind" name="kind"><option value="conceptual">conceptual: refuted by argument</option><option value="empirical">empirical: refuted by a measurement</option></select>
 </fieldset>
+${scopeFields("sc")}
 <fieldset><legend>The brief</legend>
 <label for="sc-title">Title</label> <input type="text" id="sc-title" name="title" minlength="8" maxlength="120" required>
 <label for="sc-brief">Why it matters, and how an agent could attack or check it</label> <textarea id="sc-brief" name="brief" rows="5" minlength="40" maxlength="1500" required></textarea>
@@ -251,7 +264,7 @@ ${o.csrf ? `<form method="post" action="/steward/content/challenge-seed"><input 
 </fieldset>
 <p><button class="btn" type="submit">Seed the challenge</button></p></form>
 <h3>Several at once</h3>
-<p class="small">Paste a JSON array of up to 25 seeds, each <code>{"source", "quote", "test", "kind", "title", "brief", "scale", "wants"}</code> (or <code>"claim"</code> for a claim already on the record). Each is screened and seeded in turn; the reply says which went on and why any did not. Copied from a document, the <code>\`\`\`json</code> fence and any text around the array are ignored, as are a page's no-break spaces and curly quotes; what cannot be read is reported with the place it failed.</p>
+<p class="small">Paste a JSON array of up to 25 seeds, each <code>{"source", "quote", "test", "kind", "title", "brief", "scale", "wants"}</code> (or <code>"claim"</code> for a claim already on the record); an empirical claim also carries <code>"scope"</code> (<code>{"period": {"from": "YYYY-MM", "to": "YYYY-MM"}, "basis"}</code> or <code>{"general": "construction", "basis"}</code>) and <code>"fidelity"</code> (<code>{"as": "reported" | "adapted", "basis"}</code>). Each is screened and seeded in turn; the reply says which went on and why any did not. Copied from a document, the <code>\`\`\`json</code> fence and any text around the array are ignored, as are a page's no-break spaces and curly quotes; what cannot be read is reported with the place it failed.</p>
 <form method="post" action="/steward/content/challenge-seed-many"><input type="hidden" name="csrf" value="${esc(o.csrf)}">
 <label for="sc-seeds">Seeds (JSON)</label> <textarea id="sc-seeds" name="seeds" rows="8" required spellcheck="false"></textarea>
 <p><button class="btn quiet" type="submit">Seed them all</button></p></form>` : ""}

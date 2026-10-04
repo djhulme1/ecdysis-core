@@ -20,7 +20,10 @@ import { contentPage } from "../src/web/steward.js";
 import type { Screener } from "../src/core/hazard.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
+import { hashJson } from "../src/core/canonical.js";
+import { scopeAt } from "../src/core/v2/flow.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared } from "./kinds-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 type R = Record<string, Json>;
@@ -67,7 +70,7 @@ async function world(o: { operatorKey?: boolean } = {}) {
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   const sign = async (handle: string, payload: Record<string, Json>) => {
     const kp = keys.get(handle)!;
-    const full: Json = { ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() };
+    const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const bundle = (n: number): Bundle => ({ repo: "https://github.com/example/rep", commit: n.toString(16).padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }, { name: "solver" }], runtimeMinutes: 5 });
@@ -83,7 +86,7 @@ async function world(o: { operatorKey?: boolean } = {}) {
     svc.decideHazard({ subject, decision, ts: at, signature: await signJson(key.privateKey, { op: "hazard", subject, decision, ts: at }) });
   const page = async (path: string) => { const res = await pages.handle("GET", path, "text/html"); return { status: res?.status ?? 0, html: res ? await res.text() : "" }; };
   const idOf = (r: { body: Json }) => String((r.body as R)["id"]);
-  return { svc, pages, agent, sign, bundle, commit, result, paper, review, escalate, decide, page, idOf, logKey, operatorKey, ts, now, tick: (ms: number) => { clock.t += ms; } };
+  return { svc, pages, agent, sign, bundle, commit, result, paper, review, escalate, decide, page, idOf, logKey, operatorKey, ts, now, log, v2store, tick: (ms: number) => { clock.t += ms; } };
 }
 
 describe("reserved power R1 (holds)", () => {
@@ -186,6 +189,27 @@ describe("reserved power R1 (holds)", () => {
     assert.equal((await w.decide(cid2, "reject")).status, 200);
     assert.equal((await w.svc.record()).papers.size, 1);
     assert.equal((await w.page(`/p/ecd:${cid2.slice(0, 16)}`)).status, 404);
+  });
+
+  // scope/0.1 (4 October 2026): every empirical claim of a NEW paper declares its scope, but a paper screening held before
+  // that rule existed was signed without one, and the owner's release must still publish what its agent signed.
+  it("a paper held at screening before scopes existed is published as signed when the operator key releases it, read as general", async () => {
+    const w = await world();
+    const kp = await w.agent("Ant", "op-a", ["claude"]);
+    const payload = { protocol: "ecdysis/0.2", type: "paper", title: "Held before scopes existed", abstract: "An abstract long enough to pass the structural screen and say what the paper claims and how it was tested.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "The quantity lies outside the interval in a fresh run." }], builds_on: [], agent: { handle: "Ant", publicKey: kp.publicKey }, ts: w.ts() } as Json;
+    const env = { payload, signature: await signJson(kp.privateKey, payload) } as Json;
+    assert.equal((await w.svc.publishPaper(env)).status, 400, "sent today, it must declare its claim's scope");
+    // As screening held it before the rule: the envelope kept off the log, the hold on it.
+    const cid = await hashJson({ p: payload, s: (env as R)["signature"] as Json });
+    await w.v2store.putEnvelope(cid, env);
+    await w.log.append("hazard.hold", { subject: cid, reason: "screening asked for a human look (R1)", categories: ["test"] });
+    const rel = await w.decide(cid, "release");
+    assert.equal(rel.status, 200, JSON.stringify(rel.body));
+    assert.equal((rel.body as R)["published"], true, JSON.stringify(rel.body));
+    const r = await w.svc.record();
+    const st = scopeAt(r, `ecd:${cid.slice(0, 16)}#C1`)!;
+    assert.equal(st.how, "legacy");
+    assert.deepEqual(st.scope, { general: "asserted", basis: "" }, "read as general, as claims published before scope/0.1 are");
   });
 
   // 4 October 2026, Daniel: "I won't remember not to do things." A submission he has rejected must stay rejected, whatever

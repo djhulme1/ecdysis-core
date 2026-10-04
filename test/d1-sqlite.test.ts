@@ -16,6 +16,7 @@ import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 import type { Json } from "../src/core/canonical.js";
 import { seededKeyPair } from "./society-kit.js";
+import { declared } from "./kinds-kit.js";
 
 type Sqlite = typeof import("node:sqlite");
 let sqlite: Sqlite | null = null;
@@ -260,7 +261,7 @@ describe("the v2 store against SQLite, every migration applied", { skip: !sqlite
     assert.equal((await svc.registerAgent({ constitution: ACK, handle: "Bee", publicKey: b.publicKey, operatorId: "op-b", models: ["gpt"] })).status, 201);
     await svc.setTier("op-a", "verified");
     await svc.setTier("op-b", "verified");
-    const sign = async (kp: { privateKey: string }, payload: Json) => ({ payload, signature: await signJson(kp.privateKey, payload) }) as Json;
+    const sign = async (kp: { privateKey: string }, raw: Json) => { const payload = declared(raw); return { payload, signature: await signJson(kp.privateKey, payload) } as Json; };
     const ext = await svc.registerExternalClaim(await sign(a, { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup", agent: { handle: "Ant", publicKey: a.publicKey }, ts: "2026-10-03T09:00:00Z" }));
     assert.equal(ext.status, 201);
     const ref = String((ext.body as Record<string, Json>)["ref"]);
@@ -278,7 +279,9 @@ describe("the v2 store against SQLite, every migration applied", { skip: !sqlite
     const scores = await svc.scores();
     const claim = scores.claims.get(ref)!;
     assert.equal(claim.status, "supported");
-    assert.deepEqual(claim.families, ["claude", "gpt"]);
+    // Ant registered the claim, so wrote its test: its receipt counts in the number, but neither its operator nor its model
+    // family counts towards a resolution (credence/0.4).
+    assert.deepEqual(claim.families, ["gpt"]);
     // The withheld outputs and the bundle round-trip through SQL; the log is intact.
     const v2store = new D1V2Store(d1Over(db), store, now);
     assert.deepEqual(await v2store.getOutputs(id1), { alpha: 28.4 });
@@ -412,7 +415,7 @@ describe("the account store against SQLite, every migration applied", { skip: !s
     const cs = new D1CanaryStore(d1Over(db));
     const registry = new CanaryRegistry({ store: cs, accounts, v2: svc, now });
     const { signJson } = await import("../src/core/crypto.js");
-    const extPayload = { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1000/known", quote: "a known result from the human literature", test: "a fresh run disagrees", agent: { handle: "Moth", publicKey: kp.publicKey }, ts: now().toISOString().replace(/\.\d{3}Z$/, "Z") } as unknown as Json;
+    const extPayload = declared({ protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1000/known", quote: "a known result from the human literature", test: "a fresh run disagrees", agent: { handle: "Moth", publicKey: kp.publicKey }, ts: now().toISOString().replace(/\.\d{3}Z$/, "Z") } as unknown as Json);
     const ext = await svc.registerExternalClaim({ payload: extPayload, signature: await signJson(kp.privateKey, extPayload) });
     assert.equal(ext.status, 201, JSON.stringify(ext.body));
     const ref = String((ext.body as Record<string, Json>)["ref"]);

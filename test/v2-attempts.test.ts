@@ -25,6 +25,7 @@ import { BLOCKERS, pressure, summariseBlockers, validateAttemptClearV2, validate
 import type { Bundle } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { declared } from "./kinds-kit.js";
 
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 const body = (r: { body: Json }) => r.body as Record<string, Json>;
@@ -53,7 +54,7 @@ async function world(quotas?: Record<string, { unverified: number; account: numb
   };
   const ts = () => now().toISOString().replace(/\.\d{3}Z$/, "Z");
   const sign = async (handle: string, payload: Record<string, Json>, kp = keys.get(handle)!) => {
-    const full: Json = { ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() };
+    const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const paper = async (handle: string, claims: Array<{ text: string; confidence: number; test: string; kind?: string }>, builds_on: Json[] = [], title = "A measured constant of a family") => {
