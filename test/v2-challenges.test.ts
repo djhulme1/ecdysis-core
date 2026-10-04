@@ -14,7 +14,7 @@ import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { structuralScreener } from "../src/core/hazard.js";
-import { CHALLENGES_PER_DAY, MemoryV2Store, V2Service } from "../src/api/v2/service.js";
+import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
 import { EcdysisService } from "../src/api/service.js";
 import { route, MemoryRateLimiter } from "../src/api/router.js";
@@ -25,6 +25,9 @@ import { deriveV2 } from "../src/core/v2/flow.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+// The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
+const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, challenge: { unverified: 1, account: 3, verified: 5 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
+
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 async function world() {
@@ -35,7 +38,7 @@ async function world() {
   const logKey = await generateKeyPair();
   const rows = () => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }));
   const v2store = new MemoryV2Store(rows);
-  const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()] });
+  const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()], quotas: SMALL_QUOTAS });
   const v1 = new EcdysisService({ store: logStore, screeners: [structuralScreener()], sthPrivateKey: null });
   const pages = new PagesHandler(svc, { host: "api.ecdysis.me" });
   const limiter = new MemoryRateLimiter(10_000);
@@ -251,7 +254,7 @@ describe("challenges: proposing, the board, taking up, withdrawing", () => {
     // The quota by tier: Cat (verified) has 5 a day, one claim each; the sixth is refused.
     const targets = [c1];
     for (const [t, by] of [["two", "Bee"], ["three", "Ant"], ["four", "Bee"], ["five", "Ant"], ["six", "Ant"]] as const) targets.push(await w.paper(by, `Paper ${t}`));
-    for (let i = 1; i < CHALLENGES_PER_DAY.verified; i++) assert.equal((await w.propose("Cat", targets[i]!, `Brief number ${i + 1} from Cat`, `${w.BRIEF} Variant ${i}.`)).status, 201, `brief ${i + 1}`);
+    for (let i = 1; i < SMALL_QUOTAS.challenge.verified; i++) assert.equal((await w.propose("Cat", targets[i]!, `Brief number ${i + 1} from Cat`, `${w.BRIEF} Variant ${i}.`)).status, 201, `brief ${i + 1}`);
     const flood = await w.propose("Cat", targets[5]!, "One more than the day allows", w.BRIEF);
     assert.equal(flood.status, 429);
     assert.match(String(w.b(flood)["error"]), /quota: 5 challenges a day at tier "verified"/);

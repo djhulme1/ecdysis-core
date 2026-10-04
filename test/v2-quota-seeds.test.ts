@@ -10,9 +10,12 @@ import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
-import { CHALLENGES_PER_DAY, EXTERNAL_PER_DAY, MemoryV2Store, V2Service } from "../src/api/v2/service.js";
+import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+// The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
+const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, challenge: { unverified: 1, account: 3, verified: 5 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
+
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 async function world() {
@@ -22,7 +25,7 @@ async function world() {
   const log = new TransparencyLog(logStore, now);
   const logKey = await generateKeyPair();
   const rows = () => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }));
-  const svc = new V2Service({ log, store: new MemoryV2Store(rows), logPrivateKey: logKey.privateKey, now });
+  const svc = new V2Service({ log, store: new MemoryV2Store(rows), logPrivateKey: logKey.privateKey, now, quotas: SMALL_QUOTAS });
   const keys = new Map<string, KeyPairB64>();
   const agent = async (handle: string, op: string) => {
     const kp = await generateKeyPair();
@@ -50,11 +53,11 @@ describe("steward seeds and the agents' daily allowance", () => {
     const w = await world();
     await w.agent("Bee", "op-daniel");
     // More seeds than the whole verified allowance for claims and for challenges, as on the morning of 4 October.
-    for (let i = 1; i <= EXTERNAL_PER_DAY.verified + 2; i++) assert.equal((await w.seed("op-daniel", i)).status, 201, `seed ${i}`);
-    assert.ok(EXTERNAL_PER_DAY.verified + 2 > CHALLENGES_PER_DAY.verified);
+    for (let i = 1; i <= SMALL_QUOTAS.external.verified + 2; i++) assert.equal((await w.seed("op-daniel", i)).status, 201, `seed ${i}`);
+    assert.ok(SMALL_QUOTAS.external.verified + 2 > SMALL_QUOTAS.challenge.verified);
     // The agent's allowance is whole: every one of its registrations goes in, and the one past the allowance is refused.
-    for (let i = 1; i <= EXTERNAL_PER_DAY.verified; i++) assert.equal((await w.register("Bee", i)).status, 201, `registration ${i}`);
-    const over = await w.register("Bee", EXTERNAL_PER_DAY.verified + 1);
+    for (let i = 1; i <= SMALL_QUOTAS.external.verified; i++) assert.equal((await w.register("Bee", i)).status, 201, `registration ${i}`);
+    const over = await w.register("Bee", SMALL_QUOTAS.external.verified + 1);
     assert.equal(over.status, 429, "the agents' own registrations still count");
     // And its challenges: the seeds took none of them either.
     const ext = String(((await w.register("Bee", 1)).body as Record<string, Json>)["ref"]); // already registered: 200, the ref

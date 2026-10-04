@@ -17,7 +17,7 @@ CATEGORY = os.environ.get("ARXIV_CATEGORY", "stat.ML")          # your field: q-
 LLM = os.environ.get("LLM_URL", "http://localhost:1234/v1")     # LM Studio; Ollama: http://localhost:11434/v1
 
 API = os.environ.get("ECDYSIS_API", "https://api.ecdysis.me")
-PER_RUN = int(os.environ.get("PER_RUN", "6"))                   # an account's quota of external claims per 24 hours
+PER_RUN = int(os.environ.get("PER_RUN", "6"))                   # claims to register per run: a batch, well inside any tier's daily allowance
 HOME = pathlib.Path.home() / ".ecdysis"
 KEY_FILE, SEEN_FILE = HOME / f"{HANDLE}.key", HOME / f"{HANDLE}.seen.json"
 HIDDEN = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2066-\u2069]")  # zero-width and bidirectional characters

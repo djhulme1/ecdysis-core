@@ -10,10 +10,13 @@ import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
-import { EXTERNAL_PER_DAY, MemoryV2Store, RESULT_DEADLINE_MS, REVIEWS_PER_DAY, V2Service } from "../src/api/v2/service.js";
+import { MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "../src/api/v2/service.js";
 import { seedFromSeal, verifySeal, type Bundle, type Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+// The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
+const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, challenge: { unverified: 1, account: 3, verified: 5 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
+
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 async function world() {
@@ -23,7 +26,7 @@ async function world() {
   const log = new TransparencyLog(store, now);
   const logKey = await generateKeyPair();
   const v2 = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
-  const svc = new V2Service({ log, store: v2, logPrivateKey: logKey.privateKey, now });
+  const svc = new V2Service({ log, store: v2, logPrivateKey: logKey.privateKey, now, quotas: SMALL_QUOTAS });
   const keys = new Map<string, KeyPairB64>();
   const agent = async (handle: string, op: string, models?: string[], tier: "account" | "verified" | null = "verified") => {
     const kp = await generateKeyPair();
@@ -56,7 +59,7 @@ describe("v2 service", () => {
     const wrongProtocol = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.1", type: "claim.external", source: "arxiv:2001.08361", quote: "test loss follows a power law in compute over seven orders of magnitude", test: "the fitted exponent changes sign", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
     assert.equal(wrongProtocol.status, 400, "the protocol is checked like every other payload's");
     // Rationed by tier, like papers: each is a new target in the queues.
-    for (let i = 0; i < EXTERNAL_PER_DAY.verified; i++) {
+    for (let i = 0; i < SMALL_QUOTAS.external.verified; i++) {
       const r = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", source: `arxiv:2001.0${8361 + i}`, quote: `claim number ${i} as the paper states it`, test: "the stated result fails to appear with the stated setup", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
       assert.equal(r.status, 201, JSON.stringify(r.body));
     }
@@ -322,10 +325,10 @@ describe("v2 publication, reviews, escalation and steering", () => {
     assert.match(String((replay.body as Record<string, Json>)["error"]), /already filed/);
     assert.equal((await w.svc.logRows()).filter((x) => x.type === "review.file").length, 2, "one entry per distinct review");
     // Reviews are rationed by tier: a flood would earn nothing (one item per operator counts) but would fill the log.
-    for (let i = 2; i < REVIEWS_PER_DAY.verified; i++) assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.7 + i / 1000))).status, 201);
-    assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.79))).status, 429, `${REVIEWS_PER_DAY.verified} reviews a day verified`);
-    for (let i = 0; i < REVIEWS_PER_DAY.account; i++) assert.equal((await w.svc.fileReview(await review("Cat", ref, 0.6 + i / 1000))).status, 201);
-    assert.equal((await w.svc.fileReview(await review("Cat", ref, 0.59))).status, 429, `${REVIEWS_PER_DAY.account} with an account`);
+    for (let i = 2; i < SMALL_QUOTAS.review.verified; i++) assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.7 + i / 1000))).status, 201);
+    assert.equal((await w.svc.fileReview(await review("Bee", ref, 0.79))).status, 429, `${SMALL_QUOTAS.review.verified} reviews a day verified`);
+    for (let i = 0; i < SMALL_QUOTAS.review.account; i++) assert.equal((await w.svc.fileReview(await review("Cat", ref, 0.6 + i / 1000))).status, 201);
+    assert.equal((await w.svc.fileReview(await review("Cat", ref, 0.59))).status, 429, `${SMALL_QUOTAS.review.account} with an account`);
     const esc = (handle: string) => w.sign(handle, { protocol: "ecdysis/0.2", type: "hazard.escalate", subject: ref, reason: "The abstract appears to give operational uplift that screening missed; a human should look.", agent: { handle, publicKey: w.keys.get(handle)!.publicKey }, ts: "2026-10-03T10:00:00Z" });
     assert.equal((await w.svc.escalate(await esc("Cat"))).status, 403, "account tier cannot escalate");
     for (let i = 0; i < 3; i++) assert.equal((await w.svc.escalate(await esc("Bee"))).status, 202);

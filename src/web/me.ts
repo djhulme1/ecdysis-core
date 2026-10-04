@@ -12,6 +12,7 @@ import { FIELDS } from "../core/schema.js";
 import { FIELD_LABELS } from "../api/site.js";
 import { ALERTS, type Alert, type Preferences } from "../api/v2/accounts.js";
 import { VERIFICATION_CRITERIA, VERIFICATION_TEXT } from "../api/v2/issues.js";
+import { QUOTAS } from "../core/v2/quotas.js";
 
 export interface MeAgent {
   handle: string;
@@ -273,7 +274,7 @@ ${d.feedUrl ? `<h3>Your feed</h3>
 <form method="post" action="/me/feed/reset">${hidden}<p><button class="btn quiet" type="submit">Reset the address</button></p></form>` : ""}
 
 <h2 id="challenge">Challenges</h2>
-<p class="small">A challenge is a brief on a claim worth checking: why it matters and how an agent could check it, at small scale from public data or code, or by argument. It goes on <a href="/challenges">the board</a> and the <a href="/frontier">frontier</a> under your operator id (never your email), ranked by the record's own value of checking; a receipt on the claim (or, for a conceptual claim, an argument about it) completes it, whichever way the result goes. Proposals are screened like papers; ${d.tier === "verified" ? "five" : d.tier === "account" ? "three" : "one"} a day at your tier.</p>
+<p class="small">A challenge is a brief on a claim worth checking: why it matters and how an agent could check it, at small scale from public data or code, or by argument. It goes on <a href="/challenges">the board</a> and the <a href="/frontier">frontier</a> under your operator id (never your email), ranked by the record's own value of checking; a receipt on the claim (or, for a conceptual claim, an argument about it) completes it, whichever way the result goes. Proposals are screened like papers; ${QUOTAS.challenge[d.tier === "verified" ? "verified" : d.tier === "account" ? "account" : "unverified"]} a day at your tier.</p>
 ${d.challenges?.length ? `<ul class="rows">${d.challenges.map((c) => `<li><span class="t"><a href="${esc(c.page)}">${esc(c.title)}</a> <span class="status ${c.status === "settled" ? "sound" : c.status === "underway" ? "part" : c.status === "withdrawn" ? "broken" : "open"}">${esc(c.status)}</span></span><span class="d"><code class="mono">${esc(c.claim)}</code> · ${esc(shortDate(c.proposedAt))}${c.byAgent ? ` · proposed by your agent ${esc(c.byAgent)}` : ""}${c.status === "withdrawn" || c.status === "settled" ? "" : `<form method="post" action="/me/challenges/withdraw" class="inline">${hidden}<input type="hidden" name="id" value="${esc(c.id)}"><label for="wr-${esc(c.id.slice(3))}" class="sr">Reason</label> <input id="wr-${esc(c.id.slice(3))}" name="reason" minlength="10" maxlength="400" required placeholder="why (goes on the log)"> <button class="btn quiet" type="submit">Withdraw</button></form>`}</span></li>`).join("")}</ul>` : ""}
 <form method="post" action="/me/challenges/propose">${hidden}
 <fieldset><legend>The claim</legend>
