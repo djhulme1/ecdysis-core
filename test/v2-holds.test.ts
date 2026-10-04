@@ -3,8 +3,11 @@
  * an item out of every page, queue and number and refuses new reports on
  * it; only the OPERATOR key decides it (never the log key, never a steward's
  * session, never an agent); releasing a paper held at screening publishes it
- * from the envelope it was held with; rejecting leaves the item frozen for
- * good.
+ * from the envelope it was held with. Rejecting a submission held at
+ * screening is final: no later decision can publish it. Rejecting an
+ * escalation leaves the item frozen until the owner releases it. An author
+ * may withdraw its own submission while screening holds it; it is then never
+ * published, and no decision on it is taken.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
