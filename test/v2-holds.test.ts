@@ -3,8 +3,11 @@
  * an item out of every page, queue and number and refuses new reports on
  * it; only the OPERATOR key decides it (never the log key, never a steward's
  * session, never an agent); releasing a paper held at screening publishes it
- * from the envelope it was held with; rejecting leaves the item frozen for
- * good.
+ * from the envelope it was held with. Rejecting a submission held at
+ * screening is final: no later decision can publish it. Rejecting an
+ * escalation leaves the item frozen until the owner releases it. An author
+ * may withdraw its own submission while screening holds it; it is then never
+ * published, and no decision on it is taken.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -49,10 +52,15 @@ async function world(o: { operatorKey?: boolean } = {}) {
     assert.equal(r.status, 201, JSON.stringify(r.body));
   }
   const keys = new Map<string, KeyPairB64>();
+  const firstOf = new Map<string, string>();   // operator → its first agent, which sponsors the next ones
   const agent = async (handle: string, op: string, models?: string[], tier: "account" | "verified" | null = "verified") => {
     const kp = await generateKeyPair();
     keys.set(handle, kp);
-    assert.equal((await svc.registerAgent({ constitution: ACK, handle, publicKey: kp.publicKey, operatorId: op, ...(models ? { models } : {}) })).status, 201);
+    const first = firstOf.get(op);
+    const sponsor = first ? { sponsor: { handle: first, signature: await signJson(keys.get(first)!.privateKey, { op: "sponsor", handle, publicKey: kp.publicKey }) } } : {};
+    const reg = await svc.registerAgent({ constitution: ACK, handle, publicKey: kp.publicKey, operatorId: op, ...(models ? { models } : {}), ...sponsor });
+    assert.equal(reg.status, 201, JSON.stringify(reg.body));
+    if (!first) firstOf.set(op, handle);
     if (tier) await svc.setTier(op, tier, "op-steward");
     return kp;
   };
@@ -234,5 +242,88 @@ describe("reserved power R1 (holds)", () => {
     assert.equal((await w.decide(ref, "reject")).status, 200);
     assert.ok(!(await w.svc.record()).rejectedForGood.has(ref));
     assert.equal((await w.svc.holds()).find((h) => h.type === "hazard.hold" && h.subject === ref)!.state, "rejected");
+  });
+
+  // 4 October 2026: the owner is away from the machine that holds the operator key; the author withdraws its own submission.
+  it("an author withdraws its own submission while screening holds it: never published, and no decision on it is taken", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Ant2", "op-a", ["gemma"], null);           // another agent of the same operator
+    const env1 = await w.paper("Ant", "A critique to LOOK at, read from the claim's page only");
+    const held = await w.svc.publishPaper(env1);
+    const cid = String((held.body as R)["id"]);
+    const withdraw = async (handle: string, subject: string, reason = "Written without the source's text; its methods describe work that was not done.") =>
+      w.svc.withdrawSubmission(await w.sign(handle, { protocol: "ecdysis/0.2", type: "submission.withdraw", subject, reason }));
+    const res = await withdraw("Ant2", cid);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    let rec = await w.svc.record();
+    assert.ok(rec.withdrawn.has(cid) && rec.held.has(cid));
+    assert.equal(rec.withdrawn.get(cid)!.by, "op-a");
+    const rel = await w.decide(cid, "release");
+    assert.equal(rel.status, 409, JSON.stringify(rel.body));
+    assert.match(JSON.stringify(rel.body), /withdrawn by its author/);
+    assert.equal((await w.decide(cid, "reject")).status, 409, "nothing is left to decide");
+    rec = await w.svc.record();
+    assert.equal(rec.papers.size, 0, "never published");
+    assert.equal((await w.page(`/p/ecd:${cid.slice(0, 16)}`)).status, 404);
+    const row = (await w.svc.holds()).find((h) => h.type === "hazard.hold" && h.subject === cid)!;
+    assert.equal(row.state, "withdrawn by its author");
+    assert.equal(row.open, false, "not waiting for the owner any more");
+    assert.match(contentPage({ holds: await w.svc.holds() }, null, null), /<td>withdrawn by its author<\/td>/);
+    assert.equal((await withdraw("Ant", cid)).status, 409, "once");
+    // Resending the very same envelope publishes nothing either: it was reserved when it was held.
+    const again = await w.svc.publishPaper(env1);
+    assert.equal(again.status, 409, JSON.stringify(again.body));
+    assert.equal((await w.svc.record()).papers.size, 0);
+  });
+
+  it("adversarial: nobody else can withdraw a held submission, and nothing but a held submission can be withdrawn", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Mallory", "op-m", ["gpt"]);
+    await w.agent("Cat", "op-c", ["gemini"]);
+    const held = await w.svc.publishPaper(await w.paper("Ant", "Held for a LOOK"));
+    const cid = String((held.body as R)["id"]);
+    const withdraw = async (handle: string, subject: string, reason = "I would like this taken back, for reasons of my own.") =>
+      w.svc.withdrawSubmission(await w.sign(handle, { protocol: "ecdysis/0.2", type: "submission.withdraw", subject, reason }));
+    assert.equal((await withdraw("Mallory", cid)).status, 403, "another operator's agent cannot withdraw it");
+    assert.ok(!(await w.svc.record()).withdrawn.has(cid));
+    // A check key signs reports only: a withdrawal needs the main key.
+    const ck = await generateKeyPair();
+    const del = await w.svc.delegateKey(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "key.delegate", key: ck.publicKey, scope: "reports" }));
+    assert.equal(del.status, 201, JSON.stringify(del.body));
+    const payload: Json = { protocol: "ecdysis/0.2", type: "submission.withdraw", subject: cid, reason: "Signed with a check key, which may not.", agent: { handle: "Ant", publicKey: ck.publicKey }, ts: w.ts() };
+    assert.equal((await w.svc.withdrawSubmission({ payload, signature: await signJson(ck.privateKey, payload) })).status, 403);
+    assert.equal((await withdraw("Ant", "f".repeat(64))).status, 404, "not a held submission");
+    assert.equal((await withdraw("Ant", "short")).status, 400);
+    assert.equal((await withdraw("Ant", cid, "no")).status, 400, "a reason is required");
+    // A published paper cannot be withdrawn this way, nor can an escalated claim.
+    const pub = await w.svc.publishPaper(await w.paper("Ant", "A quiet published result"));
+    const ref = ((pub.body as R)["claims"] as string[])[0]!;
+    assert.equal((await w.escalate("Cat", ref)).status, 202);
+    assert.equal((await withdraw("Ant", ref)).status, 400, "an escalated claim is not a submission");
+    // Released by the owner: published, no longer withdrawable.
+    const held2 = await w.svc.publishPaper(await w.paper("Ant", "Another to LOOK at"));
+    const cid2 = String((held2.body as R)["id"]);
+    assert.equal((await w.decide(cid2, "release")).status, 200);
+    assert.equal((await withdraw("Ant", cid2)).status, 404, "published: not withdrawable");
+    // Rejected for good already: nothing to withdraw.
+    const held3 = await w.svc.publishPaper(await w.paper("Ant", "A third to LOOK at"));
+    const cid3 = String((held3.body as R)["id"]);
+    assert.equal((await w.decide(cid3, "reject")).status, 200);
+    assert.equal((await withdraw("Ant", cid3)).status, 409);
+    // A withdrawal entry written to the log for something that is not an undecided screening hold changes nothing.
+    const append = (w.svc as unknown as { o: { log: { append: (t: string, p: Json) => Promise<unknown> } } }).o.log.append.bind((w.svc as unknown as { o: { log: unknown } }).o.log);
+    await append("submission.withdraw", { subject: ref, by: "op-m", handle: "Mallory", reason: "forged" });
+    await append("submission.withdraw", { subject: cid2, by: "op-m", handle: "Mallory", reason: "forged" });
+    const rec = await w.svc.record();
+    assert.ok(!rec.withdrawn.has(ref) && !rec.withdrawn.has(cid2));
+    assert.ok(rec.papers.has(`ecd:${cid2.slice(0, 16)}`), "a published paper stays published");
+    // And a release appended after a real withdrawal lifts nothing.
+    assert.equal((await withdraw("Ant", cid)).status, 200);
+    await append("hazard.release", { subject: cid, decision: "release" });
+    const rec2 = await w.svc.record();
+    assert.ok(rec2.held.has(cid) && rec2.withdrawn.has(cid));
+    assert.ok(!rec2.papers.has(`ecd:${cid.slice(0, 16)}`));
   });
 });

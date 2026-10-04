@@ -1310,6 +1310,7 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/claims/external": return v2.registerExternalClaim(body);
     case "/v2/challenges": return v2.proposeChallenge(body);
     case "/v2/challenges/withdraw": return v2.withdrawChallenge(body);
+    case "/v2/submissions/withdraw": return v2.withdrawSubmission(body);
     case "/v2/checks": return v2.commitCheck(body);
     case "/v2/checks/result": return v2.fileResult(body);
     case "/v2/reviews": return v2.fileReview(body);

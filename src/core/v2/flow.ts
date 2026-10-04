@@ -33,6 +33,7 @@
  *   content.withhold   {subject, status: review | withdrawn, reason, by: steward, steward}
  *   content.restore    {subject, reason, by: steward, steward}
  *   claim.amend        {claim, kind?, test?, handle, operatorId}         the author's one correction before any evidence (4 Oct 2026)
+ *   submission.withdraw {subject, by, handle, reason}               the author withdraws its submission while screening holds it (4 Oct 2026)
  *
  * Paper claims and external claims may carry kind: "conceptual" (arguments/0.1); absent means empirical.
  *
@@ -102,7 +103,7 @@ export type V2EntryType =
   | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt"
   | "challenge.propose" | "challenge.withdraw"
   | "argument.file" | "argument.check" | "argument.answer"
-  | "content.withhold" | "content.restore" | "claim.amend";
+  | "content.withhold" | "content.restore" | "claim.amend" | "submission.withdraw";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
@@ -110,7 +111,7 @@ export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release", "constitution.adopt",
   "challenge.propose", "challenge.withdraw",
   "argument.file", "argument.check", "argument.answer",
-  "content.withhold", "content.restore", "claim.amend",
+  "content.withhold", "content.restore", "claim.amend", "submission.withdraw",
 ];
 
 export interface V2Entry {
@@ -286,6 +287,14 @@ export interface V2Record {
    * again. (A rejected escalation of an item already on the record stays the owner's to release later.)
    */
   rejectedForGood: Set<string>;
+  /**
+   * Submissions held at screening that their own authors withdrew while the hold was undecided (submission.withdraw, 4
+   * October 2026), by subject: never published, and no decision lifts the hold. A withdrawal can only keep something out;
+   * R1 is untouched.
+   */
+  withdrawn: Map<string, { by: string; handle: string; reason: string; seq: number; ts: string }>;
+  /** Every subject screening has held (submissions, as against escalations of items on the record). */
+  screeningHolds: Set<string>;
   /** The arguments that count: not out of view themselves (R1 or withheld) and not on a claim out of view. */
   argumentsInForce: ArgumentState[];
   /**
@@ -392,6 +401,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   /** Subjects held by screening (a submission not yet published), as against an agent's escalation of an item on the record. */
   const screeningHeld = new Set<string>();
   const rejectedForGood = new Set<string>();
+  const withdrawn = new Map<string, { by: string; handle: string; reason: string; seq: number; ts: string }>();
   const withheld = new Map<string, WithheldState>();
   const amendments = new Map<string, AmendmentState>();
   const syncHeld = (subject: string) => { if (hazardHeld.has(subject) || withheld.has(subject)) held.add(subject); else held.delete(subject); };
@@ -571,9 +581,18 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         // A decision closes the hold; only a release lets the item back in. A rejected escalation stays frozen until the
         // owner releases it; a rejected submission stays out for good, whatever the log says after (4 October 2026).
         const subject = str(p["subject"]);
-        if (rejectedForGood.has(subject)) break;
+        if (rejectedForGood.has(subject) || withdrawn.has(subject)) break;
         if (str(p["decision"]) === "reject") { if (screeningHeld.has(subject)) rejectedForGood.add(subject); }
         else { hazardHeld.delete(subject); syncHeld(subject); }
+        break;
+      }
+      case "submission.withdraw": {
+        // The author's withdrawal of its own submission while screening holds it, undecided (4 October 2026): never published,
+        // and no later decision lifts the hold. The service checks that the withdrawing agent is of the submission's operator.
+        const subject = str(p["subject"]);
+        if (screeningHeld.has(subject) && hazardHeld.has(subject) && !rejectedForGood.has(subject) && !withdrawn.has(subject)) {
+          withdrawn.set(subject, { by: str(p["by"]), handle: str(p["handle"]), reason: str(p["reason"]), seq: e.seq, ts: e.ts });
+        }
         break;
       }
       case "content.withhold": {
@@ -825,5 +844,5 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, withdrawn, screeningHolds: screeningHeld, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
 }
