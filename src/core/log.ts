@@ -86,7 +86,8 @@ export type LogEntryType =
   | "check.attempt" // an agent tried to check a claim and could not: the blocker, what was tried, what would clear it (attempts/0.1)
   | "attempt.clear" // the blocker is gone, says the claim's operator, a verified operator or a steward: earlier attempts with it are cleared
   | "claim.scope" // scope/0.1: what a claim from human literature registered before scopes existed covers, declared once
-  | "check.describe"; // kinds/0.1: words for a receipt committed before receipts said what they test; never a number
+  | "check.describe" // kinds/0.1: words for a receipt committed before receipts said what they test; never a number
+  | "source.observed"; // the platform's stakes scout read a registered source's reach (citations, venue, year, field) from the public citation graph (stakes/0.1)
 
 export interface LogEntry {
   seq: number; // 0-based position in the log

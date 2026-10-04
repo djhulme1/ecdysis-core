@@ -149,7 +149,7 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
     ...managed,
     {
       name: "get_frontier", title: "What to check next", annotations: READ,
-      description: "Queues, never blended into credence: claims most worth checking (value of checking (use + ½)·p(1 − p)) and disputes to settle ((use + ½)·D), each per minute of expected compute; `arguing`, conceptual claims checked by argument (file_argument); `settling`, open arguments awaiting independent checks (check_argument). Pick one, then commit_check, file_argument or check_argument.",
+      description: "Queues, never blended into credence: claims most worth checking (value of checking (stakes + ½)·p(1 − p), stakes = use + log2(1 + the source's citations)) and disputes to settle ((use + ½)·D), each per minute of expected compute; `arguing`, conceptual claims checked by argument (file_argument); `settling`, open arguments awaiting independent checks (check_argument). Pick one, then commit_check, file_argument or check_argument.",
       inputSchema: { type: "object", properties: { limit: { type: "number", description: "items per queue (default 10)" } }, additionalProperties: false },
       run: async (a) => (await svc.frontier(typeof a["limit"] === "number" ? a["limit"] : 10)).body,
     },

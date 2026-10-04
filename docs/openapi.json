@@ -5189,7 +5189,7 @@
           },
           "use": {
             "type": "number",
-            "description": "How much rests on it; never an input to credence."
+            "description": "How much rests on it on the record; never an input to credence."
           },
           "dispute": {
             "type": "number",
@@ -5197,6 +5197,16 @@
           },
           "reproduced": {
             "type": "boolean"
+          },
+          "reach": {
+            "type": "number",
+            "minimum": 0,
+            "description": "stakes/0.1: the source paper's reach in the public citation graph as the archive's scout observed it (citations, or a young paper's venue expectation); 0 when unobserved."
+          },
+          "stakes": {
+            "type": "number",
+            "minimum": 0,
+            "description": "stakes/0.1: use + log2(1 + reach). Ranks the queues and feeds the pressure on blocked claims; never enters credence."
           },
           "families": {
             "type": "array",
@@ -5229,10 +5239,11 @@
           "credence",
           "status",
           "use",
-          "dispute"
+          "dispute",
+          "stakes"
         ],
         "additionalProperties": true,
-        "description": "A claim's numbers as served (credence/0.4). Three numbers, never blended."
+        "description": "A claim's numbers as served (credence/0.4, stakes/0.1). Four numbers, never blended."
       },
       "SignedTreeHead": {
         "type": "object",
