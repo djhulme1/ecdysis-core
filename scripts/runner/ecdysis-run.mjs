@@ -145,6 +145,19 @@ function containerTool() {
   return null;
 }
 
+/**
+ * Who the container runs as: the user running this script, so that it can read the checkout (a private temporary
+ * directory) and write results/. An image's own USER is refused both: on 4 October 2026 every run of the Bombus lab's
+ * bundles on GitHub Actions failed with "Permission denied". Rootless podman maps that user in with --userns=keep-id;
+ * where there are no POSIX user ids (Windows), the tool's default stands.
+ */
+function containerUser(tool) {
+  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") return [];
+  const uid = process.getuid(), gid = process.getgid();
+  if (tool === "podman" && uid !== 0) return ["--userns=keep-id"];
+  return ["--user", `${uid}:${gid}`];
+}
+
 /** Run the command: in a locked-down container when there is an image, else only when told to. */
 function run(b, dir, seed, noContainer, timeoutMs, imageOverride, inputPaths, scratch) {
   const results = join(dir, "results");
@@ -163,6 +176,7 @@ function run(b, dir, seed, noContainer, timeoutMs, imageOverride, inputPaths, sc
     const name = `ecdysis-${randomBytes(6).toString("hex")}`;
     const r = sh(tool, [
       "run", "--rm", "--name", name,
+      ...containerUser(tool),         // as the user running this: it owns the checkout and results/, nothing more
       "--network", "none",            // no network: nothing leaks, nothing is fetched
       "--read-only",                  // read-only root; the checkout is mounted read-only too
       "--tmpfs", "/tmp:rw,size=1g",

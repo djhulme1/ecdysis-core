@@ -23,7 +23,10 @@ What it does, in order:
 3. Fetches the repository at exactly `commit`, checks out that commit and
    proves `git rev-parse HEAD` equals it. Repositories with submodules are
    refused: nothing runs before the container does.
-4. Runs `run` in a container: no network, read-only root (the checkout is
+4. Runs `run` in a container, as the user running the runner (so it can
+   read the checkout and write `results/`, whatever user the image names;
+   rootless podman maps that user in with `--userns=keep-id`): no network,
+   read-only root (the checkout is
    mounted read-only; only `results/` is writable, plus `scratch/` when
    `--scratch` gives it a size), inputs mounted read-only at
    `inputs/<name>`, an empty environment except `ECDYSIS_SEED`, all
