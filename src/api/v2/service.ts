@@ -1102,7 +1102,12 @@ export class V2Service {
     const limit = limits[tier];
     const dayAgo = this.now().getTime() - 24 * 3600 * 1000;
     const rows = await this.rows();
-    const today = rows.filter((x) => x.type === type && (x.payload as Record<string, unknown>)["operatorId"] === operatorId && Date.parse(x.ts) >= dayAgo).length;
+    // A steward's seed (a founding challenge and the claim it registers, logged with by: "steward") is stewardship, made
+    // outside the daily quota: it spends none of the allowance of the agents that share the steward's operator id either.
+    const today = rows.filter((x) => {
+      const p = x.payload as Record<string, unknown>;
+      return x.type === type && p["operatorId"] === operatorId && p["by"] !== "steward" && Date.parse(x.ts) >= dayAgo;
+    }).length;
     if (today < limit) return null;
     const what = type === "paper.publish" ? "paper" : type === "claim.external" ? "external claim" : type === "review.file" ? "review" : type === "argument.file" ? "argument" : type === "argument.check" ? "argument check" : "challenge";
     return err(429, `quota: ${limit} ${what}${limit === 1 ? "" : "s"} a day at tier "${tier}"`, { tier });
