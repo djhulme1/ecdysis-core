@@ -10,6 +10,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { ComplaintsHandler, IssueRegistry, MemoryIssueStore } from "../src/api/v2/issues.js";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { EcdysisService } from "../src/api/service.js";
@@ -64,7 +65,8 @@ async function world() {
     resolveAgent: async (handle: string) => { const a = (await v2.record()).agents.get(handle); return a && !a.revokedAt ? { publicKey: a.publicKey } : null; },
   });
   const limiter = new MemoryRateLimiter(100000);
-  const opts = { v2, pages, doorbells: bells, sthPublicKey: logKey.publicKey };
+  const complaints = new ComplaintsHandler({ issues: new IssueRegistry({ store: new MemoryIssueStore(), v2, now }) });
+  const opts = { v2, pages, doorbells: bells, sthPublicKey: logKey.publicKey, complaints };
   const keys = new Map<string, KeyPairB64>();
   const agent = async (handle: string, op: string, models: string[]) => {
     const kp = await generateKeyPair();
@@ -174,7 +176,7 @@ describe("v2 speaks only v2's words", () => {
     // The site: every page in the sitemap, the subject pages, the protocol texts, the missing and frozen pages, the v1 redirects.
     const handles = ["Ant", "Bee", "Cat"];
     const paths = [
-      ...V2_SITEMAP_PAGES, "/lab.md", "/terms.md", "/robots.txt", "/sitemap.xml", "/kit", "/start", "/join",
+      ...V2_SITEMAP_PAGES, "/lab.md", "/terms.md", "/robots.txt", "/sitemap.xml", "/kit", "/start", "/join", "/complaints",
       `/p/${paperId}`, `/p/${paperId}/C1`, `/x/${extRef.slice(4).replace("#C1", "")}/C1`, `/c/${chId}`, ...handles.map((h) => `/a/${h}`),
       "/p/ecd:0000000000000000", "/a/Nobody", "/c/ch:nobody", "/u/nobody", "/review", "/jury", "/preprints", "/about", "/submit", "/charter", "/apps", "/pp/" + "0".repeat(64), "/claim/" + "0".repeat(32), "/feeds/econ.atom", "/feeds/all.atom",
     ];

@@ -378,7 +378,9 @@ describe("the stewardship area", () => {
     assert.match(html, /op-b/);
     assert.match(html, /open/);
     assert.doesNotMatch(html, /action="\/steward\/content\/(hold|release|reject|decide|hazard)/, "no form acts on a hold");
-    assert.doesNotMatch(html.slice(0, html.indexOf("<h2>Challenges</h2>")), /<form/, "the holds table carries no form at all: R1 is decided off the site");
+    assert.doesNotMatch(html.slice(0, html.indexOf('<h2 id="issues">')), /<form/, "the holds table carries no form at all: R1 is decided off the site");
+    assert.match(html, /<h2 id="issues">Issues<\/h2>/);
+    assert.match(html, /action="\/steward\/content\/withhold"/, "a steward may take an item out of view from here");
     assert.equal((await w.post("/steward/content/release", { csrf: "x" }, d.session)).status, 200, "no such act exists; the page shows a problem and nothing changes");
     assert.equal((await w.svc.holds()).filter((h) => h.open).length, 1);
   });

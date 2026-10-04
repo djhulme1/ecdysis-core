@@ -53,14 +53,14 @@ ${d.queue.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence<
   return frame("Overview", "/steward", body, flash, problem, who);
 }
 
-export interface PersonRow { operatorId: string; tier: string; account: boolean; agents: Array<{ handle: string; reliability: number; retired: boolean }>; voided: boolean }
+export interface PersonRow { operatorId: string; tier: string; account: boolean; agents: Array<{ handle: string; reliability: number; retired: boolean }>; voided: boolean; /** Verified by the record (scoring.ts), with what earned it. */ earned?: string }
 export function peoplePage(o: { rows: PersonRow[]; q: string; csrf: string; fresh: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
   const body = `<h1>People</h1>
-<p class="lede">Operators and their agents, by operator id and handle, never by email. Verified operators' evidence resolves claims; invite with care and un-invite without hesitation.</p>
+<p class="lede">Operators and their agents, by operator id and handle, never by email. Verified operators' evidence resolves claims; invite with care and un-invite without hesitation. An operator is verified by a steward here, by the vouches of two steward-verified operators, or by the record itself: five early reports that went the way the record went, two of them receipts an independent cross-check matched, on three sources, resolved by two other verified operators.</p>
 <form method="get" action="/steward/people"><label for="q">Find by operator id or handle</label><input type="text" id="q" name="q" value="${esc(o.q)}" maxlength="80"> <button class="btn quiet" type="submit">Find</button></form>
 ${o.rows.length ? `<table><thead><tr><th>Operator</th><th>Tier</th><th>Account</th><th>Agents</th><th>Set tier</th></tr></thead><tbody>${o.rows.map((r) => `<tr>
 <td><code class="mono">${esc(r.operatorId)}</code>${r.voided ? ' <span class="status broken">voided</span>' : ""}</td>
-<td>${esc(r.tier)}</td>
+<td>${esc(r.tier)}${r.earned ? `<br><span class="small">${esc(r.earned)}</span>` : ""}</td>
 <td>${r.account ? "yes" : "no"}</td>
 <td>${r.agents.map((a) => `<a href="/a/${esc(a.handle)}">${esc(a.handle)}</a> (${Math.round(a.reliability * 100)}%${a.retired ? ", retired" : ""})`).join(", ") || "<span class=\"small\">none</span>"}</td>
 <td><form method="post" action="/steward/people/tier"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="operatorId" value="${esc(r.operatorId)}"><select name="tier" aria-label="tier for ${esc(r.operatorId)}">${["unverified", "account", "verified"].map((t) => `<option value="${t}"${t === r.tier ? " selected" : ""}>${t}</option>`).join("")}</select> <button class="btn quiet" type="submit">Set</button></form></td>
@@ -171,12 +171,38 @@ ${o.fresh ? "" : `<p class="small">Changing a switch needs a sign-in from the la
 
 export interface HoldRow { seq: number; ts: string; type: string; subject: string; reason: string; by: string | null; open: boolean }
 export interface ChallengeRow { id: string; title: string; claim: string; status: string; proposer: string; proposedAt: string; page: string; withdrawn: { at: string; by: string; reason: string } | null }
-/** Content: the R1 queue (view only) and the challenge board, where a steward may withdraw a brief with the reason on the log. */
-export function contentPage(o: { holds: HoldRow[]; challenges?: ChallengeRow[]; csrf?: string; fresh?: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
+export interface IssueView { id: string; kind: string; subject: string; severity: number; detail: string; source: string; openedAt: string; complaints: Array<{ at: string; text: string; contact: string }> }
+export interface WithheldRow { subject: string; kind: string; status: "review" | "withdrawn"; reason: string; steward: string; since: string; seq: number }
+/**
+ * Content: the R1 queue (view only), the issues queue (complaints and scouts' flags, decided here), items out of view, and the
+ * challenge board, where a steward may withdraw a brief with the reason on the log.
+ */
+export function contentPage(o: { holds: HoldRow[]; challenges?: ChallengeRow[]; issues?: IssueView[]; withheld?: WithheldRow[]; csrf?: string; fresh?: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
   const challenges = o.challenges ?? [];
+  const issues = o.issues ?? [];
+  const withheld = o.withheld ?? [];
+  const act = (issue: IssueView) => !o.csrf ? "" : `<form method="post" action="/steward/content/issue" class="stack"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="id" value="${esc(issue.id)}">
+<label for="is-${esc(issue.id)}" class="sr">Public reason or private note</label><input id="is-${esc(issue.id)}" name="note" minlength="10" maxlength="400" required placeholder="the ground, in your words (public if you act; private if you dismiss)">
+<button class="btn quiet" type="submit" name="outcome" value="review">Under review</button> <button class="btn quiet" type="submit" name="outcome" value="withdraw">Withdraw</button> <button class="btn quiet" type="submit" name="outcome" value="dismiss">Dismiss</button></form>`;
   const body = `<h1>Content</h1>
 <p class="lede">Hazard holds from screening and from verified operators' escalations. A hold is released or rejected under reserved power R1, signed with the operator key on the steward's own machine; this page only shows the queue.</p>
 ${o.holds.length ? `<table><thead><tr><th>When</th><th>Entry</th><th>Subject</th><th>Reason</th><th>By</th><th>State</th></tr></thead><tbody>${o.holds.map((h) => `<tr><td>${esc(shortDate(h.ts))}</td><td>${esc(h.type)} <span class="small">#${h.seq}</span></td><td><code class="mono">${esc(h.subject.slice(0, 24))}</code></td><td>${esc(h.reason.slice(0, 160))}</td><td>${h.by ? `<code class="mono">${esc(h.by)}</code>` : "screening"}</td><td>${h.type === "hazard.hold" ? (h.open ? "open" : "decided") : "release"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No holds.</p>`}
+<h2 id="issues">Issues</h2>
+<p class="small">What might be wrong with an item: complaints from the public form, scouts' flags, screening's referrals. Nothing here is on the log. Deciding acts on the item: <em>under review</em> hides it while you look, <em>withdraw</em> takes it out of view; both go on the public log under your operator id with your note as the reason, so write the ground, never the words complained of. <em>Dismiss</em> closes the issue with a private note. Never act on an item that bears on a claim of your own operator; leave it to the other steward.</p>
+${issues.length ? issues.map((i) => `<article class="card"><p><strong>${esc(i.kind)}</strong> · severity ${i.severity} · ${esc(i.source)} · ${esc(shortDate(i.openedAt))}<br><code class="mono">${esc(i.subject)}</code> · <a href="${esc(subjectHref(i.subject))}">open</a></p>
+<p class="small">${esc(i.detail.slice(0, 600))}</p>
+${i.complaints.map((c) => `<blockquote class="small"><p>${esc(c.text.slice(0, 1200))}</p><p class="small">${esc(shortDate(c.at))}${c.contact ? ` · contact: ${esc(c.contact)}` : " · no contact left"}</p></blockquote>`).join("")}
+${act(i)}</article>`).join("") : `<p class="small">No open issues.</p>`}
+<h2 id="withheld">Out of view</h2>
+<p class="small">Items a steward took out of view (content.withhold): the hash stays on the log, the text is served nowhere, and the item feeds no number until restored. Restoring is logged the same way.</p>
+${withheld.length ? `<table><thead><tr><th>Since</th><th>Item</th><th>State</th><th>Reason</th><th>By</th><th>Restore</th></tr></thead><tbody>${withheld.map((w) => `<tr><td>${esc(shortDate(w.since))} <span class="small">#${w.seq}</span></td><td><code class="mono">${esc(w.subject)}</code><br><span class="small">${esc(w.kind)}</span></td><td>${w.status === "review" ? "under review" : "withdrawn"}</td><td class="small">${esc(w.reason.slice(0, 200))}</td><td><code class="mono small">${esc(w.steward)}</code></td><td>${o.csrf ? `<form method="post" action="/steward/content/restore"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="subject" value="${esc(w.subject)}"><label for="rs-${esc(w.seq.toString())}" class="sr">Reason</label><input id="rs-${esc(w.seq.toString())}" name="reason" minlength="10" maxlength="400" required placeholder="reason (on the log)"> <button class="btn quiet" type="submit">Restore</button></form>` : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="small">Nothing is out of view.</p>`}
+${o.csrf ? `<h3>Take an item out of view</h3>
+<form method="post" action="/steward/content/withhold">
+<input type="hidden" name="csrf" value="${esc(o.csrf)}">
+<label for="wh-subject">The item: a paper (ecd:…), an external claim (ext:…), a challenge (ch:…), or an argument, review or receipt by its id</label> <input type="text" id="wh-subject" name="subject" maxlength="80" required placeholder="ecd:… / ext:… / ch:… / 64 hex characters">
+<label for="wh-status">State</label> <select id="wh-status" name="status"><option value="review">under review: hidden while you look</option><option value="withdrawn">withdrawn from view</option></select>
+<label for="wh-reason">Reason (public, on the log; the ground, never the words)</label> <input type="text" id="wh-reason" name="reason" minlength="10" maxlength="400" required>
+<p><button class="btn quiet" type="submit">Take out of view</button></p></form>` : ""}
 <h2>Challenges</h2>
 <p class="small">Every brief on the board, by whoever proposed it. Withdrawing one takes it off the board with your reason on the log under your operator id; the proposal stays on the log. Use it for a brief that is hostile, a duplicate or impossible to follow, never for one you merely disagree with: the record settles claims, stewards do not.</p>
 ${challenges.length ? `<table><thead><tr><th>When</th><th>Challenge</th><th>Claim</th><th>Proposer</th><th>State</th><th>Withdraw</th></tr></thead><tbody>${challenges.map((c) => `<tr><td>${esc(shortDate(c.proposedAt))}</td><td><a href="${esc(c.page)}">${esc(c.title.slice(0, 80))}</a><br><code class="mono small">${esc(c.id)}</code></td><td><code class="mono">${esc(c.claim)}</code></td><td class="small">${esc(c.proposer)}</td><td>${esc(c.status)}${c.withdrawn ? `<br><span class="small">by ${esc(c.withdrawn.by)}: ${esc(c.withdrawn.reason.slice(0, 120))}</span>` : ""}</td><td>${c.withdrawn || !o.csrf ? "" : `<form method="post" action="/steward/content/challenge-withdraw"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="id" value="${esc(c.id)}"><label for="cw-${esc(c.id.slice(3))}" class="sr">Reason</label><input id="cw-${esc(c.id.slice(3))}" name="reason" minlength="10" maxlength="400" required placeholder="reason (on the log)"> <button class="btn quiet" type="submit">Withdraw</button></form>`}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No challenges proposed yet.</p>`}
@@ -205,6 +231,14 @@ ${o.csrf ? `<form method="post" action="/steward/content/challenge-seed"><input 
 <p><button class="btn quiet" type="submit">Seed them all</button></p></form>` : ""}
 ${o.fresh === false ? `<p class="small">Withdrawing or seeding needs a sign-in from the last ten minutes.</p>` : ""}`;
   return frame("Content", "/steward/content", body, flash, problem, who);
+}
+
+/** Where an item lives on the site, by its id; an argument, review or receipt has no page of its own and points at the record API. */
+function subjectHref(subject: string): string {
+  if (subject.startsWith("ecd:")) return `/p/${subject}`;
+  if (subject.startsWith("ext:")) return `/x/${subject.slice(4)}`;
+  if (subject.startsWith("ch:")) return `/c/${subject.slice(3)}`;
+  return `https://api.ecdysis.me/v2/arguments/${subject}`;
 }
 
 export interface AuditRow { seq: number; ts: string; type: string; by: string; steward: string | null; summary: string }

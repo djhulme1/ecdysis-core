@@ -22,7 +22,16 @@ describe("the v2 replay audit", () => {
     assert.equal(a.findings["f2"]?.endsWith("reversed"), true);
     assert.equal(a.tiers["op-a1"], "verified", "two steward-verified vouches verify an account");
     assert.equal(a.facts["disowned"], "1", "the compromised check key's receipt is disowned");
-    assert.equal(a.facts["held"], "ecd:p6#C1");
+    assert.equal(a.facts["held"], "ecd:p6#C1,ext:eeeeeeeeeeeeeeee", "an R1 hold and a steward's withholding are both out of view");
+    assert.equal(a.facts["withheld"], "ext:eeeeeeeeeeeeeeee:review", "the withheld claim stays under review; the withdrawn-then-restored paper does not appear");
+    // Verification by record: Yak earns the tier against the steward-verified base, Zed against a base that includes Yak; a
+    // forecaster with no cross-checked receipt (Sly) and a late herder (Hog) stay where they were.
+    assert.equal(a.tiers["op-a3"], "verified", "Yak: verified by the record");
+    assert.equal(a.tiers["op-a4"], "verified", "Zed: verified by the record once Yak's receipts weigh one");
+    assert.equal(a.tiers["op-s1"], "account", "Sly: five early right reviews and no receipt earn nothing");
+    assert.equal(a.tiers["op-h1"], "account", "Hog: five right reviews after the record resolved earn nothing");
+    assert.match(a.facts["verifiedByRecord"]!, /^op-a3:\d+\/\d+\/\d+\/\d+@1;op-a4:\d+\/\d+\/\d+\/\d+@2$/);
+    assert.equal(a.facts["rounds"], "3", "two rounds earned, a third added nobody");
   });
 
   it("matches the committed baseline (run npm run audit:v2 -- --update to move it deliberately)", () => {

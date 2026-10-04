@@ -93,6 +93,7 @@ import { modelFamilies, type ClaimInput, type EvidenceInput, type Tier, type Use
 import { APPEAL_MS } from "./receipts.js";
 import { CHALLENGE_SCALES, CHALLENGE_WANTS, type ChallengeScale, type ChallengeState, type ChallengeWants } from "./challenges.js";
 import { argumentEffects, GROUNDS, settleArgument, STANCES, type ArgumentCheckState, type ArgumentState, type ClaimArgumentsInput, type ClaimKind, type Grounds, type Stance } from "./arguments.js";
+import type { EarnedVerification } from "./scoring.js";
 
 export type V2EntryType =
   | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
@@ -223,6 +224,8 @@ export interface V2Record {
   suspendedVouchers: Set<string>;
   /** Operators verified by a steward's own tier entry: the only ones whose vouches count (vouching does not chain). */
   stewardVerified: Set<string>;
+  /** Operators verified by the record (resolve.ts): what they did and when they earned it. Empty from deriveV2 alone. */
+  verifiedByRecord: Map<string, EarnedVerification>;
   /** Pairs of operators that have each confirmed the other's claims. */
   rings: Array<[string, string]>;
   ringLinked: (a: string, b: string) => boolean;
@@ -323,7 +326,16 @@ export function isHeld(r: Pick<V2Record, "held" | "checks">, subject: string): b
   return !!c && (r.held.has(c.target) || (c.target.indexOf("#") > 0 && r.held.has(c.target.slice(0, c.target.indexOf("#")))));
 }
 
-export function deriveV2(entries: V2Entry[], now: Date): V2Record {
+export interface DeriveOptions {
+  /**
+   * Operators verified BY THE RECORD (scoring.ts, earnedVerification; resolve.ts computes the set): they take the verified
+   * tier here, so their evidence weighs one, resolves claims, verifies cross-checks and settles arguments, but they are not
+   * steward-verified, so their vouches count for nothing. Empty by default: the derivation alone knows nothing of credence.
+   */
+  verifiedByRecord?: ReadonlySet<string>;
+}
+
+export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions = {}): V2Record {
   const tiers = new Map<string, Tier>();
   const tierSeq = new Map<string, number>();
   const vouches: Array<{ from: string; for: string; seq: number; inForce: boolean }> = [];
@@ -665,6 +677,8 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const byVouchee = new Map<string, Set<string>>();
   for (const v of vouches) if (v.inForce) byVouchee.set(v.for, new Set([...(byVouchee.get(v.for) ?? []), v.from]));
   for (const [op, vouchers] of byVouchee) if (vouchers.size >= 2) tiers.set(op, "verified");
+  // Verification by record (after stewardVerified is fixed: an earned tier vouches for nobody).
+  for (const op of options.verifiedByRecord ?? []) if (!voidedOperators.has(op)) tiers.set(op, "verified");
 
   const tierOf = (op: string): Tier => tiers.get(op) ?? "unverified";
   for (const u of uses) u.tier = tierOf(u.operatorId);
@@ -722,7 +736,7 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
     // inputs/0.1: a receipt not everyone can re-run earns its tier's weight only once a verified, independent cross-check has
     // matched it; until then it counts at the unverified weight and settles nothing (credence.ts, `auditable`).
     const auditable = c.requires.length === 0 || c.verifiedBy.length > 0;
-    evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq, ...(auditable ? {} : { auditable: false }) });
+    evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq, ...(auditable ? {} : { auditable: false }), ...(c.verifiedBy.length > 0 ? { crossChecked: true } : {}) });
   }
   for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts) && !frozen(r.claim)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
   evidence.sort((a, b) => a.seq - b.seq);
@@ -743,5 +757,5 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, constitution, arguments: args, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, constitution, arguments: args, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
 }

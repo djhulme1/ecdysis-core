@@ -34,7 +34,7 @@ import { b64urlDecode, b64urlEncode, hashJson } from "../../core/canonical.js";
 import { publicKeyProblem, verifyJson } from "../../core/crypto.js";
 import type { TransparencyLog } from "../../core/log.js";
 import { CREDENCE_V2_VERSION, modelFamilies, type Tier } from "../../core/v2/credence.js";
-import { deriveV2, isHeld, V2_ENTRY_TYPES, withheldOf, type V2Entry, type V2EntryType, type V2Record } from "../../core/v2/flow.js";
+import { isHeld, V2_ENTRY_TYPES, withheldOf, type V2Entry, type V2EntryType, type V2Record } from "../../core/v2/flow.js";
 import { sanitizeText } from "../../core/sanitize.js";
 import { CHALLENGE_CLAIM, CHALLENGE_NOTES, CHALLENGES_PER_CLAIM, CHALLENGES_VERSION, challengeStatus, challengeTextProblems, PROPOSER_WEIGHT, rankChallenges, WITHDRAW_REASON, type ChallengeScale, type ChallengeState, type ChallengeStatus, type ChallengeWants, type RankedChallenge } from "../../core/v2/challenges.js";
 import { ARGUMENT_PARAMS, ARGUMENTS_VERSION, CLAIM_KINDS, groundsProblem, MONTH_MS, validateArgumentAnswerV2, validateArgumentCheckV2, validateArgumentV2, type ArgumentAnswerV2Payload, type ArgumentCheckV2Payload, type ArgumentState, type ArgumentV2Payload, type ClaimKind } from "../../core/v2/arguments.js";
@@ -55,7 +55,8 @@ import {
   type CheckResult,
   type Outputs,
 } from "../../core/v2/receipts.js";
-import { computeV2 } from "../../core/v2/scoring.js";
+import type { computeV2 } from "../../core/v2/scoring.js";
+import { resolveV2, scoreRecord } from "../../core/v2/resolve.js";
 import { validateEscalateV2, validatePaperV2, validateReviewV2, type EscalateV2Payload, type PaperV2Payload, type ReviewV2Payload } from "../../core/v2/paper.js";
 import { runScreening, type Screener, type Screenable } from "../../core/hazard.js";
 import type { PaperPayload } from "../../core/schema.js";
@@ -376,7 +377,11 @@ export class V2Service {
     const entries: V2Entry[] = rows
       .filter((r) => V2_TYPES.has(r.type) && Date.parse(r.ts) <= cut)
       .map((r) => ({ seq: r.seq, ts: r.ts, type: r.type as V2EntryType, payload: (r.payload ?? {}) as Record<string, unknown> }));
-    const rec = deriveV2(entries, asOf);
+    // Derivation, numbers and verification by record together (resolve.ts): the record carries who earned the tier, and the
+    // scores it was resolved with are kept beside it so nothing is computed twice.
+    const resolved = resolveV2(entries, asOf);
+    const rec = resolved.record;
+    this.cache.scored.set(rec, resolved.scores);
     if (this.cache.derived.size >= 8) this.cache.derived.delete(this.cache.derived.keys().next().value!);
     this.cache.derived.set(key, rec);
     return rec;
@@ -418,11 +423,11 @@ export class V2Service {
     return ok(200, { version: CREDENCE_V2_VERSION, claims } as unknown as Json);
   }
 
-  /** The same, for a record already derived (as of some moment); computed once per derived record. */
+  /** The same, for a record already derived (as of some moment); computed once per derived record (resolve.ts keeps them together). */
   async scoresFor(r: V2Record) {
     const hit = this.cache.scored.get(r);
     if (hit) return hit;
-    const s = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors, arguments: r.argumentEffects, argumentStates: [...r.arguments.values()] });
+    const s = scoreRecord(r);
     this.cache.scored.set(r, s);
     return s;
   }
@@ -1338,7 +1343,8 @@ export class V2Service {
   async argument(id: string): Promise<ApiResult> {
     const r = await this.record();
     const a = r.arguments.get(id);
-    if (!a || isHeld(r, a.claim) || r.held.has(a.id)) return err(404, "no such argument");
+    if (!a) return err(404, "no such argument");
+    if (isHeld(r, a.claim) || r.held.has(a.id)) return err(451, r.held.has(a.id) ? hiddenNote(r, a.id) : hiddenNote(r, a.claim));
     return ok(200, { version: ARGUMENTS_VERSION, argument: this.argumentView(r, a) } as unknown as Json);
   }
 

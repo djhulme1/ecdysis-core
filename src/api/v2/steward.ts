@@ -13,6 +13,7 @@ import { ME_HEADERS, sameOrigin } from "./me.js";
 import { cookie, type Accounts, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
 import type { CanaryRegistry } from "./canaries.js";
+import type { IssueRegistry } from "./issues.js";
 import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, overviewPage, peoplePage, refusedPage, type AgentRow, type PersonRow } from "../../web/steward.js";
 
 export interface StewardOptions {
@@ -25,6 +26,8 @@ export interface StewardOptions {
   readOnly?: boolean;
   /** The canary registry (off the log), when configured. */
   canaries?: CanaryRegistry | null;
+  /** The issues queue (complaints, scouts' flags), when configured. */
+  issues?: IssueRegistry | null;
 }
 
 const MAX_FORM = 8 * 1024;
@@ -175,6 +178,24 @@ export class StewardHandler {
         const summary = `${seeded} of ${seeds.length} seeded. ${outcomes.join(" · ")}`;
         return seeded === seeds.length ? this.redirect(`/steward/content?ok=${encodeURIComponent(summary.slice(0, 1500))}`) : this.page("/steward/content", signed, url, seeded ? summary.slice(0, 1500) : null, seeded ? null : summary.slice(0, 1500));
       }
+      case "/steward/content/withhold": {
+        const r = await this.o.v2.withholdContent(f.get("subject"), f.get("status"), f.get("reason"), steward);
+        if (r.status !== 200) return this.page("/steward/content", signed, url, null, `Couldn't take it out of view: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
+        return this.redirect(`/steward/content?ok=${encodeURIComponent(String((r.body as Record<string, unknown>)["note"] ?? "Done."))}#withheld`);
+      }
+      case "/steward/content/restore": {
+        const r = await this.o.v2.restoreContent(f.get("subject"), f.get("reason"), steward);
+        if (r.status !== 200) return this.page("/steward/content", signed, url, null, `Couldn't restore: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
+        return this.redirect(`/steward/content?ok=${encodeURIComponent(String((r.body as Record<string, unknown>)["note"] ?? "Restored."))}#withheld`);
+      }
+      case "/steward/content/issue": {
+        if (!this.o.issues) return this.html(404, refusedPage("The issues queue is not configured on this deployment."));
+        const outcome = f.get("outcome");
+        if (outcome !== "dismiss" && outcome !== "review" && outcome !== "withdraw") return this.page("/steward/content", signed, url, null, "Couldn't decide the issue: choose under review, withdraw or dismiss.");
+        const r = await this.o.issues.decide(f.get("id") ?? "", outcome, f.get("note") ?? "", steward);
+        if (!r.ok) return this.page("/steward/content", signed, url, null, `Couldn't decide the issue: ${r.error}.`);
+        return this.redirect(`/steward/content?ok=${encodeURIComponent(outcome === "dismiss" ? "Issue dismissed; your note is kept privately." : outcome === "review" ? "Under review: the item is out of view while you look; the act is on the log." : "Withdrawn from view; the act is on the log.")}#issues`);
+      }
       case "/steward/content/challenge-withdraw": {
         const r = await this.o.v2.withdrawChallengeBySteward(f.get("id") ?? "", f.get("reason") ?? "", steward);
         if (r.status !== 200) return this.page("/steward/content", signed, url, null, `Couldn't withdraw: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
@@ -235,7 +256,8 @@ export class StewardHandler {
         const s = await this.o.v2.scores();
         const ops = new Map<string, PersonRow>();
         for (const [handle, a] of r.agents) {
-          const row = ops.get(a.operatorId) ?? { operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", account: false, agents: [], voided: r.voidedOperators.has(a.operatorId) };
+          const earned = r.verifiedByRecord.get(a.operatorId);
+          const row = ops.get(a.operatorId) ?? { operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", account: false, agents: [], voided: r.voidedOperators.has(a.operatorId), ...(earned ? { earned: `by the record: ${earned.reports} early reports, ${earned.right} right, ${earned.receipts} cross-checked receipts, ${earned.sources} sources` } : {}) };
           row.agents.push({ handle, reliability: s.track.reliability.get(handle) ?? 0.5, retired: a.revokedAt !== null });
           ops.set(a.operatorId, row);
         }
@@ -289,7 +311,9 @@ export class StewardHandler {
       case "/steward/content": {
         const board = (await this.o.v2.challenges(200, true)).body as { challenges: Array<{ id: string; title: string; claim: string; status: string; proposedAt: string; page: string; proposer: { kind: string; handle?: string; operatorId: string }; withdrawn: { at: string; by: string; reason: string } | null }> };
         const challenges = board.challenges.map((c) => ({ id: c.id, title: c.title, claim: c.claim, status: c.status, proposedAt: c.proposedAt, page: c.page, withdrawn: c.withdrawn, proposer: c.proposer.kind === "agent" ? `agent ${c.proposer.handle ?? ""} (${c.proposer.operatorId})` : c.proposer.kind === "steward" ? `steward ${c.proposer.operatorId} (founding)` : `person ${c.proposer.operatorId}` }));
-        return this.html(200, contentPage({ holds: await this.o.v2.holds(100), challenges, csrf, fresh }, flash, problem, who));
+        const open = this.o.issues ? await this.o.issues.list("open", 100) : [];
+        const issues = await Promise.all(open.map(async (i) => ({ id: i.id, kind: i.kind, subject: i.subject, severity: i.severity, detail: i.detail, source: i.source, openedAt: i.openedAt, complaints: (await this.o.issues!.complaintsFor(i.id)).map((c) => ({ at: c.at, text: c.text, contact: c.contact })) })));
+        return this.html(200, contentPage({ holds: await this.o.v2.holds(100), challenges, issues, withheld: await this.o.v2.withheldItems(), csrf, fresh }, flash, problem, who));
       }
       case "/steward/audit":
         return this.html(200, auditPage({ rows: await this.o.v2.audit(200) }, flash, problem, who));
