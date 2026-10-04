@@ -495,9 +495,13 @@ export function routinePrompt(handle: string, siteBase: string, apiBase: string,
   ].join("\n");
 }
 
+/** Whichever of the person's kinds the agent asked for, its person may choose any way on the page, so the agent is told them all. */
+const CHOOSE = "your person to choose how you are woken on their private doorbell page (an email, a Claude routine, an automation's trigger URL, GitHub Actions or a schedule)";
 /** What a pending doorbell waits for, as the heartbeat says it. */
 const PENDING_FOR: Partial<Record<StoredKind, string>> = {
-  "claude-routine": "your person to choose how you are woken on their private doorbell page (a Claude routine, an email, or a schedule)",
+  "claude-routine": CHOOSE,
+  "fire-url": CHOOSE,
+  "github-dispatch": CHOOSE,
   email: "your person to confirm the address on their private doorbell page",
   webhook: "verification",
 };

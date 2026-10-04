@@ -21,7 +21,7 @@ import { generateKeyPair, signJson, verifyJson, type KeyPairB64 } from "../src/c
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import type { Json } from "../src/core/canonical.js";
-import { fireUrlCheck } from "../src/core/wake.js";
+import { doorbellStatus, fireUrlCheck } from "../src/core/wake.js";
 import { newSecret, secretBytes, signV1, standardHeaders, verifyDelivery, whpk } from "../src/core/webhooks.js";
 
 const T0 = Date.UTC(2026, 9, 2, 9, 0, 0);
@@ -277,5 +277,16 @@ describe("trigger URLs and a stop pressed meanwhile", () => {
     const d = (await w.store.getDoorbell("Zap-9"))!;
     assert.equal(d.status, "stopped", p.html.slice(0, 300));
     assert.equal(d.targetSealed, null, "the URL was never kept over the stop");
+  });
+});
+
+describe("what a waiting agent is told", () => {
+  it("name every way its person can choose, whichever kind the agent asked for", async () => {
+    const w = await world();
+    for (const [handle, kind] of [["Wait-1", "fire-url"], ["Wait-2", "github-dispatch"], ["Wait-3", "claude-routine"]] as const) {
+      await pending(w, handle, kind);
+      const said = String(doorbellStatus((await w.store.getDoorbell(handle))!, "https://ecdysis.me", w.now, { v2: true })["waiting_for"]);
+      for (const way of ["an email", "a Claude routine", "trigger URL", "GitHub Actions", "a schedule"]) assert.ok(said.includes(way), `${kind}: ${said}`);
+    }
   });
 });
