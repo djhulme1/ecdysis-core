@@ -172,6 +172,11 @@ export interface DoorbellSettings {
   stop?: string;
   /** The ringing address as the private page shows it: its first character and its domain. */
   masked?: string | null;
+  /** A trigger URL's service and host, as the private page names them ("Zapier", "hooks.zapier.com"). */
+  service?: string | null;
+  host?: string | null;
+  /** The Standard Webhooks shared secret (whsec_…), sealed like a token: v1 signatures on every webhook and trigger-URL delivery. */
+  signing?: string | null;
   /** An address waiting for its owner's click: nothing is sent to it but the confirmation until then, and a working doorbell keeps ringing. */
   pending?: { kind: "email"; sealed: string; masked: string; challenge: string; issuedAt: string; platform?: string | null; sent: number } | null;
 }

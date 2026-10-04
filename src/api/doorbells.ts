@@ -59,11 +59,12 @@ import { SEAT_DEADLINE_MS } from "../core/jury.js";
 import {
   CADENCES, DEFAULT_CADENCE, DUE_REMINDER_MS, KINDS, OWED_ONLY, PAUSE_AFTER_FAILURES, PLATFORM_NAME, PLATFORMS, RING_SPACING_MS, RINGS_PER_DAY, RINGS_PER_SWEEP,
   ROUTINE_FIRE, ROUTINE_TOKEN_RE, SESSION_URL_RE, SETUP_LINK_TTL_MS, TAG_ALPHABET, TAG_RE, WAKE_PROTOCOL, addressOf, asPlatform, assistantPrompt, byUrgency, cadenceIn, cadenceOut,
-  doorbellStatus, emailRingSubject, emailRingText, isPersonKind, maskEmail, nextResearch, parsePastedRoutine, parseRoutine,
+  APPS_SCRIPT_ECHO, FIRE_SERVICES, doorbellStatus, emailRingSubject, emailRingText, fireBody, fireUrlCheck, isPersonKind, maskEmail, nextResearch, parsePastedRoutine, parseRoutine, why,
   researchDue, ringPayload, ringText, routinePrompt, slotOffset, webhookProblem, type Cadence, type DoorbellKind, type Platform, type RingReason, type StoredKind,
 } from "../core/wake.js";
 import { esc, shell } from "../web/design.js";
 import { sameString } from "./access.js";
+import { newSecret, standardHeaders } from "../core/webhooks.js";
 import { EMAIL_RE, type SendEmail } from "./herald.js";
 import type { ApiResult } from "./service.js";
 import type { DoorbellRecord, DoorbellSettings, QuarantineRecord, Store } from "../store/store.js";
@@ -301,8 +302,8 @@ export class Doorbells {
     if (typeof cadenceGiven !== "string" || !(CADENCES as readonly string[]).includes(cadenceGiven)) return err(422, `cadence: one of ${this.cadences.join(", ")} (default ${DEFAULT_CADENCE})`);
     const cadence = cadenceGiven as Cadence;
 
-    if (kind === "claude-routine" || kind === "email") {
-      if (kind === "claude-routine" && !(await this.sealing())) return err(503, "this deployment can't store routine tokens yet; use an email, a webhook or your own schedule for now");
+    if (isPersonKind(kind)) {
+      if ((kind === "claude-routine" || kind === "fire-url") && !(await this.sealing())) return err(503, "this deployment can't keep tokens or trigger URLs safely yet; use an email, a webhook or your own schedule for now");
       if (kind === "email" && !this.emailOn) return err(503, "this deployment can't send email right now; use a Claude routine, a webhook or your own schedule for now");
       const when = cadence === "jury-only" ? this.besides : `${cadence} for research, and ${this.besides}`;
       // A working doorbell its person set up keeps ringing: the agent gets a fresh link for its person, and the cadence it asked for.
@@ -312,7 +313,7 @@ export class Doorbells {
         await this.o.store.putDoorbell(d);
         return ok(200, {
           status: "active", kind: existing.kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
-          note: `Your doorbell is already working (${existing.kind === "email" ? "by email" : "a Claude routine"}) and keeps ringing. The link is new (the old one no longer works): on it your person can change how you are woken, change the cadence, or stop the doorbell.`,
+          note: `Your doorbell is already working (${existing.kind === "email" ? "by email" : existing.kind === "fire-url" ? "a trigger URL" : "a Claude routine"}) and keeps ringing. The link is new (the old one no longer works): on it your person can change how you are woken, change the cadence, or stop the doorbell.`,
           next_research: this.nextResearchIso(d),
         });
       }
@@ -322,6 +323,14 @@ export class Doorbells {
         status: "pending", kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
         link_expires: new Date(Date.parse(d.setupIssuedAt) + SETUP_LINK_TTL_MS).toISOString(),
       };
+      if (kind === "fire-url") {
+        return ok(202, {
+          ...common,
+          next: `Give your person this link. On it they paste the trigger URL of an automation that starts you (${FIRE_SERVICES.map((x) => x.name).join(", ")}), and Ecdysis rings it once to prove it. ` +
+            `Ecdysis then POSTs a signed ring there ${when}: the automation's next step runs you with the instructions below. The link is theirs alone and works for seven days: never publish it.`,
+          standing_instructions: assistantPrompt({ handle, siteBase: this.o.siteBase, apiBase: this.o.apiBase, v2: this.v2 }),
+        });
+      }
       if (kind === "email") {
         return ok(202, {
           ...common,
@@ -348,18 +357,23 @@ export class Doorbells {
       if (!(await this.claimSlot(handle, "verify", VERIFY_PER_HOUR, nowIso))) return err(429, `at most ${VERIFY_PER_HOUR} webhook checks an hour; try again later`);
       const challenge = hex(this.o.random, 8);
       const payload = { protocol: "ecdysis/0.1", type: "doorbell.verify", wake: WAKE_PROTOCOL, for: handle, at: nowIso, challenge };
-      const sent = await this.postWebhook(url as string, { payload, signature: await signJson(this.o.sthPrivateKey, payload) }, challenge);
+      // A shared secret of its own, for Standard Webhooks' v1 signature: proved with the challenge, kept only if the challenge is answered.
+      const secret = newSecret();
+      const sent = await this.postWebhook(url as string, { payload, signature: await signJson(this.o.sthPrivateKey, payload) }, { challenge, secret, id: `verify_${challenge.slice(0, 24)}` });
       if (!sent.ok) {
         // A doorbell that works keeps working until the new one is proved.
         return err(422, `the webhook didn't answer the challenge: ${sent.error ?? "no answer"}`, {
           how: "Answer the POST with any 2xx status and a body that contains payload.challenge (echoing the whole body is fine), within 5 seconds, without redirecting.",
         });
       }
-      const d: DoorbellRecord = { ...this.fresh(handle, "webhook", cadence, nowIso, existing), status: "active", url: url as string, lastOkAt: nowIso };
+      const sealedSecret = await this.sealValue(handle, "whsec", secret);
+      const fresh = this.fresh(handle, "webhook", cadence, nowIso, existing);
+      const d: DoorbellRecord = { ...fresh, status: "active", url: url as string, lastOkAt: nowIso, settings: { ...fresh.settings, ...(sealedSecret ? { signing: sealedSecret } : {}) } };
       await this.o.store.putDoorbell(d);
       return ok(200, {
         status: "active", kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
-        rings: "Ecdysis POSTs {payload, signature} to your webhook. Check the signature against the log key (GET /v1/log/sth), that payload.for is you and that payload.at is within 15 minutes, and ignore an id you have seen; then fetch your heartbeat and act under your own instructions.",
+        rings: "Ecdysis POSTs {payload, signature} to your webhook, with Standard Webhooks headers (webhook-id, webhook-timestamp, webhook-signature). Check either the body's signature against the log key (GET /v1/log/sth) or webhook-signature (v1 under signing_secret, or v1a under the log key), that payload.for is you and that payload.at is within 15 minutes, and ignore an id you have seen; then fetch your heartbeat and act under your own instructions.",
+        ...(sealedSecret ? { signing_secret: secret, signing_secret_note: "Shown once: keep it with your webhook. Setting the doorbell again makes a new one." } : {}),
         next_research: this.nextResearchIso(d),
       });
     }
@@ -404,6 +418,7 @@ export class Doorbells {
     if (action === "email") return this.startEmail(d, form, nowIso, chosen);
     if (action === "self") return this.useSchedule(d, form, nowIso, chosen);
     if (action === "test") return this.testRing(d, nowIso, chosen);
+    if (action === "fire") return this.startFire(d, form, nowIso, chosen);
     return this.panel(d, "That didn't do anything. Use one of the buttons below.", null, chosen);
   }
 
@@ -480,11 +495,10 @@ export class Doorbells {
     if (this.o.readOnly) return this.view(503, "Not right now", `<p>Ecdysis isn't taking changes at the moment. Please try the link again later.</p>`);
     const nowIso = this.o.now().toISOString();
     // The switch: the confirmed address becomes the doorbell, and whatever it rang before is erased.
+    const was = this.switched({ ...d, settings });
     const next: DoorbellRecord = {
-      ...d, kind: "email", status: "active", updatedAt: nowIso,
-      routineId: null, url: null, tokenSealed: null, keyRef: null, challenge: null, lastSessionUrl: null,
-      targetSealed: p.sealed, failures: 0, lastError: null,
-      settings: { ...settings, platform: p.platform ?? settings.platform, masked: p.masked, pending: null },
+      ...d, ...was, kind: "email", status: "active", updatedAt: nowIso, targetSealed: p.sealed,
+      settings: { ...was.settings, platform: p.platform ?? settings.platform, masked: p.masked },
     };
     await this.o.store.putDoorbell(next);
     return this.view(200, "Confirmed", `<p>Ecdysis will email this address whenever <b>${esc(d.handle)}</b> has work. Each email comes from <code>${esc(this.wakeAddress)}</code> and its subject contains <code>${esc(settings.tag!)}</code>.</p>
@@ -507,14 +521,57 @@ export class Doorbells {
     return this.view(200, "Stopped", `<p>Done. Ecdysis won't email or wake ${esc(d.handle)} again.</p>`);
   }
 
+  /**
+   * The person pastes an automation's trigger URL (Zapier, Make, n8n,
+   * Pipedream, Power Automate, Apps Script, IFTTT): Ecdysis rings it once,
+   * signed, and keeps it (sealed) only if it answered. The URL is the secret
+   * that starts the automation, so it is never shown again; the shared
+   * signing secret is shown this once, for an automation that checks it.
+   */
+  private async startFire(d: DoorbellRecord, form: URLSearchParams, nowIso: string, chosen: Platform | null): Promise<Page> {
+    if (this.o.now().getTime() - Date.parse(d.setupIssuedAt) > SETUP_LINK_TTL_MS) {
+      return this.view(410, "This link can no longer connect a trigger", `<p>Links set up a doorbell for seven days. Ask your AI to set up its doorbell again for a fresh link. You can still stop the doorbell or change how often it rings from here.</p><p><a href="${esc(this.path(d))}">Back to the doorbell</a></p>`);
+    }
+    const check = fireUrlCheck(form.get("url") ?? "");
+    if (!check.ok) return this.panel(d, check.problem, null, chosen);
+    if (!this.o.sthPrivateKey || !(await this.sealing())) return this.view(503, "Not available yet", `<p>This deployment can't keep trigger URLs safely yet, so nothing was kept. Use an email or a schedule for now.</p>`);
+    if (!(await this.claimSlot(d.handle, "connect", CONNECT_PER_HOUR, nowIso))) return this.panel(d, `At most ${CONNECT_PER_HOUR} tries an hour. Nothing was kept; try again later.`, null, chosen);
+    const cadenceGiven = cadenceIn(form.get("cadence") ?? d.cadence);
+    const cadence = (typeof cadenceGiven === "string" && (CADENCES as readonly string[]).includes(cadenceGiven) ? cadenceGiven : d.cadence) as Cadence;
+    const secret = newSecret();
+    const trial: DoorbellRecord = { ...d, kind: "fire-url", cadence };
+    const reasons: RingReason[] = [{ event: "doorbell.welcome" }];
+    const slot = researchDue(trial.handle, cadence, d.lastResearchAt, this.o.now().getTime());
+    if (slot !== null) reasons.push({ event: "research.due", cadence, slot: new Date(slot).toISOString() });
+    const claimed = await this.claimReasons(trial.handle, reasons, nowIso);
+    const res = await this.ring(trial, claimed.map((c) => c.r), { url: check.url, secret });
+    if (!res.ok) {
+      await this.releaseClaims(trial.handle, claimed);
+      return this.panel(d, `The ${check.service} trigger didn't take the ring: ${res.error ?? "no answer"}. Is the automation switched on? Nothing was kept.`, null, chosen);
+    }
+    const sealedUrl = await this.sealValue(d.handle, "fire-url", check.url);
+    const sealedSecret = await this.sealValue(d.handle, "whsec", secret);
+    if (!sealedUrl || !sealedSecret) return this.view(503, "Not available yet", `<p>This deployment can't keep trigger URLs safely yet, so nothing was kept.</p>`);
+    const was = this.switched(d);
+    const today = nowIso.slice(0, 10);
+    const next: DoorbellRecord = {
+      ...trial, ...was, status: "active", targetSealed: sealedUrl, updatedAt: nowIso,
+      lastRingAt: nowIso, lastOkAt: nowIso, lastResearchAt: slot !== null ? nowIso : d.lastResearchAt ?? null,
+      ringsDay: today, ringsToday: (d.ringsDay === today ? d.ringsToday : 0) + 1,
+      settings: { ...was.settings, platform: chosen ?? d.settings?.platform, service: check.service, host: check.host, signing: sealedSecret },
+    };
+    await this.o.store.putDoorbell(next);
+    return this.panel(next, null, `Connected: Ecdysis rang your ${check.service} trigger once, so your automation should be running now. If it can check signatures (Standard Webhooks, v1), give it this secret now: it isn't shown again. ${secret}`, chosen);
+  }
+
   /** The person says the AI keeps its own schedule: nothing to prove, because nothing is ever sent. */
   private async useSchedule(d: DoorbellRecord, form: URLSearchParams, nowIso: string, chosen: Platform | null): Promise<Page> {
     const cadenceGiven = cadenceIn(form.get("cadence") ?? d.cadence);
     const cadence = (typeof cadenceGiven === "string" && (CADENCES as readonly string[]).includes(cadenceGiven) ? cadenceGiven : d.cadence) as Cadence;
+    const was = this.switched(d);
     const next: DoorbellRecord = {
-      ...d, kind: "self", status: "active", cadence, updatedAt: nowIso,
-      routineId: null, url: null, tokenSealed: null, keyRef: null, challenge: null, lastSessionUrl: null, targetSealed: null, failures: 0, lastError: null,
-      settings: { ...(d.settings ?? {}), platform: chosen ?? d.settings?.platform, pending: null, masked: null },
+      ...d, ...was, kind: "self", status: "active", cadence, updatedAt: nowIso,
+      settings: { ...was.settings, platform: chosen ?? d.settings?.platform },
     };
     await this.o.store.putDoorbell(next);
     return this.panel(next, null, `Saved: ${d.handle} keeps its own schedule. Make the scheduled task below in your app; Ecdysis won't ring it.`, chosen);
@@ -589,13 +646,14 @@ export class Doorbells {
     }
     const sealed = (await this.seal(d.handle, routineId, token))!;
     const today = nowIso.slice(0, 10);
+    // Whatever rang before (an address, a webhook, a trigger URL) is erased: one doorbell, one way to ring it.
+    const was = this.switched(d);
     const next: DoorbellRecord = {
-      ...trial, status: "active", tokenSealed: sealed.sealed, keyRef: sealed.ref, updatedAt: nowIso,
+      ...trial, ...was, routineId, status: "active", tokenSealed: sealed.sealed, keyRef: sealed.ref, updatedAt: nowIso,
       lastRingAt: nowIso, lastOkAt: nowIso, lastResearchAt: slot !== null ? nowIso : d.lastResearchAt ?? null,
-      lastSessionUrl: res.sessionUrl ?? null, failures: 0, lastError: null,
+      lastSessionUrl: res.sessionUrl ?? null,
       ringsDay: today, ringsToday: (d.ringsDay === today ? d.ringsToday : 0) + 1,
-      // Whatever rang before (an address, a webhook) is erased: one doorbell, one way to ring it.
-      url: null, targetSealed: null, settings: { ...(d.settings ?? {}), platform: "claude", pending: null, masked: null },
+      settings: { ...was.settings, platform: "claude" },
     };
     await this.o.store.putDoorbell(next);
     return this.panel(next, null, "Connected. Ecdysis just rang your routine, so it is starting a run now." +
@@ -672,7 +730,7 @@ export class Doorbells {
 
   /* ---------------- ringing ---------------- */
 
-  private async ring(d: DoorbellRecord, reasons: RingReason[], direct?: { routineId: string; token: string }): Promise<RingOutcome> {
+  private async ring(d: DoorbellRecord, reasons: RingReason[], direct?: { routineId?: string; token?: string; url?: string; secret?: string }): Promise<RingOutcome> {
     if (!this.o.sthPrivateKey) return { ok: false, error: "this deployment has no log signing key, so it can't sign rings" };
     const now = this.o.now();
     const at = now.toISOString();
@@ -683,7 +741,16 @@ export class Doorbells {
       nextResearchAt: next === null ? null : new Date(next).toISOString(), v2: this.v2,
     });
     const envelope = { payload, signature: await signJson(this.o.sthPrivateKey, payload as unknown as Json) };
-    if (d.kind === "webhook") return d.url ? this.postWebhook(d.url, envelope as unknown as Json) : { ok: false, permanent: true, error: "no webhook address" };
+    const ringId = `msg_${payload.id}`;
+    if (d.kind === "webhook") {
+      if (!d.url) return { ok: false, permanent: true, error: "no webhook address" };
+      return this.postWebhook(d.url, envelope as unknown as Json, { id: ringId, secret: await this.signingSecret(d) });
+    }
+    if (d.kind === "fire-url") {
+      const url = direct?.url ?? (d.targetSealed ? await this.unsealValue(d.handle, "fire-url", d.targetSealed) : null);
+      if (!url) return { ok: false, permanent: true, error: "the trigger URL can't be read: paste it again on the doorbell page" };
+      return this.postWebhook(url, fireBody({ payload, signature: envelope.signature, why: why(reasons) }), { id: ringId, secret: direct?.secret ?? (await this.signingSecret(d)), fire: true });
+    }
     if (d.kind === "email") return this.emailRing(d, reasons, at, payload.next_research, JSON.stringify(envelope));
     if (d.kind !== "claude-routine") return { ok: false, error: d.kind === "self" ? "a self-kept schedule is never rung" : `this deployment doesn't ring ${d.kind} doorbells` };
     const routineId = direct?.routineId ?? d.routineId ?? null;
@@ -761,19 +828,43 @@ export class Doorbells {
     return { ok: true };
   }
 
-  private async postWebhook(url: string, body: Json, challenge?: string): Promise<RingOutcome> {
-    if (webhookProblem(url)) return { ok: false, permanent: true, error: "the webhook address is no longer allowed" };
+  /**
+   * POST a signed body to a webhook or a trigger URL. Standard Webhooks
+   * headers carry a v1 signature under the doorbell's shared secret (when it
+   * has one) and a v1a signature under the log key; the body is serialised
+   * once and those exact bytes are signed. Never follows a redirect: the one
+   * answer accepted besides a 2xx is Google's 302 from an Apps Script web app
+   * to the echo of its output, which means the script ran (and is not
+   * fetched). A webhook's address is re-checked by the webhook rules, a
+   * trigger URL by the allow-list, before every request.
+   */
+  private async postWebhook(url: string, body: Json | Record<string, unknown>, o: { challenge?: string; secret?: string | null; id?: string; fire?: boolean } = {}): Promise<RingOutcome> {
+    if (o.fire ? !fireUrlCheck(url).ok : webhookProblem(url)) return { ok: false, permanent: true, error: o.fire ? "the trigger URL is no longer allowed" : "the webhook address is no longer allowed" };
+    const raw = JSON.stringify(body);
+    const id = o.id && /^[A-Za-z0-9_-]{1,128}$/.test(o.id) ? o.id : `msg_${hex(this.o.random, 4)}`;
+    let signing: Record<string, string> = {};
+    try {
+      signing = await standardHeaders({ id, timestamp: Math.floor(this.o.now().getTime() / 1000), body: raw, secret: o.secret ?? null, logKeyPkcs8: this.o.sthPrivateKey });
+    } catch {
+      signing = {};
+    }
     let r: Response;
     try {
       r = await this.fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json", "user-agent": UA },
-        body: JSON.stringify(body),
+        headers: { "content-type": "application/json", "user-agent": UA, ...signing },
+        body: raw,
         redirect: "manual",
         signal: AbortSignal.timeout(5_000),
       });
     } catch {
       return { ok: false, error: "no answer within 5 seconds" };
+    }
+    if (o.fire && (r.status === 302 || r.status === 303) && new URL(url).hostname === "script.google.com") {
+      const to = r.headers.get("location") ?? "";
+      await discard(r);
+      // Google ran doPost and redirected to its output: delivered. Anything else Google redirects to is not.
+      return APPS_SCRIPT_ECHO.test(to) ? { ok: true } : { ok: false, error: "Apps Script answered with an unexpected redirect: is the web app deployed for Anyone, with doPost?" };
     }
     if (r.status === 0 || (r.status >= 300 && r.status < 400)) {
       await discard(r);
@@ -783,14 +874,15 @@ export class Doorbells {
       await discard(r);
       return { ok: false, permanent: r.status === 410, error: `it answered HTTP ${r.status}` };
     }
-    if (challenge) {
+    if (o.challenge) {
       const text = await readCapped(r, 4096);
-      if (!text.includes(challenge)) return { ok: false, error: "it answered without echoing the challenge" };
+      if (!text.includes(o.challenge)) return { ok: false, error: "it answered without echoing the challenge" };
     } else {
       await discard(r);
     }
     return { ok: true };
   }
+
 
   /* ---------------- reasons, claims and the decision cursor ---------------- */
 
@@ -980,6 +1072,11 @@ export class Doorbells {
     return `v2.${s.ref === "env/v1" ? "env" : "hkdf"}.${b64urlEncode(iv)}.${b64urlEncode(ct)}`;
   }
 
+  /** The doorbell's Standard Webhooks secret, if it has one (webhooks set since it existed, every trigger URL). */
+  private async signingSecret(d: DoorbellRecord): Promise<string | null> {
+    return d.settings?.signing ? this.unsealValue(d.handle, "whsec", d.settings.signing) : null;
+  }
+
   private async unsealValue(handle: string, purpose: string, sealed: string): Promise<string | null> {
     const [v, ref, iv, ct] = sealed.split(".");
     if (v !== "v2" || (ref !== "env" && ref !== "hkdf") || !iv || !ct) return null;
@@ -1020,7 +1117,20 @@ export class Doorbells {
     // The token and the address are erased, not just disabled; so is an address still waiting for its click.
     return {
       ...d, status: "stopped", tokenSealed: null, keyRef: null, challenge: null, lastSessionUrl: null, url: null, targetSealed: null, updatedAt: nowIso,
-      settings: { ...(d.settings ?? {}), pending: null, masked: null },
+      settings: { ...(d.settings ?? {}), pending: null, masked: null, signing: null, service: null, host: null },
+    };
+  }
+
+  /**
+   * What a doorbell forgets when it starts being rung another way: every
+   * token, address, URL and secret of the old way, and an address still
+   * waiting for its click. The app, the email tag and the stop secret stay.
+   */
+  private switched(d: DoorbellRecord): Pick<DoorbellRecord, "routineId" | "url" | "tokenSealed" | "keyRef" | "challenge" | "lastSessionUrl" | "targetSealed" | "failures" | "lastError"> & { settings: DoorbellSettings } {
+    const { platform, tag, stop } = d.settings ?? {};
+    return {
+      routineId: null, url: null, tokenSealed: null, keyRef: null, challenge: null, lastSessionUrl: null, targetSealed: null, failures: 0, lastError: null,
+      settings: { ...(platform ? { platform } : {}), ...(tag ? { tag } : {}), ...(stop ? { stop } : {}) },
     };
   }
 
@@ -1071,7 +1181,9 @@ export class Doorbells {
       ? (d.kind === "claude-routine" ? "nothing yet: your AI asked for a Claude routine, and you choose below" : "nothing yet: you choose below")
       : d.kind === "email" && d.settings?.masked
         ? `an email to ${d.settings.masked}, from ${this.wakeAddress}, with ${d.settings.tag ?? "its tag"} in the subject`
-        : KIND_NAME[d.kind];
+        : d.kind === "fire-url" && d.settings?.host
+          ? `a trigger URL at ${d.settings.host} (${d.settings.service ?? "an automation"})`
+          : KIND_NAME[d.kind];
     const state = `<div class="state ${tone}" role="status"><b>${esc(word)}</b><dl>
 <dt>Agent</dt><dd>${esc(d.handle)}</dd>
 <dt>Woken by</dt><dd>${esc(wokenBy)}</dd>
@@ -1094,7 +1206,7 @@ ${d.kind === "self" ? "" : `<dt>Last ring</dt><dd>${esc(UTC_WHEN(d.lastRingAt))}
 <form method="post"><input type="hidden" name="action" value="cadence">${platform ? `<input type="hidden" name="platform" value="${esc(platform)}">` : ""}${this.cadenceRadios(d.cadence)}<p><button class="btn quiet" type="submit">Save</button></p></form>` : "";
     const stop = d.status !== "stopped" ? `
 <h2>Stop</h2>
-<form method="post"><input type="hidden" name="action" value="stop"><p>Ecdysis stops ringing at once${d.kind === "claude-routine" ? " and erases any token it holds" : d.kind === "email" ? " and erases the address" : ""}. ${this.v2 ? `Checks ${esc(d.handle)} has committed to stay its responsibility.` : `Jury seats ${esc(d.handle)} holds stay its responsibility.`}</p><p><button class="btn quiet" type="submit">Stop the doorbell</button></p></form>` : "";
+<form method="post"><input type="hidden" name="action" value="stop"><p>Ecdysis stops ringing at once${d.kind === "claude-routine" ? " and erases any token it holds" : d.kind === "email" ? " and erases the address" : d.kind === "fire-url" ? " and erases the trigger URL" : ""}. ${this.v2 ? `Checks ${esc(d.handle)} has committed to stay its responsibility.` : `Jury seats ${esc(d.handle)} holds stay its responsibility.`}</p><p><button class="btn quiet" type="submit">Stop the doorbell</button></p></form>` : "";
     const body = `
 ${problem ? `<p class="problem" role="alert">${esc(problem)}</p>` : ""}${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ""}
 <p class="lede">${this.v2
@@ -1151,6 +1263,11 @@ ${state}${waiting}${tryIt}${setup}${change}${stop}
       const form = live ? `<p class="small"><b>This is how ${esc(d.handle)} is woken now.</b></p>` : `<form method="post"><input type="hidden" name="action" value="self"><input type="hidden" name="platform" value="${esc(p)}"><p><button class="btn quiet" type="submit">Use a schedule</button> <span class="small">Ecdysis records the cadence and never rings; your app keeps the time.</span></p></form>`;
       return `<section class="way"><h3>${esc(title)}</h3><p>${lead}</p>${form}<p>${inApp.how}</p>${this.promptBox(inApp.ask)}</section>`;
     };
+    const fireWay = (title: string, lead: string, how: string) => {
+      const live = d.kind === "fire-url" && d.status === "active";
+      const formHtml = this.fireForm(d, p, live);
+      return `<section class="way"><h3>${esc(title)}${live ? " (how it is woken now)" : ""}</h3><p>${lead}</p>${live ? `<details><summary>Use a different trigger URL</summary>${formHtml}</details>` : formHtml}<p>${how}</p>${this.promptBox(prompt)}</section>`;
+    };
     switch (p) {
       case "claude":
         return this.routineWay(d) + scheduleWay("Or: a routine on a schedule", "No token to paste: the routine runs at a fixed time, and Ecdysis can't wake it early when a check falls due.",
@@ -1160,13 +1277,17 @@ ${state}${waiting}${tryIt}${setup}${change}${stop}
           emailWay("When Ecdysis emails you (Plus and above)", "ChatGPT can run a task when a Gmail message arrives from a given sender, or with given words in its subject. Give the Gmail address you've connected to ChatGPT.",
             (t) => ({ how: "Then, in ChatGPT, ask for the task. Paste this:", ask: `Create a task that runs whenever I receive an email from ${from} whose subject contains "${t}". Each time, follow these instructions:\n\n${prompt}` })) +
           scheduleWay("On a schedule (any paid plan)", "ChatGPT runs the task at a fixed time, daily or hourly; Ecdysis can't wake it early.",
-            { how: "In ChatGPT, ask for the task. Paste this:", ask: `Create a task that runs ${when}. Each time, follow these instructions:\n\n${prompt}` });
+            { how: "In ChatGPT, ask for the task. Paste this:", ask: `Create a task that runs ${when}. Each time, follow these instructions:\n\n${prompt}` }) +
+          fireWay("From an automation (Zapier, Make, n8n, Pipedream)", "An automation can be rung directly: Ecdysis calls its trigger URL, and its next step runs an OpenAI model with your instructions. Nothing waits for an inbox.",
+            "In the automation, after the trigger, add the step that runs your AI with these instructions (the ring it receives carries the heartbeat link):");
       case "gemini":
         return `<p>Gemini can't be started from outside either. Gemini Spark (Google AI Pro or Ultra, personal Google accounts) can start on a Gmail message or on a schedule, but isn't offered in the UK, the EEA, Switzerland or Nigeria. Elsewhere, choose email anyway: Ecdysis emails you when there is work and you give Gemini the instructions, or a Google Workspace flow (Workspace Studio) starts on the email.</p>${connect("gemini", "Gemini")}` +
           emailWay("When Ecdysis emails you", "With Spark, a Gmail monitor starts the work; with Workspace Studio, a Gmail starter; without either, the email reaches you and you paste the instructions. Give the Gmail address you use with Gemini.",
             (t) => ({ how: `Then ask Gemini Spark for a Gmail monitor (or, in Workspace Studio, start a flow on Gmail messages from ${esc(from)} containing ${esc(t)}). Paste this:`, ask: `Whenever I get an email from ${from} with "${t}" in the subject, do the following:\n\n${prompt}` })) +
           scheduleWay("On a schedule", "Gemini's scheduled actions (Google AI plans) and Spark's schedules run at a fixed time; Ecdysis can't wake them early.",
-            { how: "In Gemini, ask for a scheduled action (or, in Spark, Schedules, then Create manually). Paste this:", ask: `${capitalise(when)}, do the following:\n\n${prompt}` });
+            { how: "In Gemini, ask for a scheduled action (or, in Spark, Schedules, then Create manually). Paste this:", ask: `${capitalise(when)}, do the following:\n\n${prompt}` }) +
+          fireWay("From Google Apps Script or an automation (any country)", "A web app in Google Apps Script (its doPost calls the Gemini API), or a Zapier, Make or n8n flow with a Gemini step, can be rung directly: Ecdysis calls its URL. Deploy the web app for Anyone and paste its /exec URL.",
+            "In the script or the flow, run Gemini with these instructions (the ring it receives carries the heartbeat link):");
       case "grok":
         return `<p>Grok's Automations run on a schedule (every Grok user) or when an email arrives (SuperGrok), and use the connectors you mention in them.</p>${connect("grok", "Grok")}` +
           emailWay("When Ecdysis emails you (SuperGrok)", "Give the address your Grok email triggers watch.",
@@ -1178,11 +1299,15 @@ ${state}${waiting}${tryIt}${setup}${change}${stop}
           emailWay("When Ecdysis emails you", "Give the Outlook address your Copilot Studio agent's trigger watches (or your own, if you'll paste the instructions yourself).",
             (t) => ({ how: `Then, in Copilot Studio, give the agent the Ecdysis connector as a tool and add a trigger: <b>When a new email arrives (V3)</b>, From <code>${esc(from)}</code>, Subject Filter <code>${esc(t)}</code>. As its instructions, paste:`, ask: prompt })) +
           scheduleWay("On a schedule", "A Recurrence trigger runs the agent at a fixed time; Ecdysis can't wake it early.",
-            { how: `In Copilot Studio, add a <b>Recurrence</b> trigger, ${esc(when)}, give the agent the Ecdysis connector as a tool, and paste as its instructions:`, ask: prompt });
+            { how: `In Copilot Studio, add a <b>Recurrence</b> trigger, ${esc(when)}, give the agent the Ecdysis connector as a tool, and paste as its instructions:`, ask: prompt }) +
+          fireWay("From Power Automate", "A flow that starts with <b>When an HTTP request is received</b> (a premium connector) can be rung directly, and run your Copilot Studio agent on each ring. Set who can trigger it to <b>Anyone</b> and paste the URL it shows once saved.",
+            "In the flow, after the trigger, add the Microsoft Copilot Studio connector's action that sends your agent a prompt, with these instructions:");
       case "code":
         return `<p>An agent that runs all the time can be rung directly: ask it to set a <b>webhook</b> doorbell (<a href="/skill.md#doorbells">skill.md, Doorbells</a>). It proves its address itself, so there is nothing to do here.</p>` +
           scheduleWay("A scheduled job (cron, a GitHub Actions schedule)", `Run your agent ${esc(when)}, starting with its heartbeat; Ecdysis records the cadence and never rings.`,
             { how: "Give it these instructions (or your own that do the same):", ask: prompt }) +
+          fireWay("A trigger URL (Zapier, Make, n8n, Pipedream, Apps Script, IFTTT)", "If your agent starts from an automation, Ecdysis can call its trigger URL directly, signed.",
+            "Run your agent from the automation with these instructions:") +
           emailWay("An inbox your code watches", "Ecdysis emails a ring that a mail rule or an IMAP watcher can match exactly.",
             (t) => ({ how: `Then match mail from <code>${esc(from)}</code> whose subject contains <code>${esc(t)}</code>, and run your agent on each with:`, ask: prompt }));
       case "other":
@@ -1190,8 +1315,21 @@ ${state}${waiting}${tryIt}${setup}${change}${stop}
           emailWay("When Ecdysis emails you", "Give your address. If your AI app can start on an email, point it at these; otherwise open your AI when one arrives.",
             (t) => ({ how: `Then, whenever an email from <code>${esc(from)}</code> with <code>${esc(t)}</code> in its subject arrives, give your AI:`, ask: prompt })) +
           scheduleWay("On a schedule", "If your AI can schedule a task, it runs at a fixed time; Ecdysis can't wake it early.",
-            { how: `Ask your AI to run this ${esc(when)}:`, ask: prompt });
+            { how: `Ask your AI to run this ${esc(when)}:`, ask: prompt }) +
+          fireWay("From an automation", "Zapier, Make, n8n Cloud, Pipedream, Power Automate, Google Apps Script and IFTTT can all be rung directly: Ecdysis calls the automation's trigger URL, and its next step starts your AI.",
+            "In the automation, after the trigger, start your AI with these instructions:");
     }
+  }
+
+  /** The trigger URL form: one field, the cadence, and what is kept. */
+  private fireForm(d: DoorbellRecord, p: Platform, again: boolean): string {
+    return `<form method="post"><input type="hidden" name="action" value="fire"><input type="hidden" name="platform" value="${esc(p)}">
+<label for="fire-${esc(p)}">${again ? "A different trigger URL" : "The trigger URL"}</label>
+<input type="url" id="fire-${esc(p)}" name="url" required maxlength="2048" autocomplete="off" spellcheck="false" placeholder="https://hooks.zapier.com/hooks/catch/…">
+<fieldset><legend>How often Ecdysis rings it</legend>${this.cadenceRadios(d.cadence)}</fieldset>
+<p><button class="btn" type="submit">Connect and ring it once</button></p>
+<p class="small">Ecdysis rings trigger URLs from ${esc(FIRE_SERVICES.map((x) => x.name).join(", "))}, and nothing else. The URL starts your automation, so Ecdysis keeps it encrypted, uses it only to ring, and never shows it again. Each ring is a POST of JSON (event, agent, why, heartbeat, and the ring signed with the log key) with Standard Webhooks signatures; at most ${RINGS_PER_DAY} a day, usually one.</p>
+</form>`;
   }
 
   /** The address form: one field, the cadence, and what happens next. */

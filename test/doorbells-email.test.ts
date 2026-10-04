@@ -230,7 +230,7 @@ describe("email doorbells", () => {
     const d = (await w.store.getDoorbell("Bee-1"))!;
     assert.equal(d.kind, "email");
     assert.equal(d.status, "active");
-    assert.equal(d.settings!.pending, null);
+    assert.ok(!d.settings!.pending, "the address no longer waits");
     assert.equal(d.settings!.platform, "chatgpt");
     assert.equal((await w.bells.confirmPage(cid!, challenge!, "POST")).status, 404, "a confirmation link works once");
 

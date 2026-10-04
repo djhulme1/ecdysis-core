@@ -40,8 +40,11 @@ export const DEFAULT_CADENCE: Cadence = "daily";
  *   apps can't be started from outside but can start themselves when an
  *   email arrives (ChatGPT tasks, Gemini Spark, Grok Automations, Copilot
  *   Studio, Workspace flows), so an email is the doorbell they can all hear.
+ * fire-url: Ecdysis POSTs a signed ring to an automation's trigger URL
+ *   (Zapier, Make, n8n, Pipedream, Power Automate, Apps Script, IFTTT) that
+ *   the person pasted on the private page and saw run.
  */
-export const KINDS = ["claude-routine", "webhook", "self", "email"] as const;
+export const KINDS = ["claude-routine", "webhook", "self", "email", "fire-url"] as const;
 export type DoorbellKind = (typeof KINDS)[number];
 /** Every kind the store may hold, including those a later change adds (the database's constraint lists them all). */
 export type StoredKind = DoorbellKind | "fire-url" | "github-dispatch" | "mcp-events";
@@ -50,8 +53,8 @@ export type StoredKind = DoorbellKind | "fire-url" | "github-dispatch" | "mcp-ev
  * for one, but only the person can supply what it rings (a routine's token,
  * a confirmed address), and on that page the person may choose another.
  */
-export const PERSON_KINDS: readonly DoorbellKind[] = ["claude-routine", "email"];
-export const isPersonKind = (k: string): boolean => (PERSON_KINDS as readonly string[]).includes(k);
+export const PERSON_KINDS: readonly DoorbellKind[] = ["claude-routine", "email", "fire-url"];
+export const isPersonKind = (k: string): k is DoorbellKind => (PERSON_KINDS as readonly string[]).includes(k);
 
 /** The apps people run their AI in, as the private page asks. */
 export const PLATFORMS = ["claude", "chatgpt", "gemini", "grok", "copilot", "code", "other"] as const;
@@ -201,6 +204,73 @@ export function webhookProblem(raw: unknown): string | null {
 }
 
 /**
+ * The automation services whose trigger URLs a person may paste for a
+ * fire-url doorbell: each a host Ecdysis knows and the shape of its trigger
+ * path. Only these are ever rung, so a pasted URL can't point Ecdysis at
+ * anything else (a private network, a third party, Ecdysis itself). A
+ * trigger URL is itself the secret that starts the automation, so it is
+ * sealed and never shown again.
+ */
+export const FIRE_SERVICES: ReadonlyArray<{ name: string; host: RegExp; path: RegExp }> = [
+  // A web app's /exec URL; Google answers a POST with a 302 to script.googleusercontent.com once doPost has run.
+  { name: "Google Apps Script", host: /^script\.google\.com$/, path: /^\/macros\/s\/[A-Za-z0-9_-]{20,200}\/exec$/ },
+  { name: "Zapier", host: /^hooks\.zapier\.com$/, path: /^\/hooks\/catch\/\d{1,12}\/[A-Za-z0-9]{1,40}\/?$/ },
+  { name: "Make", host: /^hook\.[a-z0-9]{2,12}\.make\.com$/, path: /^\/[A-Za-z0-9]{10,64}$/ },
+  { name: "n8n", host: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.app\.n8n\.cloud$/, path: /^\/webhook\/[A-Za-z0-9/_-]{1,200}$/ },
+  { name: "Pipedream", host: /^[a-z0-9]{6,64}\.m\.pipedream\.net$/, path: /^\/?$/ },
+  {
+    name: "Power Automate",
+    host: /^(?:prod-\d{1,3}\.[a-z0-9]{2,30}\.logic\.azure\.com|[a-z0-9](?:[a-z0-9-]{0,62})(?:\.[a-z0-9-]{1,63}){0,3}\.environment\.api\.powerplatform\.com)$/,
+    path: /^\/(?:workflows|powerautomate\/automations\/direct\/workflows)\/[A-Za-z0-9_-]{8,80}\/triggers\/[A-Za-z0-9_.-]{1,80}\/paths\/invoke$/,
+  },
+  { name: "IFTTT", host: /^maker\.ifttt\.com$/, path: /^\/trigger\/[A-Za-z0-9_-]{1,64}\/(?:json\/)?with\/key\/[A-Za-z0-9_-]{10,64}$/ },
+];
+
+/** A trigger URL the person pasted: the service it belongs to, or why it can't be rung. */
+export function fireUrlCheck(raw: unknown): { ok: true; url: string; service: string; host: string } | { ok: false; problem: string } {
+  if (typeof raw !== "string" || !raw.trim()) return { ok: false, problem: "Paste your automation's trigger URL." };
+  const s = raw.trim();
+  if (s.length > 2048) return { ok: false, problem: "That URL is too long: at most 2048 characters." };
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return { ok: false, problem: "That isn't a URL. Paste the whole trigger URL, starting https://." };
+  }
+  if (u.protocol !== "https:") return { ok: false, problem: "Trigger URLs must start https://." };
+  if (u.username || u.password) return { ok: false, problem: "No user name or password in the URL." };
+  if (u.port && u.port !== "443") return { ok: false, problem: "Port 443 only." };
+  if (u.hash) return { ok: false, problem: "No #fragment." };
+  const host = u.hostname.toLowerCase();
+  const svc = FIRE_SERVICES.find((x) => x.host.test(host));
+  if (!svc) return { ok: false, problem: `Ecdysis rings trigger URLs from ${FIRE_SERVICES.map((x) => x.name).join(", ")}. For anything else, your AI can set a webhook doorbell, which proves its own address.` };
+  if (!svc.path.test(u.pathname)) return { ok: false, problem: `That isn't the shape of a ${svc.name} trigger URL. Copy the whole URL its trigger shows.` };
+  // Normalised: no explicit :443, the host in lower case; the query (Power Automate's signature) kept exactly.
+  return { ok: true, url: `https://${host}${u.pathname}${u.search}`, service: svc.name, host };
+}
+
+/** Google's answer to a POST to an Apps Script web app that ran: a redirect to the echo of its output, which needn't be fetched. */
+export const APPS_SCRIPT_ECHO = /^https:\/\/script\.googleusercontent\.com\/macros\/echo\?[A-Za-z0-9_=&%.-]{1,4000}$/;
+
+/**
+ * The body a trigger URL receives: the signed ring, plus the few fields a
+ * no-code tool maps into its next step. All of it is Ecdysis's own data.
+ */
+export function fireBody(o: { payload: ReturnType<typeof ringPayload>; signature: string; why: string }): Record<string, unknown> {
+  return {
+    event: "ecdysis.wake",
+    agent: o.payload.for,
+    why: o.why,
+    heartbeat: o.payload.heartbeat,
+    at: o.payload.at,
+    id: o.payload.id,
+    note: o.payload.note,
+    payload: o.payload,
+    signature: o.signature,
+  };
+}
+
+/**
  * What a person pasted from Claude's API trigger dialog: the routine and its
  * token, found anywhere in the text, in any order. An Anthropic API key is
  * recognised so it can be refused unread.
@@ -289,8 +359,8 @@ export function ringText(o: { handle: string; at: string; reasons: RingReason[];
   ].join("\n");
 }
 
-/** A ring's reasons in a few words, for an email's subject. */
-function why(reasons: RingReason[]): string {
+/** A ring's reasons in a few words, for an email's subject or a trigger's "why". */
+export function why(reasons: RingReason[]): string {
   const first = [...reasons].sort(byUrgency)[0];
   const more = reasons.length > 1 ? ` (+${reasons.length - 1})` : "";
   switch (first?.event) {
