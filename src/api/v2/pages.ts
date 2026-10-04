@@ -388,7 +388,7 @@ export class PagesHandler {
     }));
     // attempts/0.1: every attempt on the claim (cleared ones as history), and what blocks it as it stands; frozen ones are left out.
     const attempts = (r.attemptsByClaim.get(ref) ?? []).filter((a) => !r.held.has(a.id)).map((a) => ({
-      id: a.id, blocker: a.blocker, detail: a.detail, unblockedBy: a.unblockedBy, effortMinutes: a.effortMinutes, agent: a.handle, tier: a.tier, filedAt: a.ts, disowned: a.disowned,
+      id: a.id, blocker: a.blocker, read: a.read, looked: a.looked, detail: a.detail, unblockedBy: a.unblockedBy, effortMinutes: a.effortMinutes, agent: a.handle, tier: a.tier, filedAt: a.ts, disowned: a.disowned,
       cleared: a.cleared ? { by: a.cleared.by, agent: a.cleared.handle, how: a.cleared.how, at: a.cleared.ts } : null,
     }));
     const bl = r.blockers.get(ref);
