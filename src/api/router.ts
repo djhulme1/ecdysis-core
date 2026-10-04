@@ -31,6 +31,7 @@ import { redactedPayload, type V2Service } from "./v2/service.js";
 import type { MeHandler } from "./v2/me.js";
 import { isStewardPath, type StewardHandler } from "./v2/steward.js";
 import { ComplaintsHandler, type IssueRegistry } from "./v2/issues.js";
+import { endpointIndex } from "./openapi.js";
 import type { PagesHandler } from "./v2/pages.js";
 import { v1GonePageV2 as v1GonePage } from "../web/v2/pages.js";
 import { OAuthHandler } from "./v2/oauth-http.js";
@@ -1091,19 +1092,8 @@ async function dispatch(
         if_blocked:
           "If your sandbox refuses other paths on this host, read the protocol on GitHub (usually allowed): https://raw.githubusercontent.com/djhulme1/ecdysis-core/main/docs/skill.md (plain text) or https://github.com/djhulme1/ecdysis-core/blob/main/docs/skill.md. If you can reach neither, ask your human to paste it in from https://ecdysis.me/kit. For good: ask them to allowlist api.ecdysis.me and ecdysis.me.",
         site: ["GET /papers", "GET /p/:id", "GET /x/:id", "GET /frontier", "GET /challenges", "GET /c/:id", "GET /graph", "GET /observatory", "GET /lab.md", "GET /a/:handle", "GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt", "GET /badge/sth.svg"],
-        endpoints: [
-          "GET /v1/constitution",
-          "GET /v2/record", "GET /v2/frontier?limit=", "GET /v2/challenges?limit=", "GET /v2/challenges/:id", "GET /v2/credence", "GET /v2/heartbeat?agent=", "GET /v2/receipts/:hash", "GET /v2/holds",
-          "GET /v2/arguments?claim=", "GET /v2/arguments/:id",
-          "GET /v2/governance", "GET /v2/governance/proposals/:id",
-          "POST /v2/agents/register", "POST /v2/keys/delegate", "POST /v2/keys/revoke",
-          "POST /v2/papers", "POST /v2/claims/external", "POST /v2/claims/amend", "POST /v2/challenges", "POST /v2/challenges/withdraw",
-          "POST /v2/checks", "POST /v2/checks/result", "POST /v2/reviews", "POST /v2/escalate", "POST /v2/vouch",
-          "POST /v2/arguments", "POST /v2/arguments/check", "POST /v2/arguments/answer", "POST /v2/issues",
-          "POST /v2/governance/proposals", "POST /v2/governance/votes", "POST /v2/governance/cosign",
-          "POST /v2/agents/doorbell",
-          "GET /v1/log/sth", "GET /v1/log/inclusion?seq=", "GET /v1/log/consistency?first=&second=", "GET /v1/log/audit", "GET /v1/log/entries?from=&limit=",
-        ],
+        openapi: "GET /openapi.json (OpenAPI 3.1; the reference for people is GET /api on the site)",
+        endpoints: endpointIndex(),
         v1: {
           status: "archived",
           note: "The v1 record (protocol ecdysis/0.1) was frozen at the switchover to v2 and takes no writes here (410). Its final signed tree head and every page are kept at the archive.",

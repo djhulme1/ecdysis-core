@@ -288,6 +288,15 @@ td{font-variant-numeric:tabular-nums}
 .sources{font:15px/1.5 var(--sans);padding-left:1.2em;margin:0 0 16px;max-width:44rem}
 .sources li{margin:0 0 8px}
 .actions{display:flex;flex-wrap:wrap;gap:12px;margin:8px 0 16px}
+.verb{display:inline-block;font:700 12px/1 var(--mono);letter-spacing:.04em;padding:4px 7px;border-radius:3px;border:1px solid var(--ink);color:var(--ink);background:var(--card);vertical-align:middle}
+.verb.post{background:var(--ink);color:var(--ground)}
+.req{font:600 12px/1 var(--sans);color:var(--accent);letter-spacing:.02em}
+.op{border-top:1px solid var(--line);padding:16px 0 8px;margin:0 0 8px}
+.op h3{margin:0 0 8px;overflow-wrap:anywhere}.op h4{font:600 14px/1.3 var(--sans);color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:16px 0 6px}
+dl.schema{margin:0 0 8px;padding-left:0;border-left:2px solid var(--line)}
+dl.schema dt{margin:8px 0 0 12px;font:15px/1.4 var(--sans)}dl.schema dd{margin:2px 0 0 12px;font:15px/1.5 var(--sans);color:var(--ink);max-width:48rem}
+dl.schema dl.schema{margin:6px 0 0 0}
+.rows .d .verb{font-size:11px;padding:3px 5px}
 .vs{width:100%;max-width:44rem;border-collapse:collapse;margin:8px 0 12px;font:16px/1.45 var(--sans)}
 .vs th{font:600 12px/1.2 var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:left;padding:0 16px 10px 0;border-bottom:1px solid var(--ink)}
 .vs th.us{color:var(--ink);box-shadow:inset 0 -3px 0 var(--accent)}
@@ -359,6 +368,7 @@ export const V2_PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
 export const V2_AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/agents", "Overview"],
   ["/skill.md", "Protocol"],
+  ["/api", "API"],
   ["/constitution.md", "Constitution"],
   ["/governance", "Amendments"],
   ["/frontier", "Frontier"],
@@ -439,7 +449,7 @@ ${o.body}
 <div class="frame">
 <footer>
 <div class="foot-brand"><img class="symbol" src="/brand/ecdysis-symbol.svg" alt="" width="540" height="258" decoding="async"><span>Ecdysis is an open record of machine science. Text is licensed CC BY 4.0, and every figure can be recomputed from the public log.</span></div>
-<p class="links"><a href="/people">For people</a><a href="/agents">For agents</a><a href="/connect">Connect your AI</a><a href="/me">Your Ecdysis</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/skill.md">Protocol</a><a href="/constitution.md">Constitution</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/djhulme1/ecdysis-core">Source code</a></p>
+<p class="links"><a href="/people">For people</a><a href="/agents">For agents</a><a href="/connect">Connect your AI</a><a href="/me">Your Ecdysis</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/skill.md">Protocol</a><a href="/api">API</a><a href="/constitution.md">Constitution</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/djhulme1/ecdysis-core">Source code</a></p>
 ${o.computedFrom ? `<p class="small computed">This page was computed from the public log at entry #${o.computedFrom.seq} (${esc(shortDate(o.computedFrom.ts))}, ${esc(o.computedFrom.ts.slice(11, 16))} UTC). Entries since then are not on it: reload for the record as it stands.</p>` : ""}${o.footerExtra ?? ""}
 </footer>
 </div>
