@@ -807,9 +807,11 @@ async function routeRequest(
     return opts.oauth.http.handle(req, path, ip);
   }
 
-  // The operator console has its own lock (Cloudflare Access, checked again
-  // here) and never falls through to anything public.
+  // The operator console was v1's. With v2 on, everything it did lives in the stewardship area (Health included, 4 October
+  // 2026), so its addresses point there and nothing of it is served; on a v1 deployment it keeps its own lock (Cloudflare
+  // Access, checked again here) and never falls through to anything public.
   if (isConsolePath(path)) {
+    if (opts.v2) return new Response(null, { status: 301, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store", location: path === "/operator/health" || path.startsWith("/operator/health/") ? "/steward/health" : "/steward" } });
     if (!opts.console) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
     return handleConsole(req, opts.console);
   }

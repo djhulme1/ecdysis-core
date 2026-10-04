@@ -290,7 +290,7 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
  */
 const V2_CACHE = new V2Cache();
 
-function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env)): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler }; complaints: ComplaintsHandler } | null {
+function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env), keysAgree = true): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler }; complaints: ComplaintsHandler } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
@@ -333,7 +333,23 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
     complaints: new ComplaintsHandler({ issues, readOnly: frozen }),
     me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
-    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }), issues }),
+    steward: new StewardHandler({
+      accounts, v2, access: accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }), issues,
+      // Health, moved from the v1 console: the deployment's head, cron, audit and switches, read from the same places.
+      health: {
+        sth: async () => (await serviceFrom(env, store).sth()) as unknown as Record<string, unknown>,
+        logSize: () => store.logSize(),
+        opsState: async (key) => { const v = await store.getOpsState(key); return v ? { value: (v.value && typeof v.value === "object" && !Array.isArray(v.value) ? v.value : null) as Record<string, unknown> | null, at: v.at } : null; },
+        runAudit: async () => {
+          const r = await serviceFrom(env, store).audit();
+          const body = r.body as { intact?: boolean; problem?: string | null };
+          const size = await store.logSize();
+          await store.putOpsState("audit:last", { intact: !!body.intact, problem: body.problem ?? null, size }, new Date().toISOString());
+          return { intact: !!body.intact, problem: body.problem ?? null, size };
+        },
+        switches: switchesFrom(env, accessFrom(env), keysAgree),
+      },
+    }),
     pages: new PagesHandler(v2, {
       host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null,
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
@@ -566,7 +582,7 @@ export default {
     const keysAgree = await logKeysAgree(env);
     if (!keysAgree) console.error("log key mismatch: STH_SIGNING_KEY_PKCS8 is not the other half of STH_PUBLIC_KEY; writes are refused");
     const frozen = readOnly(env) || !keysAgree;
-    const v2 = v2From(env, store, (p) => ctx.waitUntil(p), frozen);
+    const v2 = v2From(env, store, (p) => ctx.waitUntil(p), frozen, keysAgree);
     const consoleDeps: ConsoleDeps = {
       svc, store, herald, newsletter, access,
       readOnly: consoleReadOnly(env, frozen),

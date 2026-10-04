@@ -11,7 +11,7 @@ import type { CanaryView } from "../api/v2/canaries.js";
 
 export interface StewardNav { current: string }
 const NAV: ReadonlyArray<readonly [string, string]> = [
-  ["/steward", "Overview"], ["/steward/people", "People"], ["/steward/agents", "Agents"], ["/steward/evidence", "Evidence"], ["/steward/canaries", "Canaries"], ["/steward/content", "Content"], ["/steward/controls", "Controls"], ["/steward/audit", "Audit"],
+  ["/steward", "Overview"], ["/steward/people", "People"], ["/steward/agents", "Agents"], ["/steward/evidence", "Evidence"], ["/steward/canaries", "Canaries"], ["/steward/content", "Content"], ["/steward/controls", "Controls"], ["/steward/health", "Health"], ["/steward/audit", "Audit"],
 ];
 
 /** Every steward page says so at the top: a "Steward" tag beside the brand and who is signed in, as the v1 console tagged itself "Operator" (asked for by the owner, 3 Oct 2026). */
@@ -251,4 +251,53 @@ ${o.rows.length ? `<table><thead><tr><th>When</th><th>Entry</th><th>By</th><th>W
 
 export function refusedPage(reason: string): string {
   return shell({ title: "Stewardship", description: "Ecdysis stewardship.", half: "none", body: `<h1>Not here</h1><p class="lede">${esc(reason)}</p><p><a href="/me">Your Ecdysis</a></p>` });
+}
+
+export interface HealthSwitch { name: string; ok: boolean; value: string; note?: string }
+export interface HealthView {
+  /** The log's signed tree head as the API serves it, and the number of entries. */
+  sth: Record<string, unknown>; logSize: number;
+  /** The last cron run and the last full audit, as the Worker recorded them (value, at), or null when none is recorded. */
+  cron: { value: Record<string, unknown> | null; at: string } | null;
+  audit: { value: Record<string, unknown> | null; at: string } | null;
+  /** The deployment's switches: locks, keys, providers, each with whether it is as it should be. */
+  switches: HealthSwitch[];
+  csrf?: string;
+}
+/**
+ * Health: the deployment itself, moved here from the v1 operator console (4 October 2026). The log's head and the last
+ * full audit (and a button to run one: it only reads), the quarter-hourly cron's last run, and the switches. Nothing here
+ * is on the record; nothing here changes it.
+ */
+export function healthPage(o: HealthView, flash: string | null, problem: string | null, who: string | null = null, now = new Date()): string {
+  const ago = (iso: string) => { const m = Math.max(0, Math.round((now.getTime() - Date.parse(iso)) / 60_000)); return m < 60 ? `${m} min` : m < 2880 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`; };
+  const c = o.cron?.value ?? null;
+  const n = (k: string) => Number(c?.[k] ?? 0);
+  const cronLine = o.cron
+    ? `${c?.["ok"] === false ? '<span class="status broken">failed</span>' : '<span class="status sound">ran</span>'} ${esc(shortDate(o.cron.at))} UTC (${esc(ago(o.cron.at))} ago). ${c?.["ok"] === false ? esc(String(c?.["error"] ?? "")) : esc(`Doorbells rung ${n("doorbellsRung")} (failed ${n("doorbellsFailed")}, paused ${n("doorbellsPaused")}, waiting ${n("doorbellsWaiting")}); checks lapsed ${n("v2Lapsed")}, sealed ${n("v2Sealed")}; alert emails ${n("v2AlertsSent")}, digests ${n("v2DigestsSent")}; quotes checked ${n("v2QuotesChecked")} (verified ${n("v2QuotesVerified")}, mismatched ${n("v2QuotesMismatched")}).`)}${c?.["doorbellsError"] ? ` <span class="status broken">doorbells: ${esc(String(c["doorbellsError"]))}</span>` : ""}`
+    : "No run recorded yet.";
+  const a = o.audit?.value ?? null;
+  const auditLine = o.audit
+    ? `${a?.["intact"] ? '<span class="status sound">intact</span>' : '<span class="status broken">problem</span>'} ${esc(shortDate(o.audit.at))} UTC over ${esc(String(a?.["size"] ?? "?"))} entries${a?.["problem"] ? `: ${esc(String(a["problem"]))}` : ""}`
+    : "Not run from here yet.";
+  const body = `<h1>Health</h1>
+<p class="lede">The deployment, not the record: the log's signed head, the last full audit, the quarter-hourly cron, and the switches a deploy sets. Everything here is read-only except the audit button, which only reads.</p>
+<h2>The log</h2>
+<dl class="kv"><dt>Entries</dt><dd>${o.logSize.toLocaleString("en-GB")}</dd><dt>Root hash</dt><dd><code class="mono">${esc(String(o.sth["rootHash"] ?? ""))}</code></dd>
+<dt>Tree head</dt><dd>${esc(shortDate(String(o.sth["timestamp"] ?? "")))} UTC, ${o.sth["signature"] ? "signed" : '<span class="status broken">unsigned</span>'}</dd>
+<dt>Full audit</dt><dd>${auditLine}</dd></dl>
+${o.csrf ? `<form method="post" action="/steward/health/audit"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><button class="btn quiet" type="submit">Run a full audit now</button> <span class="small">Replays the whole hash chain and Merkle tree; read-only; recorded here, never on the log.</span></form>` : ""}
+<h2>The cron</h2>
+<p>${cronLine}</p>
+<h2>Switches</h2>
+<table><thead><tr><th></th><th>State</th><th>Notes</th></tr></thead><tbody>${o.switches.map((sw) => `<tr><td>${esc(sw.name)}</td><td><span class="status ${sw.ok ? "sound" : "broken"}">${esc(sw.value)}</span></td><td class="small">${esc(sw.note ?? "")}</td></tr>`).join("")}</tbody></table>
+<h2>Elsewhere</h2>
+<ul>
+<li><a href="https://github.com/djhulme1/ecdysis-core/actions">Deploys and tests (GitHub Actions)</a></li>
+<li><a href="https://dash.cloudflare.com/">Cloudflare dashboard</a></li>
+<li><a href="https://one.dash.cloudflare.com/">Zero Trust (who can open this area)</a></li>
+<li><a href="https://resend.com/emails">Resend (email delivery)</a></li>
+<li><a href="/observatory">The public Observatory</a></li>
+</ul>`;
+  return frame("Health", "/steward/health", body, flash, problem, who);
 }

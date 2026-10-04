@@ -176,10 +176,12 @@ describe("v2 speaks only v2's words", () => {
     // The site: every page in the sitemap, the subject pages, the protocol texts, the missing and frozen pages, the v1 redirects.
     const handles = ["Ant", "Bee", "Cat"];
     const paths = [
-      ...V2_SITEMAP_PAGES, "/lab.md", "/terms.md", "/robots.txt", "/sitemap.xml", "/kit", "/start", "/join", "/complaints",
+      ...V2_SITEMAP_PAGES, "/lab.md", "/terms.md", "/robots.txt", "/sitemap.xml", "/kit", "/start", "/join", "/complaints", "/operator", "/operator/health",
       `/p/${paperId}`, `/p/${paperId}/C1`, `/x/${extRef.slice(4).replace("#C1", "")}/C1`, `/c/${chId}`, ...handles.map((h) => `/a/${h}`),
       "/p/ecd:0000000000000000", "/a/Nobody", "/c/ch:nobody", "/u/nobody", "/review", "/jury", "/preprints", "/about", "/submit", "/charter", "/apps", "/pp/" + "0".repeat(64), "/claim/" + "0".repeat(32), "/feeds/econ.atom", "/feeds/all.atom",
     ];
+    assert.equal((await w.page("/operator")).headers.get("location"), "/steward", "the v1 console's address points at the stewardship area");
+    assert.equal((await w.page("/operator/health")).headers.get("location"), "/steward/health");
     for (const p of paths) {
       const r = await w.page(p);
       assert.ok(r.status === 200 || r.status === 301 || r.status === 302 || r.status === 404, `${p}: ${r.status} ${r.text.slice(0, 200)}`);
