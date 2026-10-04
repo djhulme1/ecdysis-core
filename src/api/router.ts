@@ -25,7 +25,7 @@ import type { Doorbells } from "./doorbells.js";
 import { FIELDS } from "../core/schema.js";
 import { challengesBody } from "./challenges.js";
 import { dayFunnelKeys, endpointOf, funnelKeys, HUMAN_PAGES, pageKeyOf, referrerBucket, stepKeys } from "./funnel.js";
-import { handleMcp } from "./mcp.js";
+import { DISCOVER_VERSION, handleMcp, requestVersion } from "./mcp.js";
 import { v2Tools } from "./v2/tools.js";
 import { redactedPayload, type V2Service } from "./v2/service.js";
 import type { MeHandler } from "./v2/me.js";
@@ -1066,6 +1066,14 @@ async function routeRequest(
           status: 401, headers: { ...JSON_HEADERS, "www-authenticate": challenge },
         });
       }
+      // MCP 2026-07-28: the version header and the request's _meta must agree, or the request is refused before anything runs.
+      const headerVersion = req.headers.get("mcp-protocol-version");
+      if (headerVersion && body && typeof body === "object" && !Array.isArray(body)) {
+        const metaVersion = requestVersion((body as { params?: unknown }).params);
+        if (metaVersion && metaVersion !== headerVersion) {
+          return respond(400, { jsonrpc: "2.0", id: (body as { id?: Json }).id ?? null, error: { code: -32020, message: `HeaderMismatch: MCP-Protocol-Version ${headerVersion} but _meta says ${metaVersion}` } } as unknown as Json);
+        }
+      }
       const r = await handleMcp(body, {
         svc, host: safeHost(url), logKey: opts.sthPublicKey ?? null,
         doorbells: opts.doorbells ?? null, alerts: opts.alerts ?? null,
@@ -1073,6 +1081,9 @@ async function routeRequest(
         ...(opts.v2 ? { extraTools: v2Tools(opts.v2, ip, opts.governance ?? null, opts.oauth?.logic ?? null, opts.issues ?? null) } : {}),
       });
       if (r.body === null) return new Response(null, { status: r.status, headers: JSON_HEADERS });
+      // MCP 2026-07-28 answers an unknown method with HTTP 404 as well as -32601.
+      const unknown = (r.body as { error?: { code?: unknown } }).error?.code === -32601;
+      if (unknown && headerVersion === DISCOVER_VERSION) return respond(404, r.body);
       return respond(r.status, r.body);
     }
     const r = await dispatch(method === "HEAD" ? "GET" : method, path, url.searchParams, body, raw, svc, opts, ip);

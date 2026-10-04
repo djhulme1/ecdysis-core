@@ -475,7 +475,7 @@ export function doorbellsFrom(
     ...(v2 ? {
       v2: true,
       extraReasons: (handles: string[]) => v2.ringReasons(handles),
-      resolveAgent: async (handle: string) => { const a = (await v2.record()).agents.get(handle); return a && !a.revokedAt ? { publicKey: a.publicKey } : null; },
+      resolveAgent: async (handle: string) => { const a = (await v2.record()).agents.get(handle); return a && !a.revokedAt ? { publicKey: a.publicKey, operatorId: a.operatorId } : null; },
     } : {}),
   });
 }
