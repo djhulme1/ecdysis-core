@@ -43,8 +43,11 @@ export const DEFAULT_CADENCE: Cadence = "daily";
  * fire-url: Ecdysis POSTs a signed ring to an automation's trigger URL
  *   (Zapier, Make, n8n, Pipedream, Power Automate, Apps Script, IFTTT) that
  *   the person pasted on the private page and saw run.
+ * github-dispatch: Ecdysis starts a GitHub Actions workflow (workflow_dispatch)
+ *   in the person's repository with a fine-grained token that can do nothing
+ *   but run that repository's workflows; the agent runs there, with any model.
  */
-export const KINDS = ["claude-routine", "webhook", "self", "email", "fire-url"] as const;
+export const KINDS = ["claude-routine", "webhook", "self", "email", "fire-url", "github-dispatch"] as const;
 export type DoorbellKind = (typeof KINDS)[number];
 /** Every kind the store may hold, including those a later change adds (the database's constraint lists them all). */
 export type StoredKind = DoorbellKind | "fire-url" | "github-dispatch" | "mcp-events";
@@ -53,7 +56,7 @@ export type StoredKind = DoorbellKind | "fire-url" | "github-dispatch" | "mcp-ev
  * for one, but only the person can supply what it rings (a routine's token,
  * a confirmed address), and on that page the person may choose another.
  */
-export const PERSON_KINDS: readonly DoorbellKind[] = ["claude-routine", "email", "fire-url"];
+export const PERSON_KINDS: readonly DoorbellKind[] = ["claude-routine", "email", "fire-url", "github-dispatch"];
 export const isPersonKind = (k: string): k is DoorbellKind => (PERSON_KINDS as readonly string[]).includes(k);
 
 /** The apps people run their AI in, as the private page asks. */
@@ -113,6 +116,44 @@ export const ROUTINE_TOKEN_RE = /^sk-ant-oat01-[A-Za-z0-9_-]{16,400}$/;
 const FIRE_URL_RE = /^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/(trig_[A-Za-z0-9_-]{6,80})\/fire\/?$/;
 /** Where a routine's runs are watched: shown to its person only, and only in this exact shape. */
 export const SESSION_URL_RE = /^https:\/\/claude\.ai\/code\/session_[A-Za-z0-9_-]{6,80}$/;
+/** Where a dispatched workflow's run is watched: shown to its person only, and only in this exact shape. */
+export const RUN_URL_RE = /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/actions\/runs\/\d{1,20}$/;
+/** A run link the private page may show: a Claude session or a GitHub Actions run. */
+export const watchable = (u: string | null | undefined): u is string => !!u && (SESSION_URL_RE.test(u) || RUN_URL_RE.test(u));
+
+/**
+ * A GitHub dispatch doorbell, as the person gives it: the repository, the
+ * workflow file, the branch, and a fine-grained personal access token. Only
+ * fine-grained tokens are taken: a classic one carries every repository the
+ * person can reach. The token's only needed permission is Actions: Read and
+ * write on the one repository (which starts, re-runs, cancels or deletes its
+ * workflow runs, and reads and changes nothing else).
+ */
+export const GITHUB_API = "https://api.github.com";
+export const GITHUB_API_VERSION = "2026-03-10";
+export const GITHUB_TOKEN_RE = /^github_pat_[A-Za-z0-9_]{22,255}$/;
+export function githubCheck(f: { repo?: unknown; workflow?: unknown; ref?: unknown; token?: unknown }):
+  { ok: true; repo: string; workflow: string; ref: string; token: string } | { ok: false; problem: string } {
+  let repo = typeof f.repo === "string" ? f.repo.trim() : "";
+  const m = repo.match(/^https:\/\/github\.com\/([^/]+\/[^/?#]+?)(?:\.git)?\/?$/);
+  if (m) repo = m[1]!;
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/.test(repo) || repo.endsWith("/.") || repo.includes("/..")) {
+    return { ok: false, problem: "The repository: owner/name, as in github.com/owner/name." };
+  }
+  const workflow = typeof f.workflow === "string" && f.workflow.trim() ? f.workflow.trim() : "ecdysis.yml";
+  if (!/^[A-Za-z0-9._-]{1,100}\.ya?ml$/.test(workflow) || workflow.startsWith(".")) return { ok: false, problem: "The workflow: its file name in .github/workflows, such as ecdysis.yml." };
+  const ref = typeof f.ref === "string" && f.ref.trim() ? f.ref.trim() : "main";
+  if (!/^[A-Za-z0-9._/-]{1,100}$/.test(ref) || ref.includes("..") || ref.startsWith("/") || ref.endsWith("/")) return { ok: false, problem: "The branch: its name, such as main." };
+  const token = typeof f.token === "string" ? f.token.trim() : "";
+  if (/^(?:ghp|gho|ghu|ghs|ghr)_/.test(token)) {
+    return { ok: false, problem: "That is a classic or app token, which can reach far more than one repository, so it wasn't used or kept. Make a fine-grained token (it starts github_pat_) for this one repository, with Actions: Read and write." };
+  }
+  if (!GITHUB_TOKEN_RE.test(token)) return { ok: false, problem: "The token: a fine-grained personal access token, starting github_pat_." };
+  return { ok: true, repo, workflow, ref, token };
+}
+
+/** The dispatch endpoint for one repository's workflow. */
+export const githubDispatchUrl = (repo: string, workflow: string) => `${GITHUB_API}/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`;
 
 /** FNV-1a, 32 bits: spreads agents' research slots evenly over the period. For load, not secrecy. */
 function fnv1a(s: string): number {

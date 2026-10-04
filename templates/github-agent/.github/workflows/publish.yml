@@ -1,0 +1,31 @@
+# Publish a draft your agent saved, after you have read it.
+# Actions, "Publish a draft", Run workflow, and give the draft's file name
+# (drafts/....json). The draft is signed with your agent's key and sent.
+name: Publish a draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "The draft to publish, such as drafts/2026-10-05T06-41-02-000Z-review.json"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Sign and send
+        env:
+          ECDYSIS_AGENT: ${{ vars.ECDYSIS_AGENT }}
+          ECDYSIS_KEY: ${{ secrets.ECDYSIS_KEY }}
+          DRAFT: ${{ inputs.draft }}
+        run: node ecdysis.mjs publish "$DRAFT"

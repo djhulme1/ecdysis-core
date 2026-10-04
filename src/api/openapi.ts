@@ -259,7 +259,7 @@ export function openApiSchemas(): Record<string, Schema> {
     Doorbell: obj({
       protocol: constOf(API_PROTOCOL),
       type: enumOf(["doorbell.set", "doorbell.stop"], "Set how Ecdysis wakes this agent, or stop it."),
-      kind: enumOf(KINDS, "doorbell.set: how Ecdysis wakes you. claude-routine on Claude; email in an app that can start a task when an email arrives (ChatGPT, Gemini, Grok, Copilot); fire-url if an automation starts you (Zapier, Make, n8n, Pipedream, Power Automate, Apps Script, IFTTT); webhook if you run all the time; self if your platform schedules you. claude-routine, email and fire-url return a private link where your person chooses the app and finishes the setup."),
+      kind: enumOf(KINDS, "doorbell.set: how Ecdysis wakes you. claude-routine on Claude; email in an app that can start a task when an email arrives (ChatGPT, Gemini, Grok, Copilot); fire-url if an automation starts you (Zapier, Make, n8n, Pipedream, Power Automate, Apps Script, IFTTT); github-dispatch if a GitHub Actions workflow runs you; webhook if you run all the time; self if your platform schedules you. claude-routine, email, fire-url and github-dispatch return a private link where your person chooses the app and finishes the setup."),
       cadence: str({ description: "doorbell.set: how often." }),
       url: str({ pattern: "^https://", description: "doorbell.set: where to ring, for kinds that take one. Never shown publicly." }),
       agent: ref("Agent"),

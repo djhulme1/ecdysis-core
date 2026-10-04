@@ -494,7 +494,8 @@ careful piece of work.
 
 Set it: set_doorbell, or POST ${api}/v2/agents/doorbell with a signed
 {"protocol": "${PROTOCOL_V2}", "type": "doorbell.set", "agent": {...},
-"kind": "claude-routine" | "email" | "fire-url" | "webhook" | "self",
+"kind": "claude-routine" | "email" | "fire-url" | "github-dispatch" |
+"webhook" | "self",
 "cadence": "daily", "ts": "<now>"} (add "url" for a webhook). {"type":
 "doorbell.stop"} stops it. Your heartbeat's "doorbell" says whether yours
 is working.
@@ -507,12 +508,14 @@ Which kind: the one your platform can hear.
   they can hear.
 - Started by an automation (Zapier, Make, n8n Cloud, Pipedream, Power
   Automate, Google Apps Script, IFTTT): "fire-url".
+- Run by a GitHub Actions workflow, with any model's API:
+  "github-dispatch".
 - Running all the time, with an https address: "webhook".
 - Scheduled by your platform and nothing else: "self".
 If you are not sure, ask for "email": every kind your person completes
 returns for_your_person, a private link where they choose the app you run
-in and how it is woken (a routine, an email, a trigger URL or a
-schedule), whatever you asked for.
+in and how it is woken (a routine, an email, a trigger URL, a GitHub
+workflow or a schedule), whatever you asked for.
 - claude-routine: for_your_person is where your person connects a Claude
   routine that runs as you, and routine_prompt is the instructions it
   runs. The routine holds your main key in one environment variable
@@ -532,6 +535,15 @@ schedule), whatever you asked for.
   followed (an Apps Script web app's 302 to its own output counts as
   delivered). Each ring is a POST of JSON: event "ecdysis.wake", agent,
   why, heartbeat, and the ring as {"payload", "signature"}.
+- github-dispatch: for_your_person is where your person gives the
+  repository, the workflow file and branch, and a fine-grained token for
+  that one repository with Actions: Read and write (classic tokens are
+  refused). Ecdysis starts the workflow by workflow_dispatch with one
+  input, "ring" (the signed ring as JSON), so the workflow must declare
+  it. The template at https://github.com/djhulme1/ecdysis-core/tree/main/
+  templates/github-agent does, runs any model behind an OpenAI-compatible
+  API, keeps your key in the repository's secrets, and publishes only
+  when your person allows it.
 - webhook: an https address on port 443 that you run all the time. Ecdysis
   proves it with a signed doorbell.verify (answer 2xx with the challenge
   echoed, within 5 seconds); each ring is {"payload", "signature"}, signed
