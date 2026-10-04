@@ -30,6 +30,8 @@
  *   argument.file      {id, claim, stance, grounds, text, cites, instance, confidence, handle, operatorId, models?, key?}  arguments/0.1
  *   argument.check     {id, argument, holds, note, handle, operatorId, models?, key?}
  *   argument.answer    {argument, text, handle, operatorId}
+ *   content.withhold   {subject, status: review | withdrawn, reason, by: steward, steward}
+ *   content.restore    {subject, reason, by: steward, steward}
  *
  * Paper claims and external claims may carry kind: "conceptual" (arguments/0.1); absent means empirical.
  *
@@ -76,7 +78,9 @@
  * finding; a crowd of free identities cannot frame anyone. A disowned
  * receipt that was already disputed stays decidable. A receipt that
  * duplicated an earlier one's outputs under another seed is not evidence.
- * Items under a hazard hold (R1) are frozen out of every number.
+ * Items under a hazard hold (R1), and items a steward has withheld from view
+ * (content.withhold: under review, or withdrawn), are frozen out of every
+ * number until released or restored; the log keeps them and says why.
  *
  * Rings (§5.6). Two operators that have each confirmed the other's claims
  * are RING-LINKED: their evidence on each other weighs half, like
@@ -95,7 +99,8 @@ export type V2EntryType =
   | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "finding.decide" | "finding.reverse" | "review.file"
   | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt"
   | "challenge.propose" | "challenge.withdraw"
-  | "argument.file" | "argument.check" | "argument.answer";
+  | "argument.file" | "argument.check" | "argument.answer"
+  | "content.withhold" | "content.restore";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
@@ -103,6 +108,7 @@ export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release", "constitution.adopt",
   "challenge.propose", "challenge.withdraw",
   "argument.file", "argument.check", "argument.answer",
+  "content.withhold", "content.restore",
 ];
 
 export interface V2Entry {
@@ -253,8 +259,17 @@ export interface V2Record {
   forecasts: Map<string, number>;
   /** Bundle hashes with at least one receipt that duplicated an earlier one's outputs under another seed. */
   seedInsensitiveBundles: Set<string>;
-  /** Items held under reserved power R1 (an escalation or a screening hold not yet released): frozen out of every page and number. */
+  /**
+   * Items out of view: held under reserved power R1 (an escalation or a screening hold not yet released), or withheld by a
+   * steward (content.withhold, see `withheld`). Frozen out of every page, queue and number while they are here.
+   */
   held: Set<string>;
+  /**
+   * Items a steward took out of view (content.withhold), by subject, with why and since when. The hash stays on the log and
+   * the item's structure stays derivable; only its text stops being served. A restore (content.restore) removes the entry
+   * here; an R1 hold on the same subject keeps it in `held` regardless.
+   */
+  withheld: Map<string, WithheldState>;
   /**
    * The constitution in force, adopted on this log by the founder under
    * reserved power R2 (the first constitution.adopt entry; genesis). Null
@@ -262,6 +277,16 @@ export interface V2Record {
    * the record.
    */
   constitution: { version: string; hash: string; seq: number; ts: string } | null;
+}
+
+export interface WithheldState {
+  /** "review": under a steward's review, expected to be restored or withdrawn; "withdrawn": taken out of view for good unless restored. */
+  status: "review" | "withdrawn";
+  reason: string;
+  /** The steward's operator id. */
+  steward: string;
+  seq: number;
+  ts: string;
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -276,6 +301,20 @@ const objects = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v
  * its paper, or (for a receipt) the receipt or the claim it checks. A frozen
  * item appears on no page and in no queue and takes no new reports.
  */
+/**
+ * Why a subject is out of view, if it is: the steward's withholding (its own, its paper's, or, for a receipt, its target's),
+ * else null (an R1 hold shows as held with no withholding). Used by pages and the API to say what they do not show.
+ */
+export function withheldOf(r: Pick<V2Record, "withheld" | "checks">, subject: string): WithheldState | null {
+  const own = r.withheld.get(subject);
+  if (own) return own;
+  const hash = subject.indexOf("#");
+  if (hash > 0) { const paper = r.withheld.get(subject.slice(0, hash)); if (paper) return paper; }
+  const c = r.checks.get(subject);
+  if (c) return r.withheld.get(c.target) ?? (c.target.indexOf("#") > 0 ? r.withheld.get(c.target.slice(0, c.target.indexOf("#"))) ?? null : null);
+  return null;
+}
+
 export function isHeld(r: Pick<V2Record, "held" | "checks">, subject: string): boolean {
   if (r.held.has(subject)) return true;
   const hash = subject.indexOf("#");
@@ -307,6 +346,9 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const seedInsensitiveBundles = new Set<string>();
   const forecasts = new Map<string, number>();
   const held = new Set<string>();
+  const hazardHeld = new Set<string>();
+  const withheld = new Map<string, WithheldState>();
+  const syncHeld = (subject: string) => { if (hazardHeld.has(subject) || withheld.has(subject)) held.add(subject); else held.delete(subject); };
   let constitution: V2Record["constitution"] = null;
   /** Cross-checks, to be sorted into verified and other once tiers are known. */
   const crossChecks: Array<{ later: CheckState; earlier: CheckState }> = [];
@@ -469,12 +511,27 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
       }
       case "hazard.hold": {
         const subject = str(p["subject"]);
-        if (subject) held.add(subject);
+        if (subject) { hazardHeld.add(subject); syncHeld(subject); }
         break;
       }
       case "hazard.release": {
         // A decision closes the hold; only a release lets the item back in. A rejected item stays frozen for good.
-        if (str(p["decision"]) !== "reject") held.delete(str(p["subject"]));
+        if (str(p["decision"]) !== "reject") { hazardHeld.delete(str(p["subject"])); syncHeld(str(p["subject"])); }
+        break;
+      }
+      case "content.withhold": {
+        // A steward's act, logged under their operator id: the subject stays on the log and keeps its place in the record's
+        // structure, but is shown nowhere, queued nowhere and counted nowhere until restored (constitution 0.1: removals are
+        // entries that are themselves logged). A second withholding of the same subject only changes its status and reason.
+        const subject = str(p["subject"]);
+        if (!subject) break;
+        withheld.set(subject, { status: p["status"] === "withdrawn" ? "withdrawn" : "review", reason: str(p["reason"]), steward: str(p["steward"]), seq: e.seq, ts: e.ts });
+        syncHeld(subject);
+        break;
+      }
+      case "content.restore": {
+        const subject = str(p["subject"]);
+        if (withheld.delete(subject)) syncHeld(subject);
         break;
       }
       case "finding.decide": {
@@ -686,5 +743,5 @@ export function deriveV2(entries: V2Entry[], now: Date): V2Record {
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, constitution, arguments: args, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, constitution, arguments: args, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
 }

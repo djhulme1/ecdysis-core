@@ -1,6 +1,6 @@
 /**
  * The v2 store on D1: envelopes, bundles and withheld outputs (migration
- * 0013). The log rows come from the existing D1Store, which backs the
+ * 0013), and the ids reserved at the moment of writing (migration 0018). The log rows come from the existing D1Store, which backs the
  * transparency log. Nothing here is an input to any number.
  */
 import type { Json } from "../../core/canonical.js";
@@ -10,6 +10,12 @@ import type { D1Store } from "../d1-store.js";
 
 export class D1V2Store implements V2Store {
   constructor(private db: D1Database, private log: D1Store, private now: () => Date = () => new Date()) {}
+
+  /** True the first time an id is reserved, false ever after: the primary key on v2_subjects is the guard (migration 0018). */
+  async reserveSubject(kind: string, id: string): Promise<boolean> {
+    const r = await this.db.prepare("INSERT OR IGNORE INTO v2_subjects (kind, id, created_at) VALUES (?1, ?2, ?3)").bind(kind, id, this.now().toISOString()).run();
+    return (r.meta?.changes ?? 0) > 0;
+  }
 
   async putEnvelope(id: string, envelope: Json): Promise<void> {
     await this.db.prepare("INSERT OR IGNORE INTO v2_envelopes (id, envelope_json, created_at) VALUES (?1, ?2, ?3)").bind(id, JSON.stringify(envelope), this.now().toISOString()).run();

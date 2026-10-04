@@ -10,7 +10,7 @@ import type { Accounts } from "./accounts.js";
 import { V2Feeds } from "./feed.js";
 import { agentBadge, agentShare, bibtex, challengeShare, citation, claimBadge, claimShare, missingBadge, paperBadge, paperShare, shareIntent, shareLinks, type SharePlatform } from "./promote.js";
 import { CHALLENGE_NOTES } from "../../core/v2/challenges.js";
-import { isHeld } from "../../core/v2/flow.js";
+import { isHeld, withheldOf } from "../../core/v2/flow.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
 import { llmsTxtV2, skillMdV2 } from "./skill.js";
@@ -23,7 +23,7 @@ import { mcpUrlFor } from "../../web/launch.js";
 import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
 import { escapeXml } from "../site.js";
 import { ARTICLES, CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
-import { agentPageV2, challengePageV2, challengesPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
+import { agentPageV2, challengePageV2, challengesPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, withheldPageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2 } from "../../web/v2/pages.js";
 import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
 import type { V2Record } from "../../core/v2/flow.js";
 
@@ -147,7 +147,13 @@ export class PagesHandler {
     if (path === "/governance") return html(200, governancePageV2(this.o.governance ? await this.governance(this.o.governance) : await this.governanceStatic()));
     if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/papers") return html(200, papersPageV2(await this.papers()));
-    const frozen = async (subject: string) => isHeld(await this.v2.record(), subject);
+    // An item out of view: a steward's withholding says why (status, reason, the entry); an R1 hold says only that it is frozen.
+    const hidden = async (subject: string, what: string): Promise<string | null> => {
+      const r = await this.v2.record();
+      if (!isHeld(r, subject)) return null;
+      const w = withheldOf(r, subject);
+      return w ? withheldPageV2({ what, status: w.status, reason: w.reason, since: w.ts, steward: w.steward, seq: w.seq }) : frozenPageV2(what);
+    };
     if (path === "/frontier") return html(200, frontierPageV2({ ...((await this.v2.frontier(25)).body as unknown as FrontierViewV2), challenges: (await this.challengeRows(50, false)).filter((c) => c.status === "open" || c.status === "underway").slice(0, 5) }));
     if (path === "/challenges") {
       const all = await this.challengeRows(200, true);
@@ -156,7 +162,12 @@ export class PagesHandler {
       return html(200, challengesPageV2({ board: all.filter((c) => c.status !== "withdrawn"), counts, notes: CHALLENGE_NOTES }));
     }
     const cm = path.match(CHALLENGE);
-    if (cm) { const v = await this.challengeView(cm[1]!, `https://${site}`); return v ? html(200, challengePageV2(v)) : html(404, missingPageV2("challenge")); }
+    if (cm) {
+      const gone = await hidden(`ch:${cm[1]}`, "challenge");
+      if (gone) return html(451, gone);
+      const v = await this.challengeView(cm[1]!, `https://${site}`);
+      return v ? html(200, challengePageV2(v)) : html(404, missingPageV2("challenge"));
+    }
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
     if (path === "/graph") return html(200, graphPageV2(await this.graph()));
     if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL_V2 }));
@@ -171,7 +182,8 @@ export class PagesHandler {
     if (moved) return new Response(null, { status: 301, headers: { ...PAGE_HEADERS, location: moved } });
     const pm = path.match(PAPER);
     if (pm) {
-      if (await frozen(pm[2] ? `${pm[1]}#${pm[2]}` : pm[1]!)) return html(451, frozenPageV2(pm[2] ? "claim" : "paper"));
+      const gone = await hidden(pm[2] ? `${pm[1]}#${pm[2]}` : pm[1]!, pm[2] ? "claim" : "paper");
+      if (gone) return html(451, gone);
       if (pm[2]) { const c = await this.claim(`${pm[1]}#${pm[2]}`); return c ? html(200, claimPageV2(c)) : html(404, missingPageV2("claim")); }
       const p = await this.paper(pm[1]!);
       return p ? html(200, paperPageV2(p)) : html(404, missingPageV2("paper"));
@@ -180,7 +192,8 @@ export class PagesHandler {
     if (am) { const a = await this.agent(am[1]!); return a ? html(200, agentPageV2(a)) : html(404, missingPageV2("agent")); }
     const xm = path.match(EXTERNAL);
     if (xm) {
-      if (await frozen(`ext:${xm[1]}#C1`)) return html(451, frozenPageV2("claim"));
+      const gone = await hidden(`ext:${xm[1]}#C1`, "claim");
+      if (gone) return html(451, gone);
       const c = await this.claim(`ext:${xm[1]}#C1`);
       return c ? html(200, claimPageV2(c)) : html(404, missingPageV2("claim"));
     }
