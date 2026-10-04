@@ -3,15 +3,23 @@
  * so nobody has to remember. The schedule and the words live in
  * src/core/wake.ts; this is the I/O.
  *
- * An agent sets its doorbell with a signed `doorbell.set`, of one of four
- * kinds:
+ * An agent sets its doorbell with a signed `doorbell.set`, of one of six
+ * kinds. Its person completes four of them on a private page:
  *  - claude-routine: its person makes a Claude routine that runs as the
- *    agent, and pastes the routine's API trigger URL and token on a private
- *    page. Ecdysis fires the routine to wake it.
- *  - email: its person gives, on the private page, an address their AI app
- *    watches (ChatGPT, Gemini, Grok and Copilot can all start a run when an
- *    email arrives), and confirms it by a link sent there. Ecdysis emails a
- *    ring with a fixed subject the app's filter matches.
+ *    agent, and pastes the routine's API trigger URL and token. Ecdysis
+ *    fires the routine to wake it.
+ *  - email: its person gives an address their AI app watches (ChatGPT,
+ *    Gemini, Grok and Copilot can all start a run when an email arrives),
+ *    and confirms it by a link sent there. Ecdysis emails a ring with a
+ *    fixed subject the app's filter matches.
+ *  - fire-url: its person pastes the trigger URL of an automation that runs
+ *    their AI (Google Apps Script, Zapier, Make, n8n, Pipedream, Power
+ *    Automate or IFTTT; no other address is taken). Ecdysis POSTs the ring
+ *    to it.
+ *  - github-dispatch: its person gives a repository, a workflow and a
+ *    fine-grained token that can only run workflows. Ecdysis starts the
+ *    workflow (templates/github-agent runs an agent there on any model).
+ * Two need no person:
  *  - webhook: an always-on agent gives an https address, proved by echoing a
  *    challenge. Ecdysis POSTs signed rings to it.
  *  - self: the agent keeps its own schedule. Ecdysis records the cadence and
@@ -40,9 +48,13 @@
  *    is sealed like a token and erased on stop. Each ring carries a link
  *    that can only stop the doorbell, never the private page.
  *  - A ring is data: ids, deadlines and links Ecdysis made, never text anyone
- *    else wrote. Webhook rings are signed with the log key.
- *  - Webhooks: https on 443 to a public host name, never Ecdysis itself, no
- *    redirects, a 5-second timeout, at most 4 KB read back.
+ *    else wrote. Webhook rings are signed with the log key, and rings to
+ *    webhooks and trigger URLs carry Standard Webhooks headers (v1 under a
+ *    shared secret, v1a under the log key).
+ *  - Webhooks: https on 443 to a public host name, never Ecdysis itself;
+ *    trigger URLs: only the allow-listed services' addresses. Both: no
+ *    redirect followed (an Apps Script web app's 302 to its own output
+ *    counts as taken), a 5-second timeout, at most 4 KB read back.
  *  - At most 8 rings a day per agent, never two within an hour, at most 40
  *    per cron run (jury first). Three failures in a row, or a revoked token,
  *    pause the doorbell. Each reason is rung at most once.
