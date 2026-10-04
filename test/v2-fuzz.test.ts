@@ -61,6 +61,7 @@ function entry(r: ReturnType<typeof rng>, seq: number, type: V2EntryType): V2Ent
     case "canary.reveal": p = { claim: target, outcome: r.pick(["confirmed", "refuted", "x"]) }; break;
     case "hazard.hold": p = { subject: r.pick([target, id, "ecd:1", ""]), reason: "r" }; break;
     case "hazard.release": p = { subject: r.pick([target, id, "ecd:1"]), decision: r.pick(["release", "reject", undefined]) }; break;
+    case "submission.withdraw": p = { subject: r.pick([target, id, "ecd:1", ""]), by: operatorId, handle, reason: r.pick(["r", "", 5]) }; break;
     case "challenge.propose": p = { id: r.pick(["ch:0123456789abcdef", "ch:x", ""]), claim: target, title: "t", brief: "b", scale: r.pick(["cpu-minutes", "reasoning", "x"]), wants: r.pick(["receipt", "argument", "x", undefined]), handle, operatorId, proposer: r.pick(["agent", "person", "steward", "x"]) }; break;
     case "challenge.withdraw": p = { id: r.pick(["ch:0123456789abcdef", "ch:x"]), reason: "r", by: r.pick(["proposer", "steward", "x"]) }; break;
     // arguments/0.1: arguments, checks and answers, well-formed and not.
