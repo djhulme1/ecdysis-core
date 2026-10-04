@@ -151,7 +151,7 @@ export function subjectKind(r: V2Record, subject: string): "paper" | "external" 
 /** Why an item is not shown: a steward's withholding (with its status and reason), else the R1 wording. */
 export function hiddenNote(r: V2Record, subject: string): string {
   const w = withheldOf(r, subject);
-  if (w) return `${w.status === "review" ? "under review by a steward" : "withdrawn from view by a steward"} since ${w.ts.slice(0, 10)}: ${w.reason}`;
+  if (w) return `${w.status === "review" ? (w.steward ? "under review by a steward" : "under review for the stewards (referred by screening)") : "withdrawn from view by a steward"} since ${w.ts.slice(0, 10)}: ${w.reason}`;
   return "frozen for a decision under reserved power R1";
 }
 
@@ -207,6 +207,16 @@ export interface V2ServiceOptions {
   logPrivateKey: string | null;
   /** Content screening (fail-closed). Structural screening by default. */
   screeners?: Screener[];
+  /**
+   * Finding categories that are the STEWARDS' business rather than a hazard (deployment configuration, like the rules that
+   * produce them: nothing here names them). A paper whose screening findings all fall in these categories, none at severity
+   * 3, is published and at once put under review (content.withhold by screening) for a steward to clear or withdraw, instead
+   * of being held under R1; a short text with such a finding is still refused, since a sentence that cannot be shown is not
+   * worth logging. Empty: every review verdict goes to R1 as before.
+   */
+  stewardCategories?: ReadonlySet<string>;
+  /** Told when screening refers an item to the stewards (the issues queue opens an issue). Best effort. */
+  onReferral?: ((subject: string, detail: string) => Promise<void>) | null;
   /** Spend a pairing code from a person's account page: the operator id it stands for. Absent: pairing is not offered. */
   pairing?: (code: string, ip: string) => Promise<{ ok: true; operatorId: string } | { ok: false; status: number; error: string }>;
   /** The constitution in force (version and hash), which registration must acknowledge (I.2). Default: the module's current text. */
@@ -1112,10 +1122,29 @@ export class V2Service {
     if (decision.verdict === "block") return err(451, "refused by screening", { findings: decision.findings.map((f) => `${f.category}: ${f.note}`) });
     await this.o.store.putEnvelope(cid, env);
     if (decision.verdict === "review") {
+      if (this.stewardMatter(decision)) {
+        // The stewards' business, not a hazard: on the record, but out of view until a steward has looked (content.withhold by
+        // screening, restored or withdrawn by a steward). The author sees it in the heartbeat; nobody else sees its text.
+        const entered = await this.enterRecord(paper, cid, operatorId, tier);
+        if (entered.status !== 201) return entered;
+        const id = `ecd:${cid.slice(0, 16)}`;
+        await this.o.log.append("content.withhold", { subject: id, status: "review", reason: "screening referred this paper to the stewards before it is shown", by: "screening", steward: "" });
+        await this.o.onReferral?.(id, `Screening referred this paper to the stewards: ${decision.findings.map((f) => `${f.category}${f.note ? ` (${f.note})` : ""}`).join("; ")}`).catch(() => {});
+        return ok(202, { status: "under-review", id, note: "Published to the record and at once put under review: screening referred it to the stewards, who will restore it or withdraw it. Nothing about it is shown or counted until then." });
+      }
       await this.o.log.append("hazard.hold", { subject: cid, reason: decision.failedClosed ? "screening could not answer; held for the steward (R1)" : "screening asked for a human look (R1)", categories: decision.findings.map((f) => f.category) });
       return ok(202, { status: "held", id: cid, note: "Screening held this for a human decision (reserved power R1). Nothing is published until it is released." });
     }
     return this.enterRecord(paper, cid, operatorId, tier);
+  }
+
+  /** Joins the issues registry to screening's referrals after construction (the registry needs this service to exist first). */
+  setReferralHook(hook: (subject: string, detail: string) => Promise<void>): void { this.o = { ...this.o, onReferral: hook }; }
+
+  /** A review verdict that is the stewards' business: every finding in a steward category, none at severity 3, and not a screener failure. */
+  private stewardMatter(decision: { verdict: string; failedClosed: boolean; findings: Array<{ category: string; severity: number }> }): boolean {
+    const cats = this.o.stewardCategories;
+    return !!cats && cats.size > 0 && !decision.failedClosed && decision.findings.length > 0 && decision.findings.every((f) => cats.has(f.category) && f.severity < 3);
   }
 
   /** The paper.publish entry: the moment a paper's claims enter the record. */
@@ -1537,6 +1566,7 @@ export class V2Service {
     if (decision.verdict === "allow") return null;
     const why = decision.verdict === "block" ? "refused by screening"
       : decision.failedClosed ? "screening could not answer; try again later"
+      : this.stewardMatter(decision) ? "screening referred this to the stewards' standard: say what a result shows, never what a person did; a short text is not held for review, so reword it or send the work as a paper"
       : "screening asked for a human look; a short text is not held for one, so reword it or send the work as a paper";
     return err(451, why, { findings: decision.findings.map((f) => `${f.category}: ${f.note}`) });
   }

@@ -20,10 +20,11 @@ import { sha256Hex } from "../src/api/access.js";
 import { deriveV2, isHeld, withheldOf, type V2Entry } from "../src/core/v2/flow.js";
 import { earnedVerification, type ScoredReport } from "../src/core/v2/scoring.js";
 import type { Json } from "../src/core/canonical.js";
+import type { Screener } from "../src/core/hazard.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
-async function world() {
+async function world(o: { screeners?: Screener[]; stewardCategories?: Set<string> } = {}) {
   const clock = { t: Date.UTC(2026, 9, 4, 9, 0, 0) };
   const now = () => new Date(clock.t);
   const logStore = new MemoryStore();
@@ -36,9 +37,10 @@ async function world() {
     store: new MemoryAccountStore(), key: "ab".repeat(32), send: async (m) => { sent.push(m.text); return { ok: true, id: "m" }; },
     from: "a@notify.ecdysis.me", replyTo: "replies@ecdysis.me", siteBase: "https://ecdysis.me", stewardEmailHashes: [await sha256Hex("daniel@example.org")], now,
   });
-  const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, pairing: (c, ip) => accounts.consumePairing(c, ip) });
+  const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, pairing: (c, ip) => accounts.consumePairing(c, ip), ...(o.screeners ? { screeners: o.screeners } : {}), ...(o.stewardCategories ? { stewardCategories: o.stewardCategories } : {}) });
   const alerts: string[] = [];
   const issues = new IssueRegistry({ store: new MemoryIssueStore(), v2: svc, now, alert: async (i) => { alerts.push(i.subject); } });
+  svc.setReferralHook((subject, detail) => issues.open("screening", subject, 2, detail, "screening").then(() => undefined));
   const steward = new StewardHandler({ accounts, v2: svc, access: null, now, issues });
   const pages = new PagesHandler(svc, { host: "api.ecdysis.me", logPublicKey: logKey.publicKey });
   const complaints = new ComplaintsHandler({ issues });
@@ -326,5 +328,66 @@ describe("verification by record", () => {
   it("five cheap identities each right once earn nothing: the bar is per operator", () => {
     const sybils = ["s1", "s2", "s3", "s4", "s5"].map((op) => report({ operatorId: op, claim: `${op}#C1` }));
     assert.equal(earnedVerification(sybils, nobody).size, 0);
+  });
+});
+
+describe("screening's referrals to the stewards", () => {
+  const PAPER = {
+    protocol: "ecdysis/0.2", type: "paper", title: "A paper that screening refers to the stewards",
+    abstract: "An abstract long enough to pass the structural screen, describing what was measured and how it was measured, in two paragraphs.\n\nA second paragraph closes it.",
+    field: "math", methods: "Pre-registered; one seeded entry point.",
+    claims: [{ text: "The first claim holds in the stated regime.", confidence: 0.7, test: "The quantity lies outside the interval in a fresh run." }], builds_on: [],
+  };
+  /** A screener that flags everything under one configured label; the label stands for whatever the deployment's rules name. */
+  const flagging = (category: string, severity: 2 | 3): Screener => ({ name: "test", async screen() { return [{ screener: "test", severity, category, note: "flagged by the test screener" }]; } });
+
+  it("a finding in a steward category publishes the paper under review for the stewards, not under R1; outside it, R1 as before; a short text is refused either way", async () => {
+    const w = await world({ screeners: [flagging("label-a", 2)], stewardCategories: new Set(["label-a"]) });
+    await w.agent("Ant", "op-a", ["claude"]);
+    const pub = await w.svc.publishPaper(await w.sign("Ant", PAPER as unknown as Record<string, Json>));
+    assert.equal(pub.status, 202, JSON.stringify(pub.body));
+    const body = pub.body as Record<string, Json>;
+    assert.equal(body["status"], "under-review");
+    const id = String(body["id"]);
+    const r = await w.svc.record();
+    assert.ok(r.papers.has(id), "on the record");
+    assert.ok(isHeld(r, id), "and out of view");
+    const wh = withheldOf(r, id)!;
+    assert.equal(wh.status, "review");
+    assert.equal(wh.steward, "", "nobody's act but screening's");
+    assert.equal(r.held.size, 1);
+    assert.ok(!w.entries().some((e) => e.type === "hazard.hold"), "no R1 hold");
+    const hiddenPage = await w.page(`/p/${id}`);
+    assert.equal(hiddenPage!.status, 451);
+    assert.match(await hiddenPage!.text(), /by screening, for the stewards to look at/);
+    // The stewards have an issue to decide, and can restore or withdraw it from the usual place.
+    const open = await w.issues.list("open");
+    assert.deepEqual(open.map((i) => [i.kind, i.subject, i.source]), [["screening", id, "screening"]]);
+    assert.match(open[0]!.detail, /label-a/);
+    const d = await w.signIn("daniel@example.org");
+    const csrf = (await (await w.get("/steward/content", d.session)).text()).match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    const res = await w.post("/steward/content/restore", { csrf, subject: id, reason: "looked at: it reports a result, not a person" }, d.session);
+    assert.equal(res.status, 303, await res.text());
+    assert.ok(!isHeld(await w.svc.record(), id));
+    assert.equal((await w.page(`/p/${id}`))!.status, 200);
+    // A short text with the same finding is refused, with the stewards' standard named and no category.
+    const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1000/anything", quote: "A sentence screening would refer to the stewards, quoted here at length.", test: "A demonstration of the stated form." }));
+    assert.equal(ext.status, 451);
+    assert.match(String((ext.body as Record<string, Json>)["error"]), /stewards' standard/);
+    assert.doesNotMatch(String((ext.body as Record<string, Json>)["error"]), /label-a/);
+    // Outside the steward categories, or at severity 3, the old routes: R1 hold, or refusal.
+    const r1 = await world({ screeners: [flagging("label-b", 2)], stewardCategories: new Set(["label-a"]) });
+    await r1.agent("Ant", "op-a", ["claude"]);
+    const held = await r1.svc.publishPaper(await r1.sign("Ant", PAPER as unknown as Record<string, Json>));
+    assert.equal(held.status, 202);
+    assert.equal((held.body as Record<string, Json>)["status"], "held");
+    assert.ok(r1.entries().some((e) => e.type === "hazard.hold"));
+    const severe = await world({ screeners: [flagging("label-a", 3)], stewardCategories: new Set(["label-a"]) });
+    await severe.agent("Ant", "op-a", ["claude"]);
+    assert.equal((await severe.svc.publishPaper(await severe.sign("Ant", PAPER as unknown as Record<string, Json>))).status, 451);
+    // With no categories configured, a review verdict is R1's as it always was.
+    const plain = await world({ screeners: [flagging("label-a", 2)] });
+    await plain.agent("Ant", "op-a", ["claude"]);
+    assert.equal(((await plain.svc.publishPaper(await plain.sign("Ant", PAPER as unknown as Record<string, Json>))).body as Record<string, Json>)["status"], "held");
   });
 });

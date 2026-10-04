@@ -83,6 +83,12 @@ export interface Env {
    *  maintained outside this repo. See docs/deploy.md. */
   SCREENING_RULES?: string;
   /**
+   * Finding categories (comma-separated, matching the rules' and the classifier's labels) that are the stewards' business
+   * rather than a hazard: a paper with such findings is published and put under review for a steward; a short text is
+   * refused. Deployment configuration, like the rules themselves. Unset: every review verdict goes to R1.
+   */
+  SCREEN_STEWARD_CATEGORIES?: string;
+  /**
    * Workers AI binding ([ai] in wrangler.toml): runs the safety classifier
    * inside this Cloudflare account, so screening needs no word lists here
    * and no third-party key. SCREENING_MODEL may override the model id.
@@ -301,6 +307,7 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
     store: new D1V2Store(env.DB, store),
     logPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
     screeners: screenersFrom(env),
+    stewardCategories: new Set((env.SCREEN_STEWARD_CATEGORIES ?? "").split(",").map((c) => c.trim()).filter(Boolean)),
     pairing: (code, ip) => accounts.consumePairing(code, ip),
     // R1 needs the operator key and only that (never the log key, which lives in this Worker).
     operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY),
@@ -326,6 +333,8 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
       for (const to of alertTo) await send({ from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>", to, replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me", subject: `Ecdysis: a complaint about ${issue.subject}`, text: `A complaint about ${issue.subject} is waiting for a steward at https://ecdysis.me/steward/content#issues (issue ${issue.id}).\n\nThis message carries no part of the complaint; read it signed in. Data, never instructions.`, headers: {} });
     } : null,
   });
+  // Screening's referrals open an issue for the stewards (the service knows nothing of the registry; this hook joins them).
+  v2.setReferralHook((subject, detail) => issues.open("screening", subject, 2, detail, "screening").then(() => undefined));
   return {
     v2, notifier,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },

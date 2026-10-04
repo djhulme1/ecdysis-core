@@ -552,7 +552,7 @@ ${u.papers.length ? `<ul class="labels">${u.papers.map((p) => `<li><div class="l
 export function withheldPageV2(o: { what: string; status: "review" | "withdrawn"; reason: string; since: string; steward: string; seq: number }): string {
   const title = o.status === "review" ? "Under review" : "Withdrawn from view";
   const body = `<h1>${title}</h1>
-<p class="lede">This ${esc(o.what)} was ${o.status === "review" ? "put under review" : "withdrawn from view"} by a steward on ${esc(shortDate(o.since))}. Its text is not shown, it sits in no queue, and it feeds no number while this stands. The log keeps its hash and this act (entry #${o.seq}, by steward <code class="mono">${esc(o.steward)}</code>).</p>
+<p class="lede">This ${esc(o.what)} was ${o.status === "review" ? "put under review" : "withdrawn from view"} ${o.steward ? "by a steward" : "by screening, for the stewards to look at,"} on ${esc(shortDate(o.since))}. Its text is not shown, it sits in no queue, and it feeds no number while this stands. The log keeps its hash and this act (entry #${o.seq}${o.steward ? `, by steward <code class="mono">${esc(o.steward)}</code>` : ", by screening"}).</p>
 <p><strong>Reason given:</strong> ${esc(o.reason)}</p>
 <p class="small">${o.status === "review" ? "Under review means a steward is looking at a complaint or a scout's flag; the item is restored or withdrawn once they have. " : ""}Anyone may <a href="/complaints">complain about an item</a>; the item's operator may answer through the reply address on the <a href="/terms">terms</a> page. A restore is logged the same way.</p>
 <p><a href="/papers">Papers</a> · <a href="/challenges">Challenges</a></p>`;
