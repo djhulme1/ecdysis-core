@@ -126,6 +126,7 @@ describe("the D1 store against SQLite, every migration applied", { skip: !sqlite
       setupId: "s".repeat(32), setupToken: "t".repeat(64), setupIssuedAt: "2026-10-02T09:00:00.000Z", challenge: null,
       createdAt: "2026-10-02T09:00:00.000Z", updatedAt: "2026-10-02T09:00:00.000Z",
       lastRingAt: null, lastResearchAt: null, lastOkAt: null, lastSessionUrl: null, failures: 0, lastError: null, ringsDay: null, ringsToday: 0,
+      targetSealed: null, settings: {},
     };
     await store.putDoorbell(bell);
     const active = {
@@ -133,6 +134,7 @@ describe("the D1 store against SQLite, every migration applied", { skip: !sqlite
       createdAt: "2026-10-02T10:00:00.000Z", updatedAt: "2026-10-02T10:00:00.000Z", lastRingAt: "2026-10-02T10:00:01.000Z",
       lastResearchAt: "2026-10-02T10:00:01.000Z", lastOkAt: "2026-10-02T10:00:01.000Z", lastSessionUrl: "https://claude.ai/code/session_01X",
       failures: 1, lastError: "timeout", ringsDay: "2026-10-02", ringsToday: 1,
+      settings: { platform: "claude", tag: "abcdefghjk", stop: "5".repeat(32) },
     };
     await store.putDoorbell(active);
     const got = (await store.getDoorbell("Moth-1"))!;
@@ -146,6 +148,45 @@ describe("the D1 store against SQLite, every migration applied", { skip: !sqlite
     await assert.rejects(store.putDoorbell({ ...bell, handle: "Gnat-1", setupId: "s".repeat(32) }));
     // The kind is checked by the schema, not only by the code.
     await assert.rejects(store.putDoorbell({ ...bell, handle: "Gnat-1", setupId: "g".repeat(32), kind: "smtp" as never }));
+    // An email doorbell: the sealed address and the settings (an address waiting for its click included) round-trip.
+    const email = {
+      ...bell, handle: "Bee-1", kind: "email" as const, status: "active" as const, setupId: "b".repeat(32), targetSealed: "v2.hkdf.iv.ct",
+      settings: { platform: "gemini", tag: "k7f3q9w2mx", stop: "a".repeat(32), masked: "d•••@example.org", pending: { kind: "email" as const, sealed: "v2.env.iv2.ct2", masked: "x•••@example.com", challenge: "c".repeat(32), issuedAt: "2026-10-02T11:00:00.000Z", platform: "gemini", sent: 1 } },
+    };
+    await store.putDoorbell(email);
+    assert.deepEqual(await store.getDoorbell("Bee-1"), email);
+  });
+
+  it("migration 0021 rebuilds the doorbells table without losing a row or a column", async () => {
+    const db = new sqlite!.DatabaseSync(":memory:");
+    const dir = join(import.meta.dirname, "..", "migrations");
+    const files = readdirSync(dir).filter((x) => x.endsWith(".sql")).sort();
+    const at = files.indexOf("0021_doorbells_everywhere.sql");
+    assert.ok(at > 0, "the migration exists");
+    for (const f of files.slice(0, at)) db.exec(readFileSync(join(dir, f), "utf8"));
+    // A doorbell as the live table holds it before the change: a connected routine with a token, a failure and a ring.
+    db.exec(`INSERT INTO doorbells (handle, kind, status, cadence, routine_id, url, token_sealed, key_ref, setup_id, setup_token, setup_issued_at,
+      challenge, created_at, updated_at, last_ring_at, last_research_at, last_ok_at, last_session_url, failures, last_error, rings_day, rings_today)
+      VALUES ('Chrysalis-1','claude-routine','active','daily','trig_01ABCDEFGHJK',NULL,'v1.iv.ct','sth-hkdf/v1','${"s".repeat(32)}','${"t".repeat(64)}',
+      '2026-10-02T09:00:00.000Z',NULL,'2026-10-02T09:00:00.000Z','2026-10-04T08:00:00.000Z','2026-10-04T08:00:00.000Z','2026-10-04T06:51:00.000Z',
+      '2026-10-04T08:00:00.000Z','https://claude.ai/code/session_01X',0,NULL,'2026-10-04',2)`);
+    for (const f of files.slice(at)) db.exec(readFileSync(join(dir, f), "utf8"));
+    const got = (await new D1Store(d1Over(db)).getDoorbell("Chrysalis-1"))!;
+    assert.equal(got.kind, "claude-routine");
+    assert.equal(got.status, "active");
+    assert.equal(got.tokenSealed, "v1.iv.ct", "the sealed token survives");
+    assert.equal(got.keyRef, "sth-hkdf/v1");
+    assert.equal(got.routineId, "trig_01ABCDEFGHJK");
+    assert.equal(got.lastResearchAt, "2026-10-04T06:51:00.000Z");
+    assert.equal(got.ringsToday, 2);
+    assert.equal(got.targetSealed, null);
+    assert.deepEqual(got.settings, {});
+    // The constraint and the unique setup id still hold on the rebuilt table, and the index is back.
+    assert.throws(() => db.exec(`INSERT INTO doorbells (handle, kind, status, cadence, setup_id, setup_token, setup_issued_at, created_at, updated_at)
+      VALUES ('X','smtp','active','daily','${"x".repeat(32)}','t','a','a','a')`));
+    assert.throws(() => db.exec(`INSERT INTO doorbells (handle, kind, status, cadence, setup_id, setup_token, setup_issued_at, created_at, updated_at)
+      VALUES ('Y','email','active','daily','${"s".repeat(32)}','t','a','a','a')`));
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='doorbells_status'").get(), "the status index is rebuilt");
   });
 
   it("runs registration, a preprint, a switch, a withdrawal and an uninvite through the real SQL", async () => {

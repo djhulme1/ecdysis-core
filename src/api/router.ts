@@ -860,8 +860,28 @@ async function routeRequest(
     const r = await opts.alerts.unsubscribe(junsub[1]!, junsub[2]!, method === "POST" ? "POST" : "GET");
     return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers: FORM_PAGE_HEADERS });
   }
-  // A doorbell's private page: its person connects a routine, chooses how
-  // often, or stops it. Stopping works even in read-only mode.
+  // A doorbell's email links: the confirmation sent to an address (GET asks,
+  // POST confirms), and the stop-only link every email ring carries (GET
+  // asks; POST, including RFC 8058 one-click, stops, even in read-only mode).
+  const bellConfirm = path.match(/^\/doorbell\/confirm\/([0-9a-f]{32})\/([0-9a-f]{32})$/);
+  const bellStop = path.match(/^\/doorbell\/stop\/([A-Za-z0-9][A-Za-z0-9-]{1,39})\/([0-9a-f]{32})$/);
+  if (bellConfirm || bellStop) {
+    if (!opts.doorbells) return new Response("Not found", { status: 404, headers: CLAIM_HEADERS });
+    if (method !== "GET" && method !== "HEAD" && method !== "POST") return new Response("Method not allowed", { status: 405, headers: { ...CLAIM_HEADERS, allow: "GET, HEAD, POST" } });
+    // The body (a one-click "List-Unsubscribe=One-Click", or nothing) is never needed: the link is the authority.
+    if (method === "POST") await req.body?.cancel().catch(() => {});
+    const m = method === "POST" ? "POST" : "GET";
+    const r = bellConfirm ? await opts.doorbells.confirmPage(bellConfirm[1]!, bellConfirm[2]!, m) : await opts.doorbells.stopPage(bellStop![1]!, bellStop![2]!, m);
+    if (method === "POST" && req.headers.get("x-ecdysis-probe") !== "1" && r.status < 400) {
+      const counting = svc.recordOperational([`funnel:doorbell-page:${bellConfirm ? "confirm" : "email-stop"}`]);
+      if (opts.waitUntil) opts.waitUntil(counting);
+      else await counting;
+    }
+    return new Response(method === "HEAD" ? null : r.html, { status: r.status, headers: CLAIM_HEADERS });
+  }
+  // A doorbell's private page: its person chooses the app their AI runs in
+  // and how it is woken (a routine, an email, a schedule), how often, or
+  // stops it. Stopping works even in read-only mode.
   const bell = path.match(/^\/doorbell\/([0-9a-f]{32})\/([0-9a-f]{64})$/);
   if (bell || path.startsWith("/doorbell/")) {
     if (!opts.doorbells || !bell) return new Response("Not found", { status: 404, headers: CLAIM_HEADERS });
@@ -873,14 +893,14 @@ async function routeRequest(
       if (len > 4096 || text.length > 4096) return new Response("Too large", { status: 413, headers: CLAIM_HEADERS });
       form = new URLSearchParams(text);
     }
-    const r = await opts.doorbells.page(bell[1]!, bell[2]!, method === "POST" ? "POST" : "GET", form);
+    const r = await opts.doorbells.page(bell[1]!, bell[2]!, method === "POST" ? "POST" : "GET", form, new URL(req.url).searchParams);
     if (method === "POST" && req.headers.get("x-ecdysis-probe") !== "1") {
       // Counted by action and outcome only: never which doorbell.
       const reason = r.status === 404 ? "not-found" : r.status === 410 ? "expired" : r.status === 503 ? "read-only" : r.status === 409 ? "stopped" : "refused";
       const action = form?.get("action");
       const counting = svc.recordOperational([
         ...stepKeys("doorbell-page", r.status, reason, new Date().toISOString().slice(0, 10)),
-        ...(r.status < 400 && (action === "connect" || action === "stop" || action === "cadence") ? [`funnel:doorbell-page:${action}`] : []),
+        ...(r.status < 400 && (action === "connect" || action === "stop" || action === "cadence" || action === "email" || action === "self" || action === "test") ? [`funnel:doorbell-page:${action}`] : []),
       ]);
       if (opts.waitUntil) opts.waitUntil(counting);
       else await counting;

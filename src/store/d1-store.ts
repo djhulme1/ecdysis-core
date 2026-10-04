@@ -13,7 +13,7 @@
 import type { Json } from "../core/canonical.js";
 import type { LogEntry } from "../core/log.js";
 import type {
-  AgentRecord, AuditRecord, BuildRecord, ClaimRecord, DeliveryRecord, DoorbellRecord, DoorbellRing, HeraldRecord, IssueRecord, JurorOperatorRecord, JurorVouchRecord, JuryAlertRecord, SettingRecord,
+  AgentRecord, AuditRecord, BuildRecord, ClaimRecord, DeliveryRecord, DoorbellRecord, DoorbellRing, DoorbellSettings, HeraldRecord, IssueRecord, JurorOperatorRecord, JurorVouchRecord, JuryAlertRecord, SettingRecord,
   LogRowView, PaperRecord, PracticeRecord, QuarantineRecord, ReplicationRecord, Store, SubscriberRecord,
 } from "./store.js";
 
@@ -343,7 +343,7 @@ export class D1Store implements Store {
       providerId: (r["provider_id"] as string | null) ?? null, error: (r["error"] as string | null) ?? null,
     }));
   }
-  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest"): Promise<void> {
+  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest" | "doorbell"): Promise<void> {
     await this.db.prepare("INSERT INTO email_sends (at, kind) VALUES (?1, ?2)").bind(at, kind).run();
   }
 
@@ -395,15 +395,17 @@ export class D1Store implements Store {
     await this.db
       .prepare(
         `INSERT INTO doorbells (handle, kind, status, cadence, routine_id, url, token_sealed, key_ref, setup_id, setup_token, setup_issued_at,
-           challenge, created_at, updated_at, last_ring_at, last_research_at, last_ok_at, last_session_url, failures, last_error, rings_day, rings_today)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+           challenge, created_at, updated_at, last_ring_at, last_research_at, last_ok_at, last_session_url, failures, last_error, rings_day, rings_today,
+           target_sealed, settings_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
          ON CONFLICT(handle) DO UPDATE SET kind=?2, status=?3, cadence=?4, routine_id=?5, url=?6, token_sealed=?7, key_ref=?8, setup_id=?9,
            setup_token=?10, setup_issued_at=?11, challenge=?12, updated_at=?14, last_ring_at=?15, last_research_at=?16, last_ok_at=?17,
-           last_session_url=?18, failures=?19, last_error=?20, rings_day=?21, rings_today=?22`,
+           last_session_url=?18, failures=?19, last_error=?20, rings_day=?21, rings_today=?22, target_sealed=?23, settings_json=?24`,
       )
       .bind(d.handle, d.kind, d.status, d.cadence, d.routineId ?? null, d.url ?? null, d.tokenSealed ?? null, d.keyRef ?? null,
         d.setupId, d.setupToken, d.setupIssuedAt, d.challenge ?? null, d.createdAt, d.updatedAt, d.lastRingAt ?? null,
-        d.lastResearchAt ?? null, d.lastOkAt ?? null, d.lastSessionUrl ?? null, d.failures, d.lastError ?? null, d.ringsDay ?? null, d.ringsToday)
+        d.lastResearchAt ?? null, d.lastOkAt ?? null, d.lastSessionUrl ?? null, d.failures, d.lastError ?? null, d.ringsDay ?? null, d.ringsToday,
+        d.targetSealed ?? null, JSON.stringify(d.settings ?? {}))
       .run();
   }
   async getDoorbell(handle: string): Promise<DoorbellRecord | null> {
@@ -716,7 +718,20 @@ function rowToDoorbell(r: Record<string, unknown>): DoorbellRecord {
     lastError: opt("last_error"),
     ringsDay: opt("rings_day"),
     ringsToday: Number(r["rings_today"] ?? 0),
+    targetSealed: opt("target_sealed"),
+    settings: settingsOf(r["settings_json"]),
   };
+}
+
+/** A doorbell's settings, from its column: anything unreadable reads as none (the page then asks again), never as a failure. */
+function settingsOf(raw: unknown): DoorbellSettings {
+  if (typeof raw !== "string" || !raw) return {};
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as DoorbellSettings) : {};
+  } catch {
+    return {};
+  }
 }
 
 function rowToAlert(r: Record<string, unknown>): JuryAlertRecord {

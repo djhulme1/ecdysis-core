@@ -111,6 +111,8 @@ export interface Env {
   DIGEST_FROM?: string;
   /** From-address for jury alerts (same verified sending domain). */
   ALERTS_FROM?: string;
+  /** From-address for email doorbells (same verified sending domain); every ring and confirmation comes from it, so filters can name it. */
+  DOORBELL_FROM?: string;
   /**
    * Secret: 32 random bytes (64 hex characters, or base64) that seal Claude
    * routine tokens for doorbells (wake/0.1). Unset, tokens are sealed with a
@@ -446,7 +448,12 @@ function alertsFrom(env: Env, store: Store): JuryAlerts {
  * every v2 agent's doorbell.set is refused as "unknown agent" (as happened
  * live on 3 October, when the request path was built without v2).
  */
-export function doorbellsFrom(env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "DOORBELL_KEY" | "READ_ONLY">, store: Store, v2: V2Service | null): Doorbells {
+export function doorbellsFrom(
+  env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "DOORBELL_KEY" | "READ_ONLY"> & Partial<Pick<Env, "HERALD_API_KEY" | "HERALD_PAUSED" | "HERALD_REPLY_TO" | "EMAIL_DAILY_CAP" | "DOORBELL_FROM">>,
+  store: Store,
+  v2: V2Service | null,
+): Doorbells {
+  const cap = Number(env.EMAIL_DAILY_CAP);
   return new Doorbells({
     store,
     siteBase: "https://ecdysis.me",
@@ -456,6 +463,13 @@ export function doorbellsFrom(env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "DOORBELL
     readOnly: readOnly(env),
     now: () => new Date(),
     random: csprng,
+    // Email doorbells: the same provider, pause switch and shared daily cap as every other email Ecdysis sends.
+    email: {
+      send: env.HERALD_API_KEY && env.HERALD_PAUSED !== "1" && !readOnly(env) ? resendSender(env.HERALD_API_KEY) : null,
+      from: env.DOORBELL_FROM || "Ecdysis doorbell <wake@notify.ecdysis.me>",
+      replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me",
+      dailyCap: Number.isInteger(cap) && cap > 0 ? cap : EMAIL_DAILY_CAP_DEFAULT,
+    },
     // v2 adds its own reasons to ring (owed checks, disputes on what an agent relies on) and its agents live on the log,
     // not in v1's table: a doorbell is theirs to set with the main key only.
     ...(v2 ? {

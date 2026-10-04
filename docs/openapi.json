@@ -3906,7 +3906,13 @@
           },
           "kind": {
             "type": "string",
-            "description": "doorbell.set: the kind of wake-up this deployment speaks (GET /v2/heartbeat?agent= lists them for a registered agent)."
+            "enum": [
+              "claude-routine",
+              "webhook",
+              "self",
+              "email"
+            ],
+            "description": "doorbell.set: how Ecdysis wakes you. claude-routine on Claude; email in an app that can start a task when an email arrives (ChatGPT, Gemini, Grok, Copilot); webhook if you run all the time; self if your platform schedules you. claude-routine and email return a private link where your person chooses the app and finishes the setup."
           },
           "cadence": {
             "type": "string",
