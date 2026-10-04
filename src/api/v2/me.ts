@@ -17,7 +17,8 @@ import type { V2Governance } from "./governance.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
 import { NEXT_COOKIE, safeNext } from "./oauth-http.js";
 import type { V2Feeds } from "./feed.js";
-import { analyticsPage, keyIssuedPage, linkSentPage, mePage, noticePage, pairingPage, signInPage, type MeAgent, type MeAnalytics, type MeConstitution, type MeData, type MeFinding } from "../../web/me.js";
+import type { IssueRegistry } from "./issues.js";
+import { analyticsPage, keyIssuedPage, linkSentPage, mePage, noticePage, pairingPage, signInPage, type MeAgent, type MeAnalytics, type MeConstitution, type MeData, type MeFinding, type MeVerification } from "../../web/me.js";
 
 export const ME_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
@@ -50,6 +51,8 @@ export interface MeOptions {
   governance?: V2Governance | null;
   /** The private feed (/me/feed.xml), when configured: fetched by a feed reader with a capability token, no cookie. */
   feeds?: V2Feeds | null;
+  /** The stewards' issues queue, when configured: a person asks for verification from here, and reads the decision here. */
+  issues?: IssueRegistry | null;
   /** Secure cookies (off only in local tests over http). */
   secure?: boolean;
   readOnly?: boolean;
@@ -191,8 +194,9 @@ export class MeHandler {
     const f = await this.form(req);
     if (!f || !(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.html(403, await dashboard(null, "That form had expired. Please try again."));
     if (this.o.readOnly && path !== "/me/signout" && path !== "/me/signout-all") return this.html(503, noticePage("Not right now", "Ecdysis isn't taking changes at the moment. Please try again later."));
-    // Keys, deletion and pairing (which lets whoever holds the code register agents under this operator) need a recent sign-in.
-    const needsStepUp = path === "/me/keys/issue" || path === "/me/keys/revoke" || path === "/me/delete" || path === "/me/pairing" || path === "/me/agents/managed" || path === "/me/agents/managed/destroy";
+    // Keys, deletion, pairing (which lets whoever holds the code register agents under this operator) and a verification request
+    // (a statement of who stands behind the operator) need a recent sign-in.
+    const needsStepUp = path === "/me/keys/issue" || path === "/me/keys/revoke" || path === "/me/delete" || path === "/me/pairing" || path === "/me/agents/managed" || path === "/me/agents/managed/destroy" || path === "/me/verify";
     if (needsStepUp && !this.o.accounts.fresh(signed)) return this.html(401, signInPage({ stepUp: true }));
 
     switch (path) {
@@ -268,6 +272,12 @@ export class MeHandler {
         const r = await this.o.accounts.setProfile(signed, clear ? null : (f.get("name") ?? ""));
         if (!r.ok) return this.html(r.status, await dashboard(null, `Couldn't set the profile name: ${r.error}.`));
         return this.redirect(`/me?ok=${encodeURIComponent(r.name ? `Your public profile is at /u/${r.name}.` : "Your public profile is off.")}`);
+      }
+      case "/me/verify": {
+        if (!this.o.issues) return this.html(404, noticePage("Not offered", "Verification requests are not taken on this deployment; write to the stewards instead."));
+        const r = await this.o.issues.requestVerification(signed.account.operatorId, f.get("evidence") ?? "");
+        if (!r.ok) return this.html(r.status, await dashboard(null, `Couldn't send the request: ${r.error}.`));
+        return this.redirect(`/me?ok=${encodeURIComponent("Your request is with the stewards. They see it here only; their decision goes on the public log as a tier entry, and this page will say what they decided.")}#verification`);
       }
       case "/me/feed/reset": {
         await this.o.accounts.resetFeed(signed);
@@ -377,10 +387,20 @@ export class MeHandler {
         })),
       };
     }
+    // Verification: the tier as the record has it, and the newest request (open, declined with the steward's note, or acted).
+    let verification: MeVerification | null = null;
+    if (this.o.issues) {
+      const req = await this.o.issues.verificationOf(op);
+      verification = {
+        offered: true,
+        request: req ? { status: req.status, at: req.openedAt, decidedAt: req.decidedAt, note: req.note ? req.note.replace(/^(verify|decline):\s*/, "") : null } : null,
+        undeclared: agents.filter((a) => !a.retired && a.families.length === 0).map((a) => a.handle),
+      };
+    }
     const board = (await this.o.v2.challenges(200, true)).body as { challenges: Array<{ id: string; title: string; claim: string; status: string; page: string; proposedAt: string; proposer: { kind: string; handle?: string; operatorId: string } }> };
     const challenges = board.challenges.filter((c) => c.proposer.operatorId === op).map((c) => ({ id: c.id, title: c.title, claim: c.claim, status: c.status, page: c.page, proposedAt: c.proposedAt, byAgent: c.proposer.kind === "agent" ? c.proposer.handle ?? null : null }));
     const data: MeData = {
-      constitution, challenges,
+      constitution, challenges, verification,
       operatorId: op, tier: r.tiers.get(op) ?? "account", role: signed.account.role, agents, findings,
       email: email ? Accounts.maskEmail(email) : null,
       managedOffered: !!this.o.oauth,

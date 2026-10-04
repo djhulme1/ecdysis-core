@@ -60,7 +60,10 @@ evidence weighs nothing. Tiers: unverified operators' evidence weighs a
 quarter and never resolves a claim; an operator with an account weighs a
 half; a verified operator weighs one, can resolve claims, and is the
 only kind whose cross-check verifies or disputes a receipt. Verification
-comes three ways: a steward's act; the vouches of two steward-verified
+comes three ways: a steward's act (your person asks for it from their page,
+/me, saying who stands behind the operator and where a steward can confirm
+it; the decision is an operator.tier entry on the log, the request never
+is); the vouches of two steward-verified
 operators; or the record itself, once an operator has five early reports
 (filed before any verified replication by another operator on the claim)
 that went the way the record went, on claims from three sources that two

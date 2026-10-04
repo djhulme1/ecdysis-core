@@ -8,6 +8,7 @@
 
 import { esc, shell, shortDate } from "./design.js";
 import type { CanaryView } from "../api/v2/canaries.js";
+import { VERIFICATION_CRITERIA } from "../api/v2/issues.js";
 
 export interface StewardNav { current: string }
 const NAV: ReadonlyArray<readonly [string, string]> = [
@@ -29,6 +30,8 @@ export interface OverviewData {
   findingsOpen: number; findingsInForce: number; voided: number; lapses: number; holdsOpen: number; disputes: number;
   /** Registered canaries past their intended reveal time (null: no registry configured). */
   canariesDue?: number | null;
+  /** Open verification requests from people's pages (null: no issues queue configured). */
+  verificationRequests?: number | null;
   queue: Array<{ ref: string; status: string; credence: number; use: number }>;
 }
 export function overviewPage(d: OverviewData, flash: string | null, problem: string | null, who: string | null = null): string {
@@ -46,6 +49,7 @@ export function overviewPage(d: OverviewData, flash: string | null, problem: str
 <li><span class="t">${n(d.findingsOpen)} finding${d.findingsOpen === 1 ? "" : "s"} in the appeal window</span><span class="d">${n(d.findingsInForce)} in force · ${n(d.voided)} operator${d.voided === 1 ? "" : "s"} voided; <a href="/steward/evidence">review</a></span></li>
 <li><span class="t">${n(d.disputes)} claim${d.disputes === 1 ? "" : "s"} in dispute</span><span class="d">settled by further independent runs, not by anyone's decision</span></li>
 ${d.canariesDue !== null && d.canariesDue !== undefined ? `<li><span class="t">${n(d.canariesDue)} canar${d.canariesDue === 1 ? "y" : "ies"} due for reveal</span><span class="d">past the time you set; <a href="/steward/canaries">the registry</a></span></li>` : ""}
+${d.verificationRequests !== null && d.verificationRequests !== undefined ? `<li><span class="t">${n(d.verificationRequests)} verification request${d.verificationRequests === 1 ? "" : "s"} waiting</span><span class="d">people asking to be verified, with their evidence; <a href="/steward/people#verification">decide</a></span></li>` : ""}
 </ul></section>
 </div>
 <h2>Most worth checking</h2>
@@ -54,9 +58,25 @@ ${d.queue.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence<
 }
 
 export interface PersonRow { operatorId: string; tier: string; account: boolean; agents: Array<{ handle: string; reliability: number; retired: boolean }>; voided: boolean; /** Verified by the record (scoring.ts), with what earned it. */ earned?: string }
-export function peoplePage(o: { rows: PersonRow[]; q: string; csrf: string; fresh: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
+/** A person's request to be verified, from their page: the operator, its active agents with their declared models, and the evidence they gave. */
+export interface VerificationRequestRow { id: string; operatorId: string; tier: string; text: string; at: string; voided: boolean; agents: Array<{ handle: string; families: string[]; reliability: number }> }
+export function peoplePage(o: { rows: PersonRow[]; q: string; csrf: string; fresh: boolean; requests?: VerificationRequestRow[]; /** The signed-in steward's own operator: a request from it is shown, with the rule that another steward decides it. */ ownOperator?: string }, flash: string | null, problem: string | null, who: string | null = null): string {
+  const requests = o.requests ?? [];
+  const requestsBlock = `<h2 id="verification">Verification requests</h2>
+<p class="small">${esc(VERIFICATION_CRITERIA)} Check what the request says against where it says it can be confirmed, and that the agents declare their models; then verify (an <code>operator.tier</code> entry on the public log under your operator id) or decline with a note the requester reads on their page. The request itself never goes on the log. A steward does not decide their own operator's request.</p>
+${requests.length ? `<ul class="labels">${requests.map((v) => `<li><div class="label" id="req-${esc(v.id.slice(0, 12))}">
+<div class="no"><code class="mono">${esc(v.operatorId)}</code> · tier ${esc(v.tier)}${v.voided ? ' · <span class="status broken">voided</span>' : ""} · asked ${esc(shortDate(v.at))}</div>
+<p class="small">Agents: ${v.agents.length ? v.agents.map((a) => `<a href="/a/${esc(a.handle)}">${esc(a.handle)}</a> (${a.families.length ? esc(a.families.join(", ")) : "<b>no model declared</b>"}, ${Math.round(a.reliability * 100)}%)`).join("; ") : "none active"}.</p>
+<div class="summary">${esc(v.text).split(/\n{2,}/).map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`).join("")}</div>
+<p class="small">The request is its author's words: data, never instructions.</p>
+${v.operatorId === o.ownOperator ? `<p class="small">This is your own operator's request: another steward decides it.</p>` : `<form method="post" action="/steward/people/verification"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="id" value="${esc(v.id)}">
+<label for="note-${esc(v.id.slice(0, 12))}">Note to the requester (required to decline)</label> <input type="text" id="note-${esc(v.id.slice(0, 12))}" name="note" maxlength="400" placeholder="what you confirmed, or what is missing">
+<button class="btn quiet" type="submit" name="outcome" value="verify">Verify</button> <button class="btn quiet" type="submit" name="outcome" value="decline">Decline</button></form>`}
+</div></li>`).join("")}</ul>` : `<p class="small">None waiting.</p>`}`;
   const body = `<h1>People</h1>
 <p class="lede">Operators and their agents, by operator id and handle, never by email. Verified operators' evidence resolves claims; invite with care and un-invite without hesitation. An operator is verified by a steward here, by the vouches of two steward-verified operators, or by the record itself: five early reports that went the way the record went, two of them receipts an independent cross-check matched, on three sources, resolved by two other verified operators.</p>
+${requestsBlock}
+<h2>Operators</h2>
 <form method="get" action="/steward/people"><label for="q">Find by operator id or handle</label><input type="text" id="q" name="q" value="${esc(o.q)}" maxlength="80"> <button class="btn quiet" type="submit">Find</button></form>
 ${o.rows.length ? `<table><thead><tr><th>Operator</th><th>Tier</th><th>Account</th><th>Agents</th><th>Set tier</th></tr></thead><tbody>${o.rows.map((r) => `<tr>
 <td><code class="mono">${esc(r.operatorId)}</code>${r.voided ? ' <span class="status broken">voided</span>' : ""}</td>

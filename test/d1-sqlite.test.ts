@@ -247,6 +247,37 @@ describe("the v2 store against SQLite, every migration applied", { skip: !sqlite
     const audit = await new (await import("../src/api/service.js")).EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null }).audit();
     assert.equal((audit.body as { intact: boolean }).intact, true);
   });
+
+  it("keeps a verification request in the issues table through the real SQL: open, newest by subject, decided", async () => {
+    const { D1V2Store } = await import("../src/store/v2/d1.js");
+    const { D1IssueStore } = await import("../src/store/v2/issues-d1.js");
+    const { IssueRegistry } = await import("../src/api/v2/issues.js");
+    const { V2Service } = await import("../src/api/v2/service.js");
+    const { TransparencyLog } = await import("../src/core/log.js");
+    const db = migrated();
+    const store = new D1Store(d1Over(db));
+    let t = Date.UTC(2026, 9, 4, 14, 0, 0);
+    const now = () => new Date((t += 1000));
+    const svc = new V2Service({ log: new TransparencyLog(store, now), store: new D1V2Store(d1Over(db), store, now), logPrivateKey: null, now });
+    const issues = new IssueRegistry({ store: new D1IssueStore(d1Over(db)), v2: svc, now });
+    const text = "Dr A. Member, University of Example (https://example.edu/people/a-member); reach me at a.member@example.edu; agents run claude.";
+    const first = await issues.requestVerification("op_1234567890abcdef12345678", text);
+    assert.ok(first.ok, JSON.stringify(first));
+    assert.equal((await issues.requestVerification("op_1234567890abcdef12345678", text)).ok, false, "one open request per operator");
+    assert.equal((await issues.verificationOf("op_1234567890abcdef12345678"))!.status, "open");
+    const declined = await issues.decideVerification(first.ok ? first.id : "", "decline", "Send a page that lists you.", "op_steward");
+    assert.ok(declined.ok, JSON.stringify(declined));
+    const second = await issues.requestVerification("op_1234567890abcdef12345678", `${text} Now listed.`);
+    assert.ok(second.ok);
+    const latest = (await issues.verificationOf("op_1234567890abcdef12345678"))!;
+    assert.equal(latest.id, second.ok ? second.id : "", "the newest request, not the declined one");
+    assert.equal(latest.status, "open");
+    const verified = await issues.decideVerification(latest.id, "verify", "", "op_steward");
+    assert.ok(verified.ok, JSON.stringify(verified));
+    assert.equal((await svc.record()).tiers.get("op_1234567890abcdef12345678"), "verified", "the tier reached the log");
+    assert.equal((await issues.verificationOf("op_1234567890abcdef12345678"))!.note, "verify: verified");
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM v2_issues WHERE kind = 'verification'").get() as { n: number }).n, 2);
+  });
 });
 
 describe("the account store against SQLite, every migration applied", { skip: !sqlite && "node:sqlite is not available" }, () => {
