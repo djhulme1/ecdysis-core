@@ -11,6 +11,7 @@ import { V2Feeds } from "./feed.js";
 import { agentBadge, agentShare, bibtex, challengeShare, citation, claimBadge, claimShare, missingBadge, paperBadge, paperShare, shareIntent, shareLinks, type SharePlatform } from "./promote.js";
 import { CHALLENGE_NOTES } from "../../core/v2/challenges.js";
 import { isHeld, withheldOf } from "../../core/v2/flow.js";
+import { inDefaultLists } from "../../core/v2/visibility.js";
 import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
@@ -153,7 +154,8 @@ export class PagesHandler {
     // Always v2's page, even on a deployment without the governance module: v1's commons page must never stand in for it.
     if (path === "/governance") return html(200, governancePageV2(this.o.governance ? await this.governance(this.o.governance) : await this.governanceStatic()));
     if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
-    if (path === "/papers") return html(200, papersPageV2(await this.papers()));
+    // The default list leaves out unchecked work from operators with no account (core/v2/visibility.ts); /papers/all lists everything.
+    if (path === "/papers" || path === "/papers/all") return html(200, papersPageV2(await this.papers(path === "/papers/all")));
     // An item out of view: a steward's withholding says why (status, reason, the entry); an R1 hold says only that it is frozen.
     const hidden = async (subject: string, what: string): Promise<string | null> => {
       const r = await this.v2.record();
@@ -179,7 +181,9 @@ export class PagesHandler {
     if (path === "/graph") return html(200, graphPageV2(await this.graph()));
     if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL_V2 }));
     if (path === "/sitemap.xml") {
-      const ids = [...(await this.v2.record()).papers.keys()];
+      // Papers in view and in the default lists: the sitemap advertises what the lists show, never an item out of view.
+      const rec = await this.v2.record();
+      const ids = [...rec.papers.values()].filter((p) => !isHeld(rec, p.id) && inDefaultLists(rec, p.claims, p.operatorId)).map((p) => p.id);
       const urls = [...V2_SITEMAP_PAGES, ...ids.map((id) => `/p/${id}`)].map((u) => `  <url><loc>${escapeXml(`https://${site}${u}`)}</loc></url>`).join("\n");
       return new Response(method === "HEAD" ? null : `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`, { status: 200, headers: { ...PAGE_HEADERS, "content-type": "application/xml; charset=utf-8" } });
     }
@@ -226,7 +230,7 @@ export class PagesHandler {
 
   private async landing(site: string) {
     const r = await this.v2.record();
-    const latest = [...r.papers.values()].filter((p) => !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq)[0] ?? null;
+    const latest = [...r.papers.values()].filter((p) => !isHeld(r, p.id) && inDefaultLists(r, p.claims, p.operatorId)).sort((a, b) => b.seq - a.seq)[0] ?? null;
     return {
       host: site,
       constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() },
@@ -237,16 +241,20 @@ export class PagesHandler {
     };
   }
 
-  private async papers() {
+  private async papers(all = false) {
     const r = await this.v2.record();
     const s = await this.v2.scores();
     const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
-    const papers = [...r.papers.values()].filter((p) => !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq).map((p) => {
+    const inView = [...r.papers.values()].filter((p) => !isHeld(r, p.id));
+    const listed = all ? inView : inView.filter((p) => inDefaultLists(r, p.claims, p.operatorId));
+    const extInView = [...r.external.entries()].filter(([id]) => !isHeld(r, `${id}#C1`));
+    const extListed = all ? extInView : extInView.filter(([id, x]) => inDefaultLists(r, [`${id}#C1`], x.operatorId));
+    const papers = listed.sort((a, b) => b.seq - a.seq).map((p) => {
       const statuses = p.claims.map((ref) => s.claims.get(ref)?.status).filter((x): x is NonNullable<typeof x> => !!x);
       return { id: p.id, title: p.title, agent: p.handle, field: p.field, ts: p.ts, claims: p.claims.length, worst: statuses.length ? statuses.reduce((a, b) => (rank(a) < rank(b) ? a : b)) : null };
     });
-    const external = [...r.external.entries()].filter(([id]) => !isHeld(r, `${id}#C1`)).map(([id, x]) => { const sc = s.claims.get(`${id}#C1`); return { id, quote: x.quote, source: x.source, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5 }; });
-    return { papers, external };
+    const external = extListed.map(([id, x]) => { const sc = s.claims.get(`${id}#C1`); return { id, quote: x.quote, source: x.source, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5 }; });
+    return { papers, external, all, unlisted: { papers: inView.length - listed.length, external: extInView.length - extListed.length } };
   }
 
   private async paper(id: string): Promise<PaperViewV2 | null> {
