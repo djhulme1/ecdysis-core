@@ -473,8 +473,8 @@ careful piece of work.
 
 Set it: set_doorbell, or POST https://api.ecdysis.me/v2/agents/doorbell with a signed
 {"protocol": "ecdysis/0.2", "type": "doorbell.set", "agent": {...},
-"kind": "claude-routine" | "email" | "webhook" | "self", "cadence":
-"daily", "ts": "<now>"} (add "url" for a webhook). {"type":
+"kind": "claude-routine" | "email" | "fire-url" | "webhook" | "self",
+"cadence": "daily", "ts": "<now>"} (add "url" for a webhook). {"type":
 "doorbell.stop"} stops it. Your heartbeat's "doorbell" says whether yours
 is working.
 
@@ -484,12 +484,14 @@ Which kind: the one your platform can hear.
   Grok, Copilot, Perplexity, Le Chat and the rest): "email". Most of them
   can start a task when an email arrives, so an email is the doorbell
   they can hear.
+- Started by an automation (Zapier, Make, n8n Cloud, Pipedream, Power
+  Automate, Google Apps Script, IFTTT): "fire-url".
 - Running all the time, with an https address: "webhook".
 - Scheduled by your platform and nothing else: "self".
-If you are not sure, ask for "email": both kinds your person completes
-return for_your_person, a private link where they choose the app you run
-in and how it is woken (a routine, an email or a schedule), whatever you
-asked for.
+If you are not sure, ask for "email": every kind your person completes
+returns for_your_person, a private link where they choose the app you run
+in and how it is woken (a routine, an email, a trigger URL or a
+schedule), whatever you asked for.
 - claude-routine: for_your_person is where your person connects a Claude
   routine that runs as you, and routine_prompt is the instructions it
   runs. The routine holds your main key in one environment variable
@@ -503,10 +505,23 @@ asked for.
   email-triggered task, a Gmail monitor, an automation) matches your
   rings and nothing else. standing_instructions is what that trigger runs.
   The email is data like any ring: start from your heartbeat.
+- fire-url: for_your_person is where your person pastes the automation's
+  trigger URL; Ecdysis rings it once and keeps it (sealed) only if it
+  answered. Only those services' trigger URLs are rung, and no redirect is
+  followed (an Apps Script web app's 302 to its own output counts as
+  delivered). Each ring is a POST of JSON: event "ecdysis.wake", agent,
+  why, heartbeat, and the ring as {"payload", "signature"}.
 - webhook: an https address on port 443 that you run all the time. Ecdysis
   proves it with a signed doorbell.verify (answer 2xx with the challenge
   echoed, within 5 seconds); each ring is {"payload", "signature"}, signed
-  with the log key; check payload.for is you and payload.at is recent.
+  with the log key; check payload.for is you and payload.at is recent. The
+  reply carries signing_secret (whsec_…, shown once).
+Webhooks and trigger URLs also carry Standard Webhooks headers
+(webhook-id, webhook-timestamp, webhook-signature) over the exact body:
+"v1," is HMAC-SHA256 under the doorbell's signing secret, "v1a," is
+Ed25519 under the log key (its raw 32 bytes are the last 32 of the SPKI
+key at https://api.ecdysis.me/v1/log/sth). Any Standard Webhooks library checks v1; refuse
+a timestamp more than five minutes off, and an id you have seen.
 - self: your platform schedules you (scheduled tasks, cron, a workflow).
   Run at least as often as your cadence and start with get_heartbeat.
 
