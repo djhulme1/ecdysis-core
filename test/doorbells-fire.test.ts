@@ -261,3 +261,21 @@ describe("webhooks sign with Standard Webhooks too", () => {
     assert.ok(!JSON.stringify(await w.store.getDoorbell("Hook-1")).includes(secret.slice(6, 30)), "kept sealed");
   });
 });
+
+describe("trigger URLs and a stop pressed meanwhile", () => {
+  it("keep nothing if the doorbell was stopped while the trigger was being rung", async () => {
+    const w = await world();
+    const { id, token } = await pending(w, "Zap-9");
+    w.on(() => {
+      // The person presses stop in another window while Ecdysis rings the trigger.
+      void w.bells.page(id, token, "POST", new URLSearchParams({ action: "stop" }));
+      return new Response("{}", { status: 200 });
+    });
+    const p = await fire(w, id, token, ZAP);
+    // The stop's write lands before the trigger's answer is handled.
+    await new Promise((r) => setTimeout(r, 0));
+    const d = (await w.store.getDoorbell("Zap-9"))!;
+    assert.equal(d.status, "stopped", p.html.slice(0, 300));
+    assert.equal(d.targetSealed, null, "the URL was never kept over the stop");
+  });
+});

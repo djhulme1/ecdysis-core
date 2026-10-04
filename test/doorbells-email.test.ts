@@ -40,14 +40,14 @@ const ADDRESS = "daniel.person@example.org";
 
 type Mail = Parameters<SendEmail>[0];
 
-async function world(o: { readOnly?: boolean; cap?: number; noEmail?: boolean; failSend?: boolean } = {}) {
+async function world(o: { readOnly?: boolean; cap?: number; noEmail?: boolean; failSend?: string | null } = {}) {
   let now = T0;
   const store = new MemoryStore();
   const log = await generateKeyPair();
   const mails: Mail[] = [];
-  let failSend = !!o.failSend;
+  let failSend: string | null = o.failSend ?? null;
   const send: SendEmail = async (m) => {
-    if (failSend) return { ok: false, error: "provider 500" };
+    if (failSend) return { ok: false, error: failSend };
     mails.push(m);
     return { ok: true, id: `m${mails.length}` };
   };
@@ -82,7 +82,7 @@ async function world(o: { readOnly?: boolean; cap?: number; noEmail?: boolean; f
   };
   return {
     store, svc, log, mails, calls, make, add, signed, bells: make(),
-    failSend(v: boolean) { failSend = v; },
+    failSend(v: string | null) { failSend = v; },
     tick(ms: number) { now += ms; },
     get now() { return now; },
   };
@@ -364,29 +364,39 @@ describe("email doorbells", () => {
     assert.equal((await w.bells.confirmPage(last[1]!, last[2]!, "POST")).status, 410);
   });
 
-  it("hold a ring when the deployment can't send (cap reached or provider down) without pausing the doorbell", async () => {
+  it("hold a ring when the deployment can't send (cap reached, provider busy or down) without counting it or pausing the doorbell", async () => {
     const w = await world({ cap: 3 });
     const { id, token } = await ask(w, "Bee-8", "email");
     await confirmEmail(w, id, token);
-    // Fill the shared cap with other email.
-    await w.store.recordEmailSend(new Date(w.now).toISOString(), "digest");
-    await w.store.recordEmailSend(new Date(w.now).toISOString(), "digest");
+    // A day on, the shared cap is filled with other email just before research falls due.
     w.tick(DAY);
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) await w.store.recordEmailSend(new Date(w.now).toISOString(), "digest");
+    for (let i = 0; i < 12; i++) {
       await w.bells.notify();
-      w.tick(2 * HOUR);
+      w.tick(HOUR);
     }
     let d = (await w.store.getDoorbell("Bee-8"))!;
     assert.equal(d.status, "active", "never paused for the deployment's own limit");
     assert.equal(d.failures, 0);
-    // Next day the cap has room again and the research ring goes out.
+    assert.equal(d.ringsToday, 0, "a held ring counts toward nothing");
+    assert.equal(d.lastRingAt ?? null, null, "and sets no spacing");
+    // Next day the cap has room again and the research ring goes out at once.
     w.tick(DAY);
     await w.bells.notify();
     assert.ok(w.mails.some((m) => m.subject.startsWith(`${SUBJECT_MARK} Bee-8`)));
-    // A provider that answers with an error is a real failure: three in a row pause it, as for any doorbell.
-    w.failSend(true);
+    // The provider busy (429) or down (5xx): held too, however often.
     let k = 0;
     const disputes = w.make({ extraReasons: async () => new Map([["Bee-8", [{ event: "dispute.opened" as const, case: `ecd:2610.abcd${k++}#C1`, credence: 0.4 }]]]) });
+    for (const e of ["provider 429: rate limited", "provider 503: unavailable", "provider timeout: no answer within 10 seconds"]) {
+      w.failSend(e);
+      w.tick(2 * HOUR);
+      await disputes.notify();
+    }
+    d = (await w.store.getDoorbell("Bee-8"))!;
+    assert.equal(d.status, "active");
+    assert.equal(d.failures, 0);
+    // The provider refusing the address itself is the doorbell's own failure: three in a row pause it, as for any doorbell.
+    w.failSend("provider 422: invalid to address");
     for (let i = 0; i < 3; i++) {
       w.tick(2 * HOUR);
       await disputes.notify();
@@ -394,6 +404,95 @@ describe("email doorbells", () => {
     d = (await w.store.getDoorbell("Bee-8"))!;
     assert.equal(d.status, "paused");
     assert.match(String(d.lastError), /couldn't be sent/);
+  });
+
+  it("cap confirmations for the whole deployment and for any one address, so nobody can spend Ecdysis's email on strangers", async () => {
+    const w = await world({ cap: 1000 });
+    // Two a day to one address, whichever doorbell asks.
+    const a = await ask(w, "Spam-1", "email");
+    const b = await ask(w, "Spam-2", "email");
+    assert.equal((await w.bells.page(a.id, a.token, "POST", form({ action: "email", email: "victim@example.org" }))).status, 200);
+    assert.equal((await w.bells.page(b.id, b.token, "POST", form({ action: "email", email: "VICTIM@example.org" }))).status, 200);
+    const third = await w.bells.page(a.id, a.token, "POST", form({ action: "email", email: "victim@example.org" }));
+    assert.match(third.html, /That address has had two confirmation emails from Ecdysis today/);
+    assert.equal(w.mails.filter((m) => m.to.toLowerCase() === "victim@example.org").length, 2);
+    // The deployment's own ceiling: twenty a day, however many agents ask.
+    for (let i = 0; i < 40; i++) {
+      const s = await ask(w, `Spam-x${i}`, "email");
+      await w.bells.page(s.id, s.token, "POST", form({ action: "email", email: `p${i}@example.net` }));
+    }
+    assert.equal(w.mails.length, 20, "twenty confirmations in a day at most");
+    assert.equal(await w.store.countEmailSends(new Date(w.now - DAY).toISOString(), "doorbell-confirm"), 20);
+    // A day later there is room again.
+    w.tick(DAY + 1);
+    const later = await ask(w, "Spam-later", "email");
+    assert.equal((await w.bells.page(later.id, later.token, "POST", form({ action: "email", email: "new@example.net" }))).status, 200);
+  });
+
+  it("give each confirmed address a new stop secret, so a stop link in an old email never reaches a later doorbell", async () => {
+    const w = await world();
+    const { id, token } = await ask(w, "Bee-15", "email");
+    await confirmEmail(w, id, token);
+    const first = (await w.store.getDoorbell("Bee-15"))!.settings!.stop!;
+    assert.match(first, /^[0-9a-f]{32}$/);
+    // Switched to a schedule: the old stop link no longer works.
+    await w.bells.page(id, token, "POST", form({ action: "self" }));
+    assert.equal((await w.bells.stopPage("Bee-15", first, "POST")).status, 404);
+    assert.equal((await w.store.getDoorbell("Bee-15"))!.status, "active");
+    // A new address: a new secret.
+    await confirmEmail(w, id, token, "gemini", "second@example.org");
+    const second = (await w.store.getDoorbell("Bee-15"))!.settings!.stop!;
+    assert.notEqual(second, first);
+    assert.equal((await w.bells.stopPage("Bee-15", first, "POST")).status, 404);
+    // The person stops it, and the agent later signs a new doorbell: the old email's stop link is dead.
+    const again = await w.bells.request(await w.signed("Bee-15", { type: "doorbell.set", kind: "claude-routine" }));
+    assert.equal(again.status, 200, "an email that works keeps working: fresh link only");
+    const [, id2, token2] = String((again.body as Record<string, Json>)["for_your_person"]).match(LINK)!;
+    assert.equal((await w.bells.page(id2!, token2!, "POST", form({ action: "stop" }))).status, 200);
+    const fresh = await w.bells.request(await w.signed("Bee-15", { type: "doorbell.set", kind: "claude-routine" }));
+    assert.equal(fresh.status, 202);
+    assert.equal((await w.bells.stopPage("Bee-15", second, "POST")).status, 404, "a new doorbell after a stop: the old link is dead");
+    assert.equal((await w.store.getDoorbell("Bee-15"))!.status, "pending");
+  });
+
+  it("drop an address waiting for its click when the agent's re-sign makes a new link, so the page never waits for a dead link", async () => {
+    const w = await world();
+    const { id, token } = await ask(w, "Moth-9", "claude-routine");
+    assert.equal((await w.bells.page(id, token, "POST", form({ action: "connect", pasted: `${FIRE}\n${TOKEN}` }))).status, 200);
+    await w.bells.page(id, token, "POST", form({ action: "email", email: ADDRESS }));
+    assert.ok((await w.store.getDoorbell("Moth-9"))!.settings!.pending);
+    const again = await w.bells.request(await w.signed("Moth-9", { type: "doorbell.set", kind: "email" }));
+    assert.equal(again.status, 200);
+    const d = (await w.store.getDoorbell("Moth-9"))!;
+    assert.ok(!d.settings!.pending, "the wait went with the old link");
+    const [, cid, ch] = w.mails.at(-1)!.text.match(CONFIRM)!;
+    assert.equal((await w.bells.confirmPage(cid!, ch!, "POST")).status, 404);
+  });
+
+  it("let a stop made while Ecdysis was checking win: nothing is kept over it", async () => {
+    const w = await world();
+    const { id, token } = await ask(w, "Moth-10", "claude-routine");
+    // The person presses stop in another window while the routine is being rung.
+    const bells = w.make({
+      fetchImpl: (async () => {
+        await w.bells.page(id, token, "POST", form({ action: "stop" }));
+        return new Response(JSON.stringify({ type: "routine_fire", claude_code_session_url: "https://claude.ai/code/session_01HJKLMNOPQRSTUVWXYZ" }), { status: 200 });
+      }) as typeof fetch,
+    });
+    const p = await bells.page(id, token, "POST", form({ action: "connect", pasted: `${FIRE}\n${TOKEN}` }));
+    assert.equal(p.status, 409);
+    assert.match(p.html, /nothing was kept/);
+    const d = (await w.store.getDoorbell("Moth-10"))!;
+    assert.equal(d.status, "stopped");
+    assert.equal(d.tokenSealed, null, "the token was never kept");
+    // And a sweep rings a doorbell as it is now: one stopped after the sweep read it is not rung.
+    const s = await ask(w, "Bee-16", "email");
+    await confirmEmail(w, s.id, s.token);
+    const before = w.mails.length;
+    const racing = w.make({ extraReasons: async () => { await w.bells.page(s.id, s.token, "POST", form({ action: "stop" })); return new Map(); } });
+    w.tick(DAY + HOUR);
+    await racing.notify();
+    assert.equal(w.mails.length, before, "stopped mid-sweep: nothing sent");
   });
 
   it("send a test ring at the person's request: only for a working doorbell, three an hour, within the day's cap", async () => {
@@ -486,5 +585,18 @@ describe("the standing instructions for apps that start themselves", () => {
     assert.match(p, /Publish only if I have said you may publish without me/);
     assert.doesNotMatch(p, /\bjur(y|ies|or)/i);
     assert.doesNotMatch(p, /ECDYSIS_KEY/, "no environment variable: these apps hold no key in an environment");
+  });
+});
+
+describe("small safeguards", () => {
+  it("refuse webhooks at Ecdysis's own app host, and give up on an email provider that doesn't answer", async () => {
+    const { webhookProblem } = await import("../src/core/wake.js");
+    const { resendSender } = await import("../src/api/herald.js");
+    assert.match(String(webhookProblem("https://myapp.ecdysis.app/hook")), /not an Ecdysis address/);
+    assert.match(String(webhookProblem("https://ecdysis.app/hook")), /not an Ecdysis address/);
+    assert.equal(webhookProblem("https://hooks.example.org/ring"), null);
+    const send = resendSender("k", (async () => { throw new DOMException("timed out", "TimeoutError"); }) as typeof fetch);
+    const r = await send({ from: "a@b.co", to: "c@d.co", replyTo: "e@f.co", subject: "s", text: "t", headers: {} });
+    assert.deepEqual(r, { ok: false, error: "provider timeout: no answer within 10 seconds" });
   });
 });
