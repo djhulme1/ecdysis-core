@@ -64,7 +64,7 @@ import {
   researchDue, ringPayload, ringText, routinePrompt, slotOffset, webhookProblem, type Cadence, type DoorbellKind, type Platform, type RingReason, type StoredKind,
 } from "../core/wake.js";
 import { esc, shell } from "../web/design.js";
-import { sameString } from "./access.js";
+import { sameString, sha256Hex } from "./access.js";
 import { newSecret, standardHeaders } from "../core/webhooks.js";
 import { EMAIL_RE, type SendEmail } from "./herald.js";
 import type { ApiResult } from "./service.js";
@@ -84,6 +84,10 @@ const CONFIRM_PER_HOUR = 3;
 const CONFIRM_TTL_MS = 3 * DAY_MS;
 /** Test rings a person may send in an hour (each also counts toward the day's cap). */
 const TEST_PER_HOUR = 3;
+/** Confirmation emails the whole deployment sends in a day, whoever asks: so they can never use up the shared email cap. */
+export const CONFIRM_DAILY_CAP = 20;
+/** Confirmation emails one address receives in a day, from every doorbell together. */
+const CONFIRMS_PER_ADDRESS_DAY = 2;
 const ID = /^[0-9a-f]{32}$/;
 const TOKEN = /^[0-9a-f]{64}$/;
 const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
@@ -139,6 +143,12 @@ export interface Page {
 
 interface RingOutcome {
   ok: boolean;
+  /**
+   * Nothing left Ecdysis: the deployment held the ring (no email provider,
+   * email paused, the day's shared cap reached, the provider busy). It waits
+   * for a later sweep and counts nowhere: not a failure, not a ring.
+   */
+  held?: boolean;
   /** Pause now: the token was refused or the routine is gone. */
   permanent?: boolean;
   /** Retry later without counting a failure (Claude's hourly limit). */
@@ -378,7 +388,8 @@ export class Doorbells {
       const sealedSecret = await this.sealValue(handle, "whsec", secret);
       const fresh = this.fresh(handle, "webhook", cadence, nowIso, existing);
       const d: DoorbellRecord = { ...fresh, status: "active", url: url as string, lastOkAt: nowIso, settings: { ...fresh.settings, ...(sealedSecret ? { signing: sealedSecret } : {}) } };
-      await this.o.store.putDoorbell(d);
+      // A stop (or any change) made while the webhook was being checked wins.
+      if (!(await this.o.store.putDoorbellIf(d, existing?.updatedAt ?? null))) return err(409, "your doorbell changed while the webhook was being checked (it may have been stopped); nothing was set: sign a fresh request if you still want it");
       return ok(200, {
         status: "active", kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
         rings: "Ecdysis POSTs {payload, signature} to your webhook, with Standard Webhooks headers (webhook-id, webhook-timestamp, webhook-signature). Check either the body's signature against the log key (GET /v1/log/sth) or webhook-signature (v1 under signing_secret, or v1a under the log key), that payload.for is you and that payload.at is within 15 minutes, and ignore an id you have seen; then fetch your heartbeat and act under your own instructions.",
@@ -418,7 +429,7 @@ export class Doorbells {
     if (action === "cadence") {
       const c = cadenceIn(form.get("cadence") ?? "");
       if (typeof c !== "string" || !(CADENCES as readonly string[]).includes(c)) return this.panel(d, "Choose how often.", null, chosen);
-      const next = { ...d, cadence: c as Cadence, updatedAt: nowIso };
+      const next = { ...d, cadence: c as Cadence, updatedAt: later(d.updatedAt, nowIso) };
       await this.o.store.putDoorbell(next);
       return this.panel(next, null, `Saved: ${this.cadenceName(next.cadence).toLowerCase()}.`, chosen);
     }
@@ -450,6 +461,11 @@ export class Doorbells {
       return this.panel(d, `At most ${CONFIRM_PER_HOUR} confirmation emails an hour. Nothing was sent; try again later.`, null, chosen);
     }
     if (!(await this.emailBudgetLeft())) return this.panel(d, "Ecdysis has sent all the email it may send today. Nothing was sent; try again tomorrow, or use a schedule for now.", null, chosen);
+    // Confirmations have their own ceilings, so nobody can spend the deployment's email on strangers: a day's total, and two a day to any one address.
+    if ((await this.o.store.countEmailSends(new Date(this.o.now().getTime() - DAY_MS).toISOString(), "doorbell-confirm")) >= CONFIRM_DAILY_CAP) {
+      return this.panel(d, "Ecdysis has sent all the confirmation emails it may today. Nothing was sent; try again tomorrow, or use a schedule for now.", null, chosen);
+    }
+    if (!(await this.claimAddressDay(address, nowIso))) return this.panel(d, "That address has had two confirmation emails from Ecdysis today. Nothing was sent; use the link in one of those, or try again tomorrow.", null, chosen);
     const sealed = await this.sealValue(d.handle, "email", address);
     if (!sealed) return this.view(503, "Not available yet", `<p>This deployment can't keep addresses safely yet, so nothing was kept. Use a schedule for now.</p>`);
     const settings = this.ensureEmailSettings(d.settings);
@@ -473,12 +489,12 @@ export class Doorbells {
       headers: {},
     }).catch((e) => ({ ok: false as const, error: String((e as Error)?.message ?? e) }));
     if (!sent.ok) return this.panel(d, "The confirmation email couldn't be sent. Nothing was changed; try again in a few minutes.", null, chosen);
-    await this.o.store.recordEmailSend(nowIso, "doorbell");
+    await this.o.store.recordEmailSend(nowIso, "doorbell-confirm");
     const next: DoorbellRecord = {
-      ...d, cadence, updatedAt: nowIso,
+      ...d, cadence, updatedAt: later(d.updatedAt, nowIso),
       settings: { ...settings, platform: chosen ?? settings.platform, pending: { kind: "email", sealed, masked: maskEmail(address), challenge, issuedAt: nowIso, platform: chosen, sent: (d.settings?.pending?.sent ?? 0) + 1 } },
     };
-    await this.o.store.putDoorbell(next);
+    if (!(await this.o.store.putDoorbellIf(next, d.updatedAt))) return this.view(409, "Something changed meanwhile", `<p>While Ecdysis was checking, this doorbell changed (it may have been stopped, or changed in another window), so nothing was kept. <a href="${esc(this.path(d))}">Reload the doorbell</a> and try again if you still want to.</p>`);
     return this.panel(next, null, `Sent. Open the email to ${maskEmail(address)} and press Confirm there. ${d.status === "active" ? "Until you do, the doorbell keeps ringing as it does now." : "Nothing is rung until you do."}`, chosen);
   }
 
@@ -505,12 +521,13 @@ export class Doorbells {
     if (this.o.readOnly) return this.view(503, "Not right now", `<p>Ecdysis isn't taking changes at the moment. Please try the link again later.</p>`);
     const nowIso = this.o.now().toISOString();
     // The switch: the confirmed address becomes the doorbell, and whatever it rang before is erased.
+    // A new stop secret with each confirmed address: a stop link in an old email never reaches a later doorbell.
     const was = this.switched({ ...d, settings });
     const next: DoorbellRecord = {
-      ...d, ...was, kind: "email", status: "active", updatedAt: nowIso, targetSealed: p.sealed,
-      settings: { ...was.settings, platform: p.platform ?? settings.platform, masked: p.masked },
+      ...d, ...was, kind: "email", status: "active", updatedAt: later(d.updatedAt, nowIso), targetSealed: p.sealed,
+      settings: { ...was.settings, platform: p.platform ?? settings.platform, masked: p.masked, stop: hex(this.o.random, 4) },
     };
-    await this.o.store.putDoorbell(next);
+    if (!(await this.o.store.putDoorbellIf(next, d.updatedAt))) return this.view(409, "Something changed meanwhile", `<p>This doorbell changed a moment ago, so nothing was confirmed. Ask for a new confirmation link on the doorbell page if you still want this.</p>`);
     return this.view(200, "Confirmed", `<p>Ecdysis will email this address whenever <b>${esc(d.handle)}</b> has work. Each email comes from <code>${esc(this.wakeAddress)}</code> and its subject contains <code>${esc(settings.tag!)}</code>.</p>
 <p>Last step, in your AI app: a task or automation that starts on those emails and follows the instructions on the doorbell page. That page has the steps for your app, and a button that sends a test ring when you are ready.</p>`);
   }
@@ -565,12 +582,13 @@ export class Doorbells {
     const was = this.switched(d);
     const today = nowIso.slice(0, 10);
     const next: DoorbellRecord = {
-      ...trial, ...was, status: "active", targetSealed: sealedUrl, updatedAt: nowIso,
+      ...trial, ...was, status: "active", targetSealed: sealedUrl, updatedAt: later(d.updatedAt, nowIso),
       lastRingAt: nowIso, lastOkAt: nowIso, lastResearchAt: slot !== null ? nowIso : d.lastResearchAt ?? null,
       ringsDay: today, ringsToday: (d.ringsDay === today ? d.ringsToday : 0) + 1,
       settings: { ...was.settings, platform: chosen ?? d.settings?.platform, service: check.service, host: check.host, signing: sealedSecret },
     };
-    await this.o.store.putDoorbell(next);
+    // The trigger took the ring; keep it only if nothing changed meanwhile, such as a stop.
+    if (!(await this.o.store.putDoorbellIf(next, d.updatedAt))) return this.view(409, "Something changed meanwhile", `<p>While Ecdysis was checking, this doorbell changed (it may have been stopped, or changed in another window), so nothing was kept. <a href="${esc(this.path(d))}">Reload the doorbell</a> and try again if you still want to.</p>`);
     return this.panel(next, null, `Connected: Ecdysis rang your ${check.service} trigger once, so your automation should be running now. If it can check signatures (Standard Webhooks, v1), give it this secret now: it isn't shown again. ${secret}`, chosen);
   }
 
@@ -604,12 +622,13 @@ export class Doorbells {
     const was = this.switched(d);
     const today = nowIso.slice(0, 10);
     const next: DoorbellRecord = {
-      ...trial, ...was, status: "active", targetSealed: sealed, updatedAt: nowIso,
+      ...trial, ...was, status: "active", targetSealed: sealed, updatedAt: later(d.updatedAt, nowIso),
       lastRingAt: nowIso, lastOkAt: nowIso, lastResearchAt: slot !== null ? nowIso : d.lastResearchAt ?? null, lastSessionUrl: res.sessionUrl ?? null,
       ringsDay: today, ringsToday: (d.ringsDay === today ? d.ringsToday : 0) + 1,
       settings: { ...was.settings, platform: chosen ?? d.settings?.platform, repo: check.repo, workflow: check.workflow, ref: check.ref },
     };
-    await this.o.store.putDoorbell(next);
+    // GitHub took the dispatch; keep the token only if nothing changed meanwhile, such as a stop.
+    if (!(await this.o.store.putDoorbellIf(next, d.updatedAt))) return this.view(409, "Something changed meanwhile", `<p>While Ecdysis was checking, this doorbell changed (it may have been stopped, or changed in another window), so nothing was kept. <a href="${esc(this.path(d))}">Reload the doorbell</a> and try again if you still want to.</p>`);
     return this.panel(next, null, `Connected: GitHub started ${check.workflow} in ${check.repo}, so your agent is running now.`, chosen);
   }
 
@@ -619,10 +638,10 @@ export class Doorbells {
     const cadence = (typeof cadenceGiven === "string" && (CADENCES as readonly string[]).includes(cadenceGiven) ? cadenceGiven : d.cadence) as Cadence;
     const was = this.switched(d);
     const next: DoorbellRecord = {
-      ...d, ...was, kind: "self", status: "active", cadence, updatedAt: nowIso,
+      ...d, ...was, kind: "self", status: "active", cadence, updatedAt: later(d.updatedAt, nowIso),
       settings: { ...was.settings, platform: chosen ?? d.settings?.platform },
     };
-    await this.o.store.putDoorbell(next);
+    if (!(await this.o.store.putDoorbellIf(next, d.updatedAt))) return this.view(409, "Something changed meanwhile", `<p>While Ecdysis was checking, this doorbell changed (it may have been stopped, or changed in another window), so nothing was kept. <a href="${esc(this.path(d))}">Reload the doorbell</a> and try again if you still want to.</p>`);
     return this.panel(next, null, `Saved: ${d.handle} keeps its own schedule. Make the scheduled task below in your app; Ecdysis won't ring it.`, chosen);
   }
 
@@ -634,8 +653,9 @@ export class Doorbells {
     if (ringsToday >= RINGS_PER_DAY) return this.panel(d, `The doorbell has rung ${RINGS_PER_DAY} times today, the most it may. Try again tomorrow.`, null, chosen);
     if (!(await this.claimSlot(d.handle, "test", TEST_PER_HOUR, nowIso))) return this.panel(d, `At most ${TEST_PER_HOUR} test rings an hour. Try again later.`, null, chosen);
     const res = await this.ring(d, [{ event: "doorbell.test" }]);
+    if (res.held) return this.panel(d, `Ecdysis couldn't send the test ring just now (${res.error ?? "held"}); nothing was counted. Try again later.`, null, chosen);
     await this.o.store.recordDoorbellRing(d.handle, d.updatedAt, {
-      at: nowIso, ok: res.ok, research: null, sessionUrl: res.ok ? res.sessionUrl ?? null : null,
+      at: later(d.updatedAt, nowIso), ok: res.ok, research: null, sessionUrl: res.ok ? res.sessionUrl ?? null : null,
       failures: res.ok ? 0 : d.failures, error: res.ok ? null : res.error ?? "ring failed", ringsDay: today, ringsToday: ringsToday + 1, pause: false,
     });
     const after = (await this.o.store.getDoorbell(d.handle)) ?? d;
@@ -643,12 +663,21 @@ export class Doorbells {
     return this.panel(after, null, d.kind === "email" ? "Sent. The test ring should reach the inbox within a minute; your app's task or automation should start on it." : "Rung. Your AI should start within a minute.", chosen);
   }
 
-  /** An email doorbell's tag and stop secret, made once and kept (filters keep working when the address changes). */
+  /** An email doorbell's tag, made once and kept, so filters keep matching when the address changes. (Its stop secret is new with each confirmed address.) */
   private ensureEmailSettings(s: DoorbellSettings | undefined): DoorbellSettings {
     const out = { ...(s ?? {}) };
     if (!out.tag || !TAG_RE.test(out.tag)) out.tag = newTag(this.o.random);
-    if (!out.stop || !/^[0-9a-f]{32}$/.test(out.stop)) out.stop = hex(this.o.random, 4);
     return out;
+  }
+
+  /** At most two confirmations a day to one address, whichever doorbell asks: claimed under a keyed hash, never the address itself. */
+  private async claimAddressDay(address: string, nowIso: string): Promise<boolean> {
+    const h = (await sha256Hex(`${WAKE_PROTOCOL}|confirm-to|${this.o.sthPrivateKey ?? ""}|${address.toLowerCase()}`)).slice(0, 32);
+    const day = nowIso.slice(0, 10);
+    for (let i = 0; i < CONFIRMS_PER_ADDRESS_DAY; i++) {
+      if (await this.o.store.claimAlertSend("*", `to:${h}:${day}:${i}`, "ring:confirm-to", nowIso)) return true;
+    }
+    return false;
   }
 
   /** Email may still be sent today under the deployment's shared cap. */
@@ -698,13 +727,14 @@ export class Doorbells {
     // Whatever rang before (an address, a webhook, a trigger URL) is erased: one doorbell, one way to ring it.
     const was = this.switched(d);
     const next: DoorbellRecord = {
-      ...trial, ...was, routineId, status: "active", tokenSealed: sealed.sealed, keyRef: sealed.ref, updatedAt: nowIso,
+      ...trial, ...was, routineId, status: "active", tokenSealed: sealed.sealed, keyRef: sealed.ref, updatedAt: later(d.updatedAt, nowIso),
       lastRingAt: nowIso, lastOkAt: nowIso, lastResearchAt: slot !== null ? nowIso : d.lastResearchAt ?? null,
       lastSessionUrl: res.sessionUrl ?? null,
       ringsDay: today, ringsToday: (d.ringsDay === today ? d.ringsToday : 0) + 1,
       settings: { ...was.settings, platform: "claude" },
     };
-    await this.o.store.putDoorbell(next);
+    // The routine was rung (that proved the token); keep it only if nothing changed meanwhile, such as a stop.
+    if (!(await this.o.store.putDoorbellIf(next, d.updatedAt))) return this.view(409, "Something changed meanwhile", `<p>While Ecdysis was checking, this doorbell changed (it may have been stopped, or changed in another window), so nothing was kept. <a href="${esc(this.path(d))}">Reload the doorbell</a> and try again if you still want to.</p>`);
     return this.panel(next, null, "Connected. Ecdysis just rang your routine, so it is starting a run now." +
       (next.lastSessionUrl ? "" : " You can watch it in Claude, under the routine's runs."));
   }
@@ -748,8 +778,22 @@ export class Doorbells {
       }
       const claimed = await this.claimReasons(w.d.handle, w.reasons, nowIso);
       if (!claimed.length) continue;
+      // Rung as it is now, not as the sweep read it: a stop or a switch made since then wins before anything is sent.
+      const now2 = await this.o.store.getDoorbell(w.d.handle);
+      if (!now2 || now2.status !== "active" || now2.updatedAt !== w.d.updatedAt) {
+        await this.releaseClaims(w.d.handle, claimed);
+        continue;
+      }
       budget -= 1;
       const res = await this.ring(w.d, claimed.map((c) => c.r));
+      if (res.held) {
+        // Nothing left Ecdysis: the reasons wait for a later sweep, and the doorbell's day and spacing are untouched.
+        await this.releaseClaims(w.d.handle, claimed);
+        undelivered.add(w.d.handle);
+        out.waiting += 1;
+        budget += 1;
+        continue;
+      }
       const today = nowIso.slice(0, 10);
       const failures = res.ok ? 0 : res.rateLimited ? w.d.failures : w.d.failures + 1;
       const pause = !res.ok && (!!res.permanent || failures >= PAUSE_AFTER_FAILURES);
@@ -762,7 +806,7 @@ export class Doorbells {
         out.rung += 1;
       }
       await this.o.store.recordDoorbellRing(w.d.handle, w.d.updatedAt, {
-        at: nowIso, ok: res.ok,
+        at: later(w.d.updatedAt, nowIso), ok: res.ok,
         research: res.ok && claimed.some((c) => c.r.event === "research.due") ? nowIso : null,
         sessionUrl: res.ok ? res.sessionUrl ?? null : null,
         failures, error: res.ok ? null : (pause && !res.permanent ? `paused after ${failures} failed rings: ${res.error ?? "no answer"}` : res.error ?? "ring failed"),
@@ -898,7 +942,8 @@ export class Doorbells {
       }
       return { ok: true, sessionUrl: runUrl };
     }
-    const limited = r.headers.get("x-ratelimit-remaining") === "0" || r.status === 429;
+    // GitHub's primary limit says x-ratelimit-remaining: 0; its secondary limits answer 403 or 429 with retry-after. Both only wait.
+    const limited = r.headers.get("x-ratelimit-remaining") === "0" || r.status === 429 || (r.status === 403 && r.headers.has("retry-after"));
     await discard(r);
     if (limited) return { ok: false, rateLimited: true, error: "GitHub's rate limit was reached" };
     if (r.status === 401) return { ok: false, permanent: true, error: "GitHub refused the token (401): it was revoked or has expired" };
@@ -917,12 +962,12 @@ export class Doorbells {
    */
   private async emailRing(d: DoorbellRecord, reasons: RingReason[], at: string, nextResearchAt: string | null, signed: string): Promise<RingOutcome> {
     const mail = this.o.email;
-    if (!mail?.send) return { ok: false, rateLimited: true, error: "Ecdysis isn't sending email at the moment" };
+    if (!mail?.send) return { ok: false, held: true, error: "Ecdysis isn't sending email at the moment" };
     const tag = d.settings?.tag;
     const stop = d.settings?.stop;
     const address = d.targetSealed ? await this.unsealValue(d.handle, "email", d.targetSealed) : null;
     if (!address || !tag || !TAG_RE.test(tag) || !stop) return { ok: false, permanent: true, error: "the address can't be read: set up the email again on the doorbell page" };
-    if (!(await this.emailBudgetLeft())) return { ok: false, rateLimited: true, error: "Ecdysis has sent all the email it may today" };
+    if (!(await this.emailBudgetLeft())) return { ok: false, held: true, error: "Ecdysis has sent all the email it may today" };
     const stopUrl = `${this.o.siteBase}/doorbell/stop/${d.handle}/${stop}`;
     const r = await mail.send({
       from: mail.from, to: address, replyTo: mail.replyTo,
@@ -930,7 +975,13 @@ export class Doorbells {
       text: emailRingText({ handle: d.handle, at, reasons, siteBase: this.o.siteBase, apiBase: this.o.apiBase, nextResearchAt, signed, stopUrl, v2: this.v2 }),
       headers: { "list-unsubscribe": `<${stopUrl}>`, "list-unsubscribe-post": "List-Unsubscribe=One-Click", "x-ecdysis-wake": `${WAKE_PROTOCOL}; agent=${d.handle}; tag=${tag}` },
     }).catch((e) => ({ ok: false as const, error: String((e as Error)?.message ?? e).slice(0, 200) }));
-    if (!r.ok) return { ok: false, error: `the email couldn't be sent (${r.error})` };
+    if (!r.ok) {
+      // The provider busy (429), down (5xx) or slow is the deployment's trouble, never the person's: held for a later sweep.
+      // Anything else it refuses (a rejected address) is the doorbell's own failure.
+      const status = Number(r.error.match(/^provider (\d{3})/)?.[1] ?? 0);
+      if (status === 429 || status >= 500 || /timeout/i.test(r.error)) return { ok: false, held: true, error: `the email provider is busy (${r.error})` };
+      return { ok: false, error: `the email couldn't be sent (${r.error})` };
+    }
     await this.o.store.recordEmailSend(at, "doorbell");
     return { ok: true };
   }
@@ -1207,37 +1258,40 @@ export class Doorbells {
       handle, kind, status: "pending", cadence,
       routineId: null, url: null, tokenSealed: null, keyRef: null, targetSealed: null,
       setupId: hex(this.o.random, 4), setupToken: hex(this.o.random, 8), setupIssuedAt: nowIso, challenge: null,
-      createdAt: existing?.createdAt ?? nowIso, updatedAt: nowIso,
+      createdAt: existing?.createdAt ?? nowIso, updatedAt: later(existing?.updatedAt, nowIso),
       // Research history carries over, so re-setting a doorbell never rings research twice in a slot.
       lastRingAt: existing?.lastRingAt ?? null, lastResearchAt: existing?.lastResearchAt ?? null, lastOkAt: null, lastSessionUrl: null,
       failures: 0, lastError: null, ringsDay: existing?.ringsDay ?? null, ringsToday: existing?.ringsToday ?? 0,
       // The app, the tag and the stop secret carry over (filters keep matching); an address waiting for its click does not.
-      settings: { ...(s.platform ? { platform: s.platform } : {}), ...(s.tag ? { tag: s.tag } : {}), ...(s.stop ? { stop: s.stop } : {}) },
+      // The app and the tag carry over (filters keep matching); a stop secret and an address waiting for its click do not.
+      settings: { ...(s.platform ? { platform: s.platform } : {}), ...(s.tag ? { tag: s.tag } : {}) },
     };
   }
 
   private freshLink(d: DoorbellRecord, nowIso: string): DoorbellRecord {
-    return { ...d, setupId: hex(this.o.random, 4), setupToken: hex(this.o.random, 8), setupIssuedAt: nowIso, updatedAt: nowIso };
+    // A confirmation link names the old setup id, so an address waiting for its click is dropped with it: the page never shows a wait that can't end.
+    return { ...d, setupId: hex(this.o.random, 4), setupToken: hex(this.o.random, 8), setupIssuedAt: nowIso, updatedAt: later(d.updatedAt, nowIso), settings: { ...(d.settings ?? {}), pending: null } };
   }
 
   private stopped(d: DoorbellRecord, nowIso: string): DoorbellRecord {
     // The token and the address are erased, not just disabled; so is an address still waiting for its click.
     return {
-      ...d, status: "stopped", tokenSealed: null, keyRef: null, challenge: null, lastSessionUrl: null, url: null, targetSealed: null, updatedAt: nowIso,
+      ...d, status: "stopped", tokenSealed: null, keyRef: null, challenge: null, lastSessionUrl: null, url: null, targetSealed: null, updatedAt: later(d.updatedAt, nowIso),
       settings: { ...(d.settings ?? {}), pending: null, masked: null, signing: null, service: null, host: null, repo: null, workflow: null, ref: null },
     };
   }
 
   /**
    * What a doorbell forgets when it starts being rung another way: every
-   * token, address, URL and secret of the old way, and an address still
-   * waiting for its click. The app, the email tag and the stop secret stay.
+   * token, address, URL and secret of the old way, its email stop secret,
+   * and an address still waiting for its click. The app and the email tag
+   * stay (filters keep matching).
    */
   private switched(d: DoorbellRecord): Pick<DoorbellRecord, "routineId" | "url" | "tokenSealed" | "keyRef" | "challenge" | "lastSessionUrl" | "targetSealed" | "failures" | "lastError"> & { settings: DoorbellSettings } {
-    const { platform, tag, stop } = d.settings ?? {};
+    const { platform, tag } = d.settings ?? {};
     return {
       routineId: null, url: null, tokenSealed: null, keyRef: null, challenge: null, lastSessionUrl: null, targetSealed: null, failures: 0, lastError: null,
-      settings: { ...(platform ? { platform } : {}), ...(tag ? { tag } : {}), ...(stop ? { stop } : {}) },
+      settings: { ...(platform ? { platform } : {}), ...(tag ? { tag } : {}) },
     };
   }
 
@@ -1516,6 +1570,17 @@ ${folded ? `<details><summary>Replace the routine or its token</summary>` : `<h3
 }
 
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/**
+ * A doorbell's next updatedAt: now, or a millisecond after the last write if
+ * that is later. Every write moves it forward, so a compare-and-set on it
+ * (putDoorbellIf, recordDoorbellRing) always sees a change made meanwhile,
+ * even one made in the same millisecond.
+ */
+const later = (prev: string | null | undefined, nowIso: string): string => {
+  const p = prev ? Date.parse(prev) : Number.NEGATIVE_INFINITY;
+  const n = Date.parse(nowIso);
+  return new Date(Number.isFinite(p) && p >= n ? p + 1 : n).toISOString();
+};
 /** The GitHub Actions template for an agent that Ecdysis starts by workflow_dispatch. */
 const TEMPLATE_URL = "https://github.com/djhulme1/ecdysis-core/tree/main/templates/github-agent";
 

@@ -155,6 +155,15 @@ describe("the D1 store against SQLite, every migration applied", { skip: !sqlite
     };
     await store.putDoorbell(email);
     assert.deepEqual(await store.getDoorbell("Bee-1"), email);
+    // Compare-and-set: written only if unchanged since read, or only if new.
+    const later = { ...email, status: "stopped" as const, updatedAt: "2026-10-02T12:00:00.000Z" };
+    assert.equal(await store.putDoorbellIf(later, "1999-01-01T00:00:00.000Z"), false, "a stale read writes nothing");
+    assert.equal((await store.getDoorbell("Bee-1"))!.status, "active");
+    assert.equal(await store.putDoorbellIf(later, email.updatedAt), true);
+    assert.deepEqual(await store.getDoorbell("Bee-1"), later, "every column written");
+    assert.equal(await store.putDoorbellIf({ ...email, setupId: "n".repeat(32) }, null), false, "null means new: an existing doorbell is never overwritten");
+    assert.equal(await store.putDoorbellIf({ ...email, handle: "New-1", setupId: "n".repeat(32) }, null), true);
+    assert.equal((await store.getDoorbell("New-1"))!.kind, "email");
   });
 
   it("migration 0021 rebuilds the doorbells table without losing a row or a column", async () => {

@@ -142,6 +142,11 @@ describe("GitHub dispatch doorbells", () => {
     let d = (await w.store.getDoorbell("Gh-2"))!;
     assert.equal(d.status, "active", "the rate limit only waits");
     assert.equal(d.failures, 0);
+    // GitHub's secondary limit: a 403 with retry-after only waits too.
+    w.on(() => new Response('{"message":"You have exceeded a secondary rate limit"}', { status: 403, headers: { "retry-after": "60" } }));
+    w.tick(2 * HOUR);
+    await w.bells.notify();
+    assert.equal((await w.store.getDoorbell("Gh-2"))!.status, "active", "a secondary limit only waits");
     w.on(() => new Response('{"message":"Resource not accessible by personal access token"}', { status: 403 }));
     w.tick(2 * HOUR);
     await w.bells.notify();

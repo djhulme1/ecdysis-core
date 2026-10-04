@@ -37,11 +37,18 @@ export type SendEmail = (msg: {
 /** Resend's HTTP API. The key is a Worker secret installed by the deploy; it never appears anywhere else. */
 export function resendSender(apiKey: string, fetchImpl: typeof fetch = fetch): SendEmail {
   return async (m) => {
-    const r = await fetchImpl("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ from: m.from, to: [m.to], reply_to: m.replyTo, subject: m.subject, text: m.text, headers: m.headers }),
-    });
+    let r: Response;
+    try {
+      // Ten seconds at most: a provider that hangs must never hold up a cron run (doorbells, lapses, alerts all share it).
+      r = await fetchImpl("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ from: m.from, to: [m.to], reply_to: m.replyTo, subject: m.subject, text: m.text, headers: m.headers }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch {
+      return { ok: false, error: "provider timeout: no answer within 10 seconds" };
+    }
     const body = (await r.json().catch(() => ({}))) as { id?: string; message?: string; name?: string };
     if (r.ok && typeof body.id === "string") return { ok: true, id: body.id };
     return { ok: false, error: `provider ${r.status}: ${String(body.message ?? body.name ?? "error").slice(0, 200)}` };
