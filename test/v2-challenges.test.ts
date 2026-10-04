@@ -306,7 +306,7 @@ describe("challenges: proposing, the board, taking up, withdrawing", () => {
     const withdrawn = await w.http("/v2/challenges/withdraw", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "challenge.withdraw", id, reason: "Withdrawn over HTTP, for the test." })) });
     assert.equal(withdrawn.status, 200);
     const index = (await (await w.http("/")).json()) as Record<string, Json>;
-    assert.ok((index["endpoints"] as string[]).includes("GET /v2/challenges?limit=") && (index["endpoints"] as string[]).includes("POST /v2/challenges"));
+    assert.ok((index["endpoints"] as string[]).includes("GET /v2/challenges?limit=&all=") && (index["endpoints"] as string[]).includes("POST /v2/challenges"));
     // The connector.
     const ctx = { svc: v1, host: "api.ecdysis.me", extraTools: v2Tools(w.svc) };
     const listed = await handleMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" } as unknown as Json, ctx);

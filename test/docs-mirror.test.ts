@@ -30,3 +30,10 @@ describe("the lab guide's mirror", () => {
     assert.equal(readFileSync(new URL("../docs/v2/level1.py", import.meta.url), "utf8"), LAB_LEVEL1_PY, "docs/v2/level1.py is stale: run `npm run gen:docs` and commit it");
   });
 });
+
+describe("the OpenAPI mirror", () => {
+  it("docs/openapi.json matches the served document exactly", async () => {
+    const { mirrorOpenApi } = await import("../src/api/openapi.js");
+    assert.equal(readFileSync(new URL("../docs/openapi.json", import.meta.url), "utf8"), mirrorOpenApi(), "docs/openapi.json is stale: run `npm run gen:docs` and commit it");
+  });
+});

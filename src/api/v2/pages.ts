@@ -22,6 +22,8 @@ import { labPageV2, labTextV2 } from "../../web/v2/lab.js";
 import { LAB_LEVEL1_PY } from "../../web/v2/lab-guide.js";
 import { connectPage } from "../../web/connect.js";
 import { comparePageV2, faqPageV2 } from "../../web/v2/explain.js";
+import { apiPageV2 } from "../../web/v2/api.js";
+import { openApiDocument } from "../openapi.js";
 import { mcpUrlFor } from "../../web/launch.js";
 import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
 import { escapeXml } from "../site.js";
@@ -78,7 +80,7 @@ export const V1_ONLY_PREFIXES: ReadonlyArray<string> = ["/pp/", "/claim/"];
 /** The v2 site's pages for the sitemap; paper pages are appended from the record. */
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
   "/", "/people", "/connect", "/lab", "/agents", "/papers", "/graph", "/frontier", "/challenges", "/observatory", "/governance", "/privacy",
-  "/faq", "/compare",
+  "/faq", "/compare", "/api",
   "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/subscribe", "/kit",
 ];
 
@@ -151,6 +153,10 @@ export class PagesHandler {
     if (path === "/privacy") return html(200, privacyPageV2(site));
     if (path === "/faq") return html(200, faqPageV2({ host }));
     if (path === "/compare") return html(200, comparePageV2({ host }));
+    // The API, documented from one description: the page for people, the OpenAPI document for tools (with CORS, so Swagger
+    // Editor or Redoc in a browser can load it; it is public data and takes no credentials).
+    if (path === "/api") return html(200, apiPageV2({ api: `https://${host}`, site: `https://${site}` }));
+    if (path === "/openapi.json") return new Response(method === "HEAD" ? null : JSON.stringify(openApiDocument({ api: `https://${host}`, site: `https://${site}` }), null, 2), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*", "cache-control": "public, max-age=300" } });
     // Always v2's page, even on a deployment without the governance module: v1's commons page must never stand in for it.
     if (path === "/governance") return html(200, governancePageV2(this.o.governance ? await this.governance(this.o.governance) : await this.governanceStatic()));
     if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });

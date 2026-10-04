@@ -342,7 +342,7 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const TARGET = /^.{3,140}#C[1-9][0-9]?$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
-const MAX_OUTPUTS = 20;
+export const MAX_OUTPUTS = 20;
 
 function checkAgent(v: unknown, errors: string[]): void {
   const a = v as { handle?: unknown; publicKey?: unknown } | null;
