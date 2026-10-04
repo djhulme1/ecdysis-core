@@ -344,14 +344,15 @@ describe("the account store against SQLite, every migration applied", { skip: !s
     const ext = await svc.registerExternalClaim({ payload: extPayload, signature: await signJson(kp.privateKey, extPayload) });
     assert.equal(ext.status, 201, JSON.stringify(ext.body));
     const ref = String((ext.body as Record<string, Json>)["ref"]);
-    assert.deepEqual(await registry.register({ claim: ref, outcome: "refuted", label: "A1", source: "a paper", revealAfter: null }, s.account.operatorId), { ok: true });
+    assert.deepEqual(await registry.register({ claim: ref, outcome: "refuted", label: "the-first-canary", source: "a paper", revealAfter: null }, s.account.operatorId), { ok: true });
     const stored = db.prepare("SELECT * FROM steward_canaries").all() as Array<Record<string, unknown>>;
     assert.equal(stored.length, 1);
-    assert.doesNotMatch(JSON.stringify(stored[0]), new RegExp(`refuted|A1|paper|${ref.slice(4, 20)}`), "nothing readable in the table, not even the claim");
+    // The label is long on purpose: a two-letter one ("A1") turned up by chance inside the base64url ciphertext once in CI.
+    assert.doesNotMatch(JSON.stringify(stored[0]), new RegExp(`refuted|the-first-canary|paper|${ref.slice(4, 20)}`), "nothing readable in the table, not even the claim");
     assert.match(String(stored[0]!["key"]), /^[0-9a-f]{40}$/);
     assert.equal(stored[0]!["reveal_after"], null);
     const listed = await registry.list();
-    assert.equal(listed[0]!.secret!.label, "A1");
+    assert.equal(listed[0]!.secret!.label, "the-first-canary");
     assert.equal(listed[0]!.secret!.outcome, "refuted");
     assert.equal(listed[0]!.secret!.claim, ref);
     const revealed = await registry.reveal(listed[0]!.key, s.account.operatorId);
