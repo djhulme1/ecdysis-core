@@ -2044,7 +2044,7 @@
           "Reserved powers"
         ],
         "summary": "Decide a hazard hold (R1)",
-        "description": "Reserved power R1: release a held item into the record, or reject it for good. Accepted only with the OPERATOR key's signature over {op: \"hazard\", subject, decision, ts}, made on the owner's machine; the archive never holds that key and no steward, agent or console can exercise this.",
+        "description": "Reserved power R1: release a held item into the record, or reject it. A submission rejected at screening is rejected for good: any later decision on it is refused (409), and its author submits a corrected version, which is screened again; a rejected escalation stays frozen until the owner releases it. Accepted only with the OPERATOR key's signature over {op: \"hazard\", subject, decision, ts}, made on the owner's machine; the archive never holds that key and no steward, agent or console can exercise this.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2074,6 +2074,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The subject is a submission already rejected for good: nothing can release it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"

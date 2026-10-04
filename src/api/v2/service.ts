@@ -631,15 +631,25 @@ export class V2Service {
     return ok(200, { claim, outcome, reports, note: `Revealed. ${reports} report${reports === 1 ? "" : "s"} on this claim ${reports === 1 ? "is" : "are"} now scored against the known outcome.` });
   }
 
-  /** Hazard holds (screening, escalations) and releases, newest first: what waits for reserved power R1. View only here. */
-  async holds(limit = 50): Promise<Array<{ seq: number; ts: string; type: "hazard.hold" | "hazard.release"; subject: string; reason: string; by: string | null; open: boolean }>> {
+  /**
+   * Hazard holds (screening, escalations) and decisions, newest first: what waits for reserved power R1. View only here.
+   * `state` says where each hold stands: open, released, rejected (an escalation, which the owner may still release) or
+   * rejected for good (a submission rejected at screening: nothing can release it); a decision's row gives its decision.
+   */
+  async holds(limit = 50): Promise<Array<{ seq: number; ts: string; type: "hazard.hold" | "hazard.release"; subject: string; reason: string; by: string | null; open: boolean;
+    state: "open" | "released" | "rejected" | "rejected for good" | "release" | "reject" }>> {
     const rows = await this.rows();
-    const released = new Set<string>();
-    for (const x of rows) if (x.type === "hazard.release") released.add(String((x.payload as Record<string, unknown>)["subject"] ?? ""));
+    const forGood = (await this.record()).rejectedForGood;
+    const last = new Map<string, string>();
+    for (const x of rows) if (x.type === "hazard.release") last.set(String((x.payload as Record<string, unknown>)["subject"] ?? ""), String((x.payload as Record<string, unknown>)["decision"] ?? ""));
     return rows.filter((x) => x.type === "hazard.hold" || x.type === "hazard.release").map((x) => {
       const p = x.payload as Record<string, unknown>;
       const subject = String(p["subject"] ?? "");
-      return { seq: x.seq, ts: x.ts, type: x.type as "hazard.hold" | "hazard.release", subject, reason: String(p["reason"] ?? ""), by: typeof p["by"] === "string" ? (p["by"] as string) : null, open: x.type === "hazard.hold" && !released.has(subject) };
+      const decided = last.get(subject);
+      const state = x.type === "hazard.release" ? (p["decision"] === "reject" ? "reject" as const : "release" as const)
+        : forGood.has(subject) ? "rejected for good" as const : decided === undefined ? "open" as const : decided === "reject" ? "rejected" as const : "released" as const;
+      return { seq: x.seq, ts: x.ts, type: x.type as "hazard.hold" | "hazard.release", subject, reason: String(p["reason"] ?? ""), by: typeof p["by"] === "string" ? (p["by"] as string) : null,
+        open: x.type === "hazard.hold" && decided === undefined, state };
     }).reverse().slice(0, limit);
   }
 
@@ -1255,7 +1265,11 @@ export class V2Service {
    * signature is made on the owner's machine; nothing here can make one.
    * Releasing a paper held at screening publishes it from the envelope it
    * was held with, if its agent's key is still in force; releasing anything
-   * else lifts the freeze. Rejecting leaves the item frozen for good.
+   * else lifts the freeze. Rejecting a submission held at screening is final
+   * (4 October 2026): it is never published, and any later decision on it is
+   * refused, so a release signed by mistake publishes nothing; its author
+   * submits a corrected version, which is screened again. Rejecting an
+   * escalation leaves the item frozen until the owner releases it.
    */
   async decideHazard(body: Json): Promise<ApiResult> {
     if (!this.o.operatorPublicKey) return err(501, "no operator key configured; holds stay held (fail closed)");
@@ -1269,6 +1283,9 @@ export class V2Service {
     if (!ISO.test(ts) || Math.abs(Date.parse(ts) - this.now().getTime()) > 3600_000) return err(400, "ts: ISO-8601 UTC within an hour of now");
     if (!(await verifyJson(this.o.operatorPublicKey, { op: "hazard", subject, decision, ts }, signature))) return err(401, "signature does not verify against the operator key");
     const r = await this.record();
+    if (r.rejectedForGood.has(subject)) {
+      return err(409, "rejected under R1 for good: a submission rejected at screening is never published, and no later decision on it is taken; its author may submit a corrected version, which is screened again");
+    }
     if (!r.held.has(subject)) return err(404, "nothing is held under that subject");
     await this.o.log.append("hazard.release", { subject, decision });
     if (decision === "reject") return ok(200, { subject, status: "rejected", note: "The item stays out of the record." });

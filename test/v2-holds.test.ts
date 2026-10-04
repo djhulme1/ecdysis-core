@@ -13,6 +13,7 @@ import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
+import { contentPage } from "../src/web/steward.js";
 import type { Screener } from "../src/core/hazard.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
@@ -177,5 +178,61 @@ describe("reserved power R1 (holds)", () => {
     assert.equal((await w.decide(cid2, "reject")).status, 200);
     assert.equal((await w.svc.record()).papers.size, 1);
     assert.equal((await w.page(`/p/ecd:${cid2.slice(0, 16)}`)).status, 404);
+  });
+
+  // 4 October 2026, Daniel: "I won't remember not to do things." A submission he has rejected must stay rejected, whatever
+  // he signs later.
+  it("a submission rejected at screening is rejected for good: a later release, signed by mistake, is refused and publishes nothing", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    const held = await w.svc.publishPaper(await w.paper("Ant", "A critique to LOOK at before it goes out"));
+    assert.equal(held.status, 202, JSON.stringify(held.body));
+    const cid = String((held.body as R)["id"]);
+    assert.equal((await w.decide(cid, "reject")).status, 200);
+    w.tick(90 * 24 * 3600_000);   // months on, the owner has forgotten
+    const later = await w.decide(cid, "release");
+    assert.equal(later.status, 409, JSON.stringify(later.body));
+    assert.match(JSON.stringify(later.body), /rejected under R1 for good/);
+    assert.equal((await w.decide(cid, "reject")).status, 409, "nor is it decided twice");
+    const rec = await w.svc.record();
+    assert.equal(rec.papers.size, 0, "nothing published");
+    assert.ok(rec.held.has(cid) && rec.rejectedForGood.has(cid));
+    assert.equal((await w.page(`/p/ecd:${cid.slice(0, 16)}`)).status, 404);
+    const rows = await w.svc.holds();
+    assert.equal(rows.find((h) => h.type === "hazard.hold" && h.subject === cid)!.state, "rejected for good");
+    assert.equal(rows.filter((h) => h.type === "hazard.release").length, 1, "the refused release never reached the log");
+    assert.match(contentPage({ holds: rows }, null, null), /<td>rejected for good<\/td>/, "the stewards' page says so");
+    // Its author fixes it and submits it again: a new submission, screened again, and the owner's to decide afresh.
+    const again = await w.svc.publishPaper(await w.paper("Ant", "A corrected critique to LOOK at"));
+    assert.equal(again.status, 202);
+    const cid2 = String((again.body as R)["id"]);
+    assert.notEqual(cid2, cid);
+    const rel = await w.decide(cid2, "release");
+    assert.equal(rel.status, 200, JSON.stringify(rel.body));
+    assert.equal((rel.body as R)["published"], true);
+    assert.ok((await w.svc.record()).papers.has(`ecd:${cid2.slice(0, 16)}`));
+  });
+
+  it("adversarial: a release written to the log after a rejection, by any means, lifts nothing and publishes nothing", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    const held = await w.svc.publishPaper(await w.paper("Ant", "Another one to LOOK at"));
+    const cid = String((held.body as R)["id"]);
+    assert.equal((await w.decide(cid, "reject")).status, 200);
+    // As if an older server, a replayed request or a direct write appended a release after the rejection.
+    await (w.svc as unknown as { o: { log: { append: (t: string, p: Json) => Promise<unknown> } } }).o.log.append("hazard.release", { subject: cid, decision: "release" });
+    const rec = await w.svc.record();
+    assert.ok(rec.held.has(cid), "still out of view");
+    assert.ok(rec.rejectedForGood.has(cid));
+    assert.equal(rec.papers.size, 0);
+    assert.equal((await w.decide(cid, "release")).status, 409);
+    // An escalation is not a submission: rejecting one still leaves it the owner's to release (the test above).
+    await w.agent("Cat", "op-c", ["gemini"]);
+    const p = await w.svc.publishPaper(await w.paper("Ant", "A quiet result on the record"));
+    const ref = ((p.body as R)["claims"] as string[])[0]!;
+    assert.equal((await w.escalate("Cat", ref)).status, 202);
+    assert.equal((await w.decide(ref, "reject")).status, 200);
+    assert.ok(!(await w.svc.record()).rejectedForGood.has(ref));
+    assert.equal((await w.svc.holds()).find((h) => h.type === "hazard.hold" && h.subject === ref)!.state, "rejected");
   });
 });
