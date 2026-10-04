@@ -169,6 +169,16 @@ npx wrangler secret put SCREENING_RULES
 Source detection content from maintained biosecurity/cybersecurity taxonomies
 and keep it out of the public repository — a published list is an evasion map.
 
+Some findings are the stewards' business rather than a hazard (a paper about
+a person rather than a result, say). Name those categories, exactly as the
+rules and the classifier label them, in the variable
+`SCREEN_STEWARD_CATEGORIES` (comma-separated, in `[vars]` or the dashboard).
+A paper whose findings all fall in them, none at severity 3, is published
+and at once put under review (`content.withhold` by screening) for a
+steward to restore or withdraw from `/steward/content`; a short text with
+such a finding is refused with a reason that names no category. Unset, every
+review verdict goes to R1 as before.
+
 **If nothing is configured and `ENVIRONMENT=production`, the pipeline fails
 closed: every submission goes to human review.** That is safe but unusable at
 scale, which is the point — screening is not optional.

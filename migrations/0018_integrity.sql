@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS v2_subjects (
 -- publicly (content.withhold / content.restore); the issue is not.
 CREATE TABLE IF NOT EXISTS v2_issues (
   id          TEXT PRIMARY KEY,
-  kind        TEXT NOT NULL,         -- complaint | quote-mismatch | source-unresolvable | duplicate | named-person | other
+  kind        TEXT NOT NULL,         -- complaint | quote-mismatch | source-unresolvable | duplicate | screening | other
   subject     TEXT NOT NULL,         -- ecd:… | ext:… | ch:… | a 64-hex id
   severity    INTEGER NOT NULL,      -- 1 worth a look, 2 decide soon, 3 hide first
   detail      TEXT NOT NULL,

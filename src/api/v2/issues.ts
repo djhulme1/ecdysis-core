@@ -23,7 +23,7 @@ import type { V2Service } from "./service.js";
 import { subjectKind } from "./service.js";
 import { complaintsPageV2 } from "../../web/v2/pages.js";
 
-export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" | "duplicate" | "named-person" | "other";
+export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" | "duplicate" | "screening" | "other";
 export type IssueSource = "complaint" | "scout" | "screening" | "steward";
 export type IssueStatus = "open" | "dismissed" | "acted";
 
