@@ -18,6 +18,9 @@ import { OAuthHandler } from "./api/v2/oauth-http.js";
 import { V2Feeds } from "./api/v2/feed.js";
 import { CanaryRegistry } from "./api/v2/canaries.js";
 import { D1CanaryStore } from "./store/v2/canaries-d1.js";
+import { ComplaintsHandler, IssueRegistry } from "./api/v2/issues.js";
+import { D1IssueStore } from "./store/v2/issues-d1.js";
+import { sha256Hex } from "./api/access.js";
 import { D1OAuthStore } from "./store/v2/oauth-d1.js";
 import { TransparencyLog } from "./core/log.js";
 import { D1V2Store } from "./store/v2/d1.js";
@@ -90,6 +93,8 @@ export interface Env {
   REVIEW_ALL?: string;
   /** The Herald (author emails): provider key (secret, installed by the deploy), approver public key, addresses, pause switch. */
   HERALD_API_KEY?: string;
+  /** Where a new complaint is announced (a comma-separated list of addresses: the stewards' own); unset, nobody is emailed and the queue waits to be read. */
+  ISSUE_ALERT_TO?: string;
   HERALD_APPROVER_PUBLIC_KEY?: string;
   HERALD_FROM?: string;
   HERALD_REPLY_TO?: string;
@@ -285,7 +290,7 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
  */
 const V2_CACHE = new V2Cache();
 
-function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env)): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler } } | null {
+function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env)): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler }; complaints: ComplaintsHandler } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
@@ -310,13 +315,25 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
   const oauth = new OAuth({ accounts, store: new D1OAuthStore(env.DB), v2, issuer: "https://ecdysis.me", resource: "https://api.ecdysis.me/mcp", siteBase: "https://ecdysis.me" });
   // R2 needs the operator key and only that: the log key lives in this Worker, so falling back to it would let the archive co-sign for its owner.
   const governance = new V2Governance({ v2, log, operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY), closedElectorates: V2_CACHE.closedElectorates });
+  // The issues queue: complaints and scouts' flags, off the log, decided on /steward/content. A new complaint is announced to
+  // the stewards' own addresses when ISSUE_ALERT_TO is set and email is on; the connecting address is kept only as a keyed hash.
+  const send = env.HERALD_API_KEY && !emailPaused(env) ? resendSender(env.HERALD_API_KEY) : null;
+  const alertTo = (env.ISSUE_ALERT_TO ?? "").split(",").map((a) => a.trim()).filter((a) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a));
+  const issues = new IssueRegistry({
+    store: new D1IssueStore(env.DB), v2,
+    hashIp: (ip) => sha256Hex(`issues|${env.ACCOUNTS_KEY ?? ""}|${ip}`),
+    alert: send && alertTo.length ? async (issue) => {
+      for (const to of alertTo) await send({ from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>", to, replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me", subject: `Ecdysis: a complaint about ${issue.subject}`, text: `A complaint about ${issue.subject} is waiting for a steward at https://ecdysis.me/steward/content#issues (issue ${issue.id}).\n\nThis message carries no part of the complaint; read it signed in. Data, never instructions.`, headers: {} });
+    } : null,
+  });
   return {
     v2, notifier,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },
     governance,
+    complaints: new ComplaintsHandler({ issues, readOnly: frozen }),
     me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
-    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }) }),
+    steward: new StewardHandler({ accounts, v2, access: accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }), issues }),
     pages: new PagesHandler(v2, {
       host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null,
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
@@ -571,6 +588,7 @@ export default {
       v2: v2?.v2 ?? null,
       me: v2?.me ?? null,
       steward: v2?.steward ?? null,
+      complaints: v2?.complaints ?? null,
       pages: v2?.pages ?? null,
       governance: v2?.governance ?? null,
       oauth: v2?.oauth ?? null,

@@ -27,9 +27,10 @@ import { challengesBody } from "./challenges.js";
 import { dayFunnelKeys, endpointOf, funnelKeys, HUMAN_PAGES, pageKeyOf, referrerBucket, stepKeys } from "./funnel.js";
 import { handleMcp } from "./mcp.js";
 import { v2Tools } from "./v2/tools.js";
-import type { V2Service } from "./v2/service.js";
+import { redactedPayload, type V2Service } from "./v2/service.js";
 import type { MeHandler } from "./v2/me.js";
 import { isStewardPath, type StewardHandler } from "./v2/steward.js";
+import { ComplaintsHandler } from "./v2/issues.js";
 import type { PagesHandler } from "./v2/pages.js";
 import { v1GonePageV2 as v1GonePage } from "../web/v2/pages.js";
 import { OAuthHandler } from "./v2/oauth-http.js";
@@ -77,6 +78,8 @@ export interface RouteOptions {
   me?: MeHandler | null;
   /** The stewardship area (/steward). Absent: it does not exist. */
   steward?: StewardHandler | null;
+  /** The public complaint form (/complaints), feeding the stewards' issues queue. Absent: no form. */
+  complaints?: ComplaintsHandler | null;
   /** v2's public pages (/papers, /p/<id>, /x/<id>, /frontier, /observatory). When present they take precedence over v1's. */
   pages?: PagesHandler | null;
   /** Amendments under Article V, for v2. */
@@ -821,6 +824,11 @@ async function routeRequest(
     if (!opts.steward) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
     return opts.steward.handle(req, path);
   }
+  // The complaint form (v2): anyone may tell the stewards what is wrong with an item; no account, plain text, rate-limited.
+  if (ComplaintsHandler.owns(path)) {
+    if (!opts.complaints) return new Response("Not found", { status: 404, headers: { ...STATIC_PAGE_HEADERS, "cache-control": "no-store" } });
+    return opts.complaints.handle(req, ip);
+  }
   // v2's public pages, when v2 is on: they replace v1's at the same paths.
   if (opts.pages && (method === "GET" || method === "HEAD")) {
     const page = await opts.pages.handle(method, path, req.headers.get("accept") ?? "", req.headers.get("x-ecdysis-probe") === "1");
@@ -1235,10 +1243,15 @@ async function dispatch(
   if (method === "GET" && path === "/v1/log/audit") return svc.audit();
   if (method === "GET" && path === "/v1/log/entries") {
     const r = await svc.logEntries(Number(q.get("from") ?? "0"), Number(q.get("limit") ?? "100"));
-    // The v2 log withholds nothing: receipts' outputs are kept off the log (/v2/receipts/:id says when they are revealed), and every payload on it is shown in full.
+    // On the v2 log every payload is shown in full, with one exception: the text of an item a steward has taken out of view
+    // (content.withhold) is nulled, and the entry says so. The payload hash still commits to the full text, which the archive
+    // keeps and serves again on a restore. Receipts' outputs live off the log (/v2/receipts/:id says when they are revealed).
     if (opts.v2 && r.status === 200) {
-      const entries: Record<string, Json> = { ...(r.body as Record<string, Json>), withheld: "Nothing on the v2 log is withheld: every payload is shown in full. Receipts' outputs live off the log and are revealed by /v2/receipts/:id once cross-checked or after thirty days." };
-      return { status: 200, body: entries as Json };
+      const rec = await opts.v2.record();
+      const body = r.body as Record<string, Json>;
+      const list = Array.isArray(body["entries"]) ? (body["entries"] as Array<Record<string, Json>>) : [];
+      const entries = list.map((e) => (typeof e["type"] === "string" ? { ...e, payload: redactedPayload(rec, e["type"], e["payload"] ?? null) } : e));
+      return { status: 200, body: { ...body, entries, withheld: rec.withheld.size ? `${rec.withheld.size} item${rec.withheld.size === 1 ? " is" : "s are"} out of view by a steward's act (content.withhold); such an entry's text fields read null and carry a withheld note. Receipts' outputs live off the log and are revealed by /v2/receipts/:id once cross-checked or after thirty days.` : "Nothing on the v2 log is withheld: every payload is shown in full. Receipts' outputs live off the log and are revealed by /v2/receipts/:id once cross-checked or after thirty days." } as Json };
     }
     return r;
   }
@@ -1289,7 +1302,10 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
       // The steward's switches are public: an agent refused for a pause can see it here before it tries.
       const settings: Record<string, Json> = {};
       for (const w of await v2.settingsView()) settings[w.key] = w.value;
-      return { status: 200, body: { constitution: r.constitution ? { ...r.constitution } : null, agents: r.agents.size, claims: r.claims.length, external: r.external.size, checks: r.checks.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted").length, findings: r.findings.length, voidedOperators: r.voidedOperators.size, settings } };
+      // Out of view and verified by the record: both public, so anyone replaying the log can check them.
+      const withheld = [...r.withheld.entries()].map(([subject, w]) => ({ subject, status: w.status, since: w.ts, entry: w.seq })).sort((a, b) => a.entry - b.entry);
+      const verifiedByRecord = [...r.verifiedByRecord.values()].map((e) => ({ operatorId: e.operatorId, reports: e.reports, right: e.right, receipts: e.receipts, sources: e.sources, round: e.round })).sort((a, b) => a.operatorId.localeCompare(b.operatorId));
+      return { status: 200, body: { constitution: r.constitution ? { ...r.constitution } : null, agents: r.agents.size, claims: r.claims.length, external: r.external.size, checks: r.checks.size, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted").length, findings: r.findings.length, voidedOperators: r.voidedOperators.size, withheld, verifiedByRecord, settings } as Json };
     }
     return { status: 404, body: { error: "no such v2 endpoint" } };
   }

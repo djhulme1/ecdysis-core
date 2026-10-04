@@ -51,6 +51,7 @@ import {
   type ClaimInput,
   type ClaimV2,
   type EvidenceInput,
+  type EvidenceKind,
   type UseInput,
 } from "./credence.js";
 
@@ -79,6 +80,78 @@ export interface ScoredReport {
   /** The claim's resolution without this report: 1 established, 0 refuted, null not yet. */
   resolved: 0 | 1 | null;
   credit: number;
+  /** The reporting operator (verification by record counts per operator). Absent on argument reports. */
+  operatorId?: string;
+  /** replication, rerun or review. Absent on argument reports. */
+  kind?: EvidenceKind;
+  /** Filed before any verified replication by another operator on the claim: a call made while the record was still open. */
+  early?: boolean;
+  /** Distinct verified operators whose replications the leave-one-operator-out resolution rests on. */
+  resolvers?: number;
+  /** A receipt that a verified, independent cross-check matched. */
+  crossChecked?: boolean;
+}
+
+/**
+ * Verification by record (4 October 2026, Daniel: "verified by some function
+ * of credence"). An operator that no steward has verified and nobody has
+ * vouched for earns the verified tier from what the record shows it did:
+ * reports filed EARLY (before any verified replication by another operator
+ * on the claim), on claims that then RESOLVED on the replications of at
+ * least two verified operators other than itself (the leave-one-operator-out
+ * resolution the track record already scores against), enough of them, on
+ * enough distinct sources, including receipts that an independent verified
+ * cross-check matched (so compute and honesty are in the mix, not only
+ * forecasting), and RIGHT often enough (a report is right when its credit
+ * is positive: it moved credence towards where the record resolved). No
+ * finding in force. Earned verification counts in turn: the newly verified
+ * resolve claims that let others earn, so the verified set is the least
+ * fixed point of this rule over the steward-verified base (resolve.ts).
+ */
+export const EARNING_PARAMS = {
+  /** Qualifying reports needed. */
+  reports: 5,
+  /** Of which cross-checked receipts. */
+  receipts: 2,
+  /** Distinct papers or sources the qualifying reports' claims come from. */
+  sources: 3,
+  /** Share of qualifying reports that must be right. */
+  right: 0.75,
+  /** Verified operators, other than the reporter, whose replications the resolution must rest on. */
+  resolvers: 2,
+} as const;
+
+export interface EarnedVerification {
+  operatorId: string;
+  reports: number;
+  right: number;
+  receipts: number;
+  sources: number;
+  /** The round of the fixed-point iteration in which the operator earned it (1: against the steward-verified base). */
+  round: number;
+}
+
+/**
+ * The operators that earn verification from these scored reports, given who
+ * is verified already. Pure; one pass over the reports.
+ */
+export function earnedVerification(reports: ScoredReport[], verified: (operatorId: string) => boolean, voidedOperators: Set<string> = new Set(), round = 1, params = EARNING_PARAMS): Map<string, EarnedVerification> {
+  const byOperator = new Map<string, ScoredReport[]>();
+  for (const r of reports) {
+    if (!r.operatorId || verified(r.operatorId) || voidedOperators.has(r.operatorId)) continue;
+    if (!r.early || r.resolved === null || (r.resolvers ?? 0) < params.resolvers) continue;
+    byOperator.set(r.operatorId, [...(byOperator.get(r.operatorId) ?? []), r]);
+  }
+  const earned = new Map<string, EarnedVerification>();
+  for (const [operatorId, rs] of byOperator) {
+    const right = rs.filter((r) => r.credit > 0).length;
+    const receipts = rs.filter((r) => r.kind === "replication" && r.crossChecked === true).length;
+    const sources = new Set(rs.map((r) => r.claim.slice(0, r.claim.indexOf("#") > 0 ? r.claim.indexOf("#") : undefined))).size;
+    if (rs.length >= params.reports && receipts >= params.receipts && sources >= params.sources && right >= params.right * rs.length) {
+      earned.set(operatorId, { operatorId, reports: rs.length, right, receipts, sources, round });
+    }
+  }
+  return earned;
 }
 
 export interface TrackRecord {
@@ -197,9 +270,12 @@ export function scoreTrackRecord(
           foundationRefuted,
         });
       const resolved = resolutionOf(status, o.anchors?.get(c.ref));
+      // Early: nobody verified, other than this operator, had replicated the claim yet when this report was filed.
+      const early = !prefix.some((e) => e.tier === "verified" && e.kind !== "review" && e.operatorId !== item.operatorId && e.auditable !== false);
       reports.push({
         id: item.id, agent: item.agent, claim: c.ref, seq: item.seq, before, after, resolved,
         credit: resolved === null ? 0 : marketCredit(before, after, resolved),
+        operatorId: item.operatorId, kind: item.kind, early, resolvers: without.replicatingOperators, ...(item.crossChecked ? { crossChecked: true } : {}),
       });
     }
   }

@@ -5,8 +5,8 @@
  * deployment and from a test against the router.
  */
 import { CREDENCE_V2_VERSION } from "../../core/v2/credence.js";
-import { deriveV2, V2_ENTRY_TYPES, type V2Entry, type V2EntryType } from "../../core/v2/flow.js";
-import { computeV2 } from "../../core/v2/scoring.js";
+import { V2_ENTRY_TYPES, type V2Entry, type V2EntryType } from "../../core/v2/flow.js";
+import { resolveV2 } from "../../core/v2/resolve.js";
 
 export interface PublicEntry { seq: number; ts: string; type: string; payload: Record<string, unknown>; withheld?: string[] }
 export interface RecomputeV2Report { entries: number; compared: number; mismatches: string[]; agents: number; receipts: number; findings: number; voided: number }
@@ -25,8 +25,7 @@ export async function recomputeV2(getJson: <T>(path: string) => Promise<T>, now:
     if (page.next === null || page.entries.length === 0) break;
     from = page.next;
   }
-  const r = deriveV2(entries, now);
-  const s = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors, arguments: r.argumentEffects, argumentStates: [...r.arguments.values()] });
+  const { record: r, scores: s } = resolveV2(entries, now);
   const served = await getJson<{ version: string; claims: Array<{ ref: string; credence: number; status: string; use: number; dispute: number }> }>("/v2/credence");
   if (served.version !== CREDENCE_V2_VERSION) throw new Error(`server speaks ${served.version}, this code ${CREDENCE_V2_VERSION}`);
   const near = (a: number, b: number) => Math.abs(a - b) <= 1e-6;

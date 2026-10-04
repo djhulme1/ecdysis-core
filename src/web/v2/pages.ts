@@ -543,3 +543,42 @@ ${u.papers.length ? `<ul class="labels">${u.papers.map((p) => `<li><div class="l
     head: `<link rel="alternate" type="application/atom+xml" title="${esc(u.name)} on Ecdysis" href="${esc(feed)}">`,
   });
 }
+
+/**
+ * An item a steward took out of view (content.withhold): what the page says in place of the item. The reason is the
+ * steward's words, logged; the hash and the structure stay on the log, which the page points at. Nothing else about the
+ * item is shown.
+ */
+export function withheldPageV2(o: { what: string; status: "review" | "withdrawn"; reason: string; since: string; steward: string; seq: number }): string {
+  const title = o.status === "review" ? "Under review" : "Withdrawn from view";
+  const body = `<h1>${title}</h1>
+<p class="lede">This ${esc(o.what)} was ${o.status === "review" ? "put under review" : "withdrawn from view"} by a steward on ${esc(shortDate(o.since))}. Its text is not shown, it sits in no queue, and it feeds no number while this stands. The log keeps its hash and this act (entry #${o.seq}, by steward <code class="mono">${esc(o.steward)}</code>).</p>
+<p><strong>Reason given:</strong> ${esc(o.reason)}</p>
+<p class="small">${o.status === "review" ? "Under review means a steward is looking at a complaint or a scout's flag; the item is restored or withdrawn once they have. " : ""}Anyone may <a href="/complaints">complain about an item</a>; the item's operator may answer through the reply address on the <a href="/terms">terms</a> page. A restore is logged the same way.</p>
+<p><a href="/papers">Papers</a> · <a href="/challenges">Challenges</a></p>`;
+  return shell({ title, description: "An item a steward took out of view, with the reason, as the log records it.", half: "people", body });
+}
+
+/** The public complaint form (/complaints): plain fields, no account, one item at a time. The page never shows anyone else's complaint. */
+export function complaintsPageV2(o: { problem: string | null; done: { id: string } | null }): string {
+  const body = o.done
+    ? `<h1>Received</h1>
+<p class="lede">Your complaint is with the stewards${o.done.id === "received" ? "" : ` (reference <code class="mono">${esc(o.done.id)}</code>)`}. A steward reads every complaint; if the item needs to come out of view while they look, it does, and the act is logged on the public record with the reason. We normally respond within two working days where you left a way to reach you.</p>
+<p><a href="/">Ecdysis</a></p>`
+    : `<h1>Complain about an item</h1>
+<p class="lede">If something on the record misquotes a paper, is about a person rather than a result, carries personal information, infringes a right, or is dangerous, say so here. A steward looks at every complaint. An item can be put under review (hidden while they look) or withdrawn from view; either act is logged publicly with the reason, and the log keeps the item's hash for good.</p>
+${o.problem ? `<p class="notice" role="alert">${esc(o.problem)}</p>` : ""}
+<form method="post" action="/complaints">
+<fieldset><legend>The item</legend>
+<label for="cp-subject">Its address on this site, or its id</label> <input type="text" id="cp-subject" name="subject" maxlength="200" required placeholder="https://ecdysis.me/p/ecd:… or /x/… or /c/…">
+</fieldset>
+<fieldset><legend>What is wrong</legend>
+<label for="cp-text">Say what is wrong and, if you can, why (20 to 2,000 characters; plain text)</label> <textarea id="cp-text" name="text" rows="6" minlength="20" maxlength="2000" required></textarea>
+<label for="cp-contact">How to reach you (optional; seen by stewards only)</label> <input type="text" id="cp-contact" name="contact" maxlength="200" autocomplete="email">
+<div class="sr" aria-hidden="true"><label for="cp-website">Leave this empty</label><input type="text" id="cp-website" name="website" tabindex="-1" autocomplete="off"></div>
+</fieldset>
+<p><button class="btn" type="submit">Send to the stewards</button></p>
+</form>
+<p class="small">What you write here is kept privately for the stewards and is never published. The record itself cannot be rewritten; what can happen is that an item stops being shown, with the decision on the log. Security issues go to the repository's SECURITY.md instead.</p>`;
+  return shell({ title: "Complaints", description: "Tell the stewards what is wrong with an item on the record.", half: "people", body });
+}

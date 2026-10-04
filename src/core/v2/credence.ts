@@ -229,6 +229,8 @@ export interface EvidenceInput {
    * tier, and settles nothing. Absent or true: weighed by tier as usual.
    */
   auditable?: boolean;
+  /** A receipt that a verified, independent cross-check has matched: it has been re-run by someone else and came out the same (verification by record counts these). */
+  crossChecked?: boolean;
 }
 
 /** A later paper relying on a claim (extends or method). */
@@ -267,6 +269,8 @@ export interface EvidenceSum {
   sumVerified: number;
   /** Distinct verified operators whose counted item is a confirming replication. */
   confirmingOperators: number;
+  /** Distinct verified operators whose counted item is a replication or re-run, confirming or failing: the voices a resolution rests on. */
+  replicatingOperators: number;
   /** Weighted confirming and disconfirming evidence mass, VERIFIED operators only (what can resolve a claim): the dispute number's inputs. */
   s: number;
   f: number;
@@ -454,6 +458,7 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   let failingReplication = false;
   let reproduced = false;
   let confirmingOperators = 0;
+  let replicatingOperators = 0;
   const confirmingFamilies = new Set<string>();
   // Only VERIFIED items set the families that discount later ones: an unverified sybil declaring every family (its own
   // weight capped at ln 3 all together) could otherwise multiply every later verified replication by a half per sybil.
@@ -491,6 +496,7 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
       }
     }
     if (tier === "verified") {
+      if (e.kind !== "review") replicatingOperators++;
       if (e.confirms) s += w * MASS[e.kind];
       else f += w * MASS[e.kind];
       if (e.kind === "replication") {
@@ -504,7 +510,7 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   const cappedUnverified = Math.max(-P.unverifiedCap, Math.min(P.unverifiedCap, unverified));
   return {
     sum: checks + cappedUnverified + cappedReviews, sumVerified: checks + cappedReviews,
-    s, f, sReplication, fReplication, confirmingReplication, failingReplication, confirmingOperators, confirmingFamilies, reproduced, counted,
+    s, f, sReplication, fReplication, confirmingReplication, failingReplication, confirmingOperators, replicatingOperators, confirmingFamilies, reproduced, counted,
   };
 }
 

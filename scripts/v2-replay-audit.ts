@@ -20,8 +20,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { deriveV2, type V2Entry } from "../src/core/v2/flow.js";
-import { computeV2 } from "../src/core/v2/scoring.js";
+import type { V2Entry } from "../src/core/v2/flow.js";
+import { resolveV2 } from "../src/core/v2/resolve.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "audit");
 const BASELINE = join(ROOT, "v2-baseline.json");
@@ -207,6 +207,67 @@ export function scriptedLog(): V2Entry[] {
   checkArg("Fox", "op-a1", same, true, ["claude"]);
   // The author answers one argument; the answer weighs nothing.
   push("argument.answer", { argument: lg, text: "the author's reply", handle: "Dog", operatorId: "op-v4" });
+
+  // Verification by record (4 October, Daniel: "verified by some function of credence"). Yak (op-a3, an account nobody vouched
+  // for, declared mistral) is first on five of Emu's and Ant's claims from four sources: three receipts, each later matched by
+  // a verified cross-check, and two reviews; Cat (gemini) and Dog (grok) then establish each claim. Yak earns the tier in
+  // round one. Zed (op-a4, declared llama) is first on five more of Emu's claims, whose second verified voice is Yak's, so
+  // they resolve only once Yak's receipts weigh one: Zed earns in round two, which is the chaining. Sly (op-s1) is right
+  // five times early but only in reviews: no tier. Hog (op-h1) files five right reviews after the record had resolved: no
+  // tier. (Emu authors and Cat and Dog check, so no new ring forms: a ring would halve their voices on every earlier claim.)
+  for (const [handle, op, models] of [["Yak", "op-a3", ["mistral"]], ["Zed", "op-a4", ["llama"]], ["Sly", "op-s1", ["claude"]], ["Hog", "op-h1", ["gpt"]]] as Array<[string, string, string[]]>) {
+    push("operator.tier", { operatorId: op, tier: "account" });
+    push("agent.register", { handle, operatorId: op, publicKey: `pk-${handle}`, models, constitution: { version: "2.0.0" } });
+    agents.push([handle, op, models]);
+  }
+  paper("ecd:p16", "Emu", "op-v5", [["C1", 0.8], ["C2", 0.8], ["C3", 0.8]], []);
+  paper("ecd:p17", "Emu", "op-v5", [["C1", 0.8]], []);
+  paper("ecd:p18", "Emu", "op-v5", [["C1", 0.8]], []);
+  push("claim.external", { id: "ext:dddddddddddddddd", handle: "Ant", operatorId: "op-v1", source: "arxiv:2001.00001", quote: "a sound result from the literature", test: "fails to reproduce" });
+  // Yak's five, with Sly's forecasts beside them (early too, but reviews only).
+  const yak1 = receipt("Yak", "op-a3", "ecd:p16#C1", "confirmed");
+  push("review.file", { id: "sly1", claim: "ecd:p16#C1", handle: "Sly", operatorId: "op-s1", forecast: 0.9 });
+  const yak2 = receipt("Yak", "op-a3", "ecd:p16#C2", "confirmed");
+  push("review.file", { id: "sly2", claim: "ecd:p16#C2", handle: "Sly", operatorId: "op-s1", forecast: 0.9 });
+  const yak3 = receipt("Yak", "op-a3", "ecd:p17#C1", "confirmed");
+  push("review.file", { id: "sly3", claim: "ecd:p17#C1", handle: "Sly", operatorId: "op-s1", forecast: 0.9 });
+  push("review.file", { id: "yak4", claim: "ecd:p18#C1", handle: "Yak", operatorId: "op-a3", forecast: 0.85 });
+  push("review.file", { id: "sly4", claim: "ecd:p18#C1", handle: "Sly", operatorId: "op-s1", forecast: 0.9 });
+  push("review.file", { id: "yak5", claim: "ext:dddddddddddddddd#C1", handle: "Yak", operatorId: "op-a3", forecast: 0.9 });
+  push("review.file", { id: "sly5", claim: "ext:dddddddddddddddd#C1", handle: "Sly", operatorId: "op-s1", forecast: 0.9 });
+  // Cat, Dog and Fox (vouch-verified; three declared families) establish each; Cat's receipt cross-checks Yak's where there is one.
+  for (const [claim, yak] of [["ecd:p16#C1", yak1], ["ecd:p16#C2", yak2], ["ecd:p17#C1", yak3], ["ecd:p18#C1", null], ["ext:dddddddddddddddd#C1", null]] as Array<[string, string | null]>) {
+    const first = receipt("Cat", "op-v3", claim, "confirmed", yak ? { cross: yak, match: true } : {});
+    const second = receipt("Dog", "op-v4", claim, "confirmed", { cross: first, match: true });
+    receipt("Fox", "op-a1", claim, "confirmed", { cross: second, match: true });
+  }
+  for (const [i, claim] of ["ecd:p16#C1", "ecd:p16#C2", "ecd:p17#C1", "ecd:p18#C1", "ext:dddddddddddddddd#C1"].entries()) push("review.file", { id: `hog${i + 1}`, claim, handle: "Hog", operatorId: "op-h1", forecast: 0.9 });
+  // Zed's five: three receipts cross-checked by Yak, two reviews; each claim's second voice is Yak's.
+  paper("ecd:p19", "Emu", "op-v5", [["C1", 0.8]], []);
+  paper("ecd:p20", "Emu", "op-v5", [["C1", 0.8]], []);
+  paper("ecd:p21", "Emu", "op-v5", [["C1", 0.8]], []);
+  paper("ecd:p22", "Emu", "op-v5", [["C1", 0.8], ["C2", 0.8]], []);
+  const zed1 = receipt("Zed", "op-a4", "ecd:p19#C1", "confirmed");
+  const zed2 = receipt("Zed", "op-a4", "ecd:p20#C1", "confirmed");
+  const zed3 = receipt("Zed", "op-a4", "ecd:p21#C1", "confirmed");
+  push("review.file", { id: "zed4", claim: "ecd:p22#C1", handle: "Zed", operatorId: "op-a4", forecast: 0.85 });
+  push("review.file", { id: "zed5", claim: "ecd:p22#C2", handle: "Zed", operatorId: "op-a4", forecast: 0.85 });
+  // Two steward-side voices (Cat or Dog, and Fox) and Yak's: with Yak at account weight the claims stay supported; once Yak has
+  // earned the tier they resolve, and Zed's early calls on them are scored.
+  const opOf = (h: string) => (h === "Cat" ? "op-v3" : h === "Dog" ? "op-v4" : "op-a1");
+  for (const [claim, zed, other] of [["ecd:p19#C1", zed1, "Cat"], ["ecd:p20#C1", zed2, "Dog"], ["ecd:p21#C1", zed3, "Cat"], ["ecd:p22#C1", null, "Dog"], ["ecd:p22#C2", null, "Cat"]] as Array<[string, string | null, string]>) {
+    const y = receipt("Yak", "op-a3", claim, "confirmed", zed ? { cross: zed, match: true } : {});
+    const o2 = receipt(other, opOf(other), claim, "confirmed", { cross: y, match: true });
+    receipt("Fox", "op-a1", claim, "confirmed", { cross: o2, match: true });
+  }
+
+  // Content out of view (4 October): a steward puts an external claim under review (it stays so: frozen out of every number),
+  // and withdraws then restores P5 (released from R1 above), which therefore counts as before.
+  push("claim.external", { id: "ext:eeeeeeeeeeeeeeee", handle: "Ant", operatorId: "op-v1", source: "doi:10.1000/misquoted", quote: "words the paper does not contain", test: "fails" });
+  push("review.file", { id: "v6", claim: "ext:eeeeeeeeeeeeeeee#C1", handle: "Bee", operatorId: "op-v2", forecast: 0.7 });
+  push("content.withhold", { subject: "ext:eeeeeeeeeeeeeeee", status: "review", reason: "the quote could not be found in the source; under review", by: "steward", steward: "op-steward" });
+  push("content.withhold", { subject: "ecd:p5", status: "withdrawn", reason: "withdrawn pending a complaint", by: "steward", steward: "op-steward" });
+  push("content.restore", { subject: "ecd:p5", reason: "the complaint did not stand", by: "steward", steward: "op-steward" });
   return out;
 }
 
@@ -214,8 +275,7 @@ export function scriptedLog(): V2Entry[] {
 export function scoreScripted(): V2Outputs {
   const log = scriptedLog();
   const asOf = new Date(Date.UTC(2026, 10, 1));
-  const r = deriveV2(log, asOf);
-  const s = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators, lapses: r.lapses, anchors: r.anchors, arguments: r.argumentEffects, argumentStates: [...r.arguments.values()] });
+  const { record: r, scores: s, verifiedByRecord, rounds } = resolveV2(log, asOf);
   const claims: Record<string, string> = {};
   for (const [ref, c] of [...s.claims.entries()].sort()) claims[ref] = `${r6(c.credence)} · ${r6(c.credenceVerified)} · ${c.status} · use ${r6(c.use)} · dispute ${r6(c.dispute)}${c.kind === "conceptual" ? " · conceptual" : ""}${c.cap !== null ? ` · cap ${r6(c.cap)}` : ""}${c.arguments.methodology ? ` · methodology ${c.arguments.methodology}` : ""}`;
   const reliability: Record<string, string> = {};
@@ -234,6 +294,10 @@ export function scoreScripted(): V2Outputs {
     reports: s.track.reports.length.toString(),
     resolved: s.track.reports.filter((x) => x.resolved !== null).length.toString(),
     arguments: [...r.arguments.values()].sort((a, b) => a.seq - b.seq).map((a) => `${a.claim}:${a.grounds}:${a.status}`).join(";") || "none",
+    // Verification by record: who earned the tier, from what, and in how many rounds the fixed point was reached.
+    verifiedByRecord: [...verifiedByRecord.values()].sort((a, b) => a.operatorId.localeCompare(b.operatorId)).map((e) => `${e.operatorId}:${e.reports}/${e.right}/${e.receipts}/${e.sources}@${e.round}`).join(";") || "none",
+    rounds: rounds.toString(),
+    withheld: [...r.withheld.entries()].sort().map(([sub, w]) => `${sub}:${w.status}`).join(";") || "none",
   };
   return { claims, reliability, tiers, findings, facts };
 }
