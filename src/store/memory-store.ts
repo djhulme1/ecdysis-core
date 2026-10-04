@@ -230,7 +230,7 @@ export class MemoryStore implements Store {
   async listDeliveries(issueId: string): Promise<DeliveryRecord[]> {
     return [...this.deliveries.values()].filter((d) => d.issueId === issueId).map((d) => structuredClone(d));
   }
-  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest" | "doorbell"): Promise<void> {
+  async recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest" | "doorbell" | "doorbell-confirm"): Promise<void> {
     this.sends.push({ at, kind });
   }
 
@@ -261,6 +261,12 @@ export class MemoryStore implements Store {
     const clash = [...this.doorbells.values()].find((x) => x.setupId === d.setupId && x.handle !== d.handle);
     if (clash) throw new Error("UNIQUE constraint failed: doorbells.setup_id");
     this.doorbells.set(d.handle, structuredClone(d));
+  }
+  async putDoorbellIf(d: DoorbellRecord, expectUpdatedAt: string | null): Promise<boolean> {
+    const cur = this.doorbells.get(d.handle);
+    if (expectUpdatedAt === null ? !!cur : !cur || cur.updatedAt !== expectUpdatedAt) return false;
+    await this.putDoorbell(d);
+    return true;
   }
   async getDoorbell(handle: string): Promise<DoorbellRecord | null> {
     const d = this.doorbells.get(handle);

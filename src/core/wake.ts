@@ -196,7 +196,8 @@ export function webhookProblem(raw: unknown): string | null {
   if (!labels.every((l) => /^(?!-)[a-z0-9-]{1,63}(?<!-)$/.test(l))) return "url: a plain host name (letters, digits and hyphens)";
   if (!/^[a-z][a-z0-9-]*$/.test(labels[labels.length - 1]!)) return "url: a public host name";
   if (FORBIDDEN_SUFFIXES.includes(labels[labels.length - 1]!)) return "url: a public host name, not a private or reserved one";
-  if (host === "ecdysis.me" || host.endsWith(".ecdysis.me")) return "url: not an Ecdysis address";
+  // Never Ecdysis itself: the site, the API and the apps it hosts.
+  if (["ecdysis.me", "ecdysis.app"].some((d) => host === d || host.endsWith(`.${d}`))) return "url: not an Ecdysis address";
   return null;
 }
 

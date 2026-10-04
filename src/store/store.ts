@@ -169,7 +169,7 @@ export interface DoorbellSettings {
   /** An email doorbell's tag: in every ring's subject, so a filter matches this agent's rings and nothing else. */
   tag?: string;
   /** The secret in the stop-only link every email ring carries (/doorbell/stop/<handle>/<stop>). */
-  stop?: string;
+  stop?: string | null;
   /** The ringing address as the private page shows it: its first character and its domain. */
   masked?: string | null;
   /** An address waiting for its owner's click: nothing is sent to it but the confirmation until then, and a working doorbell keeps ringing. */
@@ -388,7 +388,7 @@ export interface Store extends LogBackend {
   putDelivery(d: DeliveryRecord): Promise<void>;
   listDeliveries(issueId: string): Promise<DeliveryRecord[]>;
   /** One row per email actually handed to the provider (kind only, never an address). */
-  recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest" | "doorbell"): Promise<void>;
+  recordEmailSend(at: string, kind: "herald" | "confirm" | "issue" | "alert" | "digest" | "doorbell" | "doorbell-confirm"): Promise<void>;
 
   // jury alerts (operational, private)
   putJuryAlert(a: JuryAlertRecord): Promise<void>;
@@ -404,6 +404,13 @@ export interface Store extends LogBackend {
 
   // doorbells (wake/0.1): ring dedupe reuses claimAlertSend with kinds "ring:*"
   putDoorbell(d: DoorbellRecord): Promise<void>;
+  /**
+   * Write a doorbell only if it is unchanged since it was read (its
+   * updatedAt), or, with null, only if there is none yet. For writes that
+   * follow a network call: a person's stop (or any change) made meanwhile
+   * always wins. False if nothing was written.
+   */
+  putDoorbellIf(d: DoorbellRecord, expectUpdatedAt: string | null): Promise<boolean>;
   getDoorbell(handle: string): Promise<DoorbellRecord | null>;
   getDoorbellBySetup(setupId: string): Promise<DoorbellRecord | null>;
   listDoorbells(limit: number): Promise<DoorbellRecord[]>;
