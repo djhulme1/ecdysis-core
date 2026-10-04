@@ -36,7 +36,17 @@ async function world() {
   const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, pairing: (c, ip) => accounts.consumePairing(c, ip) });
   const canaryStore = new MemoryCanaryStore();
   const canaries = new CanaryRegistry({ store: canaryStore, accounts, v2: svc, now });
-  const steward = new StewardHandler({ accounts, v2: svc, access: null, now, canaries });
+  const audits: number[] = [];
+  const steward = new StewardHandler({
+    accounts, v2: svc, access: null, now, canaries,
+    health: {
+      sth: async () => ({ rootHash: "ab".repeat(32), timestamp: now().toISOString(), signature: "sig", treeSize: logStore["log"].length }),
+      logSize: async () => (logStore as unknown as { log: unknown[] }).log.length,
+      opsState: async (key) => (key === "cron:last" ? { value: { ok: true, doorbellsRung: 2, v2Lapsed: 0, v2QuotesChecked: 6, v2QuotesVerified: 4 }, at: now().toISOString() } : null),
+      runAudit: async () => { const size = (logStore as unknown as { log: unknown[] }).log.length; audits.push(size); return { intact: true, problem: null, size }; },
+      switches: [{ name: "Read-only kill switch", ok: true, value: "off", note: "READ_ONLY" }, { name: "Log signing key", ok: true, value: "installed" }],
+    },
+  });
   const keys = new Map<string, KeyPairB64>();
   const agent = async (handle: string, op: string, models?: string[], tier: "account" | "verified" | null = "verified") => {
     const kp = await generateKeyPair();
@@ -69,7 +79,7 @@ async function world() {
     return steward.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${session}`, origin: "https://ecdysis.me" } }), path);
   };
   const idOf = (r: { body: Json }) => String((r.body as Record<string, Json>)["id"]);
-  return { svc, accounts, steward, canaries, canaryStore, agent, sign, commit, result, bundle, signIn, get, post, idOf, tick: (ms: number) => { clock.t += ms; }, keys, log };
+  return { svc, accounts, steward, canaries, canaryStore, audits, agent, sign, commit, result, bundle, signIn, get, post, idOf, tick: (ms: number) => { clock.t += ms; }, keys, log };
 }
 
 describe("the stewardship area", () => {
@@ -505,5 +515,33 @@ describe("reading a pasted seed set", () => {
     const broken = readSeedPaste("[{\"title\": }]");
     assert.match("problem" in broken ? broken.problem : "", /^Couldn't read the seeds as JSON \(.+\)\. Paste the whole array/);
     assert.doesNotMatch("problem" in broken ? broken.problem : "", /cut short/);
+  });
+});
+
+describe("the steward's health page", () => {
+  it("shows the deployment's head, cron and switches, runs a full audit on request, and is for stewards only", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    const member = await w.signIn("someone@example.org");
+    assert.equal((await w.get("/steward/health", member.session)).status, 403);
+    const d = await w.signIn("daniel@example.org");
+    const res = await w.get("/steward/health", d.session);
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.match(html, /<h1>Health<\/h1>/);
+    assert.match(html, /Root hash/);
+    assert.match(html, /abababab/);
+    assert.match(html, /Doorbells rung 2/);
+    assert.match(html, /quotes checked 6 \(verified 4/);
+    assert.match(html, /Read-only kill switch/);
+    assert.match(html, /Not run from here yet/);
+    assert.match(html, /aria-current="page">Health</);
+    const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    const run = await w.post("/steward/health/audit", { csrf }, d.session);
+    assert.equal(run.status, 303, await run.text());
+    assert.match(decodeURIComponent(run.headers.get("location")!), /The log is intact over \d+ entries/);
+    assert.equal(w.audits.length, 1);
+    // No act of the steward's goes on the log for an audit: it only reads.
+    assert.ok(!(await w.svc.audit()).some((a) => a.type.startsWith("log.")));
   });
 });

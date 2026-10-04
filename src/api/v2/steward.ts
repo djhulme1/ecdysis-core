@@ -14,7 +14,7 @@ import { cookie, type Accounts, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
 import type { CanaryRegistry } from "./canaries.js";
 import type { IssueRegistry } from "./issues.js";
-import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, overviewPage, peoplePage, refusedPage, type AgentRow, type PersonRow } from "../../web/steward.js";
+import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, healthPage, overviewPage, peoplePage, refusedPage, type AgentRow, type HealthSwitch, type PersonRow } from "../../web/steward.js";
 
 export interface StewardOptions {
   accounts: Accounts;
@@ -28,6 +28,17 @@ export interface StewardOptions {
   canaries?: CanaryRegistry | null;
   /** The issues queue (complaints, scouts' flags), when configured. */
   issues?: IssueRegistry | null;
+  /** The deployment's health, when the Worker supplies it: the log's head, the recorded cron and audit runs, the switches, and a way to run an audit. */
+  health?: HealthSource | null;
+}
+
+export interface HealthSource {
+  sth(): Promise<Record<string, unknown>>;
+  logSize(): Promise<number>;
+  opsState(key: string): Promise<{ value: Record<string, unknown> | null; at: string } | null>;
+  /** A full audit of the log (read-only); the result is recorded as the last audit. */
+  runAudit(): Promise<{ intact: boolean; problem: string | null; size: number }>;
+  switches: HealthSwitch[];
 }
 
 const MAX_FORM = 8 * 1024;
@@ -123,8 +134,10 @@ export class StewardHandler {
     if (len > maxForm || text.length > maxForm) return this.html(413, refusedPage("That form was too large."));
     const f = new URLSearchParams(text);
     if (!(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.page("/steward", signed, url, null, "That form had expired. Please try again.");
-    if (this.o.readOnly) return this.page("/steward", signed, url, null, "Ecdysis isn't taking changes at the moment.");
-    if (!this.o.accounts.fresh(signed)) return this.html(401, refusedPage("This act needs a sign-in from the last ten minutes. Sign in again from your Ecdysis page, then return."));
+    // A full audit only reads, so it runs in read-only mode and needs no step-up; every other act is a change.
+    const readsOnly = path === "/steward/health/audit";
+    if (this.o.readOnly && !readsOnly) return this.page("/steward", signed, url, null, "Ecdysis isn't taking changes at the moment.");
+    if (!readsOnly && !this.o.accounts.fresh(signed)) return this.html(401, refusedPage("This act needs a sign-in from the last ten minutes. Sign in again from your Ecdysis page, then return."));
     const steward = signed.account.operatorId;
     switch (path) {
       case "/steward/people/tier": {
@@ -195,6 +208,11 @@ export class StewardHandler {
         const r = await this.o.issues.decide(f.get("id") ?? "", outcome, f.get("note") ?? "", steward);
         if (!r.ok) return this.page("/steward/content", signed, url, null, `Couldn't decide the issue: ${r.error}.`);
         return this.redirect(`/steward/content?ok=${encodeURIComponent(outcome === "dismiss" ? "Issue dismissed; your note is kept privately." : outcome === "review" ? "Under review: the item is out of view while you look; the act is on the log." : "Withdrawn from view; the act is on the log.")}#issues`);
+      }
+      case "/steward/health/audit": {
+        if (!this.o.health) return this.html(404, refusedPage("Health is not configured on this deployment."));
+        const r = await this.o.health.runAudit();
+        return this.redirect(`/steward/health?ok=${encodeURIComponent(r.intact ? `The log is intact over ${r.size} entries.` : `The audit found a problem: ${r.problem ?? "unknown"}`)}`);
       }
       case "/steward/content/challenge-withdraw": {
         const r = await this.o.v2.withdrawChallengeBySteward(f.get("id") ?? "", f.get("reason") ?? "", steward);
@@ -314,6 +332,11 @@ export class StewardHandler {
         const open = this.o.issues ? await this.o.issues.list("open", 100) : [];
         const issues = await Promise.all(open.map(async (i) => ({ id: i.id, kind: i.kind, subject: i.subject, severity: i.severity, detail: i.detail, source: i.source, openedAt: i.openedAt, complaints: (await this.o.issues!.complaintsFor(i.id)).map((c) => ({ at: c.at, text: c.text, contact: c.contact })) })));
         return this.html(200, contentPage({ holds: await this.o.v2.holds(100), challenges, issues, withheld: await this.o.v2.withheldItems(), csrf, fresh }, flash, problem, who));
+      }
+      case "/steward/health": {
+        if (!this.o.health) return this.html(404, refusedPage("Health is not configured on this deployment."));
+        const h = this.o.health;
+        return this.html(200, healthPage({ sth: await h.sth(), logSize: await h.logSize(), cron: await h.opsState("cron:last"), audit: await h.opsState("audit:last"), switches: h.switches, csrf }, flash, problem, who, this.now()));
       }
       case "/steward/audit":
         return this.html(200, auditPage({ rows: await this.o.v2.audit(200) }, flash, problem, who));
