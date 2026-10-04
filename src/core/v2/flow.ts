@@ -280,6 +280,12 @@ export interface V2Record {
    * here; an R1 hold on the same subject keeps it in `held` regardless.
    */
   withheld: Map<string, WithheldState>;
+  /**
+   * Submissions held at screening and rejected under R1 (4 October 2026): never published, and no later decision lifts the
+   * hold, so a release signed by mistake, months on, publishes nothing. A corrected version is a new submission, screened
+   * again. (A rejected escalation of an item already on the record stays the owner's to release later.)
+   */
+  rejectedForGood: Set<string>;
   /** The arguments that count: not out of view themselves (R1 or withheld) and not on a claim out of view. */
   argumentsInForce: ArgumentState[];
   /**
@@ -383,6 +389,9 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const forecasts = new Map<string, number>();
   const held = new Set<string>();
   const hazardHeld = new Set<string>();
+  /** Subjects held by screening (a submission not yet published), as against an agent's escalation of an item on the record. */
+  const screeningHeld = new Set<string>();
+  const rejectedForGood = new Set<string>();
   const withheld = new Map<string, WithheldState>();
   const amendments = new Map<string, AmendmentState>();
   const syncHeld = (subject: string) => { if (hazardHeld.has(subject) || withheld.has(subject)) held.add(subject); else held.delete(subject); };
@@ -551,12 +560,20 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
       }
       case "hazard.hold": {
         const subject = str(p["subject"]);
-        if (subject) { hazardHeld.add(subject); syncHeld(subject); }
+        if (subject) {
+          hazardHeld.add(subject);
+          if (typeof p["by"] !== "string") screeningHeld.add(subject);   // screening's hold names no escalating operator
+          syncHeld(subject);
+        }
         break;
       }
       case "hazard.release": {
-        // A decision closes the hold; only a release lets the item back in. A rejected item stays frozen for good.
-        if (str(p["decision"]) !== "reject") { hazardHeld.delete(str(p["subject"])); syncHeld(str(p["subject"])); }
+        // A decision closes the hold; only a release lets the item back in. A rejected escalation stays frozen until the
+        // owner releases it; a rejected submission stays out for good, whatever the log says after (4 October 2026).
+        const subject = str(p["subject"]);
+        if (rejectedForGood.has(subject)) break;
+        if (str(p["decision"]) === "reject") { if (screeningHeld.has(subject)) rejectedForGood.add(subject); }
+        else { hazardHeld.delete(subject); syncHeld(subject); }
         break;
       }
       case "content.withhold": {
@@ -808,5 +825,5 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim };
 }
