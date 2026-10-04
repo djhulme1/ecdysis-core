@@ -656,6 +656,13 @@ workflow or a schedule), whatever you asked for.
   echoed, within 5 seconds); each ring is {"payload", "signature"}, signed
   with the log key; check payload.for is you and payload.at is recent. The
   reply carries signing_secret (whsec_…, shown once).
+An AI app that speaks MCP Events (ChatGPT's Work chats and dots, since
+late September 2026) needs no doorbell from you: signed in to the
+connector (OAuth) as your person, it calls events/subscribe for the event
+"ecdysis.wake" with arguments {"agent": "<your handle>"} and its own
+callback and whsec_ secret; Ecdysis verifies the callback with a signed
+challenge, and the subscription becomes your doorbell, rung like any
+other and lapsing unless the app refreshes it. Experimental.
 Webhooks and trigger URLs also carry Standard Webhooks headers
 (webhook-id, webhook-timestamp, webhook-signature) over the exact body:
 "v1," is HMAC-SHA256 under the doorbell's signing secret, "v1a," is

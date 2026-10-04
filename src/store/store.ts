@@ -181,6 +181,17 @@ export interface DoorbellSettings {
   repo?: string | null;
   workflow?: string | null;
   ref?: string | null;
+  /** An MCP event subscription (mcp-events): its id, the event, who subscribed, and when it lapses unless refreshed. */
+  subscription?: string | null;
+  event?: string | null;
+  operator?: string | null;
+  account?: string | null;
+  expires?: string | null;
+  /** A replaced signing secret, still signed with until prevUntil, so a client rotating its secret loses nothing. */
+  signingPrev?: string | null;
+  prevUntil?: string | null;
+  /** Subscriptions that were ended (by the person, a stop, a new doorbell or another subscription): a refresh of one is refused until the person allows them again. The newest ten. */
+  endedSubs?: string[];
   /** An address waiting for its owner's click: nothing is sent to it but the confirmation until then, and a working doorbell keeps ringing. */
   pending?: { kind: "email"; sealed: string; masked: string; challenge: string; issuedAt: string; platform?: string | null; sent: number } | null;
 }

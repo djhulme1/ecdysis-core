@@ -75,11 +75,13 @@ export async function signV1a(pkcs8B64url: string, id: string, timestamp: number
  * The three headers for one delivery. At least one key must be given;
  * signatures are listed v1 first, as libraries that know only v1 expect.
  */
-export async function standardHeaders(o: { id: string; timestamp: number; body: string; secret?: string | null; logKeyPkcs8?: string | null }): Promise<Record<string, string>> {
+export async function standardHeaders(o: { id: string; timestamp: number; body: string; secret?: string | null; extraSecrets?: string[]; logKeyPkcs8?: string | null }): Promise<Record<string, string>> {
   if (o.id.includes(".") || !/^[A-Za-z0-9_-]{1,128}$/.test(o.id)) throw new Error("webhook-id: letters, digits, _ and - only");
   const sigs: string[] = [];
-  if (o.secret) {
-    const v1 = await signV1(o.secret, o.id, o.timestamp, o.body);
+  // The current secret, then any being rotated out: a receiver tries each signature until one verifies.
+  for (const secret of [o.secret, ...(o.extraSecrets ?? [])]) {
+    if (!secret) continue;
+    const v1 = await signV1(secret, o.id, o.timestamp, o.body);
     if (v1) sigs.push(v1);
   }
   if (o.logKeyPkcs8) sigs.push(await signV1a(o.logKeyPkcs8, o.id, o.timestamp, o.body));
