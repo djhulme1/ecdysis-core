@@ -259,6 +259,71 @@ td{font-variant-numeric:tabular-nums}
 .wrap:not(.wide) .flow{grid-template-columns:1fr;gap:18px}
 .wrap:not(.wide) .flow li+li::before{content:"\\2193";left:14px;top:-20px}
 @media (max-width:640px){.flow{grid-template-columns:1fr;gap:18px}.flow li+li::before{content:"\\2193";left:14px;top:-20px}}
+.cmp-cap{margin:8px 0 4px}
+.cmp-key{display:flex;flex-wrap:wrap;gap:2px 18px;margin:0 0 8px}
+.cmp-wrap{overflow-x:auto;margin:0 0 8px;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink)}
+.wrap:not(.wide) .cmp-wrap{width:min(960px,calc(100vw - 48px));margin-left:calc(50% - min(480px,(100vw - 48px) / 2))}
+.cmp{border-collapse:separate;border-spacing:0;width:100%;min-width:46rem;margin:0;font:15px/1.4 var(--sans)}
+.cmp th,.cmp td{padding:12px 8px;border-bottom:1px solid var(--line);text-align:center;vertical-align:middle}
+.cmp tbody tr:last-child th,.cmp tbody tr:last-child td{border-bottom:0}
+.cmp thead th{font:600 14px/1.2 var(--sans);color:var(--ink);white-space:nowrap;padding:14px 8px 10px;border-bottom:1px solid var(--ink)}
+.cmp th[scope=row]{position:sticky;left:0;z-index:1;text-align:left;background:var(--ground);min-width:14rem;max-width:18rem;padding:12px 14px 12px 0}
+.cmp thead th:first-child{position:sticky;left:0;z-index:2;background:var(--ground)}
+.cmp th[scope=row] .t{display:block;font:400 1.05rem/1.3 var(--serif);color:var(--ink)}
+.cmp th[scope=row] .d{display:block;font:13.5px/1.4 var(--sans);color:var(--muted);margin-top:3px}
+.cmp .us{background:var(--card)}
+.cmp thead th.us{box-shadow:inset 0 3px 0 var(--accent)}
+.dot{display:inline-block;box-sizing:border-box;width:13px;height:13px;border-radius:50%;border:2px solid var(--ink);overflow:hidden;vertical-align:middle}
+.dot.yes{background:var(--ink)}
+.dot.part::before{content:"";display:block;width:50%;height:100%;background:var(--ink)}
+.cmp-key .dot{margin-right:4px;vertical-align:-1px}
+.cmp-key .g{color:var(--rule);margin-right:2px}
+.cmp td .g{font-size:16px;line-height:1;color:var(--rule)}
+.cmp td sup{font-size:11px;margin-left:2px;color:var(--muted)}
+.cmp-hint{display:none}
+@media (max-width:760px){.cmp-hint{display:block}}
+@media (max-width:520px){.cmp{font-size:14px;min-width:36rem}.cmp th[scope=row]{min-width:9.5rem;max-width:11rem;padding-right:10px}.cmp th[scope=row] .t{font-size:.95rem}.cmp th[scope=row] .d{font-size:12px}.cmp th,.cmp td{padding:10px 6px}}
+.notes{font:14px/1.5 var(--sans);color:var(--muted);padding-left:1.4em;margin:12px 0 24px;max-width:44rem}
+.notes li{margin:0 0 6px}
+.sources{font:15px/1.5 var(--sans);padding-left:1.2em;margin:0 0 16px;max-width:44rem}
+.sources li{margin:0 0 8px}
+.actions{display:flex;flex-wrap:wrap;gap:12px;margin:8px 0 16px}
+.vs{width:100%;max-width:44rem;border-collapse:collapse;margin:8px 0 12px;font:16px/1.45 var(--sans)}
+.vs th{font:600 12px/1.2 var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:left;padding:0 16px 10px 0;border-bottom:1px solid var(--ink)}
+.vs th.us{color:var(--ink);box-shadow:inset 0 -3px 0 var(--accent)}
+.vs td{width:50%;padding:12px 16px 12px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.vs td:first-child{color:var(--muted)}
+.vs td:last-child{color:var(--ink);font-weight:600}
+@media (max-width:520px){.vs{font-size:15px}}
+.jump{display:flex;flex-wrap:wrap;gap:0 20px;font:15px/1.4 var(--sans);margin:0 0 8px}
+.jump a{display:inline-flex;align-items:center;min-height:44px;color:var(--muted)}
+.faq{border-top:1px solid var(--line);margin:0 0 8px;max-width:44rem}
+.faq details{border-bottom:1px solid var(--line)}
+.faq summary{display:flex;align-items:center;gap:16px;min-height:44px;margin:0;padding:14px 0;list-style:none;font:400 1.15rem/1.35 var(--serif);color:var(--ink)}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";flex:0 0 auto;margin-left:auto;font:400 1.5rem/1 var(--sans);color:var(--muted)}
+.faq details[open] summary::after{content:"\\2212"}
+.faq summary:hover{text-decoration:underline;text-decoration-color:var(--accent);text-underline-offset:.2em}
+.faq .a{padding:0 0 18px;max-width:40rem}
+.faq .a p{margin:0 0 10px}
+.faq .a p:last-child{margin:0}
+.trace-fig{max-width:56rem}
+.trace{list-style:none;padding:0;margin:0}
+.trace li{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,20rem);gap:8px 24px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
+.trace li:last-child{border-bottom:0}
+.trace .tx b{display:block;font:400 1.08rem/1.3 var(--serif);color:var(--ink)}
+.trace .tx span{display:block;font:14px/1.45 var(--sans);color:var(--muted);margin-top:2px}
+.trace .tm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center}
+.trace .gauge{position:relative;display:block;height:10px;border-radius:5px;background:var(--line)}
+.trace .gauge .fill{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--ink)}
+.trace .gauge .bar{position:absolute;top:-6px;bottom:-6px;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--accent)}
+.trace .tv{font:600 15px/1 var(--sans);font-variant-numeric:tabular-nums;color:var(--ink)}
+.trace .status{grid-column:1/-1;justify-self:start;margin-top:0}
+@media (max-width:600px){.trace li{grid-template-columns:1fr}}
+.trace-key{display:flex;flex-wrap:wrap;gap:4px 20px;font:14px/1.4 var(--sans);color:var(--muted);margin:10px 0 0}
+.trace-key i{display:inline-block;vertical-align:middle;margin-right:8px}
+.trace-key .k-fill{width:20px;height:8px;border-radius:4px;background:var(--ink)}
+.trace-key .k-bar{width:3px;height:16px;border-radius:2px;background:var(--accent)}
 footer{border-top:1px solid var(--line);padding:24px 0 56px;font:15px/1.6 var(--sans);color:var(--muted)}
 footer a{color:var(--muted)}
 footer .links{display:flex;flex-wrap:wrap;gap:4px 20px}
@@ -289,6 +354,7 @@ export const V2_PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/graph", "Graph"],
   ["/frontier", "Frontier"],
   ["/observatory", "Observatory"],
+  ["/faq", "FAQ"],
 ];
 export const V2_AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/agents", "Overview"],
