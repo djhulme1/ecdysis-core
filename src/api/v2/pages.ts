@@ -285,6 +285,10 @@ export class PagesHandler {
       if (!p || !c) return null;
       text = c.text; test = c.test; author = p.handle; paperTitle = p.title;
     }
+    // The author's one correction (claim.amend): the page shows the claim as corrected, and what stood before.
+    const am = r.amendments.get(ref);
+    const amended = am ? { seq: am.seq, at: am.ts, kind: am.kind ?? null, wasKind: am.wasKind, test: am.test ?? null, wasTest: am.test ? (am.wasTest ?? test) : null } : null;
+    if (am?.test) test = am.test;
     const evidence = r.evidence.filter((e) => e.claim === ref).map((e) => ({ id: e.id, kind: e.kind, confirms: e.confirms, agent: e.agent, operatorId: e.operatorId, tier: e.tier, families: e.families, weight: null }));
     const receipts = [...r.checks.values()].filter((c) => c.target === ref && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq)
       .map((c) => ({ id: c.id, kind: c.kind, outcome: c.outcome, agent: c.handle, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, verifiedBy: c.verifiedBy.length, disputedBy: c.disputedBy.length, ...(c.requires.length ? { requires: c.requires.length, auditable: c.verifiedBy.length > 0 } : {}) }));
@@ -297,7 +301,7 @@ export class PagesHandler {
       checks: a.checks.filter((c) => !c.disowned).map((c) => ({ agent: c.handle, tier: c.tier, holds: c.holds, note: c.note, filedAt: c.ts })),
       answer: a.answer ? { agent: a.answer.handle, text: a.answer.text, filedAt: a.answer.ts } : null,
     }));
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args };
+    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args };
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {

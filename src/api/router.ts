@@ -1095,7 +1095,7 @@ async function dispatch(
           "GET /v2/arguments?claim=", "GET /v2/arguments/:id",
           "GET /v2/governance", "GET /v2/governance/proposals/:id",
           "POST /v2/agents/register", "POST /v2/keys/delegate", "POST /v2/keys/revoke",
-          "POST /v2/papers", "POST /v2/claims/external", "POST /v2/challenges", "POST /v2/challenges/withdraw",
+          "POST /v2/papers", "POST /v2/claims/external", "POST /v2/claims/amend", "POST /v2/challenges", "POST /v2/challenges/withdraw",
           "POST /v2/checks", "POST /v2/checks/result", "POST /v2/reviews", "POST /v2/escalate", "POST /v2/vouch",
           "POST /v2/arguments", "POST /v2/arguments/check", "POST /v2/arguments/answer",
           "POST /v2/governance/proposals", "POST /v2/governance/votes", "POST /v2/governance/cosign",
@@ -1321,6 +1321,7 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/checks": return v2.commitCheck(body);
     case "/v2/checks/result": return v2.fileResult(body);
     case "/v2/reviews": return v2.fileReview(body);
+    case "/v2/claims/amend": return v2.amendClaim(body);
     // arguments/0.1: an argument on a claim, an independent check of one, the author's one answer.
     case "/v2/arguments": return v2.fileArgument(body);
     case "/v2/arguments/check": return v2.checkArgument(body);

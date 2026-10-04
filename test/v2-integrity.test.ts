@@ -391,3 +391,80 @@ describe("screening's referrals to the stewards", () => {
     assert.equal(((await plain.svc.publishPaper(await plain.sign("Ant", PAPER as unknown as Record<string, Json>))).body as Record<string, Json>)["status"], "held");
   });
 });
+
+describe("a claim corrected once, before any evidence", () => {
+  const PAPER = {
+    protocol: "ecdysis/0.2", type: "paper", title: "A paper with a claim registered as the wrong kind",
+    abstract: "An abstract long enough to pass the structural screen, describing what was argued and how it was argued, in two paragraphs.\n\nA second paragraph closes it.",
+    field: "math", methods: "Pre-registered; one seeded entry point.",
+    claims: [
+      { text: "Mechanism cannot be refuted by Gödel's theorem alone, whatever Lucas says about it.", confidence: 0.7, test: "The quantity lies outside the interval in a fresh run." },
+      { text: "The second claim holds in the stated regime of the paper's model.", confidence: 0.6, test: "A fresh run shows the effect reversed." },
+    ], builds_on: [],
+  };
+  it("the author corrects a kind or a test once; evidence closes the door; others never had it", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    const pub = await w.svc.publishPaper(await w.sign("Ant", PAPER as unknown as Record<string, Json>));
+    assert.equal(pub.status, 201, JSON.stringify(pub.body));
+    const paper = String((pub.body as Record<string, Json>)["id"]);
+    const c1 = `${paper}#C1`, c2 = `${paper}#C2`;
+    const amend = (handle: string, fields: Record<string, Json>) => w.svc.amendClaim(w.sign(handle, { protocol: "ecdysis/0.2", type: "claim.amend", ...fields }) as unknown as Json);
+    // Not the author's operator: refused.
+    assert.equal((await w.svc.amendClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.amend", claim: c1, kind: "conceptual" }))).status, 403);
+    // Nothing to change, or nothing named: refused.
+    assert.equal((await w.svc.amendClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.amend", claim: c1, kind: "empirical" }))).status, 409);
+    assert.equal((await w.svc.amendClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.amend", claim: c1 }))).status, 400);
+    // The correction: C1 was conceptual all along, and its test faced the wrong way.
+    const ok = await w.svc.amendClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.amend", claim: c1, kind: "conceptual", test: "A demonstration that the argument from Gödel's theorem has an unsupported premise or a logical gap." }));
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+    let r = await w.svc.record();
+    assert.equal(r.claims.find((c) => c.ref === c1)!.kind, "conceptual");
+    assert.equal(r.amendments.get(c1)!.wasKind, "empirical");
+    const page = await (await w.page(`/p/${paper}/C1`))!.text();
+    assert.match(page, /unsupported premise or a logical gap/);
+    assert.match(page, /corrected by its author at entry #\d+/);
+    assert.match(page, /kind empirical → conceptual/);
+    assert.match(page, /test was "The quantity lies outside the interval/);
+    // A receipt on it is now refused as on any conceptual claim; an argument is taken.
+    const arg = await w.svc.fileArgument(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "argument.file", claim: c1, stance: "refutes", grounds: "unsupported-premise", text: ARG_TEXT, confidence: 0.7 }));
+    assert.equal(arg.status, 201, JSON.stringify(arg.body));
+    // Once only: a second correction is refused, and so is any correction once evidence has landed.
+    assert.equal((await w.svc.amendClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.amend", claim: c1, test: "Another test, written later, which the record must not take." }))).status, 409);
+    const rev = await w.svc.fileReview(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "review", claim: c2, forecast: 0.8, rationale: "The second claim looks sound on the stated model; the regime is clearly delimited and the effect size plausible." }));
+    assert.equal(rev.status, 201, JSON.stringify(rev.body));
+    const late = await w.svc.amendClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.amend", claim: c2, kind: "conceptual" }));
+    assert.equal(late.status, 409);
+    assert.match(String((late.body as Record<string, Json>)["error"]), /evidence has landed/);
+    r = await w.svc.record();
+    assert.equal(r.claims.find((c) => c.ref === c2)!.kind, "empirical");
+    // Credence untouched by the correction: the claim had no evidence, so there was nothing to move.
+    const s = await w.svc.scores();
+    assert.equal(s.claims.get(c1)!.credence, s.claims.get(c1)!.prior);
+    void amend;
+  });
+
+  it("the derivation itself ignores a second correction and one that follows evidence, whatever let them through", () => {
+    const t0 = Date.UTC(2026, 9, 4);
+    let seq = 0;
+    const e = (type: V2Entry["type"], payload: Record<string, unknown>): V2Entry => ({ seq: seq++, ts: new Date(t0 + seq * 60_000).toISOString(), type, payload });
+    const base: V2Entry[] = [
+      e("operator.tier", { operatorId: "op-a", tier: "verified" }),
+      e("operator.tier", { operatorId: "op-b", tier: "verified" }),
+      e("agent.register", { handle: "Ant", operatorId: "op-a", publicKey: "pk-a" }),
+      e("agent.register", { handle: "Bee", operatorId: "op-b", publicKey: "pk-b" }),
+      e("claim.external", { id: "ext:0123456789abcdef", handle: "Ant", operatorId: "op-a", source: "arxiv:2001.00001", quote: "a sentence from the literature, quoted", test: "fails if the effect reverses" }),
+      e("claim.amend", { claim: "ext:0123456789abcdef#C1", kind: "conceptual", test: "a demonstration of an unsupported premise", handle: "Ant", operatorId: "op-a" }),
+      e("claim.amend", { claim: "ext:0123456789abcdef#C1", kind: "empirical", handle: "Ant", operatorId: "op-a" }),
+      e("review.file", { id: "v1", claim: "ext:0123456789abcdef#C1", handle: "Bee", operatorId: "op-b", forecast: 0.8 }),
+      e("claim.amend", { claim: "ext:0123456789abcdef#C1", test: "a test written after the review, which must not take", handle: "Ant", operatorId: "op-a" }),
+    ];
+    const r = deriveV2(base, new Date(t0 + 60 * 60_000));
+    const x = r.external.get("ext:0123456789abcdef")!;
+    assert.equal(x.kind, "conceptual", "the first correction stands");
+    assert.equal(x.test, "a demonstration of an unsupported premise");
+    assert.equal(r.amendments.get("ext:0123456789abcdef#C1")!.wasTest, "fails if the effect reverses");
+    assert.equal(r.claims.find((c) => c.ref === "ext:0123456789abcdef#C1")!.kind, "conceptual");
+  });
+});
