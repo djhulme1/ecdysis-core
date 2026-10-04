@@ -33,7 +33,7 @@ const body = (r: { body: Json }) => r.body as Record<string, Json>;
 const NOW = new Date(Date.UTC(2026, 9, 4, 22, 0, 0));
 
 describe("stakes/0.1: the core", () => {
-  const obs = (over: Partial<SourceObservation>): SourceObservation => ({ source: "doi:10.1/x", provider: "openalex", work: "W1", citedBy: 0, venueCitedness: null, year: null, field: null, unresolved: false, observedAt: "2026-10-04T22:00:00Z", seq: 1, ...over });
+  const obs = (over: Partial<SourceObservation>): SourceObservation => ({ source: "doi:10.1/x", provider: "openalex", work: "W1", citedBy: 0, venueCitedness: null, year: null, field: null, fieldId: null, unresolved: false, observedAt: "2026-10-04T22:00:00Z", seq: 1, ...over });
   it("reach is the citation count, or for a paper under two years old its venue's expected citations when larger", () => {
     assert.equal(reachOf(null, NOW), 0);
     assert.equal(reachOf(obs({ citedBy: 2480 }), NOW), 2480);
@@ -117,16 +117,17 @@ async function world() {
   return { svc, log, agent, sign, register, get, page, now, tick: (ms: number) => { clock.t += ms; } };
 }
 
-/** A fake of the two indexes: OpenAlex knows the Chinchilla paper and a journal paper with a venue; Semantic Scholar knows a third; nobody knows the fourth; the fifth errors. */
+/** A fake of the two indexes: OpenAlex knows the Chinchilla paper and a journal paper with a venue (both in its field 17, whose totals it serves); Semantic Scholar knows a third; nobody knows the fourth; the fifth errors. */
 function fakeGraph() {
   const calls: string[] = [];
   const json = (status: number, b: unknown) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
   const fetchImpl: typeof fetch = async (input) => {
     const url = String(input);
     calls.push(url);
-    if (url.includes("api.openalex.org/works/doi:10.48550%2FarXiv.2203.15556")) return json(200, { id: "https://openalex.org/W4225", cited_by_count: 2480, publication_year: 2022, primary_topic: { display_name: "Natural Language Processing", field: { display_name: "Computer Science" } }, primary_location: { source: null } });
-    if (url.includes("api.openalex.org/works/doi:10.1038%2Fs41586-026-10549-w")) return json(200, { id: "https://openalex.org/W9001", cited_by_count: 3, publication_year: 2026, primary_topic: { field: { display_name: "Computer Science" } }, primary_location: { source: { id: "https://openalex.org/S137773608", display_name: "Nature" } } });
+    if (url.includes("api.openalex.org/works/doi:10.48550%2FarXiv.2203.15556")) return json(200, { id: "https://openalex.org/W4225", cited_by_count: 2480, publication_year: 2022, primary_topic: { display_name: "Natural Language Processing", field: { display_name: "Computer Science", id: "https://openalex.org/fields/17" } }, primary_location: { source: null } });
+    if (url.includes("api.openalex.org/works/doi:10.1038%2Fs41586-026-10549-w")) return json(200, { id: "https://openalex.org/W9001", cited_by_count: 3, publication_year: 2026, primary_topic: { field: { display_name: "Computer Science", id: "https://openalex.org/fields/17" } }, primary_location: { source: { id: "https://openalex.org/S137773608", display_name: "Nature" } } });
     if (url.includes("api.openalex.org/sources/S137773608")) return json(200, { id: "https://openalex.org/S137773608", summary_stats: { "2yr_mean_citedness": 41.25, h_index: 1500 } });
+    if (url.includes("api.openalex.org/fields/17")) return json(200, { id: "https://openalex.org/fields/17", display_name: "Computer Science", works_count: 30_000_000, cited_by_count: 250_000_000 });
     if (url.includes("api.openalex.org/works/doi:10.48550%2FarXiv.2609.99999")) return json(404, { error: "not found" });
     if (url.includes("api.semanticscholar.org/graph/v1/paper/arXiv%3A2609.99999")) return json(200, { paperId: "s2abc", citationCount: 7, year: 2026, s2FieldsOfStudy: [{ category: "Computer Science", source: "s2-fos-model" }] });
     if (url.includes("doi:10.9999%2Fnobody")) return json(404, {});
@@ -151,9 +152,13 @@ describe("stakes/0.1: the scout and the surfaces", () => {
     const graph = fakeGraph();
     const scout = new StakesScout({ v2: w.svc, log: w.log, fetchImpl: graph.fetchImpl, now: w.now, pause: async () => {} });
     const run = await scout.run(10);
-    assert.deepEqual(run, { observed: 3, unresolved: 1, errors: 1 });
+    assert.deepEqual(run, { observed: 3, unresolved: 1, errors: 1, fields: 1 });
     const r = await w.svc.record();
     assert.equal(r.observations.size, 4, "three observed, one unresolved, the erroring one not logged");
+    assert.equal(r.observations.get("arxiv:2203.15556")!.fieldId, "17");
+    assert.deepEqual([...r.fieldObservations.keys()], ["Computer Science"], "the one field the observed sources sit in, read once");
+    assert.equal(r.fieldObservations.get("Computer Science")!.citedBy, 250_000_000);
+    assert.equal(r.fieldObservations.get("Computer Science")!.works, 30_000_000);
     assert.equal(r.observations.get("arxiv:2203.15556")!.citedBy, 2480);
     assert.equal(r.observations.get("arxiv:2203.15556")!.field, "Computer Science");
     assert.equal(r.observations.get("doi:10.1038/s41586-026-10549-w")!.venueCitedness, 41.25);
@@ -164,12 +169,13 @@ describe("stakes/0.1: the scout and the surfaces", () => {
     // The second run asks only about the erroring source: the others were observed within the month.
     const n = graph.calls.length;
     const again = await scout.run(10);
-    assert.deepEqual(again, { observed: 0, unresolved: 0, errors: 1 });
-    assert.equal(graph.calls.length - n, 1, "one request, for the one source still due");
+    assert.deepEqual(again, { observed: 0, unresolved: 0, errors: 1, fields: 0 });
+    assert.equal(graph.calls.length - n, 1, "one request, for the one source still due; the field's totals are a month good");
     // A month on, every source is due again.
     w.tick(31 * 24 * 3600 * 1000);
     const later = await scout.run(10);
     assert.equal(later.observed + later.unresolved + later.errors, 5);
+    assert.equal(later.fields, 1, "and the field's totals are read again");
 
     // The stakes: Chinchilla log2(2481) ≈ 11.28; the Nature paper is young, so its venue's 82.5 expected citations stand in for 3: log2(83.5) ≈ 6.38; the preprint log2(8) = 3; the unknown 0.
     const s = (await w.svc.scores()).claims;

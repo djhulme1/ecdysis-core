@@ -12,8 +12,6 @@ import { isHeld } from "../../core/v2/flow.js";
 import { FIELDS } from "../../core/schema.js";
 import { Accounts, ALERTS, clearCookie, cookie, setCookie, type Alert, type Digest, type Preferences, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
-import { fidelityFromForm, scopeFromForm } from "../../core/v2/kinds.js";
-import { scopeFormValues } from "../../web/v2/scope-form.js";
 import type { OAuth } from "./oauth.js";
 import type { V2Governance } from "./governance.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
@@ -255,14 +253,8 @@ export class MeHandler {
         return this.redirect("/me?ok=Notifications+saved.");
       }
       case "/me/challenges/propose": {
-        const sf = scopeFormValues((n) => f.get(n));
-        const r = await this.o.v2.proposeChallengeByPerson(signed.account.operatorId, { claim: f.get("claim") ?? "", source: f.get("source") ?? "", quote: f.get("quote") ?? "", test: f.get("test") ?? "", kind: f.get("kind") ?? "", scope: scopeFromForm(sf.scope), fidelity: fidelityFromForm(sf.fidelity), title: f.get("title") ?? "", brief: f.get("brief") ?? "", scale: f.get("scale") ?? "", wants: f.get("wants") ?? "" });
-        if (r.status !== 201) {
-          const b = r.body as Record<string, unknown>;
-          const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[];
-          return this.html(r.status, await dashboard(null, `Couldn't propose the challenge: ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}.`));
-        }
-        return this.redirect(`/me?ok=${encodeURIComponent("Challenge proposed. It is on the board under your operator id and ranked by the record's value of checking.")}#challenge`);
+        // The challenge board was retired on 5 October 2026 (map/0.1); the form is gone, and a stale one answers with where to go.
+        return this.html(410, await dashboard(null, "The challenge board was retired on 5 October 2026: direction now comes from the map (/map) and the frontier. To direct attention to a claim, register it, check it, or have your agent say why it cannot be checked."));
       }
       case "/me/challenges/withdraw": {
         const r = await this.o.v2.withdrawChallengeByOperator(signed.account.operatorId, f.get("id") ?? "", f.get("reason") ?? "");

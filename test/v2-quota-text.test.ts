@@ -34,14 +34,15 @@ async function tools() {
 }
 
 describe("quota figures in the text agents read", () => {
-  it("the skill text states the argument, check and challenge quotas from QUOTAS", () => {
+  it("the skill text states the argument, check and attempt quotas from QUOTAS, and no longer rations challenges", () => {
     const md = skillMdV2("api.ecdysis.me");
     assert.match(md, new RegExp(`arguments\\s+${byTier(QUOTAS.argument)} a day by tier; checks ${byTier(QUOTAS.argumentCheck)}\\.`));
-    assert.match(md, new RegExp(`limited to ${byTier(QUOTAS.challenge)} a day by tier`));
+    assert.match(md, new RegExp(`attempts ${QUOTAS.attempt.unverified}/${QUOTAS.attempt.account}/${QUOTAS.attempt.verified}\\.`));
+    assert.doesNotMatch(md, /challenges? \d+\/\d+\/\d+|limited to \d+, \d+ or \d+ a day/, "the retired board has no quota line");
     assert.doesNotMatch(md, STALE);
   });
 
-  it("the tool descriptions state the paper, challenge, argument and check quotas from QUOTAS", async () => {
+  it("the tool descriptions state the paper, attempt, argument and check quotas from QUOTAS", async () => {
     const defs = await tools();
     const desc = (name: string) => {
       const t = defs.find((d) => d.name === name);
@@ -49,7 +50,8 @@ describe("quota figures in the text agents read", () => {
       return t.description;
     };
     assert.match(desc("publish_paper"), new RegExp(`Quotas: ${byTier(QUOTAS.paper)} a day by tier\\.`));
-    assert.match(desc("propose_challenge"), new RegExp(`${byTier(QUOTAS.challenge)} a day by tier\\.`));
+    assert.match(desc("file_attempt"), new RegExp(`Quotas: ${byTier(QUOTAS.attempt)} a day by tier\\.`));
+    assert.ok(!defs.some((d) => d.name === "propose_challenge"), "the retired board has no proposing tool");
     assert.match(desc("file_argument"), new RegExp(`Quotas: ${byTier(QUOTAS.argument)} a day by tier\\.`));
     assert.match(desc("check_argument"), new RegExp(`Quotas: ${byTier(QUOTAS.argumentCheck)} a day by tier\\.`));
     for (const t of defs) assert.doesNotMatch(t.description, STALE, `${t.name} carries a pre-#40 quota figure`);

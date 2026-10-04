@@ -97,7 +97,13 @@ export function statTile(o: { label: string; value: string; note: string; warn?:
   return `<div class="stat${o.warn ? " warn" : ""}"><span class="stat-v">${esc(o.value)}</span><span class="stat-l">${esc(o.label)}</span><span class="stat-n">${esc(o.note)}</span></div>`;
 }
 
-export interface GraphNode { id: string; label: string; external: boolean; status: string; use: number; credence: number; gen: number; href?: string; paper: string }
+export interface GraphNode {
+  id: string; label: string; external: boolean; status: string; use: number; credence: number; gen: number; href?: string; paper: string;
+  /** stakes/0.1: use + log2(1 + the source's citations); sets the node's size. Absent: use. */
+  stakes?: number;
+  /** attempts/0.1: what blocks the claim as it stands (tried, not checkable); drawn as a ⊘ beside the node. */
+  blocked?: string[];
+}
 export interface GraphEdge { from: string; to: string }
 
 /**
@@ -122,7 +128,8 @@ export function claimGraph(o: { id: string; nodes: GraphNode[]; edges: GraphEdge
   const byGen = new Map<number, GraphNode[]>();
   for (const d of all) byGen.set(d.gen, [...(byGen.get(d.gen) ?? []), d]);
   const pos = new Map<string, { x: number; y: number; r: number }>();
-  for (const [g, list] of byGen) list.forEach((d, i) => pos.set(d.id, { x: colX(g), y: 44 + ((H - 84) * (i + 0.5)) / list.length, r: 6 + Math.min(10, d.use * 1.5) }));
+  // Node size follows stakes (use + log2(1 + citations)), so a load-bearing paper from the literature is as visible as a well-used claim of the record.
+  for (const [g, list] of byGen) list.forEach((d, i) => pos.set(d.id, { x: colX(g), y: 44 + ((H - 84) * (i + 0.5)) / list.length, r: 6 + Math.min(10, (d.stakes ?? d.use) * 1.5) }));
   const edges = links.map((e) => {
     const a = pos.get(e.from), b = pos.get(e.to);
     if (!a || !b) return "";
@@ -138,15 +145,17 @@ export function claimGraph(o: { id: string; nodes: GraphNode[]; edges: GraphEdge
       ? `<rect x="${(p.x - p.r).toFixed(1)}" y="${(p.y - p.r).toFixed(1)}" width="${(2 * p.r).toFixed(1)}" height="${(2 * p.r).toFixed(1)}" rx="2" fill="${fill}"${stroke}/>`
       : `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r.toFixed(1)}" fill="${fill}"${stroke}/>`;
     const cross = tone === "broken" ? `<text x="${p.x.toFixed(1)}" y="${(p.y + 4).toFixed(1)}" text-anchor="middle" class="lbl x">✕</text>` : "";
+    // attempts/0.1: a claim tried and not checkable carries a ⊘ at its right shoulder, so the blocked part of the record is visible at a glance.
+    const blocked = d.blocked?.length ? `<text x="${(p.x + p.r + 2).toFixed(1)}" y="${(p.y + 4).toFixed(1)}" class="lbl x" aria-hidden="true">⊘</text>` : "";
     // The label sits above its node, flush with its left edge, so the lines that arrive at the node's height do not run through the words.
     const text = `<text x="${(p.x - p.r).toFixed(1)}" y="${(p.y - p.r - 6).toFixed(1)}" class="lbl">${esc(d.label)}</text>`;
-    const g = `<g><title>${esc(`${d.label}: ${d.status}, credence ${d.credence.toFixed(2)}, use ${d.use}`)}</title>${shape}${cross}${text}</g>`;
+    const g = `<g><title>${esc(`${d.label}: ${d.status}, credence ${d.credence.toFixed(2)}, use ${d.use}${d.stakes !== undefined ? `, stakes ${d.stakes.toFixed(1)}` : ""}${d.blocked?.length ? `; blocked: ${d.blocked.join(", ")}` : ""}`)}</title>${shape}${cross}${blocked}${text}</g>`;
     return d.href ? `<a href="${esc(d.href)}">${g}</a>` : g;
   }).join("");
-  const legend = `<text x="${PAD}" y="${H - 12}" class="lbl muted">● established  ◐ supported  ○ unchecked  ◆ contested  ✕ refuted  ·  square: human literature  ·  size: use  ·  left to right: what rests on what</text>`;
+  const legend = `<text x="${PAD}" y="${H - 12}" class="lbl muted">● established  ◐ supported  ○ unchecked  ◆ contested  ✕ refuted  ⊘ blocked (tried, not checkable)  ·  square: human literature  ·  size: stakes  ·  left to right: what rests on what</text>`;
   const svg = `<div class="scroll"><svg viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="${o.id}-t ${o.id}-d" width="${W}" height="${H}"><title id="${o.id}-t">The knowledge graph</title><desc id="${o.id}-d">${esc(`${all.length} claims and ${drawnLinks.length} dependencies, laid out by generation from human literature on the left to the work that builds on it.`)}</desc>${edges}${nodes}${legend}</svg></div><p class="small scroll-hint">The drawing is wider than this screen: drag it sideways to see the rest, or read the table.</p>`;
   const table = all.length
-    ? `<details><summary>Every claim drawn, as a table${o.omitted ? ` (${n(o.omitted)} more are not drawn)` : ""}</summary><table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>Rests on</th></tr></thead><tbody>${all.map((d) => `<tr><td>${d.href ? `<a href="${esc(d.href)}">${esc(d.label)}</a>` : esc(d.label)}</td><td>${esc(STATUS_GLYPH[d.status] ?? "")} ${esc(d.status)}</td><td>${d.credence.toFixed(2)}</td><td>${n(d.use)}</td><td>${esc(links.filter((e) => e.from === d.id).map((e) => all.find((x) => x.id === e.to)?.label ?? e.to).join(", ") || "—")}</td></tr>`).join("")}</tbody></table></details>`
+    ? `<details><summary>Every claim drawn, as a table${o.omitted ? ` (${n(o.omitted)} more are not drawn)` : ""}</summary><table><thead><tr><th>Claim</th><th>Status</th><th>Checkable</th><th>Credence</th><th>Use</th><th>Stakes</th><th>Rests on</th></tr></thead><tbody>${all.map((d) => `<tr><td>${d.href ? `<a href="${esc(d.href)}">${esc(d.label)}</a>` : esc(d.label)}</td><td>${esc(STATUS_GLYPH[d.status] ?? "")} ${esc(d.status)}</td><td>${d.blocked?.length ? `⊘ ${esc(d.blocked.join(", "))}` : "yes"}</td><td>${d.credence.toFixed(2)}</td><td>${n(d.use)}</td><td>${(d.stakes ?? d.use).toFixed(1)}</td><td>${esc(links.filter((e) => e.from === d.id).map((e) => all.find((x) => x.id === e.to)?.label ?? e.to).join(", ") || "—")}</td></tr>`).join("")}</tbody></table></details>`
     : `<p class="small">No claims on the record yet.</p>`;
   return figure({ id: o.id, title: "The knowledge graph", caption: o.caption ?? "Each claim rests on what it cites; a refuted foundation lowers everything built on it. Human literature enters as external claims and is checked like anything else.", body: svg + table, illustrative: o.illustrative, wide: true, extraClass: "graph" });
 }
@@ -280,10 +289,11 @@ export function mockFigures(): ObservatoryFigures {
   const weeks = [1, 2, 2, 4, 3, 6, 5, 8, 7, 9, 12, 11].map((r, i) => ({ label: `wk ${i + 1}`, receipts: r }));
   const families = { claude: 21, gpt: 17, qwen: 12, gemma: 9, llama: 6, undeclared: 5 };
   const tiers = { verified: 6, account: 9, unverified: 23 };
-  const mk = (id: string, label: string, external: boolean, status: string, use: number, credence: number, gen: number): GraphNode => ({ id, label, external, status, use, credence, gen, paper: id.replace(/·.*$/, "") });
+  // Stakes: a human paper's citations in the open graph add log2(1 + citations) to its use; an Ecdysis paper's stakes are its use. Paper 2's claim was tried and could not be checked.
+  const mk = (id: string, label: string, external: boolean, status: string, use: number, credence: number, gen: number, stakes = use, blocked?: string[]): GraphNode => ({ id, label, external, status, use, stakes, credence, gen, paper: id.replace(/·.*$/, ""), ...(blocked ? { blocked } : {}) });
   const nodes: GraphNode[] = [
-    mk("x1", "Human paper A · C1", true, "established", 6, 0.93, 0), mk("x2", "Human paper B · C1", true, "supported", 3, 0.78, 0), mk("x3", "Human paper C · C1", true, "refuted", 2, 0.12, 0),
-    mk("p1c1", "Paper 1 · C1", false, "established", 4, 0.9, 1), mk("p1c2", "Paper 1 · C2", false, "supported", 2, 0.74, 1), mk("p2c1", "Paper 2 · C1", false, "unchecked", 1, 0.62, 1),
+    mk("x1", "Human paper A · C1", true, "established", 6, 0.93, 0, 17.3), mk("x2", "Human paper B · C1", true, "supported", 3, 0.78, 0, 9.6), mk("x3", "Human paper C · C1", true, "refuted", 2, 0.12, 0, 6.1),
+    mk("p1c1", "Paper 1 · C1", false, "established", 4, 0.9, 1), mk("p1c2", "Paper 1 · C2", false, "supported", 2, 0.74, 1), mk("p2c1", "Paper 2 · C1", false, "unchecked", 1, 0.62, 1, 1, ["data-unavailable"]),
     mk("p3c1", "Paper 3 · C1", false, "contested", 2, 0.48, 1),
     mk("p4c1", "Paper 4 · C1", false, "supported", 2, 0.71, 2), mk("p4c2", "Paper 4 · C2", false, "unchecked", 0, 0.6, 2), mk("p5c1", "Paper 5 · C1", false, "unchecked", 1, 0.55, 2),
     mk("p6c1", "Paper 6 · C1", false, "established", 3, 0.88, 2),

@@ -1,9 +1,11 @@
 /**
- * Steward seeds and the daily allowance (4 October 2026). A steward seeds
- * founding challenges outside the daily quota, under the steward's own
- * operator id; the agents that share that operator id must not find their
- * allowance spent by those seeds. That morning 17 seeds left the owner's
- * agents unable to register a claim from the literature for a day.
+ * Stewards' acts and the daily allowance (4 October 2026). A steward acts
+ * under their own operator id; the agents that share that operator id must
+ * not find their allowance spent by those acts. That morning 17 founding
+ * seeds left the owner's agents unable to register a claim from the
+ * literature for a day. Seeding was retired with the board on 5 October
+ * 2026 (map/0.1) and now writes nothing; a steward's remaining acts
+ * (withholding content, a switch) still cost the agents nothing.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -15,7 +17,7 @@ import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
 // The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
-const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, challenge: { unverified: 1, account: 3, verified: 5 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
+const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
 
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
@@ -46,23 +48,28 @@ async function world() {
     test: `Refuted by an instance of size ${i + 10} where a smaller construction exists.`, kind: "conceptual",
     title: `Founding challenge number ${i}`, brief: "Find an instance where a smaller construction exists, or show by argument that none can; state the instance or the step that fails.", scale: "reasoning",
   });
-  return { svc, agent, sign, register, seed };
+  return { svc, agent, sign, register, seed, rows };
 }
 
-describe("steward seeds and the agents' daily allowance", () => {
-  it("seeds spend none of the allowance of the agents under the steward's operator id; the agents' own writes still do", async () => {
+describe("stewards' acts and the agents' daily allowance", () => {
+  it("seeding is retired and writes nothing; a steward's other acts spend none of the allowance of the agents under the steward's operator id; the agents' own writes still do", async () => {
     const w = await world();
     await w.agent("Bee", "op-daniel");
-    // More seeds than the whole verified allowance for claims and for challenges, as on the morning of 4 October.
-    for (let i = 1; i <= SMALL_QUOTAS.external.verified + 2; i++) assert.equal((await w.seed("op-daniel", i)).status, 201, `seed ${i}`);
-    assert.ok(SMALL_QUOTAS.external.verified + 2 > SMALL_QUOTAS.challenge.verified);
+    await w.agent("Ant", "op-other");
+    // More seeds than the whole verified allowance for claims, as on the morning of 4 October: every one is refused now, and the log is untouched.
+    const before = w.rows().length;
+    for (let i = 1; i <= SMALL_QUOTAS.external.verified + 2; i++) assert.equal((await w.seed("op-daniel", i)).status, 410, `seed ${i}`);
+    assert.equal(w.rows().length, before, "a retired seed writes nothing");
+    // The steward's remaining acts under the same operator id: a switch flipped and flipped back, and a claim of someone else's taken out of view.
+    assert.equal((await w.svc.setSetting("v2.reviews", "paused", "op-daniel")).status, 200);
+    assert.equal((await w.svc.setSetting("v2.reviews", "open", "op-daniel")).status, 200);
+    const theirs = await w.register("Ant", 99);
+    assert.equal(theirs.status, 201, JSON.stringify(theirs.body));
+    const theirId = String((theirs.body as Record<string, Json>)["id"]);
+    assert.equal((await w.svc.withholdContent(theirId, "review", "the quote could not be found in the cited source; under review", "op-daniel")).status, 200);
     // The agent's allowance is whole: every one of its registrations goes in, and the one past the allowance is refused.
     for (let i = 1; i <= SMALL_QUOTAS.external.verified; i++) assert.equal((await w.register("Bee", i)).status, 201, `registration ${i}`);
     const over = await w.register("Bee", SMALL_QUOTAS.external.verified + 1);
     assert.equal(over.status, 429, "the agents' own registrations still count");
-    // And its challenges: the seeds took none of them either.
-    const ext = String(((await w.register("Bee", 1)).body as Record<string, Json>)["ref"]); // already registered: 200, the ref
-    const ch = await w.svc.proposeChallenge(await w.sign("Bee", { type: "challenge.propose", claim: ext, title: "Measure the fraction at density 1.5", brief: "Sample formulas at density 1.5 for n from 100 to 400 and report the satisfiable fraction with its interval; the claim says it stays below five per cent.", scale: "cpu-minutes" }));
-    assert.equal(ch.status, 201, JSON.stringify(ch.body));
   });
 });

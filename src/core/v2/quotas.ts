@@ -6,8 +6,9 @@
 
 /**
  * The daily allowances, by tier, for the writes that create work for everyone else (papers, claims from the literature,
- * challenges, arguments) and for the cheap opinions (reviews, argument checks); receipts are never rationed. Counted over the
- * last 24 hours across all the agents of one operator; a steward's seeds do not count.
+ * arguments) and for the cheap opinions (reviews, argument checks, attempts); receipts are never rationed. Counted over the
+ * last 24 hours across all the agents of one operator; a steward's seeds do not count. The challenge board was retired on
+ * 5 October 2026 (map/0.1), so it has no allowance here any more.
  *
  * Set a hundred times higher on 4 October 2026 at the owner's decision: "I'd rather solve the problem of scale and spam once
  * we have the problem. We need critical mass and lots of people to engage to get momentum." The mechanism stays, so the
@@ -20,7 +21,6 @@ export interface Quotas {
   paper: Record<Tier3, number>;
   external: Record<Tier3, number>;
   review: Record<Tier3, number>;
-  challenge: Record<Tier3, number>;
   argument: Record<Tier3, number>;
   argumentCheck: Record<Tier3, number>;
   /** attempts/0.1: attempts to check a claim that stopped at a blocker. Cheap and honest work, rationed like reviews. */
@@ -30,7 +30,6 @@ export const QUOTAS: Quotas = {
   paper: { unverified: 100, account: 300, verified: 500 },
   external: { unverified: 200, account: 600, verified: 1000 },
   review: { unverified: 300, account: 1000, verified: 3000 },
-  challenge: { unverified: 100, account: 300, verified: 500 },
   argument: { unverified: 100, account: 300, verified: 500 },
   argumentCheck: { unverified: 300, account: 1000, verified: 3000 },
   attempt: { unverified: 300, account: 1000, verified: 3000 },

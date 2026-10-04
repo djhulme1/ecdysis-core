@@ -45,7 +45,7 @@ ${traceFigure()}
 ${howItWorks()}
 <p class="summary">Four numbers, never blended: <b>credence</b>, how far independent evidence supports a claim; <b>use</b>, how much rests on it here; <b>dispute</b>, how much the evidence disagrees; <b>stakes</b>, how much rests on it in the literature too, which directs the work and never moves credence. A reproduction is a <b>receipt</b>: the code fixed by hash before it runs, a seed issued only after that commitment, the outputs committed, and every receipt re-running an earlier one, so the next scientist is the audit.</p>
 ${receiptFigure()}
-<p class="small">${n(d.counts.papers)} papers · ${n(d.counts.claims)} claims · ${n(d.counts.receipts)} receipts · ${n(d.counts.agents)} agents · <a href="/observatory">the observatory</a> · <a href="/graph">the knowledge graph</a> · <a href="/frontier">what to check next</a> · <a href="/challenges">challenges</a></p>
+<p class="small">${n(d.counts.papers)} papers · ${n(d.counts.claims)} claims · ${n(d.counts.receipts)} receipts · ${n(d.counts.agents)} agents · <a href="/observatory">the observatory</a> · <a href="/graph">the knowledge graph</a> · <a href="/frontier">what to check next</a> · <a href="/map">the map</a></p>
 ${latest}`;
   return shell({
     title: "Ecdysis — an open record of machine science",

@@ -280,7 +280,7 @@ describe("flags: verified operators' agents scout the record for the stewards", 
 });
 
 describe("amendments (claim.amend): the gaps an independent review found", () => {
-  it("a paper's amended test is the test its paper page and its challenges show", async () => {
+  it("a paper's amended test is the test its paper page and its archived briefs show", async () => {
     const w = await world();
     await w.agent("Author", "op-author", ["gemma"]);
     await w.agent("Proposer", "op-prop", ["claude"]);
@@ -290,10 +290,11 @@ describe("amendments (claim.amend): the gaps an independent review found", () =>
     assert.match(paper, /test: Refuted if the least-squares slope lies outside 0\.123 to 0\.133\./);
     assert.match(paper, /corrected by its author at entry #\d+, before any evidence/);
     assert.doesNotMatch(paper, /test: Refuted if the slope is not significantly positive/);
-    const ch = await w.svc.proposeChallenge(await w.sign("Proposer", { type: "challenge.propose", claim: `${id}#C1`, title: "Fit the slope of ln S2 against N", brief: "Compute S2 exactly for N from 20 to 200 at the first-moment threshold and fit the slope by least squares; report it with its interval.", scale: "cpu-minutes" }));
-    assert.equal(ch.status, 201, JSON.stringify(ch.body));
-    const cp = (await w.page(String(body(ch)["page"]))).html;
-    assert.match(cp, /lies outside 0\.123 to 0\.133/, "the challenge's page states the test the claim has now");
+    // A brief attached to the claim before the board was retired (its page still shows the claim as it stands now).
+    const chId = "ch:" + "c".repeat(16);
+    await w.log.append("challenge.propose", { id: chId, claim: `${id}#C1`, title: "Fit the slope of ln S2 against N", brief: "Compute S2 exactly for N from 20 to 200 at the first-moment threshold and fit the slope by least squares; report it with its interval.", scale: "cpu-minutes", handle: "Proposer", operatorId: "op-prop", proposer: "agent" });
+    const cp = (await w.page(`/c/${chId.slice(3)}`)).html;
+    assert.match(cp, /lies outside 0\.123 to 0\.133/, "the brief's page states the test the claim has now");
   });
 
   it("signed amendments refuse every invisible character the sanitiser strips", async () => {
@@ -344,13 +345,13 @@ describe("amendments (claim.amend): the gaps an independent review found", () =>
     assert.doesNotMatch(await (await w.http("/v1/log/entries?from=0&limit=200")).text(), /clause density 4\.4/);
   });
 
-  it("an amendment of kind that would strand a challenge asking for a receipt is refused; a steward can pause amendments", async () => {
+  it("an amendment of kind that would strand an archived brief asking for a receipt is refused; a steward can pause amendments", async () => {
     const w = await world();
     await w.agent("Author", "op-author", ["gemma"]);
     await w.agent("Proposer", "op-prop", ["claude"]);
     const ref = await w.external("Author", QUOTE, LOOSE);
-    const ch = await w.svc.proposeChallenge(await w.sign("Proposer", { type: "challenge.propose", claim: ref, title: "Sample random 3-SAT at density 4.4", brief: "Sample formulas at clause density 4.4 for n from 100 to 400 and report the satisfiable fraction with a confidence interval; the claim says it tends to zero.", scale: "cpu-hours" }));
-    assert.equal(ch.status, 201, JSON.stringify(ch.body));
+    // A brief from before the board was retired, asking for a receipt on the claim.
+    await w.log.append("challenge.propose", { id: "ch:" + "d".repeat(16), claim: ref, title: "Sample random 3-SAT at density 4.4", brief: "Sample formulas at clause density 4.4 for n from 100 to 400 and report the satisfiable fraction with a confidence interval; the claim says it is near one half.", scale: "cpu-minutes", wants: "receipt", handle: "Proposer", operatorId: "op-prop", proposer: "agent" });
     const r = await w.amend("Author", ref, { kind: "conceptual" });
     assert.equal(r.status, 409);
     assert.match(String(body(r)["error"]), /asks for a receipt/);

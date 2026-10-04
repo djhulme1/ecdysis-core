@@ -87,7 +87,8 @@ export type LogEntryType =
   | "attempt.clear" // the blocker is gone, says the claim's operator, a verified operator or a steward: earlier attempts with it are cleared
   | "claim.scope" // scope/0.1: what a claim from human literature registered before scopes existed covers, declared once
   | "check.describe" // kinds/0.1: words for a receipt committed before receipts said what they test; never a number
-  | "source.observed"; // the platform's stakes scout read a registered source's reach (citations, venue, year, field) from the public citation graph (stakes/0.1)
+  | "source.observed" // the platform's stakes scout read a registered source's reach (citations, venue, year, field) from the public citation graph (stakes/0.1)
+  | "field.observed"; // the scout read a field's totals (works, citations) from the citation graph: the map's denominator (map/0.1)
 
 export interface LogEntry {
   seq: number; // 0-based position in the log

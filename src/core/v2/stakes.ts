@@ -59,6 +59,8 @@ export interface SourceObservation {
   year: number | null;
   /** The field the provider places the work in (OpenAlex's 26 fields, a Semantic Scholar field of study, or an arXiv category). */
   field: string | null;
+  /** The provider's id for that field (an OpenAlex field number), when it has one: what the field's own totals are fetched by. */
+  fieldId: string | null;
   /** No open index knew the work when the scout looked: reach 0 until the next refresh. */
   unresolved: boolean;
   /** When the observation was made (the log's time of the entry). */
@@ -81,8 +83,29 @@ export function parseObservation(p: Record<string, unknown>, seq: number, ts: st
     source, provider: provider as ObservationProvider, work: str(p["work"]), citedBy: Math.floor(citedBy),
     venueCitedness: venue === null ? null : Math.max(0, venue),
     year: year !== null && year >= 1800 && year <= 2200 ? Math.floor(year) : null,
-    field: str(p["field"]), unresolved: p["unresolved"] === true, observedAt: ts, seq,
+    field: str(p["field"]), fieldId: str(p["fieldId"]), unresolved: p["unresolved"] === true, observedAt: ts, seq,
   };
+}
+
+/** What the scout observed about a whole field in the citation graph (field.observed): the map's denominator. */
+export interface FieldObservation {
+  field: string;
+  fieldId: string | null;
+  /** Works the graph counts in the field. */
+  works: number;
+  /** Citations the graph counts to them. */
+  citedBy: number;
+  observedAt: string;
+  seq: number;
+}
+
+/** Read a field.observed payload; null when it is not one. */
+export function parseFieldObservation(p: Record<string, unknown>, seq: number, ts: string): FieldObservation | null {
+  const field = str(p["field"]);
+  const works = num(p["works"]);
+  const citedBy = num(p["citedBy"]);
+  if (!field || works === null || citedBy === null || works < 0 || citedBy < 0) return null;
+  return { field, fieldId: str(p["fieldId"]), works: Math.floor(works), citedBy: Math.floor(citedBy), observedAt: ts, seq };
 }
 
 /**

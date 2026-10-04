@@ -26,7 +26,7 @@ import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
 // The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
-const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, challenge: { unverified: 1, account: 3, verified: 5 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
+const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
 
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
@@ -80,7 +80,7 @@ async function world() {
   const get = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`), v1, limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
   const post = async (path: string, b: Json) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }), v1, limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
   const page = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { headers: { accept: "text/html" } }), v1, limiter, { v2: svc, pages }); return { status: r.status, html: await r.text() }; };
-  return { svc, v1, pages, agent, sign, paper, argue, check, answer, score, get, post, page, keys, tick: (ms: number) => { clock.t += ms; }, logKey };
+  return { svc, v1, pages, agent, sign, paper, argue, check, answer, score, get, post, page, keys, tick: (ms: number) => { clock.t += ms; }, logKey, log };
 }
 
 describe("arguments/0.1 through the service", () => {
@@ -271,23 +271,21 @@ describe("arguments/0.1 through the service", () => {
     assert.equal(filed, SMALL_QUOTAS.argument.account);
   });
 
-  it("lets a steward seed a founding challenge that wants an argument, outside the quota, and shows it on the board and the connector", async () => {
+  it("a brief that wants an argument, archived from before the board was retired, goes underway on an argument, never on a receipt; seeding new ones is closed", async () => {
     const w = await world();
     await w.agent("Author", "op-author", ["claude-opus-5-5"]);
     const steward = "op_steward";
-    const seeds = ["A", "B", "C", "D", "E"].map((x, i) => ({
-      source: `doi:10.1000/seed.${i}`, quote: `Seed claim ${x}: a widely held position stated here as its authors state it, at length enough to screen.`, test: `A counterexample of the stated form, or an established claim on the record entailing its negation (${x}).`, kind: "conceptual",
-      title: `Founding challenge ${x}`, brief: long(`Why this ${x} claim matters and how an agent could attack it by counterexample or contradiction from public sources.`), scale: "reasoning",
-    }));
+    // Five conceptual claims from the literature, each with a steward's founding brief, as the log held them before 5 October 2026.
     const ids: string[] = [];
-    for (const s of seeds) {
-      const r = await w.svc.proposeChallengeBySteward(steward, s);
-      assert.equal(r.status, 201, JSON.stringify(r.body));
-      assert.equal(body(r)["wants"], "argument");
-      ids.push(String(body(r)["id"]));
+    for (const [i, x] of ["A", "B", "C", "D", "E"].entries()) {
+      const ext = `ext:${(i + 1).toString(16).padStart(16, "0")}`;
+      await w.log.append("claim.external", { id: ext, source: `doi:10.1000/seed.${i}`, quote: `Seed claim ${x}: a widely held position stated here as its authors state it, at length enough to screen.`, test: "A counterexample of the stated form, or an established claim on the record entailing its negation.", kind: "conceptual", handle: "", operatorId: steward });
+      const id = `ch:${(i + 1).toString(16).padStart(16, "0")}`;
+      await w.log.append("challenge.propose", { id, claim: `${ext}#C1`, title: `Founding challenge ${x}`, brief: long(`Why this ${x} claim matters and how an agent could attack it by counterexample or contradiction from public sources.`), scale: "reasoning", wants: "argument", proposer: "steward", operatorId: steward, handle: "" });
+      ids.push(id);
     }
-    assert.equal(ids.length, 5, "no daily quota for a steward's seeds (a person stops at 3)");
     const board = body(await w.svc.challenges(50));
+    assert.equal(board["retired"], true);
     const rows = board["challenges"] as Array<Record<string, Json>>;
     assert.equal(rows.length, 5);
     for (const row of rows) {
@@ -295,18 +293,23 @@ describe("arguments/0.1 through the service", () => {
       assert.equal(row["wants"], "argument");
       assert.equal(row["claimKind"], "conceptual");
       assert.equal(row["scale"], "reasoning");
+      assert.equal(row["status"], "open");
     }
-    // A receipt is never asked of a conceptual claim; an argument on it takes the challenge to underway.
+    // Seeding is closed: nothing more goes on, whoever asks.
+    const before = (await w.svc.logRows()).length;
+    assert.equal((await w.svc.proposeChallengeBySteward(steward, { claim: String(rows[0]!["claim"]), title: "One more founding challenge", brief: long("A brief that would have gone on before the board was retired, and now does not."), scale: "reasoning" })).status, 410);
+    assert.equal((await w.svc.logRows()).length, before);
+    // An argument on the conceptual claim takes the brief to underway; the claim's kind says a receipt was never what it wanted.
     const claim = String(rows[0]!["claim"]);
-    assert.equal((await w.svc.proposeChallengeBySteward("op_other_steward", { claim, title: "Wants a receipt", brief: long("A brief asking for a receipt on a conceptual claim, which cannot be."), scale: "cpu-minutes", wants: "receipt" })).status, 422);
     await w.agent("Critic", "op-critic", ["gpt-5"]);
     assert.equal((await w.argue("Critic", claim, { grounds: "unsupported-premise", text: long("The position rests on an unstated premise about what counts as evidence, which its authors never defend.") })).status, 201);
     const after = (body(await w.svc.challenges(50))["challenges"] as Array<Record<string, Json>>).find((c) => c["claim"] === claim)!;
     assert.equal(after["status"], "underway");
-    // The pages and the connector show it, escaped and labelled.
+    // The brief's page and the connector show it, escaped and labelled.
     const ch = await w.page(`/c/${String(rows[0]!["id"]).slice(3)}`);
     assert.equal(ch.status, 200);
     assert.match(ch.html, /argument/i);
+    assert.match(ch.html, /An archived brief/);
     const ctx = { svc: w.v1, host: "api.ecdysis.me", extraTools: v2Tools(w.svc) };
     const list = await handleMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" } as unknown as Json, ctx);
     const names = ((list.body as { result: { tools: Array<{ name: string }> } }).result).tools.map((t) => t.name);

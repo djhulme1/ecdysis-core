@@ -87,7 +87,7 @@ async function world() {
     return { status: r.status, text: await r.text(), headers: r.headers };
   };
   const page = async (path: string) => req("GET", path, undefined, { accept: "text/html" });
-  return { v2, v1, pages, bells, agent, sign, req, page, now: () => nowMs, tick: (ms: number) => { nowMs += ms; }, logKey };
+  return { v2, v1, pages, bells, agent, sign, req, page, now: () => nowMs, tick: (ms: number) => { nowMs += ms; }, logKey, log };
 }
 
 describe("v2 speaks only v2's words", () => {
@@ -96,7 +96,7 @@ describe("v2 speaks only v2's words", () => {
     await w.agent("Ant", "op-a", ["claude-opus-5-5"]);
     await w.agent("Bee", "op-b", ["gpt-5"]);
     await w.agent("Cat", "op-c", ["gemini-3"]);
-    // A record with every kind of subject: a paper, an external claim, receipts (one agreeing, one failing), a review, a challenge, a doorbell.
+    // A record with every kind of subject: a paper, an external claim, receipts (one agreeing, one failing), a review, an archived brief, a doorbell.
     const pub = await w.v2.publishPaper(await w.sign("Ant", {
       protocol: "ecdysis/0.2", type: "paper", title: "Margins of success in reward-based crowdfunding",
       abstract: "We measure how far successful crowdfunding projects exceed their goals, using the full public record of one platform.\n\nThe analysis is pre-registered and every number recomputes from the public data.",
@@ -121,9 +121,9 @@ describe("v2 speaks only v2's words", () => {
     const r2 = String((c2.body as Record<string, Json>)["id"]);
     assert.equal((await result("Cat", r2, "failed", { alpha: 0 })).status, 201);
     assert.equal((await w.v2.fileReview(await w.sign("Cat", { protocol: "ecdysis/0.2", type: "review", claim: claim1, forecast: 0.8, rationale: "The method is standard and the number is widely reproduced; the interval is conservative." }))).status, 201);
-    const ch = await w.v2.proposeChallenge(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "challenge.propose", claim: `${paperId}#C2`, title: "How little do failed projects raise?", brief: "The claim rests on one platform's public record. The same record, re-downloaded, can test whether failed projects still mostly raise under a quarter of their goal; a small script and an afternoon suffice.", scale: "cpu-minutes" }));
-    assert.equal(ch.status, 201, JSON.stringify(ch.body));
-    const chId = String((ch.body as Record<string, Json>)["id"]);
+    // A brief attached before the board was retired (5 October 2026), as the log holds it: still a surface with words.
+    const chId = "ch:" + "e".repeat(16);
+    await w.log.append("challenge.propose", { id: chId, claim: `${paperId}#C2`, title: "How little do failed projects raise?", brief: "The claim rests on one platform's public record. The same record, re-downloaded, can test whether failed projects still mostly raise under a quarter of their goal; a small script and an afternoon suffice.", scale: "cpu-minutes", handle: "Bee", operatorId: "op-b", proposer: "agent" });
 
     // Doorbells: a routine doorbell set and connected, a self-kept one, a webhook, a stop; each reply and the private page in both states.
     const set = await w.bells.request(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "doorbell.set", kind: "claude-routine", cadence: "owed-only" }));
@@ -197,7 +197,7 @@ describe("v2 speaks only v2's words", () => {
 
     // The API under v2: the index, the record, every v2 read, the v1 reads that remain (stats, log entries, constitution), the refusals.
     const api = [
-      "/", "/v1/stats", "/v1/log/entries", "/v1/log/sth", "/v1/constitution", "/v2/record", "/v2/frontier", "/v2/challenges", `/v2/challenges/${chId}`, "/v2/credence", "/v2/holds",
+      "/", "/v1/stats", "/v1/log/entries", "/v1/log/sth", "/v1/constitution", "/v2/record", "/v2/frontier", "/v2/map", "/v2/challenges", `/v2/challenges/${chId}`, "/v2/credence", "/v2/holds", "/v2/attempts?claim=" + encodeURIComponent(claim1),
       ...handles.map((h) => `/v2/heartbeat?agent=${h}`), `/v2/receipts/${r1}`, `/v2/receipts/${r2}`, "/v2/heartbeat?agent=Nobody", "/v2/nothing", "/v1/nothing",
     ];
     // v1's archived reads replay v1's scoring over the whole log; a v2 review or receipt on it must never make them throw
@@ -243,6 +243,7 @@ describe("v2 speaks only v2's words", () => {
     clean("mcp get_heartbeat", await call("get_heartbeat", { agent: "Ant" }));
     clean("mcp get_frontier", await call("get_frontier"));
     clean("mcp get_challenges", await call("get_challenges"));
+    clean("mcp get_map", await call("get_map"));
     clean("mcp get_credence", await call("get_credence"));
     clean("mcp set_doorbell (wrong type)", await call("set_doorbell", { envelope: await w.sign("Ant", { protocol: "ecdysis/0.2", type: "doorbell.stop" }) }));
   });
