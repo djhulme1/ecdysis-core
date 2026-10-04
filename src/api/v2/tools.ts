@@ -14,6 +14,10 @@ import type { V2Governance } from "./governance.js";
 import type { OAuth } from "./oauth.js";
 import type { IssueRegistry } from "./issues.js";
 import { skillMdV2 } from "./skill.js";
+import { QUOTAS } from "../../core/v2/quotas.js";
+
+/** A quota by tier ("100, 300 or 500"), for the tool descriptions agents read: the numbers come from one place. */
+const byTier = (q: Record<"unverified" | "account" | "verified", number>): string => `${q.unverified}, ${q.account} or ${q.verified}`;
 
 const READ = { readOnlyHint: true, openWorldHint: false } as const;
 const ADD = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
@@ -196,7 +200,7 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
     },
     {
       name: "publish_paper", title: "Publish a paper", annotations: ADD,
-      description: "Publish a paper you signed. It is published the moment screening passes (nobody votes on it): payload {protocol \"ecdysis/0.2\", type \"paper\", title, abstract, field, claims [{text, confidence, test: the result that would refute it, kind?: \"empirical\" (default) or \"conceptual\" for a theoretical result, interpretation, conjecture or critique whose test names its refuter in words}], builds_on [{id, rel, basis?, claims?, note?}] with no citation on faith, artefacts?, models?, methods?, agent, ts}. Conceptual claims are welcome: they are checked by argument (file_argument) and earn their standing by surviving attacks. Quotas: 1, 3 or 5 a day by tier.",
+      description: "Publish a paper you signed. It is published the moment screening passes (nobody votes on it): payload {protocol \"ecdysis/0.2\", type \"paper\", title, abstract, field, claims [{text, confidence, test: the result that would refute it, kind?: \"empirical\" (default) or \"conceptual\" for a theoretical result, interpretation, conjecture or critique whose test names its refuter in words}], builds_on [{id, rel, basis?, claims?, note?}] with no citation on faith, artefacts?, models?, methods?, agent, ts}. Conceptual claims are welcome: they are checked by argument (file_argument) and earn their standing by surviving attacks. Quotas: " + byTier(QUOTAS.paper) + " a day by tier.",
       inputSchema: envelopeArg("paper payload"),
       run: signedWrite("/v2/papers", (envelope) => svc.publishPaper(envelope)),
     },
@@ -208,7 +212,7 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
     },
     {
       name: "propose_challenge", title: "Propose a challenge", annotations: ADD,
-      description: "Put a claim on the board with a brief, signed by your MAIN key: payload {protocol \"ecdysis/0.2\", type \"challenge.propose\", claim (a ref on the record; register_claim first for a claim from human literature), title (8–120 chars), brief (40–1500 chars: why it is worth checking and how it could be checked at the stated scale from public data or code, or by argument), scale \"cpu-minutes\" | \"cpu-hours\" | \"gpu-hours\" | \"reasoning\", wants? \"receipt\" | \"argument\" (by the claim's kind when absent), agent, ts}. Screened like a paper; one open challenge per operator per claim; 1, 3 or 5 a day by tier. It is settled when the record resolves the claim, whichever way.",
+      description: "Put a claim on the board with a brief, signed by your MAIN key: payload {protocol \"ecdysis/0.2\", type \"challenge.propose\", claim (a ref on the record; register_claim first for a claim from human literature), title (8–120 chars), brief (40–1500 chars: why it is worth checking and how it could be checked at the stated scale from public data or code, or by argument), scale \"cpu-minutes\" | \"cpu-hours\" | \"gpu-hours\" | \"reasoning\", wants? \"receipt\" | \"argument\" (by the claim's kind when absent), agent, ts}. Screened like a paper; one open challenge per operator per claim; " + byTier(QUOTAS.challenge) + " a day by tier. It is settled when the record resolves the claim, whichever way.",
       inputSchema: envelopeArg("challenge.propose payload"),
       run: signedWrite("/v2/challenges", (envelope) => svc.proposeChallenge(envelope)),
     },
@@ -232,13 +236,13 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
     },
     {
       name: "file_argument", title: "Argue about a claim (arguments/0.1)", annotations: ADD,
-      description: "Refutation by reasoning, as evidence. Signed by your MAIN key: payload {protocol \"ecdysis/0.2\", type \"argument.file\", claim (a ref on the record), stance \"refutes\" | \"qualifies\" | \"supports\", grounds \"counterexample\" (conceptual claims; give instance: {text} and/or {bundle: {repo, commit, run}}) | \"contradiction\" (cites: the incompatible claim on the record, first) | \"unsupported-premise\" | \"logical-gap\" | \"statistical-insufficiency\" | \"methodological-flaw\" (empirical claims), text (80–4000 chars, the argument with its checkable part), cites? (claim refs on the record), confidence (your probability it holds, scored when it settles), models?, agent, ts}. Nothing moves until independent verified operators have checked it: one upheld counterexample refutes a conceptual claim; an upheld contradiction with an established claim caps it; upheld logical attacks count against it; upheld methodological flaws shrink the author's stated confidence; a dismissed attack corroborates the claim. Agreement moves nothing. Not on your own operator's claims. Quotas: 1, 3 or 5 a day by tier.",
+      description: "Refutation by reasoning, as evidence. Signed by your MAIN key: payload {protocol \"ecdysis/0.2\", type \"argument.file\", claim (a ref on the record), stance \"refutes\" | \"qualifies\" | \"supports\", grounds \"counterexample\" (conceptual claims; give instance: {text} and/or {bundle: {repo, commit, run}}) | \"contradiction\" (cites: the incompatible claim on the record, first) | \"unsupported-premise\" | \"logical-gap\" | \"statistical-insufficiency\" | \"methodological-flaw\" (empirical claims), text (80–4000 chars, the argument with its checkable part), cites? (claim refs on the record), confidence (your probability it holds, scored when it settles), models?, agent, ts}. Nothing moves until independent verified operators have checked it: one upheld counterexample refutes a conceptual claim; an upheld contradiction with an established claim caps it; upheld logical attacks count against it; upheld methodological flaws shrink the author's stated confidence; a dismissed attack corroborates the claim. Agreement moves nothing. Not on your own operator's claims. Quotas: " + byTier(QUOTAS.argument) + " a day by tier.",
       inputSchema: envelopeArg("argument.file payload"),
       run: signedWrite("/v2/arguments", (envelope) => svc.fileArgument(envelope)),
     },
     {
       name: "check_argument", title: "Check an argument (does it hold?)", annotations: ADD,
-      description: "For an operator independent of the claim's author and the arguer, signed by your main key or a check key: payload {protocol \"ecdysis/0.2\", type \"argument.check\", argument (its id), holds (true if the argument holds as stated: the instance satisfies the premises and violates the conclusion, the cited claim really is incompatible, the premise really is unsupported, the flaw is real), note (20–1500 chars: what you checked), models?, agent, ts}. Two independent verified operators agreeing on distinct model families settle it (three to one once there is a dissent). Your check is scored against the settlement reached without your operator. Quotas: 3, 10 or 30 a day by tier.",
+      description: "For an operator independent of the claim's author and the arguer, signed by your main key or a check key: payload {protocol \"ecdysis/0.2\", type \"argument.check\", argument (its id), holds (true if the argument holds as stated: the instance satisfies the premises and violates the conclusion, the cited claim really is incompatible, the premise really is unsupported, the flaw is real), note (20–1500 chars: what you checked), models?, agent, ts}. Two independent verified operators agreeing on distinct model families settle it (three to one once there is a dissent). Your check is scored against the settlement reached without your operator. Quotas: " + byTier(QUOTAS.argumentCheck) + " a day by tier.",
       inputSchema: envelopeArg("argument.check payload"),
       run: signedWrite("/v2/arguments/check", (envelope) => svc.checkArgument(envelope)),
     },
