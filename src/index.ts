@@ -21,6 +21,7 @@ import { D1CanaryStore } from "./store/v2/canaries-d1.js";
 import { ComplaintsHandler, IssueRegistry } from "./api/v2/issues.js";
 import { D1IssueStore } from "./store/v2/issues-d1.js";
 import { QuoteScout } from "./api/v2/quotes.js";
+import { StakesScout } from "./api/v2/stakes-scout.js";
 import { D1QuoteCheckStore } from "./store/v2/quotes-d1.js";
 import { sha256Hex } from "./api/access.js";
 import { D1OAuthStore } from "./store/v2/oauth-d1.js";
@@ -298,7 +299,7 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
  */
 const V2_CACHE = new V2Cache();
 
-function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env), keysAgree = true): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler }; complaints: ComplaintsHandler; quotes: QuoteScout; issues: IssueRegistry } | null {
+function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env), keysAgree = true): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler }; complaints: ComplaintsHandler; quotes: QuoteScout; stakes: StakesScout; issues: IssueRegistry } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
@@ -347,8 +348,10 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
   // The quote scout: on the cron, a few registered quotes are checked against their source's abstract; the claim page shows the result.
   const quoteStore = new D1QuoteCheckStore(env.DB);
   const quotes = new QuoteScout({ store: quoteStore, v2, issues, contact: env.HERALD_REPLY_TO || "replies@ecdysis.me" });
+  // The stakes scout (stakes/0.1): on the cron, a few registered sources' reach is read from the public citation graph and logged.
+  const stakes = new StakesScout({ v2, log, contact: env.HERALD_REPLY_TO || "replies@ecdysis.me" });
   return {
-    v2, notifier, quotes,
+    v2, notifier, quotes, stakes,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },
     governance,
     complaints: new ComplaintsHandler({ issues, readOnly: frozen }),
@@ -581,6 +584,8 @@ export default {
         const digested = v2 ? await v2.notifier.digest().catch((e) => { console.error("v2 digest failed", e); return { sent: 0, skipped: 0 }; }) : { sent: 0, skipped: 0 };
         // v2: a few registered quotes checked against their sources (arXiv asks for a pause between requests; six a run, every quarter hour, is well within it).
         const quoted = v2 ? await v2.quotes.run(6).catch((e) => { console.error("quote scout failed", e); return { checked: 0, verified: 0, mismatched: 0, unresolvable: 0, errors: 0 }; }) : { checked: 0, verified: 0, mismatched: 0, unresolvable: 0, errors: 0 };
+        // v2 (stakes/0.1): a few registered sources' reach read from OpenAlex or Semantic Scholar and logged (five a run, a second apart).
+        const staked = v2 ? await v2.stakes.run(5).catch((e) => { console.error("stakes scout failed", e); return { observed: 0, unresolved: 0, errors: 0 }; }) : { observed: 0, unresolved: 0, errors: 0 };
         if (r.cases || purged || sent.drawn || sent.reminders || rang.rung || rang.failed || swept.lapsed.length || swept.sealed.length) console.log("cron", JSON.stringify({ ...r, purged, alerts: sent, doorbells: rang, v2: swept }));
         await store.putOpsState("cron:last", {
           ok: true, ...r, purged, alertsDrawn: sent.drawn, alertsReminders: sent.reminders,
@@ -588,6 +593,7 @@ export default {
           ...("error" in rang ? { doorbellsError: rang.error } : {}),
           v2Lapsed: swept.lapsed.length, v2Sealed: swept.sealed.length, v2AlertsSent: alerted.sent, v2DigestsSent: digested.sent,
           v2QuotesChecked: quoted.checked, v2QuotesVerified: quoted.verified, v2QuotesMismatched: quoted.mismatched,
+          v2SourcesObserved: staked.observed, v2SourcesUnresolved: staked.unresolved, v2SourcesErrors: staked.errors,
         }, at);
       } catch (e) {
         console.error("cron failed", e);

@@ -323,9 +323,11 @@ export function openApiSchemas(): Record<string, Schema> {
       ref: str(), paper: str(), external: { type: "boolean" }, kind: enumOf(CLAIM_KINDS, ""),
       prior: num(), calibration: num(), credence: num({ minimum: 0, maximum: 1, description: "What to believe: moved only by independent evidence." }), credenceVerified: num({ description: "From verified operators' evidence alone: what the status is tested against." }),
       cap: { oneOf: [num(), { type: "null" }] }, status: enumOf(["established", "supported", "unchecked", "contested", "refuted"], ""), resolved: { oneOf: [{ type: "integer" }, { type: "null" }] },
-      use: num({ description: "How much rests on it; never an input to credence." }), dispute: num({ description: "How much the evidence disagrees: 4sf/(s+f)." }), reproduced: { type: "boolean" },
+      use: num({ description: "How much rests on it on the record; never an input to credence." }), dispute: num({ description: "How much the evidence disagrees: 4sf/(s+f)." }), reproduced: { type: "boolean" },
+      reach: num({ minimum: 0, description: "stakes/0.1: the source paper's reach in the public citation graph as the archive's scout observed it (citations, or a young paper's venue expectation); 0 when unobserved." }),
+      stakes: num({ minimum: 0, description: "stakes/0.1: use + log2(1 + reach). Ranks the queues and feeds the pressure on blocked claims; never enters credence." }),
       families: arr(str()), arguments: { type: "object", additionalProperties: true }, foundations: arr({ type: "object", additionalProperties: true }), lift: arr({ type: "object", additionalProperties: true }),
-    }, ["ref", "paper", "credence", "status", "use", "dispute"], "A claim's numbers as served (credence/0.3). Three numbers, never blended.", { additionalProperties: true }),
+    }, ["ref", "paper", "credence", "status", "use", "dispute", "stakes"], "A claim's numbers as served (credence/0.3, stakes/0.1). Four numbers, never blended.", { additionalProperties: true }),
     SignedTreeHead: obj({
       treeSize: { type: "integer" }, rootHash: str({ pattern: HEX64 }), timestamp: str({ pattern: ISO_TS }),
       signature: str({ description: "Ed25519 by the log key over the canonical JSON of {treeSize, rootHash, timestamp}." }),

@@ -56,9 +56,25 @@ export function statusChip(c: ClaimV2): string {
   return `<span class="status ${statusTone(c.status)}" title="${esc(statusMeaning(c))}">${esc(c.status)}</span>${c.kind === "conceptual" ? ` <span class="status open" title="A conceptual claim: a theoretical result, interpretation, conjecture or critique. Its test names its refuter in words, so it is checked by argument (a counterexample, a contradiction, an unsupported premise, a logical gap), not by a receipt.">conceptual</span>` : ""}`;
 }
 
-/** The three numbers, never blended. */
+/** stakes/0.1: the stakes with their inputs, so the number is never mistaken for credence. */
+export function stakesLine(c: ClaimViewV2): string {
+  const s = c.score;
+  const use = `${s.use} dependant${s.use === 1 ? "" : "s"} on the record`;
+  const o = c.observed ?? null;
+  let reach: string;
+  if (!c.source) reach = "no reach off the record yet: a paper published here is not in the citation graph until it is cited there";
+  else if (!o) reach = "reach not yet observed: the archive's scout reads the citation graph for each registered source within hours and again each month";
+  else if (o.unresolved) reach = `reach 0: no open index knew this source when the scout looked (${esc(shortDate(o.observedAt))}); it looks again each month`;
+  else {
+    const venue = o.venueCitedness !== null && s.reach > o.citedBy ? `; a young paper, so its venue's expected citations (${r2(o.venueCitedness)} a year over two years) stand in for its own ${o.citedBy}` : "";
+    reach = `reach ${Number.isInteger(s.reach) ? s.reach.toLocaleString("en-GB") : s.reach.toFixed(1)}: cited ${o.citedBy.toLocaleString("en-GB")} time${o.citedBy === 1 ? "" : "s"} (${esc(o.provider === "openalex" ? "OpenAlex" : o.provider === "semanticscholar" ? "Semantic Scholar" : "Crossref")}, ${esc(shortDate(o.observedAt))}${o.year ? `; published ${o.year}` : ""}${o.field ? `; field: ${esc(o.field)}` : ""})${venue}`;
+  }
+  return `<b>Stakes ${r2(s.stakes)}</b> = use + log<sub>2</sub>(1 + reach): ${use}; ${reach}. Stakes rank the queues and feed the pressure on blocked claims; they never enter credence.`;
+}
+
+/** The four numbers, never blended. */
 export function numbers(c: ClaimV2): string {
-  return `<dl class="kv"><dt>credence</dt><dd>${r2(c.credence)}</dd><dt>use</dt><dd>${c.use}</dd><dt>dispute</dt><dd>${r2(c.dispute)}</dd></dl>`;
+  return `<dl class="kv"><dt>credence</dt><dd>${r2(c.credence)}</dd><dt>use</dt><dd>${c.use}</dd><dt>dispute</dt><dd>${r2(c.dispute)}</dd><dt>stakes</dt><dd>${r2(c.stakes)}</dd></dl>`;
 }
 
 export interface PaperViewV2 {
@@ -164,6 +180,8 @@ export interface ClaimViewV2 {
   attempts?: AttemptRowV2[];
   /** attempts/0.1: what blocks the claim as it stands (null: nothing in force says it cannot be checked). */
   blocked?: BlockedViewV2 | null;
+  /** stakes/0.1: what the scout observed about the source (null: an Ecdysis paper, or not yet observed). */
+  observed?: { provider: string; citedBy: number; venueCitedness: number | null; year: number | null; field: string | null; observedAt: string; unresolved: boolean } | null;
   /** The log entry the figures were derived to (V2Record.head), for the footer. */
   computedFrom?: { seq: number; ts: string } | null;
 }
@@ -246,6 +264,7 @@ export function claimPageV2(c: ClaimViewV2): string {
 <h1>${esc(c.text)}</h1>
 <p>${statusChip(s)} ${numbers(s)}</p>
 <p class="small">${c.source ? `From human literature: <code class="mono">${esc(c.source)}</code>.${c.quoteCheck ? ` ${esc(c.quoteCheck)}` : ""}` : `Stated at ${pct(c.stated)} by ${c.author ? `<a href="/a/${esc(c.author)}">${esc(c.author)}</a>` : "its author"}; prior ${r2(s.prior)} after calibration (${r2(s.calibration)}: the operator's record of earlier resolved claims; ½ with none) and foundations.`} Test: ${esc(c.test)}${c.amended ? ` <span class="small">(corrected by its author at entry #${c.amended.seq}, ${esc(shortDate(c.amended.at))}, before any evidence: ${[c.amended.kind ? `kind ${esc(c.amended.wasKind)} → ${esc(c.amended.kind)}` : "", c.amended.test ? `test was "${esc(c.amended.wasTest ?? "")}"` : ""].filter(Boolean).join("; ")})</span>` : ""}${s.reproduced ? " · a matched re-run shows the author reported honestly" : ""}${c.anchor !== null ? ` · <b>canary, revealed: known to ${c.anchor ? "hold" : "fail"}</b>` : ""}</p>
+<p class="small">${stakesLine(c)}</p>
 <p class="small">${esc(statusMeaning(s))}. ${s.kind === "conceptual" ? `A conceptual claim never reads established: that word is kept for replicated empirical claims. Arguments against it upheld: ${s.arguments.upheld}; dismissed: ${s.arguments.dismissed}; open: ${s.arguments.open}` : `Confirming model families: ${s.families.length ? esc(s.families.join(", ")) : "none yet"}. Threshold for established at this use: ${r2(s.threshold)}`}${s.cap !== null ? `; capped at ${r2(s.cap)} by an upheld contradiction with an established claim` : ""}${s.arguments.methodology ? `; ${s.arguments.methodology} upheld methodological assessment${s.arguments.methodology === 1 ? "" : "s"} shrink${s.arguments.methodology === 1 ? "s" : ""} the weight of the author's stated confidence` : ""}${Math.abs(s.credenceVerified - s.credence) >= 0.005 ? `; from verified operators' evidence alone, which is what the status is tested against, the credence is ${r2(s.credenceVerified)}` : ""}.</p>
 <h2>What would raise it most</h2>
 ${s.lift.length ? `<table><thead><tr><th>If this foundation gained one confirming replication</th><th>its credence</th><th>this claim</th></tr></thead><tbody>${s.lift.map((l) => `<tr><td><a href="${claimHref(l.ref)}"><code class="mono">${esc(l.ref)}</code></a></td><td>${r2(l.from)}</td><td>${r2(s.credence)} → ${r2(l.to)} (+${r2(l.gain)})</td></tr>`).join("")}</tbody></table>` : `<p class="small">An independent replication of this claim itself: it rests on no claim of the record${s.status === "unchecked" ? ", and nobody has replicated it yet" : ""}.</p>`}
@@ -258,7 +277,7 @@ ${attemptsSection(c.ref, s.kind, c.blocked ?? null, c.attempts ?? [])}
 ${s.kind === "conceptual" ? `<p class="small">A conceptual claim takes no receipts: there is no measurement to repeat. Its evidence is the arguments above.</p>` : c.receipts.length ? `<table><thead><tr><th>Receipt</th><th>Kind</th><th>Outcome</th><th>Agent</th><th>Cross-check</th><th>Re-run by</th></tr></thead><tbody>${c.receipts.map((r) => `<tr><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td><td>${esc(r.kind)}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td>${r.verifiedBy} verified, ${r.disputedBy} disputed${r.others && r.others.matched + r.others.disagreed ? ` · <span class="small" title="Re-runs by operators not yet verified are shown here and count for nothing: only a verified operator's cross-check verifies or disputes a receipt.">${r.others.matched + r.others.disagreed} more by operators not yet verified (${r.others.matched} matched, ${r.others.disagreed} disagreed), shown, not counted</span>` : ""}${r.requires ? ` · <span class="small" title="This bundle reads ${r.requires} input${r.requires === 1 ? "" : "s"} that ${r.requires === 1 ? "is" : "are"} not open; ${r.auditable ? "a verified cross-check has matched it, so it counts in full" : "until a verified operator who holds the data cross-checks it, it counts at the unverified weight and settles nothing"}.">${r.auditable ? "data held, audited" : "data held, not yet audited"}</span>` : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No receipts yet. To file one: commit_check against <code class="mono">${esc(c.ref)}</code>.</p>`}
 ${c.usedBy.length ? `<h2>Relied on by</h2><ul class="rows">${c.usedBy.map((u) => `<li><span class="t"><a href="/p/${esc(u.paper)}">${esc(u.title)}</a></span></li>`).join("")}</ul>` : ""}
 ${c.promote ? promoteBlock({ ...c.promote, what: "claim" }) : ""}
-<p class="small">Three numbers, never blended: credence (how far independent evidence supports it), use (how much rests on it), dispute (how much the evidence disagrees). All recompute from the public log.</p>`;
+<p class="small">Four numbers, never blended: credence (how far independent evidence supports it), use (how much rests on it on the record), dispute (how much the evidence disagrees), stakes (how much rests on it on and off the record: use + log<sub>2</sub>(1 + the source's reach in the public citation graph); stakes rank the queues and never enter credence). All recompute from the public log.</p>`;
   return shell({ title: c.text.slice(0, 80), description: `A claim on Ecdysis: ${c.text.slice(0, 120)}`, half: "people", current: "/papers", body, computedFrom: c.computedFrom ?? null });
 }
 
@@ -341,10 +360,10 @@ export function frontierPageV2(d: FrontierViewV2): string {
 <p class="small">A brief on a claim: why it is worth checking and how it could be checked at small scale. Ranked by the same value of checking as the queue, so a brief directs attention and moves no number. <a href="/challenges">All challenges</a> · people propose from <a href="/me#challenge">their own page</a>, agents with <code>propose_challenge</code>.</p>
 ${challenges.length ? `<ul class="labels">${challenges.map(challengeCard).join("")}</ul>` : `<p class="small">No open challenge yet. The first one proposed appears here and on <a href="/challenges">the board</a>.</p>`}
 <h2>Most worth checking</h2>
-<p class="small">Value of checking = (use + ½) · p(1 − p): claims much rests on, whose credence is nearest to a coin toss.</p>
+<p class="small">Value of checking = (stakes + ½) · p(1 − p): claims much rests on, on the record and in the literature, whose credence is nearest to a coin toss.</p>
 ${d.checking.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>Models so far</th><th>Value</th><th>Minutes</th><th>Per minute</th></tr></thead><tbody>${d.checking.map((c) => `<tr><td><a href="${claimHref(c.ref)}"><code class="mono">${esc(c.ref)}</code></a></td><td>${esc(c.status)}</td><td>${r2(c.credence)}</td><td>${c.use}</td><td>${esc(c.families.join(", ") || "—")}</td><td>${r2(c.value)}</td><td>${c.minutes}</td><td>${c.perMinute.toFixed(4)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">Nothing to check yet.</p>`}
 <h2>Disputes to settle</h2>
-<p class="small">Dispute priority = (use + ½) · D, where D = 4sf/(s + f) over verified evidence. Disputes are settled by further independent runs, not by anyone's decision.</p>
+<p class="small">Dispute priority = (stakes + ½) · D, where D = 4sf/(s + f) over verified evidence. Disputes are settled by further independent runs, not by anyone's decision.</p>
 ${d.disputes.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>Dispute</th><th>Priority</th><th>Minutes</th></tr></thead><tbody>${d.disputes.map((c) => `<tr><td><a href="${claimHref(c.ref)}"><code class="mono">${esc(c.ref)}</code></a></td><td>${esc(c.status)}</td><td>${r2(c.credence)}</td><td>${c.use}</td><td>${r2(c.dispute)}</td><td>${r2(c.priority)}</td><td>${c.minutes}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claim is in dispute.</p>`}
 <h2 id="arguing">Conceptual claims to argue about</h2>
 <p class="small">Theory, interpretation, conjecture, critique: claims whose test names a refuter in words. They are checked by argument (a counterexample, a contradiction with a claim on the record, an unsupported premise, a logical gap), never by a receipt, and earn their standing by surviving attacks. Ranked by the same value of checking, per half an hour of reasoning.</p>

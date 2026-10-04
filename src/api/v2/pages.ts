@@ -334,8 +334,11 @@ export class PagesHandler {
       cleared: a.cleared ? { by: a.cleared.by, agent: a.cleared.handle, how: a.cleared.how, at: a.cleared.ts } : null,
     }));
     const bl = r.blockers.get(ref);
-    const blocked = bl ? { verifiedOperators: bl.verifiedOperators, pressure: pressure(score.use, bl.verifiedOperators), blockers: bl.blockers.map((b) => ({ blocker: b.blocker, verifiedOperators: b.verifiedOperators, otherOperators: b.otherOperators, attempts: b.attempts.length, unblockedBy: b.unblockedBy.slice(0, 3) })) } : null;
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args, attempts, blocked, computedFrom: r.head };
+    const blocked = bl ? { verifiedOperators: bl.verifiedOperators, pressure: pressure(score.stakes, bl.verifiedOperators), blockers: bl.blockers.map((b) => ({ blocker: b.blocker, verifiedOperators: b.verifiedOperators, otherOperators: b.otherOperators, attempts: b.attempts.length, unblockedBy: b.unblockedBy.slice(0, 3) })) } : null;
+    // stakes/0.1: what the scout observed about the source, for the stakes line.
+    const obs = source ? r.observations.get(source.toLowerCase()) ?? null : null;
+    const observed = obs ? { provider: obs.provider, citedBy: obs.citedBy, venueCitedness: obs.venueCitedness, year: obs.year, field: obs.field, observedAt: obs.observedAt, unresolved: obs.unresolved } : null;
+    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, usedBy, promote, arguments: args, attempts, blocked, observed, computedFrom: r.head };
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {
