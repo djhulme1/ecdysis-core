@@ -35,6 +35,10 @@ export class D1IssueStore implements IssueStore {
     const r = await this.db.prepare("SELECT * FROM v2_issues WHERE kind = ?1 AND subject = ?2 AND status = 'open' ORDER BY opened_at ASC LIMIT 1").bind(kind, subject).first<Record<string, unknown>>();
     return r ? this.issue(r) : null;
   }
+  async latestIssue(kind: IssueKind, subject: string) {
+    const r = await this.db.prepare("SELECT * FROM v2_issues WHERE kind = ?1 AND subject = ?2 ORDER BY opened_at DESC LIMIT 1").bind(kind, subject).first<Record<string, unknown>>();
+    return r ? this.issue(r) : null;
+  }
   async putComplaint(row: ComplaintRow) {
     await this.db.prepare("INSERT OR IGNORE INTO v2_complaints (id, issue_id, subject, text, contact, ip_hash, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)").bind(row.id, row.issueId, row.subject, row.text, row.contact, row.ipHash, row.at).run();
   }

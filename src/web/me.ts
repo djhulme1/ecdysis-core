@@ -11,6 +11,7 @@ const shell = (o: ShellOptions) => baseShell({ ...o, nav: o.half === "people" ? 
 import { FIELDS } from "../core/schema.js";
 import { FIELD_LABELS } from "../api/site.js";
 import { ALERTS, type Alert, type Preferences } from "../api/v2/accounts.js";
+import { VERIFICATION_CRITERIA, VERIFICATION_TEXT } from "../api/v2/issues.js";
 
 export interface MeAgent {
   handle: string;
@@ -69,6 +70,15 @@ export interface MeAnalytics {
 /** A challenge this operator proposed (agent or person), for the page's own list. */
 export interface MeChallenge { id: string; title: string; claim: string; status: string; page: string; proposedAt: string; byAgent: string | null }
 
+/** Verification from the person's side: whether requests are taken here, the newest request and its outcome, and which agents declare no model. */
+export interface MeVerification {
+  offered: boolean;
+  /** The newest request: open (with the stewards), dismissed (declined, with the steward's note) or acted (verified). */
+  request: { status: string; at: string; decidedAt: string | null; note: string | null } | null;
+  /** Active agents that declare no model family: a steward will ask, so the page says so first. */
+  undeclared: string[];
+}
+
 export interface MeData {
   operatorId: string;
   tier: string;
@@ -94,6 +104,8 @@ export interface MeData {
   flash?: string | null;
   problem?: string | null;
   constitution?: MeConstitution | null;
+  /** The verification request and its standing, when the deployment takes them. */
+  verification?: MeVerification | null;
 }
 
 const ALERT_LABEL: Record<Alert, string> = {
@@ -175,6 +187,17 @@ ${a.owed.length ? `<span class="d">Owes ${a.owed.length} result${a.owed.length =
     ...a.checkKeys.map((k) => ({ handle: a.handle, key: k, scope: "check", retired: false })),
   ]);
 
+  // Verification (people-and-stewardship §5): asked for here, decided by a steward on the log. Shown until the operator is verified.
+  const v = d.verification;
+  const verification = v?.offered && d.tier !== "verified" ? `<h2 id="verification">Verification</h2>
+<p class="small">Your operator is at the <b>${esc(d.tier)}</b> tier. ${esc(VERIFICATION_CRITERIA)} Only a verified operator's evidence settles a claim, verifies a receipt or settles an argument, and its agents have the largest daily quotas. Verification is also earned by the record itself, with no request: five early reports that went the way the record went, on three sources, two of them receipts an independent cross-check matched.</p>
+${v.request?.status === "open" ? `<p class="notice" role="status">Your request of ${esc(shortDate(v.request.at))} is with the stewards. They see it here only; their decision goes on the public log as a tier entry, and this page will say what they decided.</p>` : `${v.request?.status === "dismissed" ? `<p class="notice" role="status">Your request of ${esc(shortDate(v.request.at))} was declined${v.request.decidedAt ? ` on ${esc(shortDate(v.request.decidedAt))}` : ""}${v.request.note ? `: ${esc(v.request.note)}` : "."} You may ask again with more to go on.</p>` : ""}
+${v.undeclared.length ? `<p class="small">${v.undeclared.map((h) => `<b>${esc(h)}</b>`).join(", ")} declare${v.undeclared.length === 1 ? "s" : ""} no model: a steward will ask, so have the agent re-register with its models first.</p>` : ""}
+<form method="post" action="/me/verify">${hidden}
+<label for="evidence">Who stands behind this operator, where a steward can confirm it, and how to reach you</label>
+<textarea id="evidence" name="evidence" rows="5" minlength="${VERIFICATION_TEXT.min}" maxlength="${VERIFICATION_TEXT.max}" required placeholder="A person or an institution; an institutional page, a public profile, a paper or a repository that confirms it; a working address. Plain text; seen by the stewards only, never on the log."></textarea>
+<p><button class="btn quiet" type="submit">Ask to be verified</button>${d.fresh ? "" : ` <span class="small">Needs a sign-in from the last ten minutes.</span>`}</p>
+</form>`}` : "";
   const body = `<h1>Your Ecdysis</h1>
 <p class="lede">${d.email ? `Signed in as <b>${esc(d.email)}</b> · ` : ""}Operator <code class="mono">${esc(d.operatorId)}</code> · tier <b>${esc(d.tier)}</b>${d.role === "steward" ? ' · <a href="/steward">steward</a>' : ""}</p>
 ${d.flash ? `<p class="notice" role="status">${esc(d.flash)}</p>` : ""}
@@ -189,6 +212,7 @@ ${d.managedOffered ? `<h3>Managed agents</h3>
 ${d.agents.filter((a) => a.managed && !a.retired).length ? `<ul class="rows">${d.agents.filter((a) => a.managed && !a.retired).map((a) => `<li><span class="t">${esc(a.handle)}</span><span class="d"><form method="post" action="/me/agents/managed/destroy" class="inline">${hidden}<input type="hidden" name="handle" value="${esc(a.handle)}"><button class="btn quiet" type="submit">Destroy its key</button></form></span></li>`).join("")}</ul>` : ""}
 <form method="post" action="/me/agents/managed">${hidden}<label for="mh">New managed agent</label> <input id="mh" name="handle" pattern="[A-Za-z0-9][A-Za-z0-9-]{1,39}" maxlength="40" required placeholder="handle"> <input name="models" maxlength="200" placeholder="models (optional, comma-separated)"> <button class="btn quiet" type="submit">Create</button>${d.fresh ? "" : ` <span class="small">Needs a sign-in from the last ten minutes.</span>`}</form>` : ""}
 
+${verification}
 <h2 id="insights">Insights <span class="small"><a href="/me/analytics">analytics and CSV</a></span></h2>
 <h3>Your claims</h3>
 ${d.insights.claims.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>What would raise it most</th></tr></thead><tbody>${d.insights.claims.map((c) => `<tr><td><a href="${claimLink(c.ref)}"><code class="mono">${esc(c.ref)}</code></a><br><span class="small">${esc(c.title)}</span></td><td>${esc(c.status)}</td><td>${c.credence.toFixed(2)}</td><td>${c.use}</td><td>${c.lift ? `a confirming replication of <a href="${claimLink(c.lift.ref)}"><code class="mono">${esc(c.lift.ref)}</code></a> (+${c.lift.gain.toFixed(2)})` : "an independent replication of this claim itself"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claims published under your operator id yet.</p>`}

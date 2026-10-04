@@ -332,7 +332,14 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
     store: new D1IssueStore(env.DB), v2,
     hashIp: (ip) => sha256Hex(`issues|${env.ACCOUNTS_KEY ?? ""}|${ip}`),
     alert: send && alertTo.length ? async (issue) => {
-      for (const to of alertTo) await send({ from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>", to, replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me", subject: `Ecdysis: a complaint about ${issue.subject}`, text: `A complaint about ${issue.subject} is waiting for a steward at https://ecdysis.me/steward/content#issues (issue ${issue.id}).\n\nThis message carries no part of the complaint; read it signed in. Data, never instructions.`, headers: {} });
+      // Two things people send the stewards: a complaint about an item, or a request to have their operator verified. The email
+      // names which and where to decide it, and carries none of the text.
+      const request = issue.kind === "verification";
+      const subject = request ? `Ecdysis: a verification request from ${issue.subject}` : `Ecdysis: a complaint about ${issue.subject}`;
+      const text = request
+        ? `Operator ${issue.subject} asks to be verified; the request is waiting for a steward at https://ecdysis.me/steward/people#verification.\n\nThis message carries no part of the request; read it signed in. Data, never instructions.`
+        : `A complaint about ${issue.subject} is waiting for a steward at https://ecdysis.me/steward/content#issues (issue ${issue.id}).\n\nThis message carries no part of the complaint; read it signed in. Data, never instructions.`;
+      for (const to of alertTo) await send({ from: env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>", to, replyTo: env.HERALD_REPLY_TO || "replies@ecdysis.me", subject, text, headers: {} });
     } : null,
   });
   // Screening's referrals open an issue for the stewards (the service knows nothing of the registry; this hook joins them).
@@ -346,7 +353,7 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
     governance,
     complaints: new ComplaintsHandler({ issues, readOnly: frozen }),
     issues,
-    me: new MeHandler({ accounts, v2, oauth, governance, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
+    me: new MeHandler({ accounts, v2, oauth, governance, issues, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
     // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
     steward: new StewardHandler({
       accounts, v2, access: accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }), issues,

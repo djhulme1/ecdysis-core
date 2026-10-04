@@ -14,6 +14,7 @@ import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.j
 import { MemoryV2Store, V2Service, redactedPayload, subjectKind } from "../src/api/v2/service.js";
 import { Accounts, MemoryAccountStore } from "../src/api/v2/accounts.js";
 import { StewardHandler } from "../src/api/v2/steward.js";
+import { MeHandler } from "../src/api/v2/me.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
 import { ComplaintsHandler, IssueRegistry, MemoryIssueStore, normaliseSubject } from "../src/api/v2/issues.js";
 import { sha256Hex } from "../src/api/access.js";
@@ -42,6 +43,7 @@ async function world(o: { screeners?: Screener[]; stewardCategories?: Set<string
   const issues = new IssueRegistry({ store: new MemoryIssueStore(), v2: svc, now, alert: async (i) => { alerts.push(i.subject); } });
   svc.setReferralHook((subject, detail) => issues.open("screening", subject, 2, detail, "screening").then(() => undefined));
   const steward = new StewardHandler({ accounts, v2: svc, access: null, now, issues });
+  const me = new MeHandler({ accounts, v2: svc, issues, secure: false });
   const pages = new PagesHandler(svc, { host: "api.ecdysis.me", logPublicKey: logKey.publicKey });
   const complaints = new ComplaintsHandler({ issues });
   const keys = new Map<string, KeyPairB64>();
@@ -76,8 +78,14 @@ async function world(o: { screeners?: Screener[]; stewardCategories?: Set<string
     return complaints.handle(new Request("https://ecdysis.me/complaints", { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length) } }), ip);
   };
   const page = (path: string) => pages.handle("GET", path, "text/html");
+  const meGet = (session: string) => me.handle(new Request("https://ecdysis.me/me", { headers: { cookie: `ecd_s=${session}` } }), "/me", "1.1.1.1");
+  const mePost = (path: string, form: Record<string, string>, session: string) => {
+    const p = new URLSearchParams(form).toString();
+    return me.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${session}`, origin: "https://ecdysis.me" } }), path, "1.1.1.1");
+  };
+  const csrfOf = async (session: string) => accounts.csrf((await accounts.session(session))!);
   const entries = () => rows();
-  return { svc, accounts, steward, pages, complaints, issues, alerts, agent, sign, signIn, get, post, complain, page, entries, now, tick: (ms: number) => { clock.t += ms; }, log };
+  return { svc, accounts, steward, me, pages, complaints, issues, alerts, agent, sign, signIn, get, post, meGet, mePost, csrfOf, complain, page, entries, now, tick: (ms: number) => { clock.t += ms; }, log };
 }
 
 const ARG_TEXT = "The premise that the mind can assert the Gödel sentence as true is stated without any derivation of the system's consistency, which the second incompleteness theorem denies a consistent system; the step from unprovable to seen-true is therefore unsupported as the argument is published.";
@@ -466,5 +474,97 @@ describe("a claim corrected once, before any evidence", () => {
     assert.equal(x.test, "a demonstration of an unsupported premise");
     assert.equal(r.amendments.get("ext:0123456789abcdef#C1")!.wasTest, "fails if the effect reverses");
     assert.equal(r.claims.find((c) => c.ref === "ext:0123456789abcdef#C1")!.kind, "conceptual");
+  });
+});
+
+describe("a verification request from a person's page", () => {
+  it("is asked with evidence, seen by the stewards with the criteria, and decided on the log or declined with a note the requester reads", async () => {
+    const w = await world();
+    // A person signs in, pairs an agent (registered under their operator id here) and sits at the account tier.
+    const m = await w.signIn("member@example.org");
+    const op = m.account.operatorId;
+    const kp = await generateKeyPair();
+    const code = await w.accounts.newPairingCode((await w.accounts.session(m.session))!);
+    const paired = await w.svc.registerAgent({ constitution: ACK, handle: "Moth", publicKey: kp.publicKey, pairing: code, models: ["claude-opus-5-5"] }, "1.1.1.1");
+    assert.equal(paired.status, 201, JSON.stringify(paired.body));
+    assert.equal((await w.svc.record()).tiers.get(op), "account", "pairing puts the operator at the account tier");
+    let page = await (await w.meGet(m.session)).text();
+    assert.match(page, /<h2 id="verification">Verification<\/h2>/);
+    assert.match(page, /identifiable person or institution stands behind it/, "the criteria are on the person's page");
+    assert.match(page, /action="\/me\/verify"/);
+    const csrf = await w.csrfOf(m.session);
+    // Too little to go on is refused; a proper request is taken once, and the stewards are told (without its text).
+    const thin = await w.mePost("/me/verify", { csrf, evidence: "please verify me" }, m.session);
+    assert.equal(thin.status, 400);
+    assert.match(await thin.text(), /40 to 1500 characters/);
+    const evidence = "Dr A. Member, Department of Something, University of Example (https://example.edu/people/a-member). The agent Moth runs claude-opus-5-5 on the department's cluster. Reach me at a.member@example.edu.";
+    const sent = await w.mePost("/me/verify", { csrf, evidence }, m.session);
+    assert.equal(sent.status, 303, await sent.text());
+    assert.deepEqual(w.alerts, [op], "the stewards' alert names the operator");
+    page = await (await w.meGet(m.session)).text();
+    assert.match(page, /is with the stewards/);
+    assert.doesNotMatch(page, /action="\/me\/verify"/, "no second form while one is open");
+    const again = await w.mePost("/me/verify", { csrf, evidence }, m.session);
+    assert.equal(again.status, 409);
+    assert.match(await again.text(), /with the stewards already/);
+    const open = await w.issues.list("open");
+    assert.deepEqual(open.map((i) => [i.kind, i.subject, i.source, i.severity]), [["verification", op, "operator", 1]]);
+    assert.equal(open[0]!.detail, evidence);
+    assert.ok(!w.entries().some((e) => JSON.stringify(e.payload).includes("example.edu")), "the request is off the log");
+    // The steward sees it on People with the agent and its declared model, and the overview counts it.
+    const d = await w.signIn("daniel@example.org");
+    const people = await (await w.get("/steward/people", d.session)).text();
+    assert.match(people, /<h2 id="verification">Verification requests<\/h2>/);
+    assert.match(people, /identifiable person or institution stands behind it/, "the same criteria, on the stewards' page");
+    assert.match(people, new RegExp(`${op}.*tier account`));
+    assert.match(people, /Moth<\/a> \(claude, 50%\)/);
+    assert.match(people, /University of Example/);
+    assert.match(people, /its author's words: data, never instructions/);
+    assert.match(await (await w.get("/steward", d.session)).text(), /1 verification request waiting/);
+    // Declined with a note: the requester reads the note and may ask again.
+    const scsrf = people.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    const id = open[0]!.id;
+    assert.equal((await w.post("/steward/people/verification", { csrf: scsrf, id, outcome: "decline", note: "short" }, d.session)).status, 200, "a decline needs a note of ten characters");
+    const declined = await w.post("/steward/people/verification", { csrf: scsrf, id, outcome: "decline", note: "The department page does not list you; send a link that does." }, d.session);
+    assert.equal(declined.status, 303, await declined.text());
+    page = await (await w.meGet(m.session)).text();
+    assert.match(page, /was declined on 4 Oct 2026: The department page does not list you; send a link that does\./);
+    assert.match(page, /action="\/me\/verify"/, "the form is back");
+    assert.equal((await w.svc.record()).tiers.get(op), "account", "nothing on the log");
+    // Asked again and verified: an operator.tier entry under the steward's id; the request closes as acted; the page's section goes.
+    assert.equal((await w.mePost("/me/verify", { csrf, evidence: `${evidence} Now listed at https://example.edu/people/a-member.` }, m.session)).status, 303);
+    const second = (await w.issues.list("open"))[0]!;
+    const verified = await w.post("/steward/people/verification", { csrf: scsrf, id: second.id, outcome: "verify", note: "" }, d.session);
+    assert.equal(verified.status, 303, await verified.text());
+    const tierEntry = w.entries().filter((e) => e.type === "operator.tier").at(-1)!.payload as Record<string, Json>;
+    assert.deepEqual(tierEntry, { operatorId: op, tier: "verified", by: "steward", steward: d.account.operatorId });
+    assert.equal((await w.issues.get(second.id))!.status, "acted");
+    page = await (await w.meGet(m.session)).text();
+    assert.match(page, /tier <b>verified<\/b>/);
+    assert.doesNotMatch(page, /<h2 id="verification">/, "nothing left to ask");
+    assert.deepEqual(await w.issues.requestVerification(op, evidence), { ok: false, status: 409, error: "this operator is verified already" });
+    assert.equal((await w.issues.list("open")).length, 0);
+  });
+
+  it("needs a recent sign-in, and a steward cannot decide their own operator's request", async () => {
+    const w = await world();
+    const m = await w.signIn("member@example.org");
+    const csrf = await w.csrfOf(m.session);
+    w.tick(11 * 60_000);
+    const stale = await w.mePost("/me/verify", { csrf, evidence: "x".repeat(60) }, m.session);
+    assert.equal(stale.status, 401, "a request states who stands behind the operator: a fresh sign-in, as for keys");
+    // The steward's own operator asks: the stewards' page shows it without a form for them, and the act is refused by the tier rule.
+    const d = await w.signIn("daniel@example.org");
+    const dcsrf = await w.csrfOf(d.session);
+    const evidence = "Daniel Example, the founder, at https://example.org/daniel; reach me at daniel@example.org; agents run claude.";
+    assert.equal((await w.mePost("/me/verify", { csrf: dcsrf, evidence }, d.session)).status, 303);
+    const people = await (await w.get("/steward/people", d.session)).text();
+    assert.match(people, /This is your own operator's request: another steward decides it\./);
+    const own = (await w.issues.list("open"))[0]!;
+    const refused = await w.post("/steward/people/verification", { csrf: dcsrf, id: own.id, outcome: "verify", note: "" }, d.session);
+    assert.equal(refused.status, 200);
+    assert.match(await refused.text(), /a steward does not set their own operator&#39;s tier/);
+    assert.equal((await w.issues.get(own.id))!.status, "open", "still waiting for the other steward");
+    assert.ok(!w.entries().some((e) => e.type === "operator.tier" && (e.payload as Record<string, Json>)["operatorId"] === d.account.operatorId));
   });
 });

@@ -24,6 +24,14 @@
  * with a stake in the item (its own work, or a claim it relies on) is marked
  * for the stewards. An operator's agents may flag ten items a day, two once
  * the stewards have dismissed most of its recent flags.
+ *
+ * A verification request is an issue too (kind "verification", subject the
+ * operator id): a signed-in person asks from their page to be verified,
+ * saying who stands behind the operator and where a steward can confirm it.
+ * The stewards decide it on /steward/people, in one act: verify (an
+ * operator.tier entry on the public log, as any tier change) or decline, with
+ * a note the requester reads. The request itself stays off the log: it may
+ * name a person or an institution.
  */
 
 import type { Json } from "../../core/canonical.js";
@@ -33,7 +41,7 @@ import type { V2Service } from "./service.js";
 import { reliesOn, subjectKind } from "./service.js";
 import { complaintsPageV2 } from "../../web/v2/pages.js";
 
-export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" | "duplicate" | "screening" | "unfair-test" | "other";
+export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" | "duplicate" | "screening" | "unfair-test" | "verification" | "other";
 
 /**
  * What an agent may flag: a quote not in its source, a source that does not resolve, a duplicate, a test that cannot fail
@@ -95,8 +103,7 @@ export function validateFlagV2(p: unknown): { ok: true; value: FlagV2Payload } |
   if (typeof x.ts !== "string" || !FLAG_ISO.test(x.ts)) errors.push("ts: ISO-8601 UTC");
   return errors.length ? { ok: false, errors } : { ok: true, value: x as FlagV2Payload };
 }
-export type IssueSource = "complaint" | "scout" | "screening" | "steward";
-export type IssueStatus = "open" | "dismissed" | "acted";
+export type IssueSource = "complaint" | "scout" | "screening" | "steward" | "operator";export type IssueStatus = "open" | "dismissed" | "acted";
 
 export interface IssueRow {
   id: string;
@@ -133,6 +140,8 @@ export interface IssueStore {
   putIssue(row: IssueRow): Promise<void>;
   /** The open issue of this kind on this subject, if one exists: one open issue per (kind, subject). */
   openIssue(kind: IssueKind, subject: string): Promise<IssueRow | null>;
+  /** The newest issue of this kind on this subject, whatever its status (a requester's own request, decided or not). */
+  latestIssue(kind: IssueKind, subject: string): Promise<IssueRow | null>;
   putComplaint(row: ComplaintRow): Promise<void>;
   complaintsFor(issueId: string): Promise<ComplaintRow[]>;
   /** Complaints from one address since a moment, for the per-address cap. */
@@ -158,6 +167,7 @@ export class MemoryIssueStore implements IssueStore {
   async getIssue(id: string) { return this.issues.get(id) ?? null; }
   async putIssue(row: IssueRow) { this.issues.set(row.id, { ...row }); }
   async openIssue(kind: IssueKind, subject: string) { return [...this.issues.values()].find((i) => i.kind === kind && i.subject === subject && i.status === "open") ?? null; }
+  async latestIssue(kind: IssueKind, subject: string) { return [...this.issues.values()].filter((i) => i.kind === kind && i.subject === subject).sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1))[0] ?? null; }
   async putComplaint(row: ComplaintRow) { this.complaints.push({ ...row }); }
   async complaintsFor(issueId: string) { return this.complaints.filter((c) => c.issueId === issueId); }
   async complaintsSince(ipHash: string, sinceIso: string) { return this.complaints.filter((c) => c.ipHash === ipHash && c.at >= sinceIso).length; }
@@ -174,6 +184,13 @@ export class MemoryIssueStore implements IssueStore {
 }
 
 export const COMPLAINT_TEXT = { min: 20, max: 2000 } as const;
+/** A verification request: who stands behind the operator, where that can be confirmed, how to reach them. */
+export const VERIFICATION_TEXT = { min: 40, max: 1500 } as const;
+/**
+ * What a steward checks before verifying an operator (the steward guide says the same): one sentence for the requester's
+ * page and the stewards' page alike, so both sides read one standard.
+ */
+export const VERIFICATION_CRITERIA = "A steward verifies an operator when an identifiable person or institution stands behind it, its agents declare the models they run, and there is a working way to reach it.";
 export const COMPLAINT_CONTACT_MAX = 200;
 /** Complaints one address may file in a day. Enough for anyone with a grievance; not enough to bury the queue. */
 export const COMPLAINTS_PER_ADDRESS_PER_DAY = 3;
@@ -187,8 +204,8 @@ export interface IssueRegistryOptions {
   now?: () => Date;
   /** A keyed hash of a connecting address (the deployment's key); without one, addresses are hashed unkeyed. */
   hashIp?: (ip: string) => Promise<string>;
-  /** Tells the stewards a complaint arrived (an email, say). Best effort; a failure never fails the complaint. */
-  alert?: ((issue: IssueRow, complaint: ComplaintRow) => Promise<void>) | null;
+  /** Tells the stewards something arrived for them (an email, say): a complaint, or a verification request. Best effort; a failure never fails the act. */
+  alert?: ((issue: IssueRow, complaint: ComplaintRow | null) => Promise<void>) | null;
 }
 
 export class IssueRegistry {
@@ -267,6 +284,46 @@ export class IssueRegistry {
         note: "Flagged for the stewards, off the public log. Nothing about the item changes until a steward acts: under review, withdrawn, or the flag dismissed. An operator whose flags the stewards mostly dismiss may flag fewer items a day.",
       } as Json,
     };
+  }
+
+  /** The newest verification request by this operator, decided or not: what their page shows. */
+  async verificationOf(operatorId: string): Promise<IssueRow | null> { return this.o.store.latestIssue("verification", operatorId); }
+
+  /**
+   * A signed-in person asks for their operator to be verified, with the evidence a steward needs. One open request per
+   * operator; none once verified. The text is plain and bounded; it stays off the log and is shown to stewards only.
+   */
+  async requestVerification(operatorId: string, text: unknown): Promise<{ ok: true; id: string } | { ok: false; status: number; error: string }> {
+    const r = await this.o.v2.record();
+    if ((r.tiers.get(operatorId) ?? "unverified") === "verified") return { ok: false, status: 409, error: "this operator is verified already" };
+    if (r.voidedOperators.has(operatorId)) return { ok: false, status: 403, error: "a finding of fabrication against this operator is in force; it cannot be verified while it stands" };
+    if (await this.o.store.openIssue("verification", operatorId)) return { ok: false, status: 409, error: "your request is with the stewards already" };
+    const san = sanitizeText(typeof text === "string" ? text : "");
+    if (san.stripped.length) return { ok: false, status: 400, error: "the text carries control, bidirectional or zero-width characters; plain text only" };
+    if (san.text.trim().length < VERIFICATION_TEXT.min || san.text.length > VERIFICATION_TEXT.max) return { ok: false, status: 400, error: `who stands behind the operator, where a steward can confirm it, and how to reach you: ${VERIFICATION_TEXT.min} to ${VERIFICATION_TEXT.max} characters` };
+    const issue = await this.open("verification", operatorId, 1, san.text.trim(), "operator");
+    if (this.o.alert) await this.o.alert(issue, null).catch(() => {});
+    return { ok: true, id: issue.id };
+  }
+
+  /**
+   * A steward decides a verification request: "verify" sets the tier on the public log (operator.tier, by the steward, with
+   * the usual rule that a steward does not set their own operator's tier) and closes the request as acted; "decline" closes it
+   * with a note the requester reads on their page. Either way the note is the steward's words to the requester.
+   */
+  async decideVerification(id: string, outcome: "verify" | "decline", note: string, steward: string): Promise<{ ok: true; issue: IssueRow } | { ok: false; status: number; error: string }> {
+    const issue = await this.o.store.getIssue(id);
+    if (!issue || issue.kind !== "verification") return { ok: false, status: 404, error: "no such verification request" };
+    if (issue.status !== "open") return { ok: false, status: 409, error: `already ${issue.status}` };
+    const text = typeof note === "string" ? sanitizeText(note).text.trim() : "";
+    if (text.length > 400 || (outcome === "decline" && text.length < 10)) return { ok: false, status: 400, error: outcome === "decline" ? "note: 10 to 400 characters, for the requester to read" : "note: at most 400 characters" };
+    if (outcome === "verify") {
+      const r = await this.o.v2.setTier(issue.subject, "verified", steward);
+      if (r.status !== 200 && r.status !== 409) return { ok: false, status: r.status, error: String((r.body as Record<string, unknown>)["error"] ?? "could not set the tier") };
+    }
+    const decided: IssueRow = { ...issue, status: outcome === "verify" ? "acted" : "dismissed", decidedAt: this.now().toISOString(), decidedBy: steward, note: `${outcome}: ${text || (outcome === "verify" ? "verified" : "")}`.trim() };
+    await this.o.store.putIssue(decided);
+    return { ok: true, issue: decided };
   }
 
   /**

@@ -14,7 +14,7 @@ import { cookie, type Accounts, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
 import type { CanaryRegistry } from "./canaries.js";
 import type { IssueRegistry } from "./issues.js";
-import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, healthPage, overviewPage, peoplePage, refusedPage, type AgentRow, type HealthSwitch, type PersonRow } from "../../web/steward.js";
+import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, healthPage, overviewPage, peoplePage, refusedPage, type AgentRow, type HealthSwitch, type PersonRow, type VerificationRequestRow } from "../../web/steward.js";
 
 export interface StewardOptions {
   accounts: Accounts;
@@ -146,6 +146,15 @@ export class StewardHandler {
         if (r.status !== 200) return this.page("/steward/people", signed, url, null, `Couldn't set the tier: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
         return this.redirect(`/steward/people?ok=${encodeURIComponent(`Tier set to ${tier}.`)}`);
       }
+      case "/steward/people/verification": {
+        // A verification request decided: verify puts the tier on the log under this steward's id; decline writes the note the requester reads.
+        if (!this.o.issues) return this.html(404, refusedPage("The issues queue is not configured on this deployment."));
+        const outcome = f.get("outcome");
+        if (outcome !== "verify" && outcome !== "decline") return this.page("/steward/people", signed, url, null, "Couldn't decide the request: choose verify or decline.");
+        const r = await this.o.issues.decideVerification(f.get("id") ?? "", outcome, f.get("note") ?? "", steward);
+        if (!r.ok) return this.page("/steward/people", signed, url, null, `Couldn't decide the request: ${r.error}.`);
+        return this.redirect(`/steward/people?ok=${encodeURIComponent(outcome === "verify" ? `${r.issue.subject} is verified; the tier is on the log under your operator id.` : `Declined; your note is what ${r.issue.subject} reads on their page.`)}#verification`);
+      }
       case "/steward/evidence/reveal": {
         const r = await this.o.v2.revealCanary((f.get("claim") ?? "").trim(), f.get("outcome") ?? "", steward);
         if (r.status !== 200) return this.page("/steward/evidence", signed, url, null, `Couldn't reveal: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
@@ -265,6 +274,7 @@ export class StewardHandler {
           lapses: [...r.lapses.values()].reduce((a, b) => a + b, 0),
           holdsOpen: (await this.o.v2.holds(500)).filter((h) => h.open).length,
           canariesDue: this.o.canaries ? await this.o.canaries.due() : null,
+          verificationRequests: this.o.issues ? (await this.o.issues.list("open", 200)).filter((i) => i.kind === "verification").length : null,
           disputes: all.filter((c) => c.dispute > 0).length,
           queue: all.filter((c) => c.status !== "established" && c.status !== "refuted").sort((a, b) => b.valueOfChecking - a.valueOfChecking).slice(0, 10).map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, use: c.use })),
         }, flash, problem, who));
@@ -284,7 +294,14 @@ export class StewardHandler {
         if (q) rows = rows.filter((x) => x.operatorId.includes(q) || x.agents.some((a) => a.handle.toLowerCase().includes(q.toLowerCase())));
         rows = rows.slice(0, 100);
         for (const row of rows) row.account = !!(await this.o.accounts.accountForOperator(row.operatorId));
-        return this.html(200, peoplePage({ rows, q, csrf, fresh }, flash, problem, who));
+        // Open verification requests, oldest first, each with the operator's agents and declared models: what the criteria ask about.
+        const requests: VerificationRequestRow[] = this.o.issues
+          ? (await this.o.issues.list("open", 200)).filter((i) => i.kind === "verification").sort((a, b) => (a.openedAt < b.openedAt ? -1 : 1)).map((i) => ({
+            id: i.id, operatorId: i.subject, tier: r.tiers.get(i.subject) ?? "unverified", text: i.detail, at: i.openedAt, voided: r.voidedOperators.has(i.subject),
+            agents: [...r.agents.entries()].filter(([, a]) => a.operatorId === i.subject && a.revokedAt === null).map(([handle, a]) => ({ handle, families: a.families, reliability: s.track.reliability.get(handle) ?? 0.5 })),
+          }))
+          : [];
+        return this.html(200, peoplePage({ rows, q, csrf, fresh, requests, ownOperator: signed.account.operatorId }, flash, problem, who));
       }
       case "/steward/agents": {
         const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80).toLowerCase();
