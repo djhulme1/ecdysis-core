@@ -26,6 +26,9 @@ const OPS = ["op-a", "op-b", "op-c", "", "op_0123456789abcdef01234567"];
 const CLAIMS = ["ecd:0000000000000001", "ecd:0000000000000002", "ecd:0000000000000003", "ext:0123456789abcdef", "ecd:nothere", "", "ecd:1", "#", "arxiv:1706.03762"];
 const TARGETS = CLAIMS;
 const IDS = ["r1", "r2", "r3", "f1", "a".repeat(64), "", "r1"];
+/** literature/0.1: claims from human literature a link may join (and some it may not), and link ids. */
+const LINK_ENDS = ["ext:0123456789abcdef", "ext:fedcba9876543210", "ext:1111111111111111", "ext:0123456789abcdef", "ext:fedcba9876543210", "ext:1111111111111111", "ecd:0000000000000001", "ext:nothere", ""];
+const LINK_IDS = ["lnk:0000000000000001", "lnk:0000000000000002", "lnk:0000000000000003", "lnk:short", "", "lnk:0000000000000001"];
 
 function randomValue(r: ReturnType<typeof rng>, depth = 0): unknown {
   switch (r.int(depth > 2 ? 7 : 10)) {
@@ -59,7 +62,7 @@ function entry(r: ReturnType<typeof rng>, seq: number, type: V2EntryType): V2Ent
       blockers: r.pick([undefined, [], [{ blocker: "data-unavailable", detail: "d", unblockedBy: "u" }], [{ blocker: "x" }], "x"]),
       models: r.pick([["gpt"], undefined, "x"]),
     }; break;
-    case "claim.external": p = { id: r.pick(["ext:0123456789abcdef", ""]), handle, operatorId, source: r.pick(["arxiv:1706.03762", "doi:10.1/x", ""]), quote: "q", test: "t", kind: r.pick(["empirical", "conceptual", undefined]), scope: r.pick([{ general: "construction", basis: "b" }, { period: { from: "2009-04-01", to: "2012-07-31" }, basis: "b" }, undefined, "x"]), fidelity: r.pick([{ as: "reported", basis: "b" }, { as: "adapted", basis: "b" }, undefined, 3]) }; break;
+    case "claim.external": p = { id: r.pick(["ext:0123456789abcdef", "ext:fedcba9876543210", "ext:1111111111111111", ""]), handle: r.pick(HANDLES.filter((h) => h)), operatorId, source: r.pick(["arxiv:1706.03762", "doi:10.1/x", ""]), quote: "q", test: "t", kind: r.pick(["empirical", "conceptual", undefined]), scope: r.pick([{ general: "construction", basis: "b" }, { period: { from: "2009-04-01", to: "2012-07-31" }, basis: "b" }, undefined, "x"]), fidelity: r.pick([{ as: "reported", basis: "b" }, { as: "adapted", basis: "b" }, undefined, 3]) }; break;
     case "claim.amend": p = { claim: target, handle, operatorId, kind: r.pick([undefined, "conceptual", "empirical", "x"]), test: r.pick([undefined, "a corrected test of some length", "", 3]), scope: r.pick([undefined, { general: "construction", basis: "b" }, "x"]), fidelity: r.pick([undefined, { as: "adapted", basis: "b" }]), data: r.pick([undefined, [], "x"]) }; break;
     case "check.commit": p = { id, target, kind: r.pick(["replication", "rerun", "other"]), design: r.pick([undefined, { method: "stated", data: "original", basis: "b" }, { method: "altered", data: "new", basis: "b", alteration: "a" }, { method: "x" }, "x"]), period: r.pick([undefined, { from: "2020-01-01", to: "2021-01-01" }, "x"]), bundle: r.pick(["b1", "b2", ""]), image: r.pick([true, false]), runtimeMinutes: r.pick([5, 0, -1, "x"]), handle, operatorId, models: r.pick([["gpt"], undefined]), key: r.pick([undefined, "ck", "pk-Ant-0"]) }; break;
     case "check.seal": p = { commit: id, seal: "s", seed: r.pick(["ab".repeat(32), "cd".repeat(32), ""]), crossCheck: r.pick([null, "r1", "r2", "nothere"]) }; break;
@@ -80,6 +83,9 @@ function entry(r: ReturnType<typeof rng>, seq: number, type: V2EntryType): V2Ent
     case "content.restore": p = { subject: r.pick([target, id, "a".repeat(64), ""]), steward: "op_steward" }; break;
     case "source.observed": p = { source: r.pick(["arxiv:1706.03762", "doi:10.1/x", "ARXIV:1706.03762", "", "x"]), provider: r.pick(["openalex", "x", undefined]), work: "W1", citedBy: r.pick([100, 0, -1, "x", NaN, 1e308]), venueCitedness: r.pick([undefined, 10, -5, "x"]), year: r.pick([undefined, 2017, 1700, 2300, "x"]), field: r.pick(["ml", "", undefined]), fieldId: "F1", unresolved: r.pick([true, false, "x"]) }; break;
     case "field.observed": p = { field: r.pick(["ml", "econ", "", undefined]), fieldId: "F1", works: r.pick([1000, 0, -1, "x", NaN]), citedBy: r.pick([1e6, 0, -1, "x", Infinity]) }; break;
+    // literature/0.1: links between claims from human literature, well-formed and not, and withdrawals by anyone.
+    case "claim.link": p = { id: r.pick(LINK_IDS), from: r.pick(LINK_ENDS), to: r.pick(LINK_ENDS), rel: r.pick(["extends", "method", "replicates", "refutes", "background", "x", 3]), basis: r.pick(["identified", "reviewed", undefined]), quote: r.pick(["the citing sentence", "", 5, null]), where: r.pick([undefined, "Section 2", 7]), handle, operatorId, models: r.pick([["gemma"], undefined, "x"]) }; break;
+    case "claim.unlink": p = { link: r.pick(LINK_IDS), reason: r.pick(["a reason", "", 3]), handle, operatorId }; break;
     // arguments/0.1: arguments, checks and answers, well-formed and not.
     case "argument.file": p = { id: r.pick(["a".repeat(64), "b".repeat(64), "short", ""]), claim: target, stance: r.pick(["refutes", "qualifies", "supports", "x"]), grounds: r.pick(["counterexample", "contradiction", "unsupported-premise", "logical-gap", "statistical-insufficiency", "methodological-flaw", "x"]), text: "t", cites: r.pick([[target], ["ecd:0000000000000001", 3], "ecd:0000000000000001", null, undefined]), instance: r.pick([null, { text: "i" }, { bundle: { repo: "https://x", commit: "c", run: "r" } }, "i", 5, []]), confidence: r.pick([0.8, 0.2, 0, 1, 2, -1, "x", NaN]), handle, operatorId, models: r.pick([["gpt"], undefined]) }; break;
     case "argument.check": p = { id: r.pick(["c".repeat(64), ""]), argument: r.pick(["a".repeat(64), "b".repeat(64), "nothere"]), holds: r.pick([true, false, "yes", 1, null]), note: "n", handle, operatorId, models: r.pick([["claude"], ["gpt", "claude"], undefined]), key: r.pick([undefined, "ck"]) }; break;
@@ -134,6 +140,9 @@ describe("the derivation is total", () => {
       for (const a of rec.arguments.values()) assert.ok(a.status === "open" || a.status === "upheld" || a.status === "dismissed", `trial ${trial}: argument ${a.id} status ${a.status}`);
       for (const c of out.claims.values()) if (c.cap !== null) assert.ok(c.cap > 0 && c.cap < 1 && c.credence <= c.cap + 1e-9, `trial ${trial}: cap ${c.cap} on ${c.ref}`);
       for (const [ref, b] of rec.blockers) assert.ok(Array.isArray(b.blockers) && b.claim === ref, `trial ${trial}: blockers on ${ref}`);
+      // literature/0.1: the links stay a DAG between claims from human literature, and reliance is finite and never negative.
+      for (const e of rec.linkEdges) assert.ok(rec.external.has(e.from) && rec.external.has(e.to) && e.from !== e.to, `trial ${trial}: link ${e.from} > ${e.to}`);
+      for (const c of out.claims.values()) assert.ok(Number.isFinite(c.reliance) && c.reliance >= 0, `trial ${trial}: reliance of ${c.ref} = ${c.reliance}`);
     }
     assert.ok(entries > 40_000, `a real exercise (${entries} entries)`);
   });

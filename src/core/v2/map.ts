@@ -1,5 +1,5 @@
 /**
- * The claims map (map/0.1): how completely the literature has been
+ * The claims map (map/0.1, with literature/0.1's load-bearing list): how completely the literature has been
  * assessed, field by field, and where the stakes still sit (Ecdysis v2;
  * design: claude/ecdysis-claims-map-design.md §5, Daniel, 4 October 2026:
  * "paint a picture of how complete we have been in assessing the claims
@@ -27,6 +27,13 @@
  *   cleared            blockers removed recently, by whom: where the record
  *                      is already changing behaviour.
  *
+ * and, from the links agents identify between claims from human literature
+ * (literature/0.1), a fifth:
+ *   load-bearing       the claims the most of the literature on the record
+ *                      rests on (reliance), with whether anyone has assessed
+ *                      them: the dependency map's own reading of where a
+ *                      check, or a refutation, would reach furthest.
+ *
  * A field is the source paper's field in the citation graph (OpenAlex's 26
  * fields, as the stakes scout observed it), or for a claim published here its
  * declared field. Coverage is the registered sources' citations as a share
@@ -50,6 +57,8 @@ export interface MapClaim {
   stakes: number;
   reach: number;
   use: number;
+  /** literature/0.1: how much of the literature on the record rests on it through identified links. Absent: 0. */
+  reliance?: number;
   credence: number;
   status: string;
   /** At least one attempt was ever filed on it (cleared or not). */
@@ -91,7 +100,9 @@ export interface MapView {
   version: typeof MAP_VERSION;
   fields: FieldRow[];
   totals: Omit<FieldRow, "field" | "denominator" | "coverage">;
-  unchecked: Array<{ ref: string; field: string; stakes: number; reach: number; use: number; credence: number; status: string; external: boolean }>;
+  unchecked: Array<{ ref: string; field: string; stakes: number; reach: number; use: number; reliance: number; credence: number; status: string; external: boolean }>;
+  /** literature/0.1: the claims with the most resting on them through identified links, highest reliance first, assessed or not. */
+  loadBearing: Array<{ ref: string; field: string; reliance: number; stakes: number; credence: number; status: string; assessed: boolean; external: boolean }>;
   underPressure: Array<{ ref: string; field: string; stakes: number; pressure: number; verifiedOperators: number; blockers: Blocker[]; dominant: Blocker | null }>;
   /** Claims blocked on the operator's side: what an operator would need (`capability`), and how many have tried. */
   needsCapability: Array<{ ref: string; field: string; stakes: number; capability: Blocker[]; verifiedOperators: number; otherOperators: number; unblockedBy: string | null }>;
@@ -149,7 +160,10 @@ export function buildMap(claims: readonly MapClaim[], cleared: readonly ClearedI
   void _f; void _d; void _c;
   const unchecked = claims.filter((c) => !c.assessed && !c.attempted && !c.resolved && !c.blocked)
     .sort((a, b) => b.stakes - a.stakes || a.ref.localeCompare(b.ref)).slice(0, limit)
-    .map((c) => ({ ref: c.ref, field: c.field, stakes: r4(c.stakes), reach: c.reach, use: r4(c.use), credence: r4(c.credence), status: c.status, external: c.external }));
+    .map((c) => ({ ref: c.ref, field: c.field, stakes: r4(c.stakes), reach: c.reach, use: r4(c.use), reliance: r4(c.reliance ?? 0), credence: r4(c.credence), status: c.status, external: c.external }));
+  const loadBearing = claims.filter((c) => (c.reliance ?? 0) > 0)
+    .sort((a, b) => (b.reliance ?? 0) - (a.reliance ?? 0) || b.stakes - a.stakes || a.ref.localeCompare(b.ref)).slice(0, limit)
+    .map((c) => ({ ref: c.ref, field: c.field, reliance: r4(c.reliance ?? 0), stakes: r4(c.stakes), credence: r4(c.credence), status: c.status, assessed: c.assessed, external: c.external }));
   // Under pressure: the authors' blockers only (attempts/0.2); every blocker in force is listed, the pressure counts the authors'.
   const underPressure = claims.filter((c) => c.blocked && c.blocked.dominant !== null)
     .map((c) => ({ ref: c.ref, field: c.field, stakes: r4(c.stakes), pressure: r4(pressure(c.stakes, c.blocked!.verifiedOperators)), verifiedOperators: c.blocked!.verifiedOperators, blockers: c.blocked!.blockers.map((b) => b.blocker), dominant: c.blocked!.dominant }))
@@ -164,5 +178,5 @@ export function buildMap(claims: readonly MapClaim[], cleared: readonly ClearedI
   const byRef = new Map(claims.map((c) => [c.ref, c] as const));
   const clearedOut = [...cleared].sort((a, b) => b.seq - a.seq).slice(0, limit)
     .map((x) => ({ ref: x.ref, field: byRef.get(x.ref)?.field ?? UNPLACED_FIELD, blocker: x.blocker, by: x.by, how: x.how, at: x.at, stakes: r4(byRef.get(x.ref)?.stakes ?? 0) }));
-  return { version: MAP_VERSION, fields, totals: totalsOut, unchecked, underPressure, needsCapability, cleared: clearedOut };
+  return { version: MAP_VERSION, fields, totals: totalsOut, unchecked, loadBearing, underPressure, needsCapability, cleared: clearedOut };
 }

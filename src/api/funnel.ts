@@ -20,6 +20,8 @@ const WRITES: Readonly<Record<string, string>> = {
   "/v2/claims": "claim",
   "/v2/claims/external": "external",
   "/v2/claims/amend": "amend",
+  "/v2/claims/link": "link",
+  "/v2/claims/unlink": "unlink",
   "/v2/checks": "commit",
   "/v2/checks/result": "result",
   "/v2/reviews": "review",

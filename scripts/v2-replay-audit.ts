@@ -12,7 +12,8 @@
  * tier, claims resting on claims (network/0.1), claims from human
  * literature, receipts with seals, matching and disputed cross-checks,
  * findings and a reversal, reviews, a ring, a compromised check key, a
- * canary, a hold, arguments, an amendment, declared blockers) and prints
+ * canary, a hold, arguments, an amendment, declared blockers, links agents
+ * identified between claims from human literature) and prints
  * exactly which figures a change moved, so the shift is in the diff and a
  * reviewer can see who gains and who loses. The scenario is pure (no clock,
  * no random), so it scores identically everywhere.
@@ -35,7 +36,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "audit");
 const BASELINE = join(ROOT, "v2-baseline.json");
 
 export interface V2Outputs {
-  /** claim ref → "credence · verified-only · status · use · dispute · stakes" (stakes/0.1: equal to use until a source is observed) */
+  /** claim ref → "credence · verified-only · status · use · dispute · stakes" (stakes/0.2: use, until a source is observed or a link identified) */
   claims: Record<string, string>;
   /** agent → reliability (6 decimals) */
   reliability: Record<string, string>;
@@ -382,6 +383,28 @@ export function scriptedLog(): V2Entry[] {
   const overlapping = argue("Mole", "op-k3", "p25C1", "contradiction", { cites: ["p24C1"], confidence: 0.6 });
   checkArg("Lark", "op-k2", overlapping, true);
   checkArg("Newt", "op-k4", overlapping, true);
+
+  // literature/0.1: links agents identified between claims from human literature, by agents of their own (Quill, a
+  // steward-verified operator; Rook, an account) whose work touches nobody else's, so that only reliance, and so stakes, can
+  // move. ext:2222… rests on ext:1111… (Quill, corroborated by Rook) and ext:3333… takes its method from ext:2222… (Quill): a
+  // chain. ext:dddd… rests on ext:1111… as Rook alone identified it (an account's dependency weighs ½). Quill records that
+  // ext:0123… refutes ext:aaaa… (the literature's own evidence: no reliance). A link that would close a cycle never enters, and
+  // Rook withdraws one it got wrong.
+  for (const [handle, op, models, tier] of [["Quill", "op-l1", ["qwen"], "verified"], ["Rook", "op-l2", ["phi"], "account"]] as Array<[string, string, string[], string]>) {
+    push("operator.tier", { operatorId: op, tier, ...(tier === "verified" ? { by: "steward", steward: "op-steward" } : {}) });
+    push("agent.register", { handle, operatorId: op, publicKey: `pk-${handle}`, models, constitution: { version: "2.1.0" } });
+    agents.push([handle, op, models]);
+  }
+  const link = (id: string, from: string, to: string, rel: string, handle: string, op: string) =>
+    push("claim.link", { id, from, to, rel, basis: "identified", quote: `the citing paper's own sentence, for ${id}`, where: "Section 2", handle, operatorId: op });
+  link("lnk:1111111111110001", "ext:2222222222222222", "ext:1111111111111111", "extends", "Quill", "op-l1");
+  link("lnk:1111111111110002", "ext:2222222222222222", "ext:1111111111111111", "extends", "Rook", "op-l2");
+  link("lnk:1111111111110003", "ext:3333333333333333", "ext:2222222222222222", "method", "Quill", "op-l1");
+  link("lnk:1111111111110004", "ext:dddddddddddddddd", "ext:1111111111111111", "extends", "Rook", "op-l2");
+  link("lnk:1111111111110005", "ext:0123456789abcdef", "ext:aaaaaaaaaaaaaaaa", "refutes", "Quill", "op-l1");
+  link("lnk:1111111111110006", "ext:1111111111111111", "ext:3333333333333333", "extends", "Quill", "op-l1");
+  link("lnk:1111111111110007", "ext:aaaaaaaaaaaaaaaa", "ext:dddddddddddddddd", "extends", "Rook", "op-l2");
+  push("claim.unlink", { link: "lnk:1111111111110007", reason: "the citing sentence was about another paper", handle: "Rook", operatorId: "op-l2" });
   return out;
 }
 
@@ -425,6 +448,9 @@ export function scoreScripted(): V2Outputs {
     edges: Object.entries(r.edges.reduce<Record<string, number>>((m, e) => ({ ...m, [e.rel]: (m[e.rel] ?? 0) + 1 }), {})).sort().map(([k, n]) => `${k}:${n}`).join(";") || "none",
     // credence/0.4: where an empirical claim's status reads a different number from its verified credence (replication tests alone).
     statusReads: [...s.claims.values()].filter((c) => c.kind !== "conceptual" && Math.abs(c.credenceReplication - c.credenceVerified) > 1e-6).sort((a, b) => a.ref.localeCompare(b.ref)).map((c) => `${c.ref}:${r6(c.credenceReplication)}`).join(";") || "none",
+    // literature/0.1: every identified link on the record with its state, and the reliance the links in force give (stakes read it, nothing else).
+    links: [...r.links.values()].sort((a, b) => a.seq - b.seq).map((l) => `${l.id}:${l.from}>${l.to}:${l.rel}:${l.handle}${l.withdrawn ? ":withdrawn" : ""}${l.disowned ? ":disowned" : ""}`).join(";") || "none",
+    reliance: [...s.claims.values()].filter((c) => c.reliance > 0).sort((a, b) => a.ref.localeCompare(b.ref)).map((c) => `${c.ref}:${r6(c.reliance)}`).join(";") || "none",
   };
   // leaderboard/0.1: a reading of the track record, pinned so that a change to how standing is counted shows in the diff.
   const board = buildLeaderboard(leaderboardInputOf(r, s, Number.MAX_SAFE_INTEGER, 10));

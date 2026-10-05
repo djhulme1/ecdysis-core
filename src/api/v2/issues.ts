@@ -38,6 +38,7 @@ import type { Json } from "../../core/canonical.js";
 import { sanitizeText } from "../../core/sanitize.js";
 import { isHeld } from "../../core/v2/flow.js";
 import { isClaimRef } from "../../core/v2/refs.js";
+import { LINK_ID } from "../../core/v2/links.js";
 import type { V2Service } from "./service.js";
 import { reliesOn, subjectKind } from "./service.js";
 import { complaintsPageV2 } from "../../web/v2/pages.js";
@@ -92,7 +93,7 @@ export function validateFlagV2(p: unknown): { ok: true; value: FlagV2Payload } |
   if (!x || typeof x !== "object" || Array.isArray(x)) return { ok: false, errors: ["payload: an object"] };
   if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
   if (x.type !== "issue.flag") errors.push('type: "issue.flag"');
-  if (typeof x.subject !== "string" || x.subject.length > 200 || !normaliseSubject(x.subject)) errors.push("subject: a claim's id (ecd:… or ext:…), a 64-hex id (an argument, a receipt, a review, an attempt), or a claim's address on the site");
+  if (typeof x.subject !== "string" || x.subject.length > 200 || !normaliseSubject(x.subject)) errors.push("subject: a claim's id (ecd:… or ext:…), a link's id (lnk:…), a 64-hex id (an argument, a receipt, a review, an attempt), or a claim's address on the site");
   if (!(FLAG_KINDS as readonly string[]).includes(String(x.kind))) errors.push(`kind: one of ${FLAG_KINDS.join(", ")}`);
   if (typeof x.detail !== "string" || x.detail.trim().length < FLAG_DETAIL.min || x.detail.length > FLAG_DETAIL.max) errors.push(`detail: ${FLAG_DETAIL.min} to ${FLAG_DETAIL.max} characters`);
   else if (sanitizeText(x.detail).stripped.length) errors.push("detail: no control, bidirectional or zero-width characters");
@@ -258,8 +259,9 @@ export class IssueRegistry {
     const review = r.evidence.find((e) => e.kind === "review" && e.id === subject);
     const own = subject.startsWith("ext:") ? r.external.get(subject)?.operatorId === operatorId
       : subject.startsWith("ecd:") ? r.native.get(subject)?.operatorId === operatorId
+      : subject.startsWith("lnk:") ? r.links.get(subject)?.operatorId === operatorId
       : (r.arguments.get(subject)?.operatorId ?? r.checks.get(subject)?.operatorId ?? r.attempts.get(subject)?.operatorId ?? review?.operatorId) === operatorId;
-    const target = r.arguments.get(subject)?.claim ?? r.checks.get(subject)?.target ?? r.attempts.get(subject)?.claim ?? review?.claim;
+    const target = r.arguments.get(subject)?.claim ?? r.checks.get(subject)?.target ?? r.attempts.get(subject)?.claim ?? review?.claim ?? r.links.get(subject)?.to;
     const ownsOrRelies = (ref: string) => (ref.startsWith("ext:") ? r.external.get(ref)?.operatorId : r.native.get(ref)?.operatorId) === operatorId || reliesOn(r, operatorId, ref);
     const stake = own || (target ? ownsOrRelies(target) : false) || (isClaimRef(subject) && reliesOn(r, operatorId, subject));
     const detail = sanitizeText(f.detail).text.trim();
@@ -366,7 +368,7 @@ export function normaliseSubject(raw: string): string | null {
   try { s = decodeURIComponent(s); } catch { /* as given */ }
   const url = s.match(/^(?:https?:\/\/[^/]+)?\/c\/((?:ecd|ext):[0-9a-f]{16})(?:\/line)?\/?$/);
   if (url) return url[1]!;
-  if (isClaimRef(s) || /^[0-9a-f]{64}$/.test(s)) return s;
+  if (isClaimRef(s) || /^[0-9a-f]{64}$/.test(s) || LINK_ID.test(s)) return s;
   return null;
 }
 

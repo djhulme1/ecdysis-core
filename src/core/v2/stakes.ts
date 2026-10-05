@@ -1,10 +1,12 @@
 /**
- * Stakes (stakes/0.1): how much rests on a claim, on and off the record
+ * Stakes (stakes/0.2): how much rests on a claim, on and off the record
  * (Ecdysis v2; design: claude/ecdysis-claims-map-design.md §3, Daniel,
  * 4 October 2026: "we shouldn't give any credence to citations, but it
- * might help direct agents towards claims in high-impact papers").
+ * might help direct agents towards claims in high-impact papers"; and
+ * claude/ecdysis-literature-network-design.md, 5 October 2026, for
+ * reliance).
  *
- * Two sources, one unit:
+ * Three sources, one unit:
  *
  *   use U     what rests on the claim ON the record: the papers that build
  *             on it, weighted by the citing operator's tier and independence
@@ -19,20 +21,29 @@
  *             expected citations stand in: R = max(C, venue's two-year mean
  *             citedness × 2). Author h-index is not used: it measures the
  *             person, not the claim.
+ *   reliance N  what the literature rests on the claim itself, ON the
+ *             record: the claims from human literature that agents have
+ *             identified as resting on it (literature/0.1, links.ts),
+ *             through every path, halved for each step away and weighed
+ *             by who identified each step. Where reach counts every
+ *             citation of the whole paper, reliance counts the identified
+ *             dependencies of this one claim.
  *
- *   S = U + log2(1 + R)
+ *   S = U + log2(1 + R) + log2(1 + N)
  *
  * Each doubling of citations adds one unit of stakes, so a paper with a
- * thousand citations counts like a claim with ten dependants on the record.
- * The log compresses a measure that is inflated and noisy (self-citation,
- * review articles, fashion) into a direction number, and says plainly that
- * it is one. Stakes enter the value of checking (direction/0.1) and the pressure
- * on blocked claims (attempts.ts), and nothing else: credence, the statuses,
- * dispute and reliability never see a citation. Claims of one paper share
- * its reach. Pure: no runtime dependencies, no environment.
+ * thousand citations counts like a claim with ten dependants on the record;
+ * each doubling of reliance adds one more. The logs compress measures that
+ * are inflated and noisy (self-citation, review articles, fashion; links an
+ * agent got wrong) into a direction number, and say plainly that it is one.
+ * Stakes enter the value of checking (direction/0.1) and the pressure on
+ * blocked claims (attempts.ts), and nothing else: credence, the statuses,
+ * dispute and reliability never see a citation or a link. Claims of one
+ * paper share its reach; reliance is each claim's own. Pure: no runtime
+ * dependencies, no environment.
  */
 
-export const STAKES_VERSION = "stakes/0.1";
+export const STAKES_VERSION = "stakes/0.2";
 
 export const STAKES_PARAMS = {
   /** A source younger than this (by publication year) takes its venue's expected citations when they exceed its own. */
@@ -121,7 +132,7 @@ export function reachOf(obs: SourceObservation | null | undefined, now: Date): n
   return young ? Math.max(cited, obs.venueCitedness * STAKES_PARAMS.venueYears) : cited;
 }
 
-/** S = U + log2(1 + R). */
-export function stakesOf(use: number, reach: number): number {
-  return Math.max(0, use) + Math.log2(1 + Math.max(0, reach));
+/** S = U + log2(1 + R) + log2(1 + N). */
+export function stakesOf(use: number, reach: number, reliance = 0): number {
+  return Math.max(0, use) + Math.log2(1 + Math.max(0, reach)) + Math.log2(1 + Math.max(0, reliance));
 }

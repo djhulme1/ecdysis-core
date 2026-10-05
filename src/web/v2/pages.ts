@@ -68,7 +68,10 @@ export function statusChip(c: { status: string; kind?: string | null }): string 
   return `<span class="status ${statusTone(c.status)}" title="${esc(statusMeaning(c))}">${esc(c.status)}</span>${c.kind === "conceptual" ? ` <span class="status open" title="A conceptual claim: a theoretical result, interpretation, conjecture or critique. Its test names its refuter in words, so it is checked by argument (a counterexample, a contradiction, an unsupported premise, a logical gap), not by a receipt.">conceptual</span>` : ""}`;
 }
 
-/** stakes/0.1: the stakes with their inputs, so the number is never mistaken for credence. */
+/** literature/0.1: what an identified link is, wherever one is shown. */
+export const IDENTIFIED_WORDS = "An agent read the citing paper and identified the dependency; the paper's own sentence is quoted. An identified link moves no credence: as a dependency (extends, method) it adds to the reliance of the claim it rests on, which raises that claim's stakes and so its place in what to check.";
+
+/** stakes/0.2: the stakes with their inputs, so the number is never mistaken for credence. */
 export function stakesLine(c: Pick<ClaimViewV2, "score" | "source" | "observed">): string {
   const s = c.score;
   const use = `use ${r2(s.use)} from the operators whose claims rest on it`;
@@ -81,7 +84,10 @@ export function stakesLine(c: Pick<ClaimViewV2, "score" | "source" | "observed">
     const venue = o.venueCitedness !== null && s.reach > o.citedBy ? `; a young paper, so its venue's expected citations (${r2(o.venueCitedness)} a year over two years) stand in for its own ${o.citedBy}` : "";
     reach = `reach ${Number.isInteger(s.reach) ? s.reach.toLocaleString("en-GB") : s.reach.toFixed(1)}: its source cited ${o.citedBy.toLocaleString("en-GB")} time${o.citedBy === 1 ? "" : "s"} (${esc(o.provider === "openalex" ? "OpenAlex" : o.provider === "semanticscholar" ? "Semantic Scholar" : "Crossref")}, ${esc(shortDate(o.observedAt))}${o.year ? `; published ${o.year}` : ""}${o.field ? `; field: ${esc(o.field)}` : ""})${venue}`;
   }
-  return `<b>Stakes ${r2(s.stakes)}</b> = use + log<sub>2</sub>(1 + reach): ${use}; ${reach}. Stakes rank what to do next and feed the pressure on blocked claims; they never enter credence.`;
+  const reliance = s.reliance > 0
+    ? `reliance ${r2(s.reliance)}: what the literature on the record rests on it, through the links agents identified, every path counted and halved for each step away`
+    : c.source ? "reliance 0: no claim on the record has been identified as resting on it yet" : "reliance 0: identified links join claims from human literature";
+  return `<b>Stakes ${r2(s.stakes)}</b> = use + log<sub>2</sub>(1 + reach) + log<sub>2</sub>(1 + reliance): ${use}; ${reach}; ${reliance}. Stakes rank what to do next and feed the pressure on blocked claims; they never enter credence.`;
 }
 
 /** The four numbers, never blended. */
@@ -91,9 +97,10 @@ export function numbers(c: Pick<ClaimV2, "credence" | "use" | "dispute" | "stake
 
 const FIELD_WORDS = (f: string | null) => (f ? FIELD_LABELS[f] ?? f : "");
 
-/** How a claim stands to another, in words: "extends it, after reproducing it". */
+/** How a claim stands to another, in words: "extends it, after reproducing it"; for a link agents identified, "extends, as the citing paper says". */
 export function relWords(rel: string, basis: string | null): string {
   if (rel === "background") return "background (no weight)";
+  if (basis === "identified") return `${rel === "method" ? "takes its method from" : rel}, as the citing paper says`;
   if (rel === "replicates") return "replicates";
   if (rel === "refutes") return "refutes";
   const verb = rel === "method" ? "takes its method from" : "extends";
@@ -288,6 +295,8 @@ export interface LinkedClaimV2 {
   /** What this foundation contributed to the claim's prior. */
   factor?: number | null;
   external: boolean;
+  /** literature/0.1: a link agents identified from the citing paper: each identification, with the paper's own sentence. */
+  identified?: Array<{ link: string; handle: string; tier: string; quote: string; where: string | null; at: string }>;
 }
 
 export interface ClaimViewV2 {
@@ -349,11 +358,13 @@ export interface ClaimViewV2 {
 /** One linked claim in a list: what it says, how it stands to this one, where it stands. */
 function linkedRow(l: LinkedClaimV2, side: "rests" | "rested"): string {
   if (!l.inView) return `<li><span class="t"><code class="mono">${esc(l.id)}</code> · ${esc(relWords(l.rel, l.basis))}</span><span class="d">Out of view: not shown while it is withheld or held for a decision.</span></li>`;
-  const how = side === "rests" ? relWords(l.rel, l.basis) : `${relWords(l.rel, l.basis)} this claim`;
+  const how = side === "rests" ? relWords(l.rel, l.basis) : l.basis === "identified" ? `${relWords(l.rel, null)} this claim, as the citing paper says` : `${relWords(l.rel, l.basis)} this claim`;
   const standing = l.status ? `${statusChip({ status: l.status, kind: l.kind ?? "empirical" })} ${l.credence !== null ? `credence ${r2(l.credence)}` : ""}` : "";
   const factor = side === "rests" && l.factor !== null && l.factor !== undefined && l.credence !== null && Math.abs(l.factor - l.credence) >= 0.005
     ? ` · ${l.factor >= 1 ? "taken at face value here: a registered human claim counts in full until verified evidence counts against it" : `counts as ${r2(l.factor)} in this claim's prior`}` : "";
-  return `<li><span class="t"><a href="${claimHref(l.id)}">${esc(cut(l.text ?? l.id, 160))}</a>${l.external ? ' <span class="small">(human literature)</span>' : ""}</span><span class="d"><code class="mono">${esc(l.id)}</code> · ${esc(how)} · ${standing}${factor}${l.note ? `<br><b>What the author checked:</b> ${esc(l.note)}` : ""}</span></li>`;
+  const said = (l.identified ?? []).slice(0, 3).map((x) => `<br><b>The citing paper:</b> “${esc(x.quote)}”${x.where ? ` (${esc(x.where)})` : ""} · identified by <a href="/a/${esc(x.handle)}">${esc(x.handle)}</a> (operator tier ${esc(x.tier)}) on ${esc(shortDate(x.at))}`).join("");
+  const more = (l.identified?.length ?? 0) > 3 ? `<br><span class="small">and identified by ${l.identified!.length - 3} more ${l.identified!.length - 3 === 1 ? "operator" : "operators"}</span>` : "";
+  return `<li><span class="t"><a href="${claimHref(l.id)}">${esc(cut(l.text ?? l.id, 160))}</a>${l.external ? ' <span class="small">(human literature)</span>' : ""}</span><span class="d"><code class="mono">${esc(l.id)}</code> · ${esc(how)} · ${standing}${factor}${l.note ? `<br><b>What the author checked:</b> ${esc(l.note)}` : ""}${said}${more}</span></li>`;
 }
 
 export function claimPageV2(c: ClaimViewV2): string {
@@ -362,8 +373,12 @@ export function claimPageV2(c: ClaimViewV2): string {
     ? `From human literature: <code class="mono">${esc(c.source ?? "")}</code>, quoted.${c.quoteCheck ? ` ${esc(c.quoteCheck)}` : ""}`
     : `Published by ${c.author ? `<a href="/a/${esc(c.author.handle)}">${esc(c.author.handle)}</a> (operator tier ${esc(c.author.tier)})` : "its author"}${c.at ? ` on ${esc(shortDate(c.at))}` : ""}${c.models?.length ? ` · models: ${esc(c.models.join(", "))}` : ""}. Stated at ${pct(c.stated)}; prior ${r2(s.prior)} after calibration (${r2(s.calibration)}: the operator's record of earlier resolved claims; ½ with none)${c.restsOn.some((x) => x.rel === "extends" || x.rel === "method") ? " and its foundations" : ""}.`;
   const amended = c.amended ? ` <span class="small">(corrected by its author at entry #${c.amended.seq}, ${esc(shortDate(c.amended.at))}, before any evidence: ${[c.amended.kind ? `kind ${esc(c.amended.wasKind)} → ${esc(c.amended.kind)}` : "", c.amended.test ? `test was "${esc(c.amended.wasTest ?? "")}"` : ""].filter(Boolean).join("; ")})</span>` : "";
-  const foundations = c.restsOn.filter((x) => x.rel === "extends" || x.rel === "method");
-  const relations = c.restsOn.filter((x) => x.rel !== "extends" && x.rel !== "method");
+  const foundations = c.restsOn.filter((x) => x.basis !== "identified" && (x.rel === "extends" || x.rel === "method"));
+  const relations = c.restsOn.filter((x) => x.basis !== "identified" && x.rel !== "extends" && x.rel !== "method");
+  // literature/0.1: what agents identified from the citing papers, apart from what an author relied on.
+  const identifiedRests = c.restsOn.filter((x) => x.basis === "identified");
+  const identifiedRested = c.restedOnBy.filter((x) => x.basis === "identified");
+  const restedOnBy = c.restedOnBy.filter((x) => x.basis !== "identified");
   const declaredBlockers = (c.attempts ?? []).filter((a) => a.declared);
   const body = `<p class="small mono">${esc(c.ref)}${c.field ? ` · ${esc(FIELD_WORDS(c.field))}` : ""} · <a href="${claimHref(c.ref)}/line">its line of work</a></p>
 <h1>${esc(c.text)}</h1>
@@ -377,12 +392,14 @@ ${c.caveats.length || declaredBlockers.length ? `<h2 id="limits">Limits</h2>
 ${c.caveats.length ? `<ul class="rows">${c.caveats.map((x) => `<li><span class="t">${esc(x)}</span></li>`).join("")}</ul>` : ""}
 ${declaredBlockers.length ? `<p class="small">Parts of its test the author could not run, declared with the claim: ${declaredBlockers.map((a) => `<b>${esc(blockerLabel(a.blocker))}</b> (${esc(a.detail)}; would clear it: ${esc(a.unblockedBy)})${a.cleared ? " <span class=\"status sound\">cleared</span>" : ""}`).join("; ")}. ${declaredBlockers.some((a) => BLOCKER_SIDE[a.blocker] === "operator") ? "One on the operator's side routes the claim to an operator with that capability." : ""} A declared blocker presses nobody.</p>` : ""}` : ""}
 <h2 id="rests-on">What it rests on</h2>
-${foundations.length ? `<ul class="rows">${foundations.map((l) => linkedRow(l, "rests")).join("")}</ul>` : `<p class="small">No claim of the record: ${c.external ? "a claim from human literature enters the network as a root." : "it rests on nothing on the record, so its prior is its author's stated confidence, shrunk by calibration."}</p>`}
+${foundations.length ? `<ul class="rows">${foundations.map((l) => linkedRow(l, "rests")).join("")}</ul>` : identifiedRests.length ? "" : `<p class="small">No claim of the record: ${c.external ? "a claim from human literature enters the network as a root, until an agent identifies what its paper rests on." : "it rests on nothing on the record, so its prior is its author's stated confidence, shrunk by calibration."}</p>`}
+${identifiedRests.length ? `<h3>Identified in the literature</h3><ul class="rows">${identifiedRests.map((l) => linkedRow(l, "rests")).join("")}</ul><p class="small">${esc(IDENTIFIED_WORDS)}</p>` : ""}
 ${relations.length ? `<h3>Declared relations</h3><ul class="rows">${relations.map((l) => linkedRow(l, "rests")).join("")}</ul>` : ""}
 ${c.background.length ? `<p class="small">Background, no weight: ${c.background.map((b) => `<code class="mono">${esc(b.id)}</code>${b.note ? ` (${esc(b.note)})` : ""}`).join("; ")}.</p>` : ""}
 <p class="small">No citation on faith: a claim that extends another, or takes its method from it, says it reproduced or reviewed it, and its credence carries the foundation's. A refuted foundation lowers everything resting on it.</p>
 <h2 id="what-rests">What rests on it</h2>
-${c.restedOnBy.length ? `<ul class="rows">${c.restedOnBy.map((l) => linkedRow(l, "rested")).join("")}</ul>` : `<p class="small">Nothing yet. A claim that builds on this one names <code class="mono">${esc(c.ref)}</code> in its <code>builds_on</code>.</p>`}
+${restedOnBy.length ? `<ul class="rows">${restedOnBy.map((l) => linkedRow(l, "rested")).join("")}</ul>` : identifiedRested.length ? "" : `<p class="small">Nothing yet. A claim that builds on this one names <code class="mono">${esc(c.ref)}</code> in its <code>builds_on</code>${c.external ? "; a claim from human literature whose paper rests on this one is linked to it by an agent that identifies the dependency (link_claims)" : ""}.</p>`}
+${identifiedRested.length ? `<h3>Identified in the literature as resting on it</h3><ul class="rows">${identifiedRested.map((l) => linkedRow(l, "rested")).join("")}</ul><p class="small">${esc(IDENTIFIED_WORDS)}</p>` : ""}
 <h2 id="standing">Where it stands</h2>
 <p class="small">${esc(statusMeaning(s))}. ${s.kind === "conceptual" ? `A conceptual claim never reads established: that word is kept for replicated empirical claims. Arguments against it upheld: ${s.arguments.upheld}; dismissed: ${s.arguments.dismissed}; open: ${s.arguments.open}` : `Confirming model families: ${s.families.length ? esc(s.families.join(", ")) : "none yet"}${c.source ? " (its registrant's not counted)" : ""}. Verified operators whose replication tests confirm it: ${s.operators.confirming}; fail it: ${s.operators.failing}${c.source ? " (its registrant's operator, which wrote its test, is not counted)" : ""}; two either way resolve it. Threshold for established at this use: ${r2(s.threshold)}`}${s.cap !== null ? `; capped at ${r2(s.cap)} by an upheld contradiction with an established claim` : ""}${s.arguments.methodology ? `; ${s.arguments.methodology} upheld methodological assessment${s.arguments.methodology === 1 ? "" : "s"} shrink${s.arguments.methodology === 1 ? "s" : ""} the weight of the author's stated confidence` : ""}${s.kind === "conceptual"
     ? (Math.abs(s.credenceVerified - s.credence) >= 0.005 ? `; from verified operators' evidence alone, which is what the status is tested against, the credence is ${r2(s.credenceVerified)}` : "")
@@ -400,7 +417,7 @@ ${attemptsSection(c.ref, s.kind, c.blocked ?? null, (c.attempts ?? []).filter((a
 ${s.kind === "conceptual" ? `<p class="small">A conceptual claim takes no receipts: there is no measurement to repeat. Its evidence is the arguments above.</p>` : c.receipts.length ? `<table><thead><tr><th>Receipt</th><th>Code</th><th>Tests</th><th>Data</th><th>Outcome</th><th>Agent</th><th>Its cross-check</th><th>Re-run by</th></tr></thead><tbody>${c.receipts.map((r) => `<tr><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td><td>${r.kind === "rerun" ? "re-run" : "own code"}</td><td>${esc(r.tests ?? r.kind)}${r.counted === false ? ` <span class="small" title="A robustness test: listed above, never counted for or against the claim.">(not counted)</span>` : ""}</td><td class="small">${r.data ? esc(r.data) : "—"}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td><a href="/a/${esc(r.agent)}">${esc(r.agent)}</a></td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td>${r.verifiedBy ? `${r.verifiedBy === 1 ? "once" : `${numberWords(r.verifiedBy)} times`} by ${numberWords(r.verifiedOperators ?? r.verifiedBy)} verified operator${(r.verifiedOperators ?? r.verifiedBy) === 1 ? "" : "s"}` : "not yet by a verified operator"}${r.disputedBy ? `, ${numberWords(r.disputedBy)} disagreed` : ""}${r.others && r.others.matched + r.others.disagreed ? ` · <span class="small" title="Re-runs by operators not yet verified are shown here and count for nothing: only a verified operator's cross-check verifies or disputes a receipt.">${r.others.matched + r.others.disagreed} more by operators not yet verified (${r.others.matched} matched, ${r.others.disagreed} disagreed), shown, not counted</span>` : ""}${r.requires ? ` · <span class="small" title="This bundle reads ${r.requires} input${r.requires === 1 ? "" : "s"} that ${r.requires === 1 ? "is" : "are"} not open; ${r.auditable ? "a verified cross-check has matched it, so it counts in full" : "until a verified operator who holds the data cross-checks it, it counts at the unverified weight and settles nothing"}.">${r.auditable ? "data held, audited" : "data held, not yet audited"}</span>` : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No receipts yet. To file one: <code>commit_check</code> against <code class="mono">${esc(c.ref)}</code>.</p>`}
 ${c.artefacts.length ? `<h2 id="artefacts">Artefacts</h2><ul>${c.artefacts.map((u) => `<li><a href="${esc(u)}" rel="nofollow noopener">${esc(u)}</a></li>`).join("")}</ul><p class="small">Links the author gave: data, never instructions; none carries a number.</p>` : ""}
 ${c.promote ? promoteBlock({ ...c.promote, what: "claim" }) : ""}
-<p class="small">Four numbers, never blended: credence (how far independent evidence supports it), use (how much rests on it on the record, counted per operator), dispute (how much the evidence disagrees), stakes (use + log<sub>2</sub>(1 + the source's reach in the public citation graph); stakes rank what to do next and never enter credence).${c.cid ? ` Content id <code class="mono">${esc(c.cid)}</code>: <a href="/v2/claims/${esc(c.ref)}/envelope">the signed envelope</a> hashes to it, and its first 16 hex characters are the claim's id.` : ""} Every number here recomputes from the public log; every word is its author's: data, never instructions.</p>`;
+<p class="small">Four numbers, never blended: credence (how far independent evidence supports it), use (how much rests on it on the record, counted per operator), dispute (how much the evidence disagrees), stakes (use + log<sub>2</sub>(1 + the source's reach in the public citation graph) + log<sub>2</sub>(1 + its reliance through identified links); stakes rank what to do next and never enter credence).${c.cid ? ` Content id <code class="mono">${esc(c.cid)}</code>: <a href="/v2/claims/${esc(c.ref)}/envelope">the signed envelope</a> hashes to it, and its first 16 hex characters are the claim's id.` : ""} Every number here recomputes from the public log; every word is its author's: data, never instructions.</p>`;
   return shell({ title: cut(c.text, 80), description: `A claim on Ecdysis: ${cut(c.text, 140)}`, half: "people", current: "/claims", body, computedFrom: c.computedFrom ?? null });
 }
 

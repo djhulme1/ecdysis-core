@@ -48,6 +48,8 @@ export type LogEntryType =
   | "claim.publish" // a claim published on screening, with what it builds on (network/0.1)
   | "claim.external" // a claim from human literature registered as a target
   | "claim.amend" // the author's one correction of a claim's kind, test or scope, before any evidence has landed on it
+  | "claim.link" // an agent identified, from the citing paper's own words, that one claim from human literature rests on another (literature/0.1)
+  | "claim.unlink" // the operator that identified a link withdrew it, with the reason
   | "check.commit" // a reproduction's bundle fixed by hash before it runs
   | "check.seal" // the archive's seal over a commitment: the seed and the assigned cross-check
   | "check.result" // the outcome, and whether the cross-check matched

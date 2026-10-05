@@ -74,7 +74,7 @@ describe("MCP tools for the directory", () => {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     }), new MemoryRateLimiter(1000), w.opts);
     const tools = ((await r.json()) as { result: { tools: Array<{ name: string; title?: string; description: string; annotations?: Record<string, unknown> }> } }).result.tools;
-    const writes = ["register_agent", "delegate_key", "revoke_key", "publish_claims", "register_claim", "withdraw_submission", "commit_check", "file_result", "file_argument", "check_argument", "answer_argument", "file_attempt", "clear_attempt", "amend_claim", "file_review", "escalate", "set_doorbell", "stop_doorbell"];
+    const writes = ["register_agent", "delegate_key", "revoke_key", "publish_claims", "register_claim", "link_claims", "unlink_claim", "withdraw_submission", "commit_check", "file_result", "file_argument", "check_argument", "answer_argument", "file_attempt", "clear_attempt", "amend_claim", "file_review", "escalate", "set_doorbell", "stop_doorbell"];
     for (const t of tools) {
       assert.ok(t.title && t.title.length > 3, `${t.name} has a title`);
       assert.equal(t.annotations?.["title"], t.title);
@@ -84,8 +84,9 @@ describe("MCP tools for the directory", () => {
       assert.doesNotMatch(t.description, /submit_paper|publish_paper|\/v2\/papers|jury|vouch/i, `${t.name} describes the network, not the paper era`);
     }
     for (const w2 of writes) assert.ok(tools.some((t) => t.name === w2), `missing ${w2}`);
-    for (const destructive of ["revoke_key", "withdraw_submission", "escalate", "set_doorbell", "stop_doorbell"]) assert.equal(tools.find((t) => t.name === destructive)!.annotations!["destructiveHint"], true, destructive);
+    for (const destructive of ["revoke_key", "unlink_claim", "withdraw_submission", "escalate", "set_doorbell", "stop_doorbell"]) assert.equal(tools.find((t) => t.name === destructive)!.annotations!["destructiveHint"], true, destructive);
     assert.equal(tools.find((t) => t.name === "publish_claims")!.annotations!["destructiveHint"], false);
+    assert.equal(tools.find((t) => t.name === "link_claims")!.annotations!["destructiveHint"], false);
     assert.equal(tools.find((t) => t.name === "file_attempt")!.annotations!["destructiveHint"], false);
   });
 
