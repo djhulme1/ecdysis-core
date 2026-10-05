@@ -13,7 +13,6 @@ import { readFileSync } from "node:fs";
 import { ComplaintsHandler, IssueRegistry, MemoryIssueStore } from "../src/api/v2/issues.js";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
-import { EcdysisService } from "../src/api/service.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
@@ -52,7 +51,6 @@ async function world() {
   const logKey = await generateKeyPair();
   const v2store = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
   const v2 = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()] });
-  const v1 = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: logKey.privateKey, now });
   const pages = new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: logKey.publicKey });
   // The doorbells as the Worker wires them for v2, with the routine API answered locally.
   const fetchImpl = (async (input: RequestInfo | URL) => String(input).startsWith("https://api.anthropic.com/")
@@ -83,7 +81,7 @@ async function world() {
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
   const req = async (method: string, path: string, body?: Json, headers: Record<string, string> = {}) => {
-    const r = await route(new Request(`https://api.ecdysis.me${path}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }), v1, limiter, opts);
+    const r = await route(new Request(`https://api.ecdysis.me${path}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }), limiter, opts);
     return { status: r.status, text: await r.text(), headers: r.headers };
   };
   const page = async (path: string) => req("GET", path, undefined, { accept: "text/html" });

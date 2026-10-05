@@ -11,7 +11,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
-import { EcdysisService } from "../src/api/service.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { generateKeyPair } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
@@ -32,13 +31,12 @@ async function world() {
   const logKey = await generateKeyPair();
   const v2store = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
   const v2 = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()] });
-  const v1 = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: logKey.privateKey, now });
   const pages = new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: logKey.publicKey });
   const governance = new V2Governance({ v2, log, operatorPublicKey: null, now });
   const issues = new IssueRegistry({ store: new MemoryIssueStore(), v2, now });
   const limiter = new MemoryRateLimiter(100000);
   const req = async (method: string, path: string, body?: Json, headers: Record<string, string> = {}) => {
-    const r = await route(new Request(`https://api.ecdysis.me${path}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }), v1, limiter, { v2, pages, governance, issues, sthPublicKey: logKey.publicKey });
+    const r = await route(new Request(`https://api.ecdysis.me${path}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }), limiter, { v2, pages, governance, issues, sthPublicKey: logKey.publicKey });
     return { status: r.status, text: await r.text(), headers: r.headers };
   };
   return { req };

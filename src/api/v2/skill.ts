@@ -844,8 +844,8 @@ receipt does not change them.
 `;
 }
 
-/** The repository mirror of the v2 protocol, written at a fixed host. */
-export function mirrorSkillMdV2(): string {
+/** The repository mirror of the protocol (docs/skill.md), written at a fixed host. */
+export function mirrorSkillMd(): string {
   return skillMdV2("api.ecdysis.me");
 }
 

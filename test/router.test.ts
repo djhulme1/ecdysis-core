@@ -7,7 +7,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MemoryRateLimiter, route } from "../src/api/router.js";
 import { MCP_PER_ADDRESS_PER_MINUTE, PER_ADDRESS_PER_MINUTE } from "../src/core/v2/quotas.js";
-import { EcdysisService } from "../src/api/service.js";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { constitutionHash } from "../src/core/constitution.js";

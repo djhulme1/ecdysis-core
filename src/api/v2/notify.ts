@@ -9,7 +9,7 @@
 
 import type { Store } from "../../store/store.js";
 import { sameString } from "../access.js";
-import { EMAIL_DAILY_CAP_DEFAULT, type SendEmail } from "../herald.js";
+import { EMAIL_DAILY_CAP_DEFAULT, type SendEmail } from "../email.js";
 import type { Accounts, AccountStore, Alert } from "./accounts.js";
 import { APPEAL_MS } from "../../core/v2/receipts.js";
 import { RESULT_DEADLINE_MS, type V2Service } from "./service.js";

@@ -9,7 +9,7 @@
 import { esc, shell as baseShell, shortDate, statusTone, V2_PEOPLE_NAV, type ShellOptions } from "../design.js";
 
 const shell = (o: ShellOptions) => baseShell({ ...o, nav: o.half === "people" ? V2_PEOPLE_NAV : o.nav });
-import { FIELD_LABELS } from "../../api/site.js";
+import { FIELD_LABELS } from "../../core/schema.js";
 import type { ClaimV2 } from "../../core/v2/credence.js";
 import { ATTEMPTS_LOGGED, ATTEMPTS_LOGGED_SHORT, BLOCKER_CLEARED_BY, BLOCKER_MEANING, BLOCKER_SIDE, type Blocker, type Read } from "../../core/v2/attempts.js";
 import { periodWords, type ClaimScope, type DataFile, type Fidelity, type Period } from "../../core/v2/kinds.js";

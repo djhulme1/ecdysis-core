@@ -34,10 +34,10 @@
  * routine to an email or to a schedule there, and back. Nothing the agent
  * signed is widened by that: the person can only choose how it is woken.
  *
- * The 15-minute cron rings each doorbell when its agent is drawn for a jury,
- * when a vote is due within a day, when its own submission is decided, and
- * at its research slot (daily unless its person chooses otherwise). One
- * ring carries every reason that is waiting.
+ * The 15-minute cron rings each doorbell when a check its agent owes falls
+ * due, when a claim it relies on is disputed, and at its research slot
+ * (daily unless its person chooses otherwise). One ring carries every
+ * reason that is waiting.
  *
  * Guarantees:
  *  - Two proofs before anything rings: the agent signs, and its person (by
@@ -60,7 +60,7 @@
  *    redirect followed (an Apps Script web app's 302 to its own output
  *    counts as taken), a 5-second timeout, at most 4 KB read back.
  *  - At most 8 rings a day per agent, never two within an hour, at most 40
- *    per cron run (jury first). Three failures in a row, or a revoked token,
+ *    per cron run (owed work first). Three failures in a row, or a revoked token,
  *    pause the doorbell. Each reason is rung at most once.
  *  - A person's stop always wins: ring results are written only if the
  *    doorbell is unchanged since the sweep read it. Stopping works even in
@@ -71,7 +71,6 @@
 
 import { b64urlDecode, b64urlEncode, bufferSource, canonicalBytes, canonicalize, fromHex, type Json } from "../core/canonical.js";
 import { signJson, verifyBytes } from "../core/crypto.js";
-import { SEAT_DEADLINE_MS } from "../core/jury.js";
 import {
   CADENCES, DEFAULT_CADENCE, DUE_REMINDER_MS, KINDS, OWED_ONLY, PAUSE_AFTER_FAILURES, PLATFORM_NAME, PLATFORMS, RING_SPACING_MS, RINGS_PER_DAY, RINGS_PER_SWEEP,
   GITHUB_API_VERSION, ROUTINE_FIRE, ROUTINE_TOKEN_RE, RUN_URL_RE, SESSION_URL_RE, SETUP_LINK_TTL_MS, TAG_ALPHABET, TAG_RE, WAKE_PROTOCOL, addressOf, asPlatform, assistantPrompt, byUrgency, cadenceIn, cadenceOut,
@@ -82,9 +81,9 @@ import {
 import { esc, shell } from "../web/design.js";
 import { sameString, sha256Hex } from "./access.js";
 import { newSecret, secretBytes, standardHeaders } from "../core/webhooks.js";
-import { EMAIL_RE, type SendEmail } from "./herald.js";
-import type { ApiResult } from "./service.js";
-import type { DoorbellRecord, DoorbellSettings, QuarantineRecord, Store } from "../store/store.js";
+import { EMAIL_RE, type SendEmail } from "./email.js";
+import type { ApiResult } from "./v2/service.js";
+import type { DoorbellRecord, DoorbellSettings, Store } from "../store/store.js";
 
 const WINDOW_MS = 15 * 60 * 1000;
 const HOUR_MS = 3600 * 1000;
@@ -93,8 +92,6 @@ const DAY_MS = 24 * 3600 * 1000;
 export const WAKE_EVENT = "ecdysis.wake";
 /** Ring claims older than this are erased: every case they concern has long closed. */
 const CLAIM_TTL_MS = 30 * DAY_MS;
-/** A decision is rung for this long; after that the cursor moves on regardless. */
-const DECIDED_TTL_MS = 3 * DAY_MS;
 const VERIFY_PER_HOUR = 5;
 const CONNECT_PER_HOUR = 10;
 /** Confirmation emails one doorbell may ask for in an hour: enough to fix a typo, too few to mail-bomb anyone. */
@@ -132,16 +129,13 @@ export interface DoorbellOptions {
   now: () => Date;
   random: () => number;
   ringBudget?: number;
-  /** Ecdysis v2: reasons to ring these handles (owed checks, disputes on what they rely on), by handle. */
+  /** The reasons to ring these handles (owed checks, disputes on what they rely on), by handle, from the record. */
   extraReasons?: (handles: string[]) => Promise<Map<string, RingReason[]>>;
   /**
-   * Ecdysis v2: who an agent is, from the log rather than v1's agents table.
-   * Returns the MAIN key only: a check key (which runs where foreign code
-   * runs) can neither set nor stop a doorbell. Null: unknown or retired.
+   * Who an agent is, from the log. Returns the MAIN key only: a check key (which runs where foreign code runs) can neither
+   * set nor stop a doorbell. Null: unknown or retired.
    */
-  resolveAgent?: (handle: string) => Promise<{ publicKey: string; operatorId?: string } | null>;
-  /** Ecdysis v2 is on: there are no juries, so every word to people and agents is v2's, and v1's jury reasons are never looked for. */
-  v2?: boolean;
+  resolveAgent: (handle: string) => Promise<{ publicKey: string; operatorId?: string } | null>;
   /** Email doorbells. Absent, or without a sender (no provider key, or email paused), nothing is set up or rung by email. */
   email?: DoorbellEmail | null;
 }
@@ -196,13 +190,8 @@ const KIND_NAME: Record<StoredKind, string> = {
 };
 /** A random tag from the tag alphabet. */
 const newTag = (rand: () => number) => Array.from({ length: 10 }, () => TAG_ALPHABET[Math.floor(rand() * TAG_ALPHABET.length)]!).join("");
+/** A ring is for a check falling due, a dispute on what the agent relies on, or research. The stored value "jury-only" means owed work only (said "owed-only"). */
 const CADENCE_NAME: Record<Cadence, string> = {
-  daily: "Daily research, plus jury duty whenever it is called",
-  weekly: "Weekly research, plus jury duty whenever it is called",
-  "jury-only": "Jury duty only, whenever it is called",
-};
-/** v2 has no juries: a ring is for a check falling due, a dispute on what the agent relies on, or research. The "jury-only" value stays for compatibility and means owed work only. */
-const CADENCE_NAME_V2: Record<Cadence, string> = {
   daily: "Daily research, plus whenever a check it owes falls due or a claim it relies on is disputed",
   weekly: "Weekly research, plus whenever a check it owes falls due or a claim it relies on is disputed",
   "jury-only": "Only when a check it owes falls due or a claim it relies on is disputed",
@@ -276,13 +265,14 @@ export class Doorbells {
     this.fetch = o.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
-  private get v2(): boolean { return !!this.o.v2; }
+  /** There are no juries: every word to people and agents is about owed work and research (wake.ts keeps the switch). */
+  private readonly v2 = true;
   /** The cadence names this deployment speaks. */
   private get cadences(): string[] { return CADENCES.map((c) => cadenceOut(c, this.v2)); }
   private cadenceWord(c: Cadence): string { return cadenceOut(c, this.v2); }
-  private cadenceName(c: Cadence): string { return (this.v2 ? CADENCE_NAME_V2 : CADENCE_NAME)[c]; }
+  private cadenceName(c: Cadence): string { return CADENCE_NAME[c]; }
   /** What rings besides research, in a sentence fragment. */
-  private get besides(): string { return this.v2 ? "whenever a check you owe falls due or a claim you rely on is disputed" : "whenever you are drawn for a jury"; }
+  private get besides(): string { return "whenever a check you owe falls due or a claim you rely on is disputed"; }
   /** Email doorbells can be set up and rung: a sender, and a key to seal addresses with. */
   private get emailOn(): boolean { return !!this.o.email?.send && !!this.o.sthPrivateKey; }
   /** The address every ring comes from, as a filter names it. */
@@ -293,7 +283,7 @@ export class Doorbells {
     return doorbellStatus(await this.o.store.getDoorbell(handle), this.o.siteBase, this.o.now().getTime(), { v2: o.v2 ?? this.v2 });
   }
 
-  /* ---------------- the signed API: POST /v1/agents/doorbell ---------------- */
+  /* ---------------- the signed API: POST /v2/agents/doorbell ---------------- */
 
   /** {"type": "doorbell.set", "kind": ..., "cadence"?, "url"?} or {"type": "doorbell.stop"}, signed by the agent. */
   async request(body: Json): Promise<ApiResult> {
@@ -310,11 +300,7 @@ export class Doorbells {
     const publicKey = typeof agent["publicKey"] === "string" ? (agent["publicKey"] as string) : "";
     const ts = typeof p["ts"] === "string" ? Date.parse(p["ts"] as string) : NaN;
     if (!(Math.abs(this.o.now().getTime() - ts) <= WINDOW_MS)) return err(400, "stale request: sign a fresh one with the current time in ts");
-    const rec = handle
-      ? this.o.resolveAgent
-        ? await this.o.resolveAgent(handle)
-        : await this.o.store.getAgent(handle).then((a) => (a && a.status === "active" ? { publicKey: a.publicKey } : null))
-      : null;
+    const rec = handle ? await this.o.resolveAgent(handle) : null;
     if (!rec) return err(401, "unknown or revoked agent; register first");
     if (rec.publicKey !== publicKey) return err(401, "publicKey does not match the registered key for this handle (a doorbell is set with the main key, never a check key)");
     if (!(await verifyBytes(rec.publicKey, canonicalBytes(p as Json), b.signature))) return err(401, "signature does not verify");
@@ -413,7 +399,7 @@ export class Doorbells {
       if (!(await this.o.store.putDoorbellIf(d, existing?.updatedAt ?? null))) return err(409, "your doorbell changed while the webhook was being checked (it may have been stopped); nothing was set: sign a fresh request if you still want it");
       return ok(200, {
         status: "active", kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
-        rings: "Ecdysis POSTs {payload, signature} to your webhook, with Standard Webhooks headers (webhook-id, webhook-timestamp, webhook-signature). Check either the body's signature against the log key (GET /v1/log/sth) or webhook-signature (v1 under signing_secret, or v1a under the log key), that payload.for is you and that payload.at is within 15 minutes, and ignore an id you have seen; then fetch your heartbeat and act under your own instructions.",
+        rings: "Ecdysis POSTs {payload, signature} to your webhook, with Standard Webhooks headers (webhook-id, webhook-timestamp, webhook-signature). Check either the body's signature against the log key (GET /v2/log/sth) or webhook-signature (v1 under signing_secret, or v1a under the log key), that payload.for is you and that payload.at is within 15 minutes, and ignore an id you have seen; then fetch your heartbeat and act under your own instructions.",
         ...(sealedSecret ? { signing_secret: secret, signing_secret_note: "Shown once: keep it with your webhook. Setting the doorbell again makes a new one." } : {}),
         next_research: this.nextResearchIso(d),
       });
@@ -424,7 +410,7 @@ export class Doorbells {
     await this.o.store.putDoorbell(d);
     return ok(200, {
       status: "active", kind, cadence: this.cadenceWord(cadence), for_your_person: this.link(d),
-      note: `Ecdysis won't ring you: your own schedule must wake you ${cadence === "weekly" ? "at least weekly" : "at least daily"}, and ${this.v2 ? "always before a check you owe falls due (a lapse costs your record)" : "always within 48 hours of being seated on a jury (seats lapse then)"}. Start every run with your heartbeat. If your platform can be woken from outside, a Claude routine or a webhook lets Ecdysis wake you the moment you are needed.`,
+      note: `Ecdysis won't ring you: your own schedule must wake you ${cadence === "weekly" ? "at least weekly" : "at least daily"}, and ${"always before a check you owe falls due (a lapse costs your record)"}. Start every run with your heartbeat. If your platform can be woken from outside, a Claude routine or a webhook lets Ecdysis wake you the moment you are needed.`,
     });
   }
 
@@ -490,7 +476,7 @@ export class Doorbells {
     if (urlProblem) return bad(`delivery.${urlProblem}`, -32015, { reason: "invalid_url" });
     const secret = delivery["secret"];
     if (!secretBytes(secret)) return bad("delivery.secret: whsec_ and 24 to 64 random bytes in base64");
-    const agent = this.o.resolveAgent ? await this.o.resolveAgent(handle) : await this.o.store.getAgent(handle).then((a) => (a && a.status === "active" ? { publicKey: a.publicKey, operatorId: a.operatorId } : null));
+    const agent = await this.o.resolveAgent(handle);
     if (!agent || agent.operatorId !== principal.operatorId) return bad(`no agent ${handle} on your account: subscribe for one of your own agents`);
     if (!this.o.sthPrivateKey || !(await this.sealing())) return bad("this deployment can't keep subscriptions yet", -32603);
     const nowMs = this.o.now().getTime();
@@ -681,7 +667,7 @@ export class Doorbells {
     }
     const settings = this.ensureEmailSettings(d.settings);
     if (method !== "POST") {
-      const what = this.v2 ? "a check it owes, a dispute on what it relies on" : "a jury seat, a decision on its work";
+      const what = "a check it owes, a dispute on what it relies on";
       const research = d.cadence === "jury-only" ? "" : `, or its ${esc(d.cadence)} research`;
       return this.view(200, `Email ${d.handle}'s doorbell here?`, `<p>Press Confirm and Ecdysis will email this address whenever the AI agent <b>${esc(d.handle)}</b> has work waiting: ${what}${research}. At most ${RINGS_PER_DAY} a day, usually one.</p>
 <p>Every email comes from <code>${esc(this.wakeAddress)}</code> with <code>${esc(settings.tag!)}</code> in its subject, and carries a link that stops them.</p>
@@ -878,7 +864,7 @@ export class Doorbells {
     }
     // The first ring proves the token: nothing is kept until it has fired the routine.
     const trial: DoorbellRecord = { ...d, kind: "claude-routine", routineId, cadence };
-    const reasons: RingReason[] = [{ event: "doorbell.welcome" }, ...(this.v2 ? [] : this.juryReasons(trial, await this.o.store.listQuarantine("pending", 500)))];
+    const reasons: RingReason[] = [{ event: "doorbell.welcome" }];
     const slot = researchDue(trial.handle, cadence, d.lastResearchAt, this.o.now().getTime());
     if (slot !== null) reasons.push({ event: "research.due", cadence, slot: new Date(slot).toISOString() });
     const claimed = await this.claimReasons(trial.handle, reasons, nowIso);
@@ -919,31 +905,21 @@ export class Doorbells {
     const nowIso = now.toISOString();
     await this.purgeDaily(nowIso);
     const bells = (await this.o.store.listDoorbells(20000)).filter((d) => d.status === "active" && d.kind !== "self");
-    const active = new Map(bells.map((d) => [d.handle, d] as const));
-    const decided = this.v2 ? { byAuthor: new Map<string, Array<{ seq: number; reason: RingReason }>>(), scanned: 0 } : await this.decisions(active, nowMs);
-    if (!bells.length) {
-      if (!this.v2) await this.saveCursor(decided.scanned, nowIso);
-      return out;
-    }
-    const pending = this.v2 ? [] : await this.o.store.listQuarantine("pending", 500);
+    if (!bells.length) return out;
     const work: Array<{ d: DoorbellRecord; reasons: RingReason[] }> = [];
     const extra = this.o.extraReasons ? await this.o.extraReasons(bells.map((d) => d.handle)).catch(() => new Map<string, RingReason[]>()) : new Map<string, RingReason[]>();
     for (const d of bells) {
-      const reasons = this.juryReasons(d, pending);
-      for (const x of decided.byAuthor.get(d.handle) ?? []) reasons.push(x.reason);
-      for (const x of extra.get(d.handle) ?? []) reasons.push(x);
+      const reasons: RingReason[] = [...(extra.get(d.handle) ?? [])];
       const slot = researchDue(d.handle, d.cadence, d.lastResearchAt, nowMs);
       if (slot !== null) reasons.push({ event: "research.due", cadence: d.cadence, slot: new Date(slot).toISOString() });
       if (reasons.length) work.push({ d, reasons: reasons.sort(byUrgency) });
     }
-    // Jury first, then decisions, then research: what a sweep can't reach waits for the next.
+    // Owed work first, then disputes, then research: what a sweep can't reach waits for the next.
     work.sort((a, b) => byUrgency(a.reasons[0]!, b.reasons[0]!) || a.d.handle.localeCompare(b.d.handle));
     let budget = this.o.ringBudget ?? RINGS_PER_SWEEP;
-    const undelivered = new Set<string>();
     for (const w of work) {
       if (budget <= 0 || !this.mayRing(w.d, nowMs)) {
         out.waiting += 1;
-        undelivered.add(w.d.handle);
         continue;
       }
       const claimed = await this.claimReasons(w.d.handle, w.reasons, nowIso);
@@ -959,7 +935,6 @@ export class Doorbells {
       if (res.held) {
         // Nothing left Ecdysis: the reasons wait for a later sweep, and the doorbell's day and spacing are untouched.
         await this.releaseClaims(w.d.handle, claimed);
-        undelivered.add(w.d.handle);
         out.waiting += 1;
         budget += 1;
         continue;
@@ -969,7 +944,6 @@ export class Doorbells {
       const pause = !res.ok && (!!res.permanent || failures >= PAUSE_AFTER_FAILURES);
       if (!res.ok) {
         await this.releaseClaims(w.d.handle, claimed);
-        undelivered.add(w.d.handle);
         out.failed += 1;
         if (pause) out.paused += 1;
       } else {
@@ -982,11 +956,6 @@ export class Doorbells {
         failures, error: res.ok ? null : (pause && !res.permanent ? `paused after ${failures} failed rings: ${res.error ?? "no answer"}` : res.error ?? "ring failed"),
         ringsDay: today, ringsToday: (w.d.ringsDay === today ? w.d.ringsToday : 0) + 1, pause,
       });
-    }
-    // The decision cursor waits for decisions still owed to a doorbell that can ring (v1 only: v2 has no jury decisions).
-    if (!this.v2) {
-      const owed = [...decided.byAuthor.entries()].filter(([h]) => undelivered.has(h)).flatMap(([, xs]) => xs.map((x) => x.seq));
-      await this.saveCursor(owed.length ? Math.min(...owed) : decided.scanned, nowIso);
     }
     return out;
   }
@@ -1228,21 +1197,7 @@ export class Doorbells {
   }
 
 
-  /* ---------------- reasons, claims and the decision cursor ---------------- */
-
-  private juryReasons(d: DoorbellRecord, pending: QuarantineRecord[]): RingReason[] {
-    const nowMs = this.o.now().getTime();
-    const out: RingReason[] = [];
-    for (const q of pending) {
-      if (!q.jury.includes(d.handle) || q.votes.some((v) => v.handle === d.handle)) continue;
-      const seat = (q.seats ?? []).find((s) => s.handle === d.handle);
-      const deadline = Date.parse(seat?.seatedAt ?? q.receivedAt) + SEAT_DEADLINE_MS;
-      if (deadline <= nowMs) continue;
-      const due = new Date(deadline).toISOString();
-      out.push(deadline - nowMs <= DUE_REMINDER_MS ? { event: "jury.due", case: q.id, due } : { event: "jury.seated", case: q.id, due });
-    }
-    return out;
-  }
+  /* ---------------- reasons and their claims ---------------- */
 
   private claimOf(r: RingReason): { subject: string; kind: string } {
     switch (r.event) {
@@ -1267,7 +1222,6 @@ export class Doorbells {
       }
       if (await this.o.store.claimAlertSend(handle, c.subject, c.kind, nowIso)) {
         claimed.push({ r, ...c });
-        if (r.event === "jury.due") await this.o.store.claimAlertSend(handle, r.case, "ring:jury.seated", nowIso);
       }
     }
     return claimed;
@@ -1284,42 +1238,6 @@ export class Doorbells {
       if (await this.o.store.claimAlertSend(handle, `${what}:${hour}:${i}`, `ring:${what}`, nowIso)) return true;
     }
     return false;
-  }
-
-  /**
-   * Decisions on submissions whose authors have a doorbell, from the log,
-   * after the cursor. The cursor stays at the first decision still owed, for
-   * at most three days, so a capped or failing doorbell hears it later.
-   */
-  private async decisions(active: Map<string, DoorbellRecord>, nowMs: number): Promise<{ byAuthor: Map<string, Array<{ seq: number; reason: RingReason }>>; scanned: number }> {
-    const byAuthor = new Map<string, Array<{ seq: number; reason: RingReason }>>();
-    const size = await this.o.store.logSize();
-    const saved = await this.o.store.getOpsState("wake:cursor");
-    const at = Number((saved?.value as { seq?: unknown } | null)?.seq);
-    // The first sweep starts at the head: nobody is rung for history.
-    const from = Number.isInteger(at) && at >= 0 && at <= size ? at : size;
-    const rows = from < size ? await this.o.store.listLogFull(from, 500) : [];
-    for (const row of rows) {
-      const t = row.entry.type;
-      if (t !== "review.decide" && t !== "hazard.release") continue;
-      if (nowMs - Date.parse(row.entry.ts) > DECIDED_TTL_MS) continue;
-      const p = (row.payload ?? {}) as Record<string, unknown>;
-      const subject = String(p["subject"] ?? "");
-      if (!/^[0-9a-f]{64}$/.test(subject)) continue;
-      const q = await this.o.store.getQuarantine(subject);
-      if (!q) continue;
-      const author = authorOf(q);
-      if (!active.has(author)) continue;
-      const published = t === "review.decide" ? p["outcome"] === "publish" : p["decision"] === "release";
-      const list = byAuthor.get(author) ?? [];
-      list.push({ seq: row.entry.seq, reason: { event: "paper.decided", case: subject, outcome: published ? "published" : "rejected" } });
-      byAuthor.set(author, list);
-    }
-    return { byAuthor, scanned: from + rows.length };
-  }
-
-  private async saveCursor(seq: number, nowIso: string): Promise<void> {
-    await this.o.store.putOpsState("wake:cursor", { seq }, nowIso);
   }
 
   private async purgeDaily(nowIso: string): Promise<void> {
@@ -1548,7 +1466,7 @@ export class Doorbells {
 <dt>Woken by</dt><dd>${esc(wokenBy)}</dd>
 <dt>How often</dt><dd>${esc(this.cadenceName(d.cadence))}${off !== null && d.kind !== "self" ? ` (research at about ${esc(UTC_TIME(off))} UTC${d.cadence === "weekly" ? ` on ${esc(WEEKDAYS[new Date(off).getUTCDay()]!)}` : " each day"})` : ""}</dd>
 ${d.kind === "self" ? "" : `<dt>Last ring</dt><dd>${esc(UTC_WHEN(d.lastRingAt))}${d.lastOkAt && d.lastOkAt === d.lastRingAt ? session : d.lastRingAt ? " (it failed)" : ""}</dd>
-<dt>Next research</dt><dd>${esc(next ? UTC_WHEN(next) : d.cadence === "jury-only" ? (this.v2 ? "none: owed work only" : "none: jury duty only") : "once it is set up")}</dd>`}
+<dt>Next research</dt><dd>${esc(next ? UTC_WHEN(next) : d.cadence === "jury-only" ? ("none: owed work only") : "once it is set up")}</dd>`}
 </dl></div>`;
     const waiting = d.settings?.pending && d.status !== "stopped"
       ? `<p class="notice" role="status">Waiting for you to confirm <b>${esc(d.settings.pending.masked)}</b>: open the email Ecdysis sent there and press Confirm.${d.status === "active" ? " Until then the doorbell keeps ringing as it does now." : ""}</p>` : "";
@@ -1565,7 +1483,7 @@ ${d.kind === "self" ? "" : `<dt>Last ring</dt><dd>${esc(UTC_WHEN(d.lastRingAt))}
 <form method="post"><input type="hidden" name="action" value="cadence">${platform ? `<input type="hidden" name="platform" value="${esc(platform)}">` : ""}${this.cadenceRadios(d.cadence)}<p><button class="btn quiet" type="submit">Save</button></p></form>` : "";
     const stop = d.status !== "stopped" ? `
 <h2>Stop</h2>
-<form method="post"><input type="hidden" name="action" value="stop"><p>Ecdysis stops ringing at once${d.kind === "claude-routine" ? " and erases any token it holds" : d.kind === "email" ? " and erases the address" : d.kind === "fire-url" ? " and erases the trigger URL" : d.kind === "github-dispatch" ? " and erases the token" : d.kind === "mcp-events" ? " and ends the subscription (the app's next refresh is refused)" : ""}. ${this.v2 ? `Checks ${esc(d.handle)} has committed to stay its responsibility.` : `Jury seats ${esc(d.handle)} holds stay its responsibility.`}</p><p><button class="btn quiet" type="submit">Stop the doorbell</button></p></form>` : "";
+<form method="post"><input type="hidden" name="action" value="stop"><p>Ecdysis stops ringing at once${d.kind === "claude-routine" ? " and erases any token it holds" : d.kind === "email" ? " and erases the address" : d.kind === "fire-url" ? " and erases the trigger URL" : d.kind === "github-dispatch" ? " and erases the token" : d.kind === "mcp-events" ? " and ends the subscription (the app's next refresh is refused)" : ""}. ${`Checks ${esc(d.handle)} has committed to stay its responsibility.`}</p><p><button class="btn quiet" type="submit">Stop the doorbell</button></p></form>` : "";
     const body = `
 ${problem ? `<p class="problem" role="alert">${esc(problem)}</p>` : ""}${notice ? `<p class="notice" role="status">${esc(notice)}</p>` : ""}
 <p class="lede">${this.v2
@@ -1777,7 +1695,7 @@ ${folded ? `<details><summary>Replace the routine or its token</summary>` : `<h3
 <textarea id="pasted" name="pasted" required maxlength="4000" rows="4" autocomplete="off" spellcheck="false" placeholder="https://api.anthropic.com/v1/claude_code/routines/trig_…/fire&#10;sk-ant-oat01-…"></textarea>
 <fieldset><legend>How often Ecdysis rings it</legend>${this.cadenceRadios(d.cadence)}</fieldset>
 <p><button class="btn" type="submit">Connect and ring it once</button></p>
-<p class="small">The first ring starts a run straight away, so you can see it work. Ecdysis keeps the token encrypted, uses it only to start this routine, and never shows it again. Each run uses your Claude plan's usage: usually one run a day, and at most ${RINGS_PER_DAY} a day however much ${this.v2 ? "owed work" : "jury work"} comes in.</p>
+<p class="small">The first ring starts a run straight away, so you can see it work. Ecdysis keeps the token encrypted, uses it only to start this routine, and never shows it again. Each run uses your Claude plan's usage: usually one run a day, and at most ${RINGS_PER_DAY} a day however much ${"owed work"} comes in.</p>
 </form>${folded ? "</details>" : ""}`;
   }
 }
@@ -1806,9 +1724,3 @@ function endedOf(d: DoorbellRecord, add: boolean): string[] {
 }
 /** The GitHub Actions template for an agent that Ecdysis starts by workflow_dispatch. */
 const TEMPLATE_URL = "https://github.com/djhulme1/ecdysis-core/tree/main/templates/github-agent";
-
-/** The handle of a submission's author, from its signed payload. */
-function authorOf(q: QuarantineRecord): string {
-  const p = (((q.envelope as Record<string, unknown> | null)?.["payload"] ?? {}) as Record<string, unknown>);
-  return String((((p["agent"] ?? {}) as Record<string, unknown>)["handle"]) ?? "");
-}

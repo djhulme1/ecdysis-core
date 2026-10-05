@@ -16,7 +16,6 @@ import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson } from "../src/core/crypto.js";
 import { b64urlEncode, type Json } from "../src/core/canonical.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
-import { EcdysisService } from "../src/api/service.js";
 import { MemoryRateLimiter, route } from "../src/api/router.js";
 import { Accounts, MemoryAccountStore } from "../src/api/v2/accounts.js";
 import { MeHandler } from "../src/api/v2/me.js";
@@ -41,7 +40,6 @@ async function world() {
   const accountStore = new MemoryAccountStore();
   const accounts = new Accounts({ store: accountStore, key: "ab".repeat(32), send: async (m) => { sent.push(m.text); return { ok: true, id: "m" }; }, from: "a@notify.ecdysis.me", replyTo: "r@ecdysis.me", siteBase: "https://ecdysis.me", stewardEmailHashes: [], now });
   const v2 = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()], pairing: (c, ip) => accounts.consumePairing(c, ip) });
-  const v1 = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null, now });
   const oauthStore = new MemoryOAuthStore();
   const oauth = new OAuth({ accounts, store: oauthStore, v2, issuer: "https://api.ecdysis.me", resource: "https://api.ecdysis.me/mcp", siteBase: "https://ecdysis.me", now });
   const http = new OAuthHandler({ oauth, accounts, secure: false });
@@ -52,7 +50,7 @@ async function world() {
     const headers = new Headers(init.headers);
     if (init.cookies) headers.set("cookie", Object.entries(init.cookies).map(([k, v]) => `${k}=${v}`).join("; "));
     if (init.origin !== null && init.method === "POST") headers.set("origin", init.origin ?? "https://api.ecdysis.me");
-    return route(new Request(`https://api.ecdysis.me${path}`, { ...init, headers }), v1, limiter, opts);
+    return route(new Request(`https://api.ecdysis.me${path}`, { ...init, headers }), limiter, opts);
   };
   const form = (o: Record<string, string>) => ({ body: new URLSearchParams(o).toString(), headers: { "content-type": "application/x-www-form-urlencoded" } });
   const cookieOf = (res: Response, name: string) => { const c = res.headers.getSetCookie().find((x) => x.startsWith(`${name}=`)); return c ? decodeURIComponent(c.split(";")[0]!.slice(name.length + 1)) : null; };

@@ -16,7 +16,7 @@
 import type { V2Service } from "./service.js";
 import type { Preferences } from "./accounts.js";
 import { FIELDS } from "../../core/schema.js";
-import { FIELD_LABELS } from "../site.js";
+import { FIELD_LABELS } from "../../core/schema.js";
 import { isHeld, type CheckState, type PaperState } from "../../core/v2/flow.js";
 import { testsWords } from "../../core/v2/kinds.js";
 import { inDefaultLists } from "../../core/v2/visibility.js";

@@ -1,39 +1,26 @@
 /**
- * docs/skill.md mirrors the agent protocol on GitHub, where blocked
- * sandboxes can still read it. A stale mirror would teach agents the wrong
- * protocol, so this fails whenever it drifts. Fix: `npm run gen:docs`.
+ * The repository mirrors what the site serves, for agents whose sandbox can
+ * reach GitHub but not ecdysis.me. A stale mirror would teach agents the
+ * wrong protocol, so these fail whenever one drifts. Fix: `npm run gen:docs`.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mirrorSkillMd } from "../src/api/site.js";
+import { mirrorSkillMd } from "../src/api/v2/skill.js";
+import { LAB_GUIDE_MD, LAB_LEVEL1_PY } from "../src/web/v2/lab-guide.js";
+import { mirrorOpenApi } from "../src/api/openapi.js";
 
-describe("protocol mirror", () => {
-  it("docs/skill.md matches the served protocol exactly", () => {
-    const onDisk = readFileSync(new URL("../docs/skill.md", import.meta.url), "utf8");
-    assert.equal(onDisk, mirrorSkillMd(), "docs/skill.md is stale: run `npm run gen:docs` and commit it");
+const onDisk = (f: string) => readFileSync(new URL(`../docs/${f}`, import.meta.url), "utf8");
+
+describe("the repository's mirrors of what the site serves", () => {
+  it("docs/skill.md is the protocol served at /skill.md, exactly", () => {
+    assert.equal(onDisk("skill.md"), mirrorSkillMd(), "docs/skill.md is stale: run `npm run gen:docs` and commit it");
   });
-});
-
-describe("v2 protocol mirror", () => {
-  it("docs/v2/skill.md matches the served v2 protocol exactly", async () => {
-    const { mirrorSkillMdV2 } = await import("../src/api/v2/skill.js");
-    const onDisk = readFileSync(new URL("../docs/v2/skill.md", import.meta.url), "utf8");
-    assert.equal(onDisk, mirrorSkillMdV2(), "docs/v2/skill.md is stale: run `npm run gen:docs` and commit it");
+  it("docs/lab.md and docs/level1.py are /lab.md and /lab/level1.py, exactly", () => {
+    assert.equal(onDisk("lab.md"), LAB_GUIDE_MD, "docs/lab.md is stale: run `npm run gen:docs` and commit it");
+    assert.equal(onDisk("level1.py"), LAB_LEVEL1_PY, "docs/level1.py is stale: run `npm run gen:docs` and commit it");
   });
-});
-
-describe("the lab guide's mirror", () => {
-  it("docs/v2/idle-compute.md and docs/v2/level1.py match what the site serves at /lab.md and /lab/level1.py", async () => {
-    const { LAB_GUIDE_MD, LAB_LEVEL1_PY } = await import("../src/web/v2/lab-guide.js");
-    assert.equal(readFileSync(new URL("../docs/v2/idle-compute.md", import.meta.url), "utf8"), LAB_GUIDE_MD, "docs/v2/idle-compute.md is stale: run `npm run gen:docs` and commit it");
-    assert.equal(readFileSync(new URL("../docs/v2/level1.py", import.meta.url), "utf8"), LAB_LEVEL1_PY, "docs/v2/level1.py is stale: run `npm run gen:docs` and commit it");
-  });
-});
-
-describe("the OpenAPI mirror", () => {
-  it("docs/openapi.json matches the served document exactly", async () => {
-    const { mirrorOpenApi } = await import("../src/api/openapi.js");
-    assert.equal(readFileSync(new URL("../docs/openapi.json", import.meta.url), "utf8"), mirrorOpenApi(), "docs/openapi.json is stale: run `npm run gen:docs` and commit it");
+  it("docs/openapi.json is /openapi.json, exactly", () => {
+    assert.equal(onDisk("openapi.json"), mirrorOpenApi(), "docs/openapi.json is stale: run `npm run gen:docs` and commit it");
   });
 });

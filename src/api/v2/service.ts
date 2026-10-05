@@ -47,7 +47,7 @@ import type { CandidateStore } from "./stakes-scout.js";
 import { ATTEMPTS_VERSION, BLOCKER_CLEARED_BY, BLOCKER_MEANING, BLOCKER_SIDE, pressure, supported as attemptSupported, validateAttemptClearV2, validateAttemptV2, type AttemptClearV2Payload, type AttemptState, type AttemptV2Payload, type ClaimBlockers } from "../../core/v2/attempts.js";
 import { buildMap, UNPLACED_FIELD, type MapClaim, type MapView } from "../../core/v2/map.js";
 import { auditList, buildLeaderboard, contributionsOf, leaderboardInputOf, LEADERBOARD_VERSION, type AuditItem, type Leaderboard, type LeaderboardInput } from "../../core/v2/leaderboard.js";
-import { FIELD_LABELS } from "../site.js";
+import { FIELD_LABELS } from "../../core/schema.js";
 import { ARGUMENT_PARAMS, ARGUMENTS_VERSION, CLAIM_KINDS, groundsProblem, validateArgumentAnswerV2, validateArgumentCheckV2, validateArgumentV2, type ArgumentAnswerV2Payload, type ArgumentCheckV2Payload, type ArgumentState, type ArgumentV2Payload, type ClaimKind } from "../../core/v2/arguments.js";
 import {
   bundleHash,
@@ -70,8 +70,7 @@ import type { computeV2 } from "../../core/v2/scoring.js";
 import { resolveV2, scoreRecord } from "../../core/v2/resolve.js";
 import { paperPeriodProblems, paperScopeProblems, validateEscalateV2, validatePaperV2, validateReviewV2, type EscalateV2Payload, type PaperV2Payload, type ReviewV2Payload } from "../../core/v2/paper.js";
 import { runScreening, type Screener, type Screenable } from "../../core/hazard.js";
-import type { PaperPayload } from "../../core/schema.js";
-import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
+import { CONSTITUTION_VERSION, constitutionCanonical, constitutionHash } from "../../core/constitution.js";
 
 export const RESULT_DEADLINE_MS = 7 * 24 * 3600 * 1000;
 /** arguments/0.1: the reasoning a conceptual claim is assumed to take to argue about, for ranking it beside compute-costed claims. */
@@ -1262,13 +1261,11 @@ export class V2Service {
     // Screening, fail-closed, no probation (tiers do that job in v2).
     // The words a claim's scope gives go on the log with it, so they are screened with the paper.
     const scopeWords = paper.claims.flatMap((c) => [c.scope?.basis, ...dataWordsOf(c.data)]).filter((b): b is string => typeof b === "string" && b.trim() !== "");
-    const screenable: PaperPayload = {
-      protocol: "ecdysis/0.1", type: "paper", title: paper.title, abstract: scopeWords.length ? [paper.abstract, ...scopeWords].join("\n\n") : paper.abstract, field: paper.field,
-      claims: paper.claims.map((c) => ({ text: c.text, confidence: c.confidence })),
-      builds_on: paper.builds_on.map((b) => ({ id: b.id, rel: b.rel, ...(b.basis ? { basis: b.basis } : {}), ...(b.claims ? { claims: b.claims } : {}), ...(b.note ? { note: b.note } : {}) })),
-      ...(paper.artefacts ? { artefacts: paper.artefacts } : {}), agent: paper.agent, ts: paper.ts,
+    const screenable: Screenable = {
+      texts: [paper.title, paper.abstract, ...scopeWords, ...paper.claims.map((c) => c.text), ...paper.builds_on.map((b) => b.note ?? "")],
+      links: paper.artefacts ?? [],
     };
-    const decision = await runScreening(screenable as Screenable, { agentHandle: paper.agent.handle, operatorId, acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
+    const decision = await runScreening(screenable, { agentHandle: paper.agent.handle, operatorId, acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
     if (decision.verdict === "block") return err(451, "refused by screening", { findings: decision.findings.map((f) => `${f.category}: ${f.note}`) });
     // A screener that could not answer, with nothing else found, is an outage, not a finding. Screening still fails closed (nothing
     // is published unscreened), but nothing is held either: reserved power R1 is for hazards, not for spending the owner's key on
@@ -1347,6 +1344,14 @@ export class V2Service {
    * the module's), only once, and only before any agent exists; the entry is
    * the first thing on the v2 record. Nothing here can make the signature.
    */
+  /** The constitution's canonical text and its hash: what registration acknowledges. */
+  async constitutionText(): Promise<ApiResult> {
+    return ok(200, {
+      canonical: constitutionCanonical(), hash: await constitutionHash(),
+      acknowledge_by: "include constitution: {version, hash} in your registration. Registration is plain JSON, not signed: including the hash in force is your assent, and the log records it. Every later write is signed with your key.",
+    });
+  }
+
   async adoptConstitution(body: Json): Promise<ApiResult> {
     if (!this.o.operatorPublicKey) return err(501, "no operator key configured; the constitution cannot be adopted (fail closed)");
     const b = (body ?? {}) as Record<string, unknown>;
@@ -2154,11 +2159,8 @@ export class V2Service {
    * sends the work as a paper. Returns the refusal, or null to proceed.
    */
   private async screenText(c: { title: string; body: string; handle: string; operatorId: string; publicKey: string | null; ts: string }): Promise<ApiResult | null> {
-    const screenable: PaperPayload = {
-      protocol: "ecdysis/0.1", type: "paper", title: c.title, abstract: c.body, field: "other", claims: [], builds_on: [],
-      agent: { handle: c.handle || "person", publicKey: c.publicKey ?? "" }, ts: c.ts,
-    };
-    const decision = await runScreening(screenable as Screenable, { agentHandle: c.handle || "person", operatorId: c.operatorId, acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
+    const screenable: Screenable = { texts: [c.title, c.body] };
+    const decision = await runScreening(screenable, { agentHandle: c.handle || "person", operatorId: c.operatorId, acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
     if (decision.verdict === "allow") return null;
     if (screenerOutage(decision)) return err(503, "screening could not answer; nothing was kept, so send the same text again in a few minutes", { retry: true });
     const why = decision.verdict === "block" ? "refused by screening"

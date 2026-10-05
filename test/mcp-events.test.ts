@@ -20,7 +20,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Doorbells } from "../src/api/doorbells.js";
 import { MemoryStore } from "../src/store/memory-store.js";
-import { EcdysisService } from "../src/api/service.js";
 import { handleMcp, type McpContext } from "../src/api/mcp.js";
 import { MemoryRateLimiter, route } from "../src/api/router.js";
 import { generateKeyPair, signJson, verifyJson } from "../src/core/crypto.js";

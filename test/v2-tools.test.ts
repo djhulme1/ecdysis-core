@@ -7,7 +7,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
-import { EcdysisService } from "../src/api/service.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { generateKeyPair, signJson } from "../src/core/crypto.js";
 import { handleMcp } from "../src/api/mcp.js";
@@ -25,7 +24,6 @@ describe("v2 connector tools", () => {
     const logKey = await generateKeyPair();
     const v2 = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
     const v2svc = new V2Service({ log, store: v2, logPrivateKey: logKey.privateKey, screeners: [structuralScreener()] });
-    const v1svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
     const ctx = { svc: v1svc, host: "api.ecdysis.me", extraTools: v2Tools(v2svc) };
     const list = await handleMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" } as unknown as Json, ctx);
     const tools = ((list.body as { result: { tools: Array<{ name: string; title?: string; annotations?: Record<string, unknown> }> } }).result).tools;
@@ -97,14 +95,13 @@ describe("v2 over HTTP", () => {
     const logKey = await generateKeyPair();
     const v2 = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
     const v2svc = new V2Service({ log, store: v2, logPrivateKey: logKey.privateKey, screeners: [structuralScreener()] });
-    const v1svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
     const limiter = new MemoryRateLimiter(1000);
     const post = async (path: string, body: Json, on = true) => {
-      const r = await route(new Request(`https://api.ecdysis.me${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), v1svc, limiter, on ? { v2: v2svc } : {});
+      const r = await route(new Request(`https://api.ecdysis.me${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), limiter, on ? { v2: v2svc } : {});
       return { status: r.status, body: (await r.json()) as Record<string, Json> };
     };
     const get = async (path: string, on = true) => {
-      const r = await route(new Request(`https://api.ecdysis.me${path}`), v1svc, limiter, on ? { v2: v2svc } : {});
+      const r = await route(new Request(`https://api.ecdysis.me${path}`), limiter, on ? { v2: v2svc } : {});
       return { status: r.status, body: (await r.json()) as Record<string, Json> };
     };
     assert.equal((await get("/v2/frontier", false)).status, 404, "off by default");
@@ -123,7 +120,7 @@ describe("v2 over HTTP", () => {
     assert.equal(rec.body["receipts"], 1);
     assert.deepEqual(rec.body["settings"], { "v2.registration": "open", "v2.publishing": "open", "v2.external": "open", "v2.checks": "open", "v2.reviews": "open", "v2.arguments": "open", "v2.amendments": "open", "v2.flags": "open" }, "the steward's switches are public; attempts have none (attempts/0.3)");
     // The launcher types v2's prompts when v2 is on: receipts and the frontier, never juries; v1-only starters are gone.
-    const launch = async (what: string, on = true) => route(new Request(`https://ecdysis.me/o/chatgpt/${what}`), v1svc, limiter, on ? { v2: v2svc } : {});
+    const launch = async (what: string, on = true) => route(new Request(`https://ecdysis.me/o/chatgpt/${what}`), limiter, on ? { v2: v2svc } : {});
     let l = await launch("famous");
     assert.equal(l.status, 302);
     const typed = decodeURIComponent(l.headers.get("location")!);
@@ -162,10 +159,9 @@ describe("verify, don't trust (v2)", () => {
     const logKey = await generateKeyPair();
     const v2 = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
     const v2svc = new V2Service({ log, store: v2, logPrivateKey: logKey.privateKey, screeners: [structuralScreener()] });
-    const v1svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: logKey.privateKey });
     const limiter = new MemoryRateLimiter(1000);
     const getJson = async <T>(path: string): Promise<T> => {
-      const r = await route(new Request(`https://api.ecdysis.me${path}`), v1svc, limiter, { v2: v2svc });
+      const r = await route(new Request(`https://api.ecdysis.me${path}`), limiter, { v2: v2svc });
       if (!r.ok) throw new Error(`${path}: ${r.status}`);
       return (await r.json()) as T;
     };
@@ -204,14 +200,13 @@ describe("the site after the switchover", () => {
     const logKey = await generateKeyPair();
     const v2 = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
     const v2svc = new V2Service({ log, store: v2, logPrivateKey: logKey.privateKey, screeners: [structuralScreener()] });
-    const v1svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
     const limiter = new MemoryRateLimiter(1000);
     const archive = "https://v1.ecdysis.me";
     const pages = new PagesHandler(v2svc, { host: "api.ecdysis.me", archive });
     const on = { v2: v2svc, pages, archive };
 
     // The agents' index: v2's protocol and endpoints, and where the first record went. With v2 off it is v1's.
-    const index = async (opts: Record<string, unknown>) => { const r = await route(new Request("https://api.ecdysis.me/"), v1svc, limiter, opts); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
+    const index = async (opts: Record<string, unknown>) => { const r = await route(new Request("https://api.ecdysis.me/"), limiter, opts); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
     const v2index = await index(on);
     assert.equal(v2index.status, 200);
     assert.equal(v2index.body["protocol"], "ecdysis/0.2");
@@ -224,7 +219,7 @@ describe("the site after the switchover", () => {
     assert.equal((await index({ v2: v2svc })).body["v1"] && ((await index({ v2: v2svc })).body["v1"] as Record<string, Json>)["archive"], undefined, "no archive named when none is configured");
 
     // v1's pages under v2: permanent redirects, never v1's page rendered over v2's record.
-    const site = async (path: string) => route(new Request(`https://ecdysis.me${path}`, { headers: { accept: "text/html" } }), v1svc, limiter, on);
+    const site = async (path: string) => route(new Request(`https://ecdysis.me${path}`, { headers: { accept: "text/html" } }), limiter, on);
     for (const [from, to] of Object.entries(V1_PAGE_MOVES)) {
       const r = await site(from);
       assert.equal(r.status, 301, from);

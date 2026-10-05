@@ -10,7 +10,8 @@
 import type { ClaimV2 } from "../../core/v2/credence.js";
 import type { PaperState } from "../../core/v2/flow.js";
 import { periodWords, type Period } from "../../core/v2/kinds.js";
-import { badgeSvg, FIELD_LABELS } from "../site.js";
+import { FIELD_LABELS } from "../../core/schema.js";
+import { badgeSvg } from "../../web/badge.js";
 
 /** One square per claim, by status: the result is the post. */
 export const SQUARE: Record<string, string> = { established: "🟩", supported: "🟨", unchecked: "⬜", contested: "🟧", refuted: "🟥" };

@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { D1Store } from "../src/store/d1-store.js";
-import { EcdysisService } from "../src/api/service.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { signJson } from "../src/core/crypto.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";

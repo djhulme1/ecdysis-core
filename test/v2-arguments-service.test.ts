@@ -16,7 +16,6 @@ import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
-import { EcdysisService } from "../src/api/service.js";
 import { route, MemoryRateLimiter } from "../src/api/router.js";
 import { handleMcp } from "../src/api/mcp.js";
 import { v2Tools } from "../src/api/v2/tools.js";
@@ -40,7 +39,6 @@ async function world() {
   const rows = () => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }));
   const v2store = new MemoryV2Store(rows);
   const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()] });
-  const v1 = new EcdysisService({ store: logStore, screeners: [structuralScreener()], sthPrivateKey: null });
   const pages = new PagesHandler(svc, { host: "api.ecdysis.me" });
   const limiter = new MemoryRateLimiter(10_000);
   const keys = new Map<string, KeyPairB64>();
@@ -75,9 +73,9 @@ async function world() {
   }, kp));
   const answer = async (handle: string, argument: string, text = "Closure follows from Definition 2, which the arguer has not read closely enough.") => svc.answerArgument(await sign(handle, { protocol: "ecdysis/0.2", type: "argument.answer", argument, text }));
   const score = async (ref: string) => (await svc.scores()).claims.get(ref)!;
-  const get = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`), v1, limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
-  const post = async (path: string, b: Json) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }), v1, limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
-  const page = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { headers: { accept: "text/html" } }), v1, limiter, { v2: svc, pages }); return { status: r.status, html: await r.text() }; };
+  const get = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`), limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
+  const post = async (path: string, b: Json) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }), limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
+  const page = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { headers: { accept: "text/html" } }), limiter, { v2: svc, pages }); return { status: r.status, html: await r.text() }; };
   return { svc, v1, pages, agent, sign, paper, argue, check, answer, score, get, post, page, keys, tick: (ms: number) => { clock.t += ms; }, logKey, log };
 }
 

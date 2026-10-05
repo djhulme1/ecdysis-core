@@ -16,7 +16,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Doorbells, type DoorbellOptions } from "../src/api/doorbells.js";
 import { MemoryStore } from "../src/store/memory-store.js";
-import { EcdysisService } from "../src/api/service.js";
 import { generateKeyPair, signJson, verifyJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { structuralScreener } from "../src/core/hazard.js";

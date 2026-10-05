@@ -15,7 +15,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MemoryRateLimiter, route } from "../src/api/router.js";
-import { EcdysisService } from "../src/api/service.js";
 import { Doorbells } from "../src/api/doorbells.js";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { structuralScreener } from "../src/core/hazard.js";

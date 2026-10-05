@@ -22,7 +22,7 @@
  */
 
 import { b64urlDecode, b64urlEncode, bufferSource, toHex, type Json } from "../../core/canonical.js";
-import { EMAIL_RE, type SendEmail } from "../herald.js";
+import { EMAIL_RE, type SendEmail } from "../email.js";
 import { sha256Hex, sameString } from "../access.js";
 
 export const LINK_TTL_MS = 15 * 60 * 1000;

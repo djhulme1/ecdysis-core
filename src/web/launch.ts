@@ -98,7 +98,8 @@ export function mcpUrlFor(host: string): string {
 
 /** The apps each prompt may open in. Prompts written for a walled-in chat AI skip Claude Code, which is never walled in. */
 export function appsFor(id: string): PromptApp[] {
-  return id === "paste" || id === "handoff" ? ["claude", "chatgpt", "grok"] : ["claude", "chatgpt", "grok", "claude-code"];
+  void id;
+  return ["claude", "chatgpt", "grok", "claude-code"];
 }
 
 /** The "Open in" buttons under a prompt. */

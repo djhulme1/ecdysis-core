@@ -18,7 +18,6 @@ import { Accounts, MemoryAccountStore } from "../src/api/v2/accounts.js";
 import { StewardHandler } from "../src/api/v2/steward.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
 import { IssueRegistry, MemoryIssueStore } from "../src/api/v2/issues.js";
-import { EcdysisService } from "../src/api/service.js";
 import { route, MemoryRateLimiter } from "../src/api/router.js";
 import { v2Tools } from "../src/api/v2/tools.js";
 import { recomputeV2 } from "../src/api/v2/recompute.js";
@@ -93,8 +92,7 @@ async function world(o: { screeners?: Screener[] } = {}) {
   const amend = async (handle: string, claim: string, change: Record<string, Json>) => svc.amendClaim(await sign(handle, { type: "claim.amend", claim, ...change }));
   const flag = async (handle: string, subject: string, kind: string, detail = "The quoted sentence is not in the cited source: searched the full text and the abstract, no match.") =>
     issues.flag(await sign(handle, { type: "issue.flag", subject, kind, detail }));
-  const v1 = new EcdysisService({ store: logStore, screeners: [], sthPrivateKey: null });
-  const http = (path: string, init?: RequestInit) => route(new Request(`https://api.ecdysis.me${path}`, init), v1, new MemoryRateLimiter(10_000), { v2: svc, pages, steward, issues });
+  const http = (path: string, init?: RequestInit) => route(new Request(`https://api.ecdysis.me${path}`, init), new MemoryRateLimiter(10_000), { v2: svc, pages, steward, issues });
   return { svc, accounts, steward, pages, issues, agent, sign, paper, external, amend, flag, signIn, get, post, page, http, entries: rows, now, tick: (ms: number) => { clock.t += ms; }, log };
 }
 

@@ -7,7 +7,7 @@
 import { peoplePromptsV2 } from "../starters.js";
 import { launchRow } from "../launch.js";
 import { esc, shell, V2_AGENT_NAV, V2_PEOPLE_NAV } from "../design.js";
-import { FIELD_LABELS } from "../../api/site.js";
+import { FIELD_LABELS } from "../../core/schema.js";
 import { howItWorks, receiptFigure, traceFigure } from "./viz.js";
 import { contrastTable } from "./explain.js";
 import { ATTEMPTS_LOGGED } from "../../core/v2/attempts.js";

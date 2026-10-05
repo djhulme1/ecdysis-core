@@ -17,7 +17,6 @@ import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.j
 import { structuralScreener } from "../src/core/hazard.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
-import { EcdysisService } from "../src/api/service.js";
 import { route, MemoryRateLimiter } from "../src/api/router.js";
 import { handleMcp } from "../src/api/mcp.js";
 import { v2Tools } from "../src/api/v2/tools.js";
@@ -39,7 +38,6 @@ async function world() {
   const rows = () => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }));
   const v2store = new MemoryV2Store(rows);
   const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()] });
-  const v1 = new EcdysisService({ store: logStore, screeners: [structuralScreener()], sthPrivateKey: null });
   const pages = new PagesHandler(svc, { host: "api.ecdysis.me" });
   const limiter = new MemoryRateLimiter(10_000);
   const keys = new Map<string, KeyPairB64>();
@@ -71,7 +69,7 @@ async function world() {
     return id;
   };
   const page = async (path: string) => { const r = await pages.handle("GET", path); return r ? { status: r.status, html: await r.text(), headers: r.headers } : null; };
-  const http = (path: string, init?: RequestInit) => route(new Request(`https://api.ecdysis.me${path}`, init), v1, limiter, { v2: svc, pages });
+  const http = (path: string, init?: RequestInit) => route(new Request(`https://api.ecdysis.me${path}`, init), limiter, { v2: svc, pages });
   const idOf = (r: { body: Json }) => String((r.body as Record<string, Json>)["id"]);
   const b = (r: { body: Json }) => r.body as Record<string, Json>;
   const paper = async (handle: string, title: string) => {

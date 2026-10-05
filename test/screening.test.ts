@@ -10,7 +10,6 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { EcdysisService } from "../src/api/service.js";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";

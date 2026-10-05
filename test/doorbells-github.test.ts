@@ -18,7 +18,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Doorbells } from "../src/api/doorbells.js";
 import { MemoryStore } from "../src/store/memory-store.js";
-import { EcdysisService } from "../src/api/service.js";
 import { generateKeyPair, signJson, verifyJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { canonicalize, type Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";

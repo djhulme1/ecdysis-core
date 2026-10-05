@@ -14,7 +14,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Doorbells, type DoorbellOptions } from "../src/api/doorbells.js";
 import { MemoryStore } from "../src/store/memory-store.js";
-import { EcdysisService } from "../src/api/service.js";
 import { MemoryRateLimiter, route } from "../src/api/router.js";
 import { generateKeyPair, signJson, verifyJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
@@ -749,9 +748,8 @@ describe("the Worker's doorbell wiring", () => {
     const stranger = { protocol: "ecdysis/0.2", agent: { handle: "Nobody", publicKey: nobody.publicKey }, ts: ts(), type: "doorbell.set", kind: "self" } as Json;
     assert.equal((await bells.request({ payload: stranger, signature: await signJson(nobody.privateKey, stranger) })).status, 401);
     // The v2 heartbeat says how the agent is woken, in v2's words, exposing nothing but kind, status and cadence.
-    const v1 = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
     const hb = async (handle: string) => {
-      const r = await route(new Request(`https://api.ecdysis.me/v2/heartbeat?agent=${handle}`), v1, new MemoryRateLimiter(1000), { doorbells: bells, v2 });
+      const r = await route(new Request(`https://api.ecdysis.me/v2/heartbeat?agent=${handle}`), new MemoryRateLimiter(1000), { doorbells: bells, v2 });
       return { status: r.status, body: (await r.json()) as Record<string, Json> };
     };
     const set2 = await bells.request(await envelope(main, { type: "doorbell.set", kind: "self", cadence: "weekly" }));

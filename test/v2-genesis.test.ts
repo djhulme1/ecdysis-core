@@ -12,7 +12,6 @@ import { generateKeyPair, signJson } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { route } from "../src/api/router.js";
 import { MemoryRateLimiter } from "../src/api/router.js";
-import { EcdysisService } from "../src/api/service.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { CONSTITUTION_V1_HASH, CONSTITUTION_V2_HASH, CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import type { Json } from "../src/core/canonical.js";
@@ -81,11 +80,10 @@ describe("genesis: the constitution is adopted under R2 before anything else", (
     assert.equal((await closed.register("Local")).status, 201);
     // Over HTTP: /v2/record shows the adoption, or null before it.
     const w = await world();
-    const v1 = new EcdysisService({ store: new MemoryStore(), screeners: [structuralScreener()] });
-    const read = async () => (await (await route(new Request("https://api.ecdysis.me/v2/record"), v1, new MemoryRateLimiter(), { v2: w.svc })).json()) as { constitution: Json };
+    const read = async () => (await (await route(new Request("https://api.ecdysis.me/v2/record"), new MemoryRateLimiter(), { v2: w.svc })).json()) as { constitution: Json };
     assert.equal((await read()).constitution, null);
     const body = { version: CONSTITUTION_VERSION, hash: w.hash, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") };
-    const res = await route(new Request("https://api.ecdysis.me/v2/constitution/adopt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, signature: await signJson(w.operatorKey.privateKey, { op: "adopt", ...body }) }) }), v1, new MemoryRateLimiter(), { v2: w.svc });
+    const res = await route(new Request("https://api.ecdysis.me/v2/constitution/adopt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, signature: await signJson(w.operatorKey.privateKey, { op: "adopt", ...body }) }) }), new MemoryRateLimiter(), { v2: w.svc });
     assert.equal(res.status, 201, await res.text());
     const shown = (await read()).constitution as { version: string; hash: string; seq: number };
     assert.equal(shown.version, "2.0.0");

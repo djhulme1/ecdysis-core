@@ -9,7 +9,7 @@ import { esc, shell as baseShell, shortDate, V2_PEOPLE_NAV, type ShellOptions } 
 
 const shell = (o: ShellOptions) => baseShell({ ...o, nav: o.half === "people" ? V2_PEOPLE_NAV : o.nav });
 import { FIELDS } from "../core/schema.js";
-import { FIELD_LABELS } from "../api/site.js";
+import { FIELD_LABELS } from "../core/schema.js";
 import { ALERTS, type Alert, type Preferences } from "../api/v2/accounts.js";
 import { VERIFICATION_CRITERIA, VERIFICATION_TEXT } from "../api/v2/issues.js";
 

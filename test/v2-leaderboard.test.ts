@@ -11,7 +11,6 @@ import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
-import { EcdysisService } from "../src/api/service.js";
 import { route, MemoryRateLimiter } from "../src/api/router.js";
 import { PagesHandler, V2_SITEMAP_PAGES } from "../src/api/v2/pages.js";
 import { handleMcp } from "../src/api/mcp.js";
@@ -178,7 +177,6 @@ async function world() {
   const logKey = await generateKeyPair();
   const rows = () => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }));
   const svc = new V2Service({ log, store: new MemoryV2Store(rows), logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()] });
-  const v1 = new EcdysisService({ store: logStore, screeners: [structuralScreener()], sthPrivateKey: null });
   const pages = new PagesHandler(svc, { host: "api.ecdysis.me" });
   const limiter = new MemoryRateLimiter(10_000);
   const keys = new Map<string, KeyPairB64>();
@@ -208,8 +206,8 @@ async function world() {
     assert.equal(r.status, 201, JSON.stringify(r.body));
     return String(body(c)["id"]);
   };
-  const get = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`), v1, limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
-  const page = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { headers: { accept: "text/html" } }), v1, limiter, { v2: svc, pages }); return { status: r.status, html: await r.text() }; };
+  const get = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`), limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
+  const page = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { headers: { accept: "text/html" } }), limiter, { v2: svc, pages }); return { status: r.status, html: await r.text() }; };
   return { svc, v1, agent, register, check, get, page };
 }
 

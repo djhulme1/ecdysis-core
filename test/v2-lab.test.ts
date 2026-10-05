@@ -8,7 +8,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
-import { EcdysisService } from "../src/api/service.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { generateKeyPair } from "../src/core/crypto.js";
 import { MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "../src/api/v2/service.js";
@@ -26,10 +25,9 @@ async function world() {
   const logKey = await generateKeyPair();
   const v2store = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
   const v2 = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, screeners: [structuralScreener()] });
-  const v1 = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
   const limiter = new MemoryRateLimiter(1000);
   const pages = new PagesHandler(v2, { host: "api.ecdysis.me" });
-  const site = (path: string, v2on = true) => route(new Request(`https://ecdysis.me${path}`, { headers: { accept: "text/html" } }), v1, limiter, v2on ? { v2, pages } : {});
+  const site = (path: string, v2on = true) => route(new Request(`https://ecdysis.me${path}`, { headers: { accept: "text/html" } }), limiter, v2on ? { v2, pages } : {});
   return { site };
 }
 

@@ -28,9 +28,10 @@ import { comparePageV2, faqPageV2 } from "../../web/v2/explain.js";
 import { apiPageV2 } from "../../web/v2/api.js";
 import { openApiDocument } from "../openapi.js";
 import { mcpUrlFor } from "../../web/launch.js";
-import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
-import { escapeXml } from "../site.js";
-import { ARTICLES, CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
+import { RAW_PROTOCOL_URL } from "../../web/prompts.js";
+import { badgeSvg, escapeXml, robotsTxt } from "../../web/badge.js";
+import type { LogApi } from "./log-api.js";
+import { ARTICLES, CONSTITUTION_VERSION, constitutionHash, renderMarkdown } from "../../core/constitution.js";
 import { agentPageV2, challengePageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, withheldPageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2, type RobustnessRowV2 } from "../../web/v2/pages.js";
 import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
 import type { V2Record } from "../../core/v2/flow.js";
@@ -101,6 +102,8 @@ export interface PagesOptions {
   waitUntil?: (p: Promise<unknown>) => void;
   /** The quote scout's results, when configured: the claim page says whether a registered quote was found in its source. */
   quotes?: QuoteCheckStore | null;
+  /** The transparency log, for the live badge of its head (/badge/sth.svg). */
+  log?: LogApi | null;
 }
 
 
@@ -179,6 +182,13 @@ export class PagesHandler {
       }
       return target ? new Response(null, { status: 302, headers: { ...TEXT_404, "x-robots-tag": "noindex, nofollow", location: target } }) : new Response(method === "HEAD" ? null : "Nothing to share at this address.", { status: 404, headers: TEXT_404 });
     }
+    if (path === "/robots.txt") return new Response(method === "HEAD" ? null : robotsTxt(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "content-security-policy": "default-src 'none'" } });
+    if (path === "/constitution.md") return new Response(method === "HEAD" ? null : renderMarkdown(await constitutionHash()), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8", "content-security-policy": "default-src 'none'" } });
+    if (path === "/badge/sth.svg") {
+      const head = this.o.log ? ((await this.o.log.sth()) as { treeSize?: number }) : null;
+      const n = typeof head?.treeSize === "number" ? head.treeSize : 0;
+      return new Response(method === "HEAD" ? null : badgeSvg("ecdysis log", `${n} ${n === 1 ? "entry" : "entries"} · signed`), { status: 200, headers: SVG_HEADERS });
+    }
     const bm = path.match(BADGE);
     if (bm) return new Response(method === "HEAD" ? null : await this.badge(bm[1] as "paper" | "claim" | "agent", bm[2]!), { status: 200, headers: SVG_HEADERS });
     const um = path.match(PROFILE);
@@ -238,7 +248,7 @@ export class PagesHandler {
     }
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
     if (path === "/graph") return html(200, graphPageV2(await this.graph()));
-    if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL_V2 }));
+    if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL }));
     if (path === "/sitemap.xml") {
       // Papers in view and in the default lists: the sitemap advertises what the lists show, never an item out of view.
       const rec = await this.v2.record();
