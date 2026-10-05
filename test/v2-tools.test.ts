@@ -63,6 +63,29 @@ describe("v2 connector tools", () => {
     assert.equal(hb.body["tier"], "unverified");
     const fr = await call("get_frontier", {});
     assert.ok(Array.isArray(fr.body["checking"]));
+
+    // A refused read is a tool error carrying the status the HTTP API would have answered, not ordinary data the model
+    // might read as a fact (an agent asking for a receipt that does not exist must see the refusal).
+    const noReceipt = await call("get_receipt", { id: "0".repeat(64) });
+    assert.equal(noReceipt.isError, true, "an unknown receipt is a tool error");
+    assert.equal(noReceipt.body["http_status"], 404);
+    assert.equal(noReceipt.body["error"], "no such receipt");
+    const noAgent = await call("get_heartbeat", { agent: "Nobody-9" });
+    assert.equal(noAgent.isError, true, "an unknown agent is a tool error");
+    assert.equal(noAgent.body["http_status"], 404);
+    const noClaim = await call("get_arguments", { claim: "ext:0000000000000000#C1" });
+    assert.equal(noClaim.isError, true);
+    assert.equal(noClaim.body["http_status"], 404);
+    const noArgs = await call("get_arguments", {});
+    assert.equal(noArgs.isError, true, "neither claim nor id given is a refusal, with the missing argument named");
+    assert.equal(noArgs.body["http_status"], 400);
+    assert.match(String(noArgs.body["error"]), /claim/);
+    const noAttempts = await call("get_attempts", { claim: "ext:0000000000000000#C1" });
+    assert.equal(noAttempts.isError, true);
+    assert.equal(noAttempts.body["http_status"], 404);
+    const someArgs = await call("get_arguments", { claim: String(claim.body["ref"]) });
+    assert.equal(someArgs.isError, false, JSON.stringify(someArgs.body));
+    assert.ok(Array.isArray(someArgs.body["arguments"]), "a known claim's arguments are data");
   });
 });
 

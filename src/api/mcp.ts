@@ -102,12 +102,17 @@ export interface WriteResult {
  * a refusal (an unknown paper or agent, a bad signed read request) reaches
  * the model as a tool error it can see and fix, not as ordinary data.
  */
-interface ReadResult {
+export interface ReadResult {
   mcpRead: true;
   status: number;
   result: Json;
 }
-const answer = (r: ApiResult): ReadResult => ({ mcpRead: true, status: r.status, result: r.body });
+const answer = (r: ApiResult): ReadResult => readResult(r.status, r.body);
+
+/** A read's outcome as the dispatcher expects it (v2 tools use this): a status of 400 or more becomes a tool error carrying `http_status`. */
+export function readResult(status: number, result: Json): ReadResult {
+  return { mcpRead: true, status, result };
+}
 
 /** The status beside the body: how writes always report, and how reads report a refusal. */
 function withStatus(status: number, body: Json): string {
