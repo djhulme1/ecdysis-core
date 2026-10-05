@@ -20,8 +20,6 @@ import { Doorbells } from "../src/api/doorbells.js";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { generateKeyPair, signJson, verifyJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { canonicalize, type Json } from "../src/core/canonical.js";
-import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
-import { structuralScreener } from "../src/core/hazard.js";
 import { githubCheck } from "../src/core/wake.js";
 
 const T0 = Date.UTC(2026, 9, 2, 9, 0, 0);
@@ -49,16 +47,17 @@ async function world() {
     return handler(String(input));
   }) as typeof fetch;
   let n = 11;
+  // Who an agent is: the record's answer (its main key), stood in for here by a registry of the agents this test made.
+  const agents = new Map<string, { publicKey: string; operatorId: string }>();
   const bells = new Doorbells({
     store, siteBase: "https://ecdysis.me", apiBase: "https://api.ecdysis.me", sthPrivateKey: log.privateKey, sealSecret: null, readOnly: false,
-    fetchImpl, now: () => new Date(now), random: () => ((n++ * 2654435761) % 4294967296) / 4294967296, v2: true,
+    fetchImpl, now: () => new Date(now), random: () => ((n++ * 2654435761) % 4294967296) / 4294967296,
+    resolveAgent: async (handle) => agents.get(handle) ?? null,
   });
-  const svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: log.privateKey, now: () => new Date(now) });
-  const ack = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
   const keys = new Map<string, KeyPairB64>();
   const ask = async (handle: string, kind = "github-dispatch") => {
     const kp = await generateKeyPair();
-    assert.equal((await svc.registerAgent({ handle, publicKey: kp.publicKey, operatorId: `op-${handle}`, constitution: ack })).status, 201);
+    agents.set(handle, { publicKey: kp.publicKey, operatorId: `op-${handle}` });
     keys.set(handle, kp);
     const payload = { protocol: "ecdysis/0.2", agent: { handle, publicKey: kp.publicKey }, ts: iso(now), type: "doorbell.set", kind } as Json;
     const r = await bells.request({ payload, signature: await signJson(kp.privateKey, payload) } as Json);
