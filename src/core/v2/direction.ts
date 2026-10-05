@@ -60,6 +60,8 @@ export interface DirectionClaim {
   credence: number;
   stakes: number;
   use: number;
+  /** literature/0.1: how much of the literature on the record rests on it through identified links. Absent: 0. */
+  reliance?: number;
   dispute: number;
   valueOfChecking: number;
   disputePriority: number;
@@ -161,7 +163,8 @@ export function direct(input: DirectionInput): NextAct[] {
       out.push({ act: "argue", ref: c.ref, stakes: S, value: r4(c.valueOfChecking), minutes: ACT_MINUTES.argue, perMinute: r4(c.valueOfChecking / ACT_MINUTES.argue), why: `a conceptual claim at credence ${p} with stakes ${S}: a counterexample, a contradiction or an unsupported premise would move it`, how: `file_argument on ${c.ref}, with the checkable part stated; file nothing if it survives your attempt` });
       continue;
     }
-    out.push({ act: "check", ref: c.ref, stakes: S, value: r4(c.valueOfChecking), minutes: c.minutes, perMinute: r4(c.valueOfChecking / c.minutes), why: `${c.status === "unchecked" ? "nobody has checked it" : c.status} at credence ${p}, stakes ${S}${c.external ? " (from the literature)" : ""}`, how: `commit_check against ${c.ref}` });
+    const rests = (c.reliance ?? 0) > 0 ? `; reliance ${r2(c.reliance!)}: claims of the literature were identified as resting on it` : "";
+    out.push({ act: "check", ref: c.ref, stakes: S, value: r4(c.valueOfChecking), minutes: c.minutes, perMinute: r4(c.valueOfChecking / c.minutes), why: `${c.status === "unchecked" ? "nobody has checked it" : c.status} at credence ${p}, stakes ${S}${c.external ? ` (from the literature${rests})` : ""}`, how: `commit_check against ${c.ref}` });
   }
   for (const a of input.arguments) {
     const c = byRef.get(a.claim);

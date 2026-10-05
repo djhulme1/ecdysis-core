@@ -101,11 +101,13 @@
  *   dispute D    how much the evidence disagrees, D = 4sf/(s + f), where s
  *                and f are the weighted confirming and disconfirming
  *                evidence mass (replication 1, re-run ½, review ¼);
- *   stakes S     how much rests on it on and off the record (stakes/0.1,
- *                stakes.ts): S = U + log2(1 + R), where R is the source
- *                paper's reach in the public citation graph (for a claim
- *                registered from human literature) as the
- *                platform's scout observed it. Stakes rank what is worth
+ *   stakes S     how much rests on it on and off the record (stakes/0.2,
+ *                stakes.ts): S = U + log2(1 + R) + log2(1 + N), where R is
+ *                the source paper's reach in the public citation graph (for
+ *                a claim registered from human literature) as the
+ *                platform's scout observed it, and N its reliance: how much
+ *                of the literature rests on it through identified links
+ *                (links.ts). Stakes rank what is worth
  *                checking ((S + ½)·p(1 − p), direction/0.1) and feed the pressure on blocked
  *                claims; they never enter credence, the statuses or the
  *                threshold for established, which stay on U.
@@ -271,6 +273,8 @@ export interface ClaimInput {
   registrant?: string;
   /** stakes/0.1: the source paper's reach off the record (citations, or a young paper's venue expectation), from the scout's observation. Absent: 0. */
   reach?: number;
+  /** stakes/0.2: how much of the literature rests on it through identified links (links.ts, literature/0.1). Absent: 0. */
+  reliance?: number;
 }
 
 export interface EvidenceInput {
@@ -390,7 +394,9 @@ export interface ClaimV2 {
   use: number;
   /** stakes/0.1: the source paper's reach off the record, as observed; 0 when nothing was observed or the claim was published here. */
   reach: number;
-  /** stakes/0.1: S = use + log2(1 + reach). Ranks what is worth checking (direction/0.1); never enters credence. */
+  /** stakes/0.2: how much of the literature rests on it through identified links, every path halved for each step (links.ts); 0 for none. */
+  reliance: number;
+  /** stakes/0.2: S = use + log2(1 + reach) + log2(1 + reliance). Ranks what is worth checking (direction/0.1); never enters credence. */
   stakes: number;
   threshold: number;
   status: ClaimStatusV2;
@@ -858,11 +864,12 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     if (settled !== 0 && c.calibration === undefined && c.authorOperator) pending.push({ op: c.authorOperator, stated: c.stated, truth: settled > 0 ? 1 : 0, weight: Math.abs(settled) });
     const dispute = disputeOf(ev.s, ev.f);
     const reach = Math.max(0, c.reach ?? 0);
-    const stakes = stakesOf(use, reach);
+    const reliance = Math.max(0, c.reliance ?? 0);
+    const stakes = stakesOf(use, reach, reliance);
     sums.set(c.ref, total);
     out.set(c.ref, {
       ref: c.ref, external: c.external === true, kind, cap, calibration, prior, logOdds, credence, credenceVerified, credenceReplication,
-      operators: { confirming: ev.confirmingOperators, failing: ev.failingOperators }, s: ev.s, f: ev.f, dispute, use, reach, stakes, threshold, status, resolved,
+      operators: { confirming: ev.confirmingOperators, failing: ev.failingOperators }, s: ev.s, f: ev.f, dispute, use, reach, reliance, stakes, threshold, status, resolved,
       arguments: { upheld: args?.upheldAttacks.length ?? 0, dismissed: args?.dismissedAttacks.length ?? 0, open: args?.open ?? 0, methodology: args?.methodology ?? 0, counterexample: args?.refuted ?? false },
       reproduced: ev.reproduced,
       families: [...ev.confirmingFamilies].filter((x) => x !== "?").sort(),

@@ -23,6 +23,7 @@ import { mapPageV2 } from "../../web/v2/map.js";
 import { leaderboardPageV2 } from "../../web/v2/leaderboard.js";
 import { pressure } from "../../core/v2/attempts.js";
 import { isClaimRef } from "../../core/v2/refs.js";
+import { RESTS_ON, type LinkEdge } from "../../core/v2/links.js";
 import type { ClaimPayload } from "../../core/v2/claim.js";
 import type { Json } from "../../core/canonical.js";
 import { llmsTxtV2, skillMdV2 } from "./skill.js";
@@ -173,6 +174,33 @@ export function claimText(r: V2Record, ref: string): string {
 
 /** The relations that make a line of work: a claim building on another, or declaring that it replicates or refutes it. Background is a mention. */
 const LINE_RELS = new Set(["extends", "method", "replicates", "refutes"]);
+
+/** The network's edges as a line or a drawing follows them: those claims declare (network/0.1), and the links agents identified between claims from human literature (literature/0.1), in force and in view. */
+function networkEdges(r: V2Record): Array<{ from: string; to: string; rel: string; basis: string | null; seq: number }> {
+  return [...r.edges, ...r.linkEdges.map((e) => ({ from: e.from, to: e.to, rel: e.rel, basis: e.basis, seq: e.seq }))];
+}
+
+/** literature/0.1: what each claim from human literature was identified as resting on (extends, method), for its generation. */
+function identifiedFoundations(r: V2Record): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const e of r.linkEdges) {
+    if (!RESTS_ON.has(e.rel)) continue;
+    const list = out.get(e.from);
+    if (list) list.push(e.to); else out.set(e.from, [e.to]);
+  }
+  return out;
+}
+
+/** The network's edges indexed both ways, so a page walks a line in time linear in what it visits. */
+function indexEdges<E extends { from: string; to: string }>(edges: readonly E[]): { out: Map<string, E[]>; into: Map<string, E[]> } {
+  const out = new Map<string, E[]>();
+  const into = new Map<string, E[]>();
+  for (const e of edges) {
+    const a = out.get(e.from); if (a) a.push(e); else out.set(e.from, [e]);
+    const b = into.get(e.to); if (b) b.push(e); else into.set(e.to, [e]);
+  }
+  return { out, into };
+}
 
 export class PagesHandler {
   private feeds: V2Feeds;
@@ -325,10 +353,12 @@ export class PagesHandler {
     const s = await this.v2.scores();
     const inView = r.claims.filter((c) => !isHeld(r, c.ref));
     const listed = all ? inView : inView.filter((c) => inDefaultLists(r, [c.ref], c.external ? (c.registrant ?? "") : c.authorOperator));
-    const linesIn = (ref: string) => r.edges.filter((e) => e.from === ref && LINE_RELS.has(e.rel) && !isHeld(r, e.to)).length;
-    const linesOut = (ref: string) => r.edges.filter((e) => e.to === ref && LINE_RELS.has(e.rel) && !isHeld(r, e.from)).length;
+    const net = networkEdges(r);
+    const byEnd = indexEdges(net);
+    const linesIn = (ref: string) => (byEnd.out.get(ref) ?? []).filter((e) => LINE_RELS.has(e.rel) && !isHeld(r, e.to)).length;
+    const linesOut = (ref: string) => (byEnd.into.get(ref) ?? []).filter((e) => LINE_RELS.has(e.rel) && !isHeld(r, e.from)).length;
     const scored = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
-    const gen = generations(scored);
+    const gen = generations(scored, identifiedFoundations(r));
     return {
       all, unlisted: inView.length - listed.length,
       claims: [...listed].sort((a, b) => b.seq - a.seq).slice(0, 200).map((c) => {
@@ -344,8 +374,8 @@ export class PagesHandler {
       graph: this.graphOf(r, s),
       totals: {
         claims: inView.length, external: inView.filter((c) => c.external).length,
-        edges: r.edges.filter((e) => LINE_RELS.has(e.rel) && !isHeld(r, e.from) && !isHeld(r, e.to)).length,
-        maxGen: Math.max(0, ...gen.values()),
+        edges: net.filter((e) => LINE_RELS.has(e.rel) && !isHeld(r, e.from) && !isHeld(r, e.to)).length,
+        maxGen: [...gen.values()].reduce((m, g) => Math.max(m, g), 0),
         deepUnchecked: scored.filter((c) => (gen.get(c.ref) ?? 0) >= 3 && c.status === "unchecked").length,
       },
       computedFrom: r.head,
@@ -396,8 +426,16 @@ export class PagesHandler {
         factor: withFactor && inView ? factor.get(id) ?? null : null,
       };
     };
-    const restsOn = r.edges.filter((e) => e.from === ref).map((e) => linked(e.to, e.rel, e.basis, notes.get(e.to) ?? null, true));
-    const restedOnBy = r.edges.filter((e) => e.to === ref && !isHeld(r, e.from)).sort((a, b) => b.seq - a.seq).map((e) => linked(e.from, e.rel, e.basis, null, false));
+    // literature/0.1: the links agents identified from the citing papers, with who identified each and the paper's sentence.
+    const identified = (e: LinkEdge) => e.by.map((b) => ({ link: b.id, handle: b.handle, tier: b.tier, quote: b.quote, where: b.where, at: b.ts }));
+    const restsOn = [
+      ...r.edges.filter((e) => e.from === ref).map((e) => linked(e.to, e.rel, e.basis, notes.get(e.to) ?? null, true)),
+      ...r.linkEdges.filter((e) => e.from === ref).map((e) => ({ ...linked(e.to, e.rel, "identified", null, false), identified: identified(e) })),
+    ];
+    const restedOnBy = [
+      ...r.edges.filter((e) => e.to === ref && !isHeld(r, e.from)).sort((a, b) => b.seq - a.seq).map((e) => linked(e.from, e.rel, e.basis, null, false)),
+      ...[...r.linkEdges].filter((e) => e.to === ref).sort((a, b) => b.seq - a.seq).map((e) => ({ ...linked(e.from, e.rel, "identified", null, false), identified: identified(e) })),
+    ];
     const background = (payload?.builds_on ?? []).filter((b) => b.rel === "background" && !isClaimRef(b.id)).map((b) => ({ id: b.id, note: b.note ?? null }));
     const site = this.site();
     const promote = {
@@ -442,13 +480,16 @@ export class PagesHandler {
     const r = await this.v2.record();
     const s = await this.v2.scores();
     const steps = new Map<string, { side: "rests" | "self" | "rested"; steps: number; how: string }>([[ref, { side: "self", steps: 0, how: "" }]]);
+    // network/0.1 and literature/0.1: a line follows the edges claims declare and the links agents identified between claims from human literature.
+    const net = networkEdges(r);
+    const byEnd = indexEdges(net);
     // Down: what it rests on, breadth first, so each claim is reached by its shortest way.
     let frontier = [ref];
     for (let d = 1; frontier.length; d++) {
       const next: string[] = [];
-      for (const from of frontier) for (const e of r.edges) {
-        if (e.from !== from || !LINE_RELS.has(e.rel) || steps.has(e.to) || isHeld(r, e.to)) continue;
-        steps.set(e.to, { side: "rests", steps: d, how: `${from === ref ? "this claim" : "the claim above"} ${relWords(e.rel, e.basis)} it` });
+      for (const from of frontier) for (const e of byEnd.out.get(from) ?? []) {
+        if (!LINE_RELS.has(e.rel) || steps.has(e.to) || isHeld(r, e.to)) continue;
+        steps.set(e.to, { side: "rests", steps: d, how: e.basis === "identified" ? `${from === ref ? "this claim" : "the claim above"} ${relWords(e.rel, null)} it, as the citing paper says` : `${from === ref ? "this claim" : "the claim above"} ${relWords(e.rel, e.basis)} it` });
         next.push(e.to);
       }
       frontier = next;
@@ -457,20 +498,20 @@ export class PagesHandler {
     frontier = [ref];
     for (let d = 1; frontier.length; d++) {
       const next: string[] = [];
-      for (const to of frontier) for (const e of r.edges) {
-        if (e.to !== to || !LINE_RELS.has(e.rel) || steps.has(e.from) || isHeld(r, e.from)) continue;
-        steps.set(e.from, { side: "rested", steps: d, how: `${relWords(e.rel, e.basis)} ${to === ref ? "this claim" : "the claim below"}` });
+      for (const to of frontier) for (const e of byEnd.into.get(to) ?? []) {
+        if (!LINE_RELS.has(e.rel) || steps.has(e.from) || isHeld(r, e.from)) continue;
+        steps.set(e.from, { side: "rested", steps: d, how: e.basis === "identified" ? `${relWords(e.rel, null)} ${to === ref ? "this claim" : "the claim below"}, as the citing paper says` : `${relWords(e.rel, e.basis)} ${to === ref ? "this claim" : "the claim below"}` });
         next.push(e.from);
       }
       frontier = next;
     }
     const scored = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
-    const gen = generations(scored);
+    const gen = generations(scored, identifiedFoundations(r));
     const inLine = scored.filter((c) => steps.has(c.ref));
     const chosen = [...inLine].sort((a, b) => (a.ref === ref ? -1 : b.ref === ref ? 1 : 0) || steps.get(a.ref)!.steps - steps.get(b.ref)!.steps || b.stakes - a.stakes || a.ref.localeCompare(b.ref)).slice(0, GRAPH_MAX_NODES);
     const ids = new Set(chosen.map((c) => c.ref));
     const nodes: GraphNode[] = chosen.map((c) => this.node(r, c, gen));
-    const edges: GraphEdge[] = r.edges.filter((e) => LINE_RELS.has(e.rel) && ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to }));
+    const edges: GraphEdge[] = net.filter((e) => LINE_RELS.has(e.rel) && ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to }));
     return {
       ref, text: claimText(r, ref), nodes, edges, omitted: inLine.length - chosen.length,
       rows: inLine.map((c) => ({ id: c.ref, text: claimText(r, c.ref), external: c.external, status: c.status, credence: c.credence, ...steps.get(c.ref)! })),
@@ -644,30 +685,47 @@ export class PagesHandler {
    */
   private graphOf(r: V2Record, s: ScoresV2): { nodes: GraphNode[]; edges: GraphEdge[]; omitted: number } {
     const all = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
-    const gen = generations(all);
+    const gen = generations(all, identifiedFoundations(r));
     const chosen = [...all].sort((a, b) => b.stakes - a.stakes || b.use - a.use || (gen.get(a.ref) ?? 0) - (gen.get(b.ref) ?? 0) || a.ref.localeCompare(b.ref)).slice(0, GRAPH_MAX_NODES);
     const ids = new Set(chosen.map((c) => c.ref));
     const nodes: GraphNode[] = chosen.map((c) => this.node(r, c, gen));
-    const edges: GraphEdge[] = r.edges.filter((e) => LINE_RELS.has(e.rel) && ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to }));
+    const edges: GraphEdge[] = networkEdges(r).filter((e) => LINE_RELS.has(e.rel) && ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to }));
     return { nodes, edges, omitted: all.length - chosen.length };
   }
 }
 
-/** Each claim's generation: 0 for claims from human literature and for claims resting on nothing; otherwise one more than the deepest foundation. A cycle (impossible on the log, guarded anyway) is cut at the first repeat. */
-export function generations(claims: Array<{ ref: string; external: boolean; foundations: Array<{ ref: string }> }>): Map<string, number> {
+/**
+ * Each claim's generation: 0 for a claim resting on nothing; otherwise one more than the deepest claim it rests on. A claim
+ * from human literature rests on what agents identified it as resting on (`identified`, literature/0.1), and on nothing else.
+ * Computed in order, foundations first, without recursion, so a chain of any length is fine; a claim on a cycle (impossible
+ * among claims published here, refused among links but possible by a race) and what rests on it take the depth reached
+ * without the cycle.
+ */
+export function generations(claims: Array<{ ref: string; external: boolean; foundations: Array<{ ref: string }> }>, identified: ReadonlyMap<string, readonly string[]> = new Map()): Map<string, number> {
   const byRef = new Map(claims.map((c) => [c.ref, c] as const));
+  const under = new Map<string, string[]>();
+  const restedOnBy = new Map<string, string[]>();
+  const waiting = new Map<string, number>();
+  for (const c of claims) {
+    const fs = [...new Set(c.external ? (identified.get(c.ref) ?? []) : c.foundations.map((f) => f.ref))].filter((x) => byRef.has(x) && x !== c.ref);
+    under.set(c.ref, fs);
+    waiting.set(c.ref, fs.length);
+    for (const f of fs) { const list = restedOnBy.get(f); if (list) list.push(c.ref); else restedOnBy.set(f, [c.ref]); }
+  }
   const gen = new Map<string, number>();
-  const depth = (ref: string, seen: Set<string>): number => {
-    const hit = gen.get(ref);
-    if (hit !== undefined) return hit;
-    const c = byRef.get(ref);
-    if (!c || c.external || c.foundations.length === 0 || seen.has(ref)) return 0;
-    seen.add(ref);
-    const g = 1 + Math.max(...c.foundations.map((f) => depth(f.ref, seen)));
-    gen.set(ref, g);
-    return g;
-  };
-  for (const c of claims) gen.set(c.ref, depth(c.ref, new Set()));
+  const ready = claims.filter((c) => waiting.get(c.ref) === 0).map((c) => c.ref);
+  while (ready.length) {
+    const ref = ready.pop()!;
+    const fs = under.get(ref) ?? [];
+    gen.set(ref, fs.length ? 1 + fs.reduce((m, f) => Math.max(m, gen.get(f) ?? 0), 0) : 0);
+    for (const up of restedOnBy.get(ref) ?? []) {
+      const left = (waiting.get(up) ?? 1) - 1;
+      waiting.set(up, left);
+      if (left === 0) ready.push(up);
+    }
+  }
+  // What a cycle kept from being ready: the depth its foundations outside the cycle give it.
+  for (const c of claims) if (!gen.has(c.ref)) { const known = (under.get(c.ref) ?? []).map((f) => gen.get(f)).filter((g): g is number => g !== undefined); gen.set(c.ref, known.length ? 1 + known.reduce((m, g) => Math.max(m, g), 0) : 0); }
   return gen;
 }
 

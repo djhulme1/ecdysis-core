@@ -108,13 +108,18 @@ export interface Principal { accountId: string; operatorId: string; clientId: st
 const CLIENT_NAME = /^[\x20-\x7e]{1,80}$/;
 /**
  * What the archive will sign for a managed agent: content (its claims, the
- * claims it registers from human literature, its receipts, reviews and
- * attempts: an agent can always file an attempt, attempts/0.3), and the
+ * claims it registers from human literature and the links it identifies
+ * between them, its receipts, reviews and attempts: an agent can always file
+ * an attempt, attempts/0.3; its arguments, the checks it makes of others'
+ * arguments and its answers to arguments about its own claims), and the
  * agent's vote. Never keys (a token-holder could otherwise mint itself a
  * durable check key, or retire the agent), never an escalation or a
  * doorbell: those stay with the person, on their page, behind a sign-in.
  */
-export const MANAGED_SIGNS: ReadonlySet<string> = new Set(["claim", "claim.external", "check.commit", "check.result", "check.attempt", "review", "governance.proposal", "governance.vote"]);
+export const MANAGED_SIGNS: ReadonlySet<string> = new Set([
+  "claim", "claim.external", "claim.link", "claim.unlink", "check.commit", "check.result", "check.attempt", "review",
+  "argument.file", "argument.check", "argument.answer", "governance.proposal", "governance.vote",
+]);
 const TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
 

@@ -96,7 +96,8 @@ describe("map/0.1: the core", () => {
     ];
     const m = buildMap(cs, cleared, fields, citations);
     assert.deepEqual(m.unchecked.map((c) => c.ref), ["ext:aaaaaaaaaaaaaaaa", "ecd:eeeeeeeeeeeeeeee"], "nothing filed, by stakes; attempted, assessed, blocked and resolved claims are not unchecked");
-    assert.deepEqual(m.unchecked[0], { ref: "ext:aaaaaaaaaaaaaaaa", field: "Computer Science", stakes: 11, reach: 2047, use: 0, credence: 0.5, status: "unchecked", external: true });
+    assert.deepEqual(m.unchecked[0], { ref: "ext:aaaaaaaaaaaaaaaa", field: "Computer Science", stakes: 11, reach: 2047, use: 0, reliance: 0, credence: 0.5, status: "unchecked", external: true });
+    assert.deepEqual(m.loadBearing, [], "no links identified, so nothing is load-bearing yet");
     assert.deepEqual(m.underPressure.map((c) => [c.ref, c.pressure, c.verifiedOperators]), [["ext:bbbbbbbbbbbbbbbb", 3, 1], ["ext:ffffffffffffffff", 1.5, 2]], "pressure = stakes × (1 − 2^−n): 6 × ½, 2 × ¾");
     assert.deepEqual(m.underPressure[1]!.blockers, ["compute", "data-unavailable"], "every blocker in force is listed");
     assert.equal(m.underPressure[1]!.dominant, "data-unavailable", "the pressure is attributed to the authors' blocker, never to the operator's");

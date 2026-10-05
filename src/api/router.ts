@@ -554,6 +554,13 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     if (path === "/v2/constitution") return v2.constitutionText();
     const rc = path.match(/^\/v2\/receipts\/([0-9a-f]{64})$/);
     if (rc) return v2.receipt(rc[1]!);
+    // literature/0.1: one identified link, in force or withdrawn.
+    const rl = path.match(/^\/v2\/links\/([^/]{1,80})$/);
+    if (rl) {
+      let id = "";
+      try { id = decodeURIComponent(rl[1]!); } catch { /* a malformed escape: refused below as no link id */ }
+      return v2.link(id);
+    }
     // arguments/0.1: one argument by id, or every argument on a claim.
     const ra = path.match(/^\/v2\/arguments\/([0-9a-f]{64})$/);
     if (ra) return v2.argument(ra[1]!);
@@ -590,6 +597,9 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     // network/0.1: one claim per signed envelope, naming what it builds on; or a claim from human literature.
     case "/v2/claims": return v2.publishClaim(body);
     case "/v2/claims/external": return v2.registerExternalClaim(body);
+    // literature/0.1: an identified link between two claims from human literature, and its withdrawal by its own operator.
+    case "/v2/claims/link": return v2.linkClaims(body);
+    case "/v2/claims/unlink": return v2.unlinkClaims(body);
     case "/v2/submissions/withdraw": return v2.withdrawSubmission(body);
     case "/v2/checks": return v2.commitCheck(body);
     case "/v2/checks/result": return v2.fileResult(body);

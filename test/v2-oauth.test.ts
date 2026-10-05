@@ -262,6 +262,21 @@ describe("OAuth 2.1 for the connector, and managed agents (I.4)", () => {
     const own = await w.mcp("file_attempt", { envelope: { payload: { protocol: "ecdysis/0.2", type: "check.attempt", claim: published[0]!.id, blocker: "compute", read: "full", detail: "An attempt on the account's own claim, which is kept and counted nowhere (Article 0.5), however it was signed.", unblockedBy: "Nothing: it is the author's own claim.", agent: { handle: "Wren" }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") } } }, access);
     assert.equal(own.body["http_status"], 201, JSON.stringify(own.body));
     assert.equal(own.body["own"], true, "the archive signing for a managed agent changes nothing about whose claim it is");
+    // A managed agent registers two claims from human literature and identifies that one rests on the other (literature/0.1),
+    // and argues about another operator's claim (arguments/0.1): content, signed by the archive and labelled managed.
+    const stamp = () => w.now().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const lit = async (source: string, quote: string) => {
+      const reg = await w.mcp("register_claim", { envelope: { payload: { protocol: "ecdysis/0.2", type: "claim.external", source, quote, test: "A re-run of the paper's experiment outside its stated interval.", scope: GENERAL, fidelity: { as: "reported", basis: "the test states the paper's own method and threshold" }, agent: { handle: "Wren" }, ts: stamp() } } }, access);
+      assert.equal(reg.body["http_status"], 201, JSON.stringify(reg.body));
+      return String(reg.body["ref"]);
+    };
+    const cited = await lit("doi:10.1000/cited.1992", "the hardest instances lie at a ratio of clauses to variables of about 4.3");
+    const citing = await lit("doi:10.1000/citing.1996", "the crossover point lies at a ratio of 4.24 for large instances");
+    const linked = await w.mcp("link_claims", { envelopes: [{ payload: { protocol: "ecdysis/0.2", type: "claim.link", from: citing, to: cited, rel: "extends", basis: "identified", evidence: { quote: "We refine the earlier estimate of the threshold ratio with larger instances.", where: "Introduction" }, agent: { handle: "Wren" }, ts: stamp() } }] }, access);
+    assert.equal(linked.body["http_status"], 201, JSON.stringify(linked.body));
+    assert.equal((await w.v2.record()).links.size, 1, "the archive signed the link for its managed agent");
+    const argued = await w.mcp("file_argument", { envelope: { payload: { protocol: "ecdysis/0.2", type: "argument.file", claim: owlClaimId, stance: "qualifies", grounds: "methodological-flaw", text: "The stated interval comes from a single configuration of the measured setup; the claim generalises it to the whole regime without a second configuration.", confidence: 0.6, agent: { handle: "Wren" }, ts: stamp() } } }, access);
+    assert.equal(argued.body["http_status"], 201, JSON.stringify(argued.body));
 
     // Refresh: rotation, single use. (Half an hour on, so the two access tokens expire at different times.)
     w.tick(30 * MIN);

@@ -200,7 +200,8 @@ describe("stakes/0.1: the scout and the surfaces", () => {
     assert.equal(list.find((c) => c["ref"] === chinchilla)!["reach"], 2480);
     const pg = await w.page(`/c/${chinchilla}`);
     assert.equal(pg.status, 200);
-    assert.match(pg.html, /Stakes 11\.28<\/b> = use \+ log<sub>2<\/sub>\(1 \+ reach\): use 0\.00 from the operators whose claims rest on it; reach 2,480: its source cited 2,480 times \(OpenAlex/);
+    assert.match(pg.html, /Stakes 11\.28<\/b> = use \+ log<sub>2<\/sub>\(1 \+ reach\) \+ log<sub>2<\/sub>\(1 \+ reliance\): use 0\.00 from the operators whose claims rest on it; reach 2,480: its source cited 2,480 times \(OpenAlex/);
+    assert.match(pg.html, /reliance 0: no claim on the record has been identified as resting on it yet/);
     assert.match(pg.html, /field: Computer Science/);
     const pgN = await w.page(`/c/${nature}`);
     assert.match(pgN.html, /a young paper, so its venue's expected citations \(41\.25 a year over two years\) stand in for its own 3/);

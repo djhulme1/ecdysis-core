@@ -1,6 +1,7 @@
 /**
  * The record, derived from the log (network/0.1, on credence/0.4, track/0.2,
- * kinds/0.1, scope/0.1, arguments/0.1, attempts/0.3, stakes/0.1). Credence
+ * kinds/0.1, scope/0.1, arguments/0.1, attempts/0.3, stakes/0.2,
+ * literature/0.1). Credence
  * and standing are deterministic, public functions of the log, with no
  * hidden inputs (Article 0.4). So every input to the numbers is derived here
  * from log entries alone: claims and the claims they build on, evidence
@@ -47,6 +48,19 @@
  *   content.restore    {subject, reason, by, steward}
  *   source.observed    {source, provider, work, citedBy, venueCitedness?, year?, field?, fieldId?}  stakes/0.1
  *   field.observed     {field, fieldId, works, citedBy}         map/0.1: a field's totals, the map's denominator
+ *   claim.link         {id, from, to, rel, basis, quote, where?, handle, operatorId, models?}   literature/0.1: an identified dependency between two claims from human literature
+ *   claim.unlink       {link, reason, handle, operatorId}       its operator withdrew it
+ *
+ * Identified links (literature/0.1; links.ts). A claim from human literature
+ * names nothing it rests on; an agent reading the citing paper identifies a
+ * dependency, with the paper's own sentence as evidence. Links join claims
+ * from human literature only, are withdrawn but never edited (a withdrawal
+ * signed after its key's declared compromise is void), and move no credence:
+ * they feed RELIANCE, which enters stakes and so ranks what is worth
+ * checking. Links that are withdrawn, disowned, identified by a voided
+ * operator or out of view (the link, or either claim) count for nothing. The
+ * service refuses a link that would close a cycle; the fold checks none,
+ * because reliance counts bounded paths and needs no order.
  *
  * Scope and kinds (scope/0.1, kinds/0.1; kinds.ts). A claim's scope says what
  * it covers (a period, or general); a receipt's design says what it tests. A
@@ -116,10 +130,11 @@ import { argumentEffects, GROUNDS, settleArgument, STANCES, type ArgumentCheckSt
 import type { EarnedVerification } from "./scoring.js";
 import { BLOCKERS, READ, summariseBlockers, supported as attemptSupported, type AttemptState, type Blocker, type ClaimBlockers, type ClearState, type Read } from "./attempts.js";
 import { parseFieldObservation, parseObservation, reachOf, type FieldObservation, type SourceObservation } from "./stakes.js";
+import { LINK_ID, LINK_RELS, linkEdgesOf, relianceOf, type LinkEdge, type LinkRel, type LinkState } from "./links.js";
 
 export type V2EntryType =
   | "constitution.adopt" | "operator.tier" | "agent.register" | "key.delegate" | "key.revoke"
-  | "claim.publish" | "claim.external" | "claim.amend"
+  | "claim.publish" | "claim.external" | "claim.amend" | "claim.link" | "claim.unlink"
   | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "check.attempt" | "attempt.clear"
   | "review.file" | "argument.file" | "argument.check" | "argument.answer"
   | "finding.decide" | "finding.reverse" | "canary.reveal"
@@ -128,7 +143,7 @@ export type V2EntryType =
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "constitution.adopt", "operator.tier", "agent.register", "key.delegate", "key.revoke",
-  "claim.publish", "claim.external", "claim.amend",
+  "claim.publish", "claim.external", "claim.amend", "claim.link", "claim.unlink",
   "check.commit", "check.seal", "check.result", "check.lapse", "check.attempt", "attempt.clear",
   "review.file", "argument.file", "argument.check", "argument.answer",
   "finding.decide", "finding.reverse", "canary.reveal",
@@ -386,6 +401,10 @@ export interface V2Record {
   observations: Map<string, SourceObservation>;
   /** map/0.1: the latest observation of each field's totals in the citation graph (field.observed), by field name. */
   fieldObservations: Map<string, FieldObservation>;
+  /** literature/0.1: every identified link by id, in force or withdrawn, disowned or not (links.ts). */
+  links: Map<string, LinkState>;
+  /** literature/0.1: the links that count, grouped by (from, to, rel): in force, in view, not disowned, not by a voided operator. */
+  linkEdges: LinkEdge[];
   /**
    * The constitution in force, adopted on this log by the founder under
    * reserved power R2 (the first constitution.adopt entry; genesis). Null
@@ -507,6 +526,9 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const dataFiles = (v: unknown): DataFile[] => normaliseData(v);
   const observations = new Map<string, SourceObservation>();
   const fieldObservations = new Map<string, FieldObservation>();
+  const links = new Map<string, LinkState>();
+  /** Withdrawals, in log order: applied once compromises are known, so one signed by a stolen key is void. */
+  const unlinks: Array<{ link: string; operatorId: string; handle: string; reason: string; seq: number; ts: string }> = [];
   const syncHeld = (subject: string) => { if (hazardHeld.has(subject) || withheld.has(subject)) held.add(subject); else held.delete(subject); };
   let constitution: V2Record["constitution"] = null;
   let head: V2Record["head"] = null;
@@ -619,6 +641,31 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         claimByRef.set(id, claim);
         // scope/0.1: the paper's scope, as the registrant declares it from the paper's words.
         scopes.set(id, [{ scope: kind === "conceptual" ? null : normaliseScope(p["scope"]), fidelity: normaliseFidelity(p["fidelity"]), data: dataFiles(p["data"]), how: "registration", seq: e.seq, ts: e.ts }]);
+        break;
+      }
+      case "claim.link": {
+        // literature/0.1: a dependency between two claims from human literature, both already on the record, identified by an
+        // agent from the citing paper's own words. One operator identifies a link once (its id hashes the operator in), and the
+        // first entry for an id stands, so a withdrawn link stays withdrawn. No cycle check here: the service refuses one before
+        // writing, and nothing derived from links needs an order among them (links.ts).
+        const id = str(p["id"]);
+        const from = str(p["from"]);
+        const to = str(p["to"]);
+        const rel = str(p["rel"]);
+        const handle = str(p["handle"]);
+        if (!LINK_ID.test(id) || links.has(id) || !external.has(from) || !external.has(to) || from === to || !(LINK_RELS as readonly string[]).includes(rel) || !handle) break;
+        const declared = modelFamilies(p["models"] as string[] | undefined);
+        links.set(id, {
+          id, from, to, rel: rel as LinkRel, quote: str(p["quote"]), where: str(p["where"]) || null, handle, operatorId: str(p["operatorId"]),
+          families: declared.length ? declared : (agents.get(handle)?.families ?? []), seq: e.seq, ts: e.ts,
+          key: agents.get(handle)?.publicKey ?? "", tier: "unverified", disowned: false, withdrawn: null,
+        });
+        break;
+      }
+      case "claim.unlink": {
+        // Kept for after the fold, when compromises are known: a withdrawal counts only from the identifying operator, signed by a
+        // key in force (the service checks the operator before writing; a hostile entry from anyone else changes nothing).
+        unlinks.push({ link: str(p["link"]), operatorId: str(p["operatorId"]), handle: str(p["handle"]), reason: str(p["reason"]), seq: e.seq, ts: e.ts });
         break;
       }
       case "check.commit": {
@@ -1004,6 +1051,24 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     if (obs) c.reach = reachOf(obs, now);
   }
 
+  // literature/0.1: the links that count, now that tiers, compromises, findings and holds are known, and each claim's reliance
+  // (links.ts), which enters its stakes and nothing else.
+  for (const l of links.values()) {
+    l.tier = tierOf(l.operatorId);
+    l.disowned = disownedAt(l.key, l.ts);
+  }
+  // The first withdrawal of each link by its own operator, signed by its agent's main key before any declared compromise, stands;
+  // one a thief signed after the compromise is void, as a report it signed would be, so declaring the compromise restores the link.
+  for (const u of unlinks) {
+    const l = links.get(u.link);
+    if (!l || l.withdrawn || u.seq < l.seq || u.operatorId !== l.operatorId || agents.get(u.handle)?.operatorId !== l.operatorId) continue;
+    if (disownedAt(agents.get(u.handle)?.publicKey ?? "", u.ts)) continue;
+    l.withdrawn = { seq: u.seq, ts: u.ts, reason: u.reason, handle: u.handle };
+  }
+  const linkEdges = linkEdgesOf(links.values(), { held: (subject) => held.has(subject), voided: (op) => voidedOperators.has(op) });
+  const reliance = relianceOf(linkEdges);
+  for (const c of claims) { const n = reliance.get(c.ref); if (n !== undefined) c.reliance = n; }
+
   const evidence: EvidenceInput[] = [];
   const receiptsByClaim = new Map<string, Array<{ id: string; operatorId: string; seq: number; requires: string[] }>>();
   for (const c of [...checks.values()].sort((a, b) => a.seq - b.seq)) {
@@ -1046,6 +1111,6 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     tiers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, native, edges, claims, external, checks, findings, evidence,
     uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, withdrawn,
     screeningHolds: screeningHeld, scopes, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim,
-    attempts, attemptsByClaim, clears, blockers, observations, fieldObservations,
+    attempts, attemptsByClaim, clears, blockers, observations, fieldObservations, links, linkEdges,
   };
 }
