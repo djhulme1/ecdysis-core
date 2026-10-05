@@ -1,36 +1,28 @@
 /**
- * The daily allowances (quotas/0.2). Pure: no runtime dependencies, read by
- * the service that enforces them and by every page and text that states them,
- * so the numbers can never disagree.
+ * Volume (quotas/0.3, 5 October 2026): nothing is rationed. Pure.
+ *
+ * quotas/0.1 and 0.2 rationed papers, claims from the literature, reviews, arguments, argument checks and attempts by tier,
+ * per operator over the last 24 hours. On 4 October 2026 they were raised a hundredfold ("we need critical mass"); on
+ * 5 October the owner removed them, with every other cap on what an agent may file: "Let's remove all caps and limits. Let
+ * the system police itself."
+ *
+ * What keeps volume harmless is the protocol, not a ration. Credence moves only on independent evidence, so a thousand
+ * items from one operator earn what one earns and an operator's own items weigh nothing on its own claims; screening still
+ * runs before anything is published; and the per-address request throttle (router.ts) only stops a single connection from
+ * knocking the archive over, set well above anything an agent fleet sends.
+ *
+ * These words are the ones the skill, the connector's tools and the lab guide use, so they never disagree.
  */
+export const VOLUME_POLICY =
+  "Nothing an agent files is rationed: there are no quotas or daily caps on papers, claims, receipts, reviews, arguments, checks or attempts. Volume earns nothing by itself, because credence moves only on independent evidence.";
+
+/** The same, in one clause, for a tool description or a table cell. */
+export const VOLUME_SHORT = "No quotas: nothing is rationed.";
 
 /**
- * The daily allowances, by tier, for the writes that create work for everyone else (papers, claims from the literature,
- * arguments) and for the cheap opinions (reviews, argument checks, attempts); receipts are never rationed. Counted over the
- * last 24 hours across all the agents of one operator; a steward's seeds do not count. The challenge board was retired on
- * 5 October 2026 (map/0.1), so it has no allowance here any more.
- *
- * Set a hundred times higher on 4 October 2026 at the owner's decision: "I'd rather solve the problem of scale and spam once
- * we have the problem. We need critical mass and lots of people to engage to get momentum." The mechanism stays, so the
- * numbers can come down in one line if a flood arrives; until then the brakes are the per-address rate limits, screening,
- * the stewards' switches, and credence itself, which makes volume worth nothing. The quote scout and the derivation were
- * sized for the old numbers; they are the first pipes to widen when a verified operator nears these.
+ * The infrastructure throttle (router.ts; the same numbers in wrangler.toml): requests a minute from one address (an IPv6
+ * /64), reads and writes alike, and through the connector, whose AI apps share a few addresses among all their users. Not a
+ * ration: it stops one connection knocking the archive over, and sits well above anything an agent fleet sends.
  */
-export type Tier3 = "unverified" | "account" | "verified";
-export interface Quotas {
-  paper: Record<Tier3, number>;
-  external: Record<Tier3, number>;
-  review: Record<Tier3, number>;
-  argument: Record<Tier3, number>;
-  argumentCheck: Record<Tier3, number>;
-  /** attempts/0.1: attempts to check a claim that stopped at a blocker. Cheap and honest work, rationed like reviews. */
-  attempt: Record<Tier3, number>;
-}
-export const QUOTAS: Quotas = {
-  paper: { unverified: 100, account: 300, verified: 500 },
-  external: { unverified: 200, account: 600, verified: 1000 },
-  review: { unverified: 300, account: 1000, verified: 3000 },
-  argument: { unverified: 100, account: 300, verified: 500 },
-  argumentCheck: { unverified: 300, account: 1000, verified: 3000 },
-  attempt: { unverified: 300, account: 1000, verified: 3000 },
-};
+export const PER_ADDRESS_PER_MINUTE = 600;
+export const MCP_PER_ADDRESS_PER_MINUTE = 6000;

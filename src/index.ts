@@ -5,7 +5,7 @@
  */
 
 import { EcdysisService, PREPRINT_DAILY_CAP } from "./api/service.js";
-import { BUCKET_LIMITS, MemoryRateLimiter, route, type RateLimiter } from "./api/router.js";
+import { BUCKET_LIMITS, MemoryRateLimiter, PER_ADDRESS_PER_MINUTE, route, type RateLimiter } from "./api/router.js";
 import { V2Cache, V2Service } from "./api/v2/service.js";
 import { Accounts } from "./api/v2/accounts.js";
 import { MeHandler } from "./api/v2/me.js";
@@ -149,13 +149,12 @@ export interface Env {
    * Cloudflare's rate-limiting bindings (wrangler.toml, [[ratelimits]]): one
    * limit per binding, per key, per Cloudflare location, shared by every
    * isolate there. RL_KEY carries the ordinary ceiling (reads and writes per
-   * address), RL_MCP the connector's per-connection ceiling, RL_AGENT the
-   * connector's per-agent one. Any that is missing falls back to the
-   * in-memory limiter for its buckets alone.
+   * address), RL_MCP the connector's per-connection ceiling. There is no
+   * per-agent ceiling any more (quotas/0.3). Any that is missing falls back
+   * to the in-memory limiter for its buckets alone.
    */
   RL_KEY?: RateLimitBinding;
   RL_MCP?: RateLimitBinding;
-  RL_AGENT?: RateLimitBinding;
 }
 
 export function screenersFrom(env: Env): Screener[] {
@@ -214,20 +213,19 @@ export interface RateLimitBinding {
  * nothing; this one lives as long as the isolate does. Cloudflare's bindings,
  * when bound, are shared across the isolates of a location and preferred.
  */
-const FALLBACK_LIMITER = new MemoryRateLimiter(60, 60_000, () => Date.now(), BUCKET_LIMITS);
+const FALLBACK_LIMITER = new MemoryRateLimiter(PER_ADDRESS_PER_MINUTE, 60_000, () => Date.now(), BUCKET_LIMITS);
 
 /**
  * The limiter for a request: each bucket goes to the binding that carries
  * its ceiling (one binding has one limit for every key, so the connector's
- * 600 a minute cannot share RL_KEY's 60), and a bucket whose binding is not
+ * 6,000 a minute cannot share RL_KEY's 600), and a bucket whose binding is not
  * bound, or whose binding fails, falls back to the in-memory limiter, so
  * there is always a ceiling and a platform hiccup never opens the gates.
  */
-export function limiterFrom(env: Pick<Env, "RL_KEY" | "RL_MCP" | "RL_AGENT">): RateLimiter {
-  if (!env.RL_KEY && !env.RL_MCP && !env.RL_AGENT) return FALLBACK_LIMITER;
+export function limiterFrom(env: Pick<Env, "RL_KEY" | "RL_MCP">): RateLimiter {
+  if (!env.RL_KEY && !env.RL_MCP) return FALLBACK_LIMITER;
   const bindingFor = (bucket: string): RateLimitBinding | undefined => {
     if (bucket === "mcp") return env.RL_MCP;
-    if (bucket === "mcp-agent") return env.RL_AGENT;
     // Every other bucket carries the default ceiling, which is RL_KEY's; a bucket with a ceiling of its own and no binding falls back.
     return BUCKET_LIMITS[bucket] === undefined ? env.RL_KEY : undefined;
   };

@@ -17,7 +17,7 @@ CATEGORY = os.environ.get("ARXIV_CATEGORY", "stat.ML")          # your field: q-
 LLM = os.environ.get("LLM_URL", "http://localhost:1234/v1")     # LM Studio; Ollama: http://localhost:11434/v1
 
 API = os.environ.get("ECDYSIS_API", "https://api.ecdysis.me")
-PER_RUN = int(os.environ.get("PER_RUN", "6"))                   # claims to register per run: a batch, well inside any tier's daily allowance
+PER_RUN = int(os.environ.get("PER_RUN", "6"))                   # claims to register per run: a batch (nothing is rationed)
 HOME = pathlib.Path.home() / ".ecdysis"
 KEY_FILE, SEEN_FILE = HOME / f"{HANDLE}.key", HOME / f"{HANDLE}.seen.json"
 HIDDEN = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2066-\u2069]")  # zero-width and bidirectional characters
@@ -173,7 +173,7 @@ def run() -> None:
                 print("archive:", e)
                 break
             print(r.status_code, source, r.text[:200])
-            if r.status_code not in (200, 201, 400, 451):      # quota used up, archive busy or set-up wrong: keep the paper
+            if r.status_code not in (200, 201, 400, 451):      # throttled, archive busy or set-up wrong: keep the paper
                 break
             sent += r.status_code == 201
         seen.add(source)                                       # decided: filed, already there, refused or skipped

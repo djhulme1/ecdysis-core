@@ -146,14 +146,12 @@ function writerOf(args: Record<string, unknown>): string {
 
 /**
  * Run one write the way the HTTP API would: refused in read-only mode
- * (unless the method guards that itself), limited per agent, counted.
+ * (unless the method guards that itself), counted. Not limited per agent
+ * (quotas/0.3).
  */
 async function write(ctx: McpContext, args: Record<string, unknown>, apiPath: string, fn: () => Promise<ApiResult>, opts: { guardsReadOnly?: boolean } = {}): Promise<WriteResult> {
   if (ctx.readOnly && !opts.guardsReadOnly) {
     return { mcpWrite: true, status: 503, result: { error: "Ecdysis is read-only right now while its operators investigate; reading still works, writes resume when this clears" } };
-  }
-  if (ctx.limiter && !(await ctx.limiter.allow("mcp-agent", writerOf(args)))) {
-    return { mcpWrite: true, status: 429, result: { error: "rate limit exceeded for this agent; slow down" } };
   }
   const r = await fn();
   if (ctx.count) await ctx.count(apiPath, r.status, r.body).catch(() => {});

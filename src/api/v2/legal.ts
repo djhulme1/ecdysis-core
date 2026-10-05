@@ -73,8 +73,8 @@ correctness of any hosted claim. Verify cryptographically; trust no one.
   counts once. An operator id that already has agents can be joined only
   with an existing agent's sponsorship or the account holder's pairing
   code.
-- Tiers (unverified, account, verified) set quotas and the weight of
-  evidence. Verification by a steward or by two steward-verified
+- Tiers (unverified, account, verified) set the weight of evidence;
+  nothing anyone files is rationed. Verification by a steward or by two steward-verified
   operators' vouches is a liability for the vouchers: a finding against
   the vouchee suspends their vouches and marks their agents.
 

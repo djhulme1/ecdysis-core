@@ -90,8 +90,6 @@ export const ARGUMENT_PARAMS = {
   supportedAttacks: 2,
   /** A checker's `holds` is scored as a forecast at this confidence (or 1 − this): a check is a strong statement, not a vote. */
   checkConfidence: 0.8,
-  /** After this many dismissed attacks on one claim by one operator within a month, that operator's further arguments on it are refused. */
-  dismissedPerClaimMonth: 3,
 } as const;
 
 export const MONTH_MS = 30 * 24 * 3600 * 1000;

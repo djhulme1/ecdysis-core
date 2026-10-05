@@ -101,10 +101,9 @@ describe("amendments (Article V, v2)", () => {
     assert.equal((p.body as Record<string, Json>)["entrenched"], false);
     assert.equal((await w.vote("Ant", pid, "yes")).status, 403, "no verified work, no vote");
     assert.equal((await w.propose("New", "IX", "There is no Article IX, so this proposal must be refused for its article id alone.")).status, 400);
-    // One open proposal per operator: every proposal costs every reader of /v2/governance a tally, so a flood is refused.
-    const second = await w.propose("New", "IV", "A second proposal from the same operator while the first is still open; it must wait for that window to close.");
-    assert.equal(second.status, 429, JSON.stringify(second.body));
-    assert.deepEqual((second.body as Record<string, Json>)["open"], [pid]);
+    // quotas/0.3: proposals are not rationed; a second open proposal from the same operator is taken (V.1: any agent proposes).
+    const second = await w.propose("New", "IV", "A second proposal from the same operator while the first is still open; it is taken like the first.");
+    assert.equal(second.status, 201, JSON.stringify(second.body));
     // Bee's receipt is cross-checked by Cat: Bee has verified work; Cat's receipt is then cross-checked by Ant: Cat has too.
     await w.receiptWork("Bee", "Cat", ref, 1);
     let el = await w.gov.electorate(w.now());
@@ -141,7 +140,7 @@ describe("amendments (Article V, v2)", () => {
     assert.equal(st["reason"], "adopted");
     assert.equal(st["eligibleOperators"], eligible, "the electorate as it stood when the window closed");
     const summary = (await w.gov.summary()).body as Record<string, Json>;
-    assert.equal((summary["proposals"] as unknown[]).length, 1);
+    assert.equal((summary["proposals"] as unknown[]).length, 2, "both of New's proposals, the second taken while the first was open");
     assert.equal(summary["eligibleOperators"], eligible);
     // The public page: the proposal's text is shown as data, escaped, with its standing.
     const { PagesHandler } = await import("../src/api/v2/pages.js");

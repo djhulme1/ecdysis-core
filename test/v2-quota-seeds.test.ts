@@ -1,11 +1,9 @@
 /**
- * Stewards' acts and the daily allowance (4 October 2026). A steward acts
- * under their own operator id; the agents that share that operator id must
- * not find their allowance spent by those acts. That morning 17 founding
- * seeds left the owner's agents unable to register a claim from the
- * literature for a day. Seeding was retired with the board on 5 October
- * 2026 (map/0.1) and now writes nothing; a steward's remaining acts
- * (withholding content, a switch) still cost the agents nothing.
+ * Stewards' acts and the agents under the steward's operator id (4 October 2026). A steward acts under their own operator
+ * id; the agents that share it must never find their work refused because of those acts. That morning 17 founding seeds
+ * left the owner's agents unable to register a claim from the literature for a day. Seeding was retired with the board on
+ * 5 October 2026 (map/0.1) and writes nothing; and since quotas/0.3 the same day nothing an agent files is rationed at all,
+ * so neither a steward's acts nor the agents' own volume can stop the next registration.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -16,8 +14,6 @@ import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
-// The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
-const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
 
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
@@ -28,13 +24,13 @@ async function world() {
   const log = new TransparencyLog(logStore, now);
   const logKey = await generateKeyPair();
   const rows = () => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }));
-  const svc = new V2Service({ log, store: new MemoryV2Store(rows), logPrivateKey: logKey.privateKey, now, quotas: SMALL_QUOTAS });
+  const svc = new V2Service({ log, store: new MemoryV2Store(rows), logPrivateKey: logKey.privateKey, now });
   const keys = new Map<string, KeyPairB64>();
-  const agent = async (handle: string, op: string) => {
+  const agent = async (handle: string, op: string, tier: "unverified" | "account" | "verified" = "verified") => {
     const kp = await generateKeyPair();
     keys.set(handle, kp);
     assert.equal((await svc.registerAgent({ constitution: ACK, handle, publicKey: kp.publicKey, operatorId: op, models: ["gemma"] })).status, 201);
-    await svc.setTier(op, "verified");
+    await svc.setTier(op, tier);
   };
   const sign = async (handle: string, payload: Record<string, Json>) => {
     const kp = keys.get(handle)!;
@@ -51,14 +47,14 @@ async function world() {
   return { svc, agent, sign, register, seed, rows };
 }
 
-describe("stewards' acts and the agents' daily allowance", () => {
-  it("seeding is retired and writes nothing; a steward's other acts spend none of the allowance of the agents under the steward's operator id; the agents' own writes still do", async () => {
+describe("stewards' acts and the agents under the steward's operator id", () => {
+  it("seeding is retired and writes nothing; a steward's other acts refuse nothing of the agents'; and no volume of their own is refused either (quotas/0.3)", async () => {
     const w = await world();
     await w.agent("Bee", "op-daniel");
     await w.agent("Ant", "op-other");
-    // More seeds than the whole verified allowance for claims, as on the morning of 4 October: every one is refused now, and the log is untouched.
+    // More seeds than the whole old verified allowance for claims, as on the morning of 4 October: every one is refused now, and the log is untouched.
     const before = w.rows().length;
-    for (let i = 1; i <= SMALL_QUOTAS.external.verified + 2; i++) assert.equal((await w.seed("op-daniel", i)).status, 410, `seed ${i}`);
+    for (let i = 1; i <= 12; i++) assert.equal((await w.seed("op-daniel", i)).status, 410, `seed ${i}`);
     assert.equal(w.rows().length, before, "a retired seed writes nothing");
     // The steward's remaining acts under the same operator id: a switch flipped and flipped back, and a claim of someone else's taken out of view.
     assert.equal((await w.svc.setSetting("v2.reviews", "paused", "op-daniel")).status, 200);
@@ -67,9 +63,13 @@ describe("stewards' acts and the agents' daily allowance", () => {
     assert.equal(theirs.status, 201, JSON.stringify(theirs.body));
     const theirId = String((theirs.body as Record<string, Json>)["id"]);
     assert.equal((await w.svc.withholdContent(theirId, "review", "the quote could not be found in the cited source; under review", "op-daniel")).status, 200);
-    // The agent's allowance is whole: every one of its registrations goes in, and the one past the allowance is refused.
-    for (let i = 1; i <= SMALL_QUOTAS.external.verified; i++) assert.equal((await w.register("Bee", i)).status, 201, `registration ${i}`);
-    const over = await w.register("Bee", SMALL_QUOTAS.external.verified + 1);
-    assert.equal(over.status, 429, "the agents' own registrations still count");
+    // Nothing is rationed: the agent registers well past the first week's verified allowance of ten a day, in one day.
+    for (let i = 1; i <= 15; i++) assert.equal((await w.register("Bee", i)).status, 201, `registration ${i}`);
+  });
+
+  it("an unverified operator, the lowest tier, is rationed no more than a verified one", async () => {
+    const w = await world();
+    await w.agent("Gnat", "op-gnat", "unverified");
+    for (let i = 1; i <= 8; i++) assert.equal((await w.register("Gnat", 200 + i)).status, 201, `registration ${i} at the unverified tier (the first week allowed two)`);
   });
 });

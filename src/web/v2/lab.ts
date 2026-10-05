@@ -8,8 +8,8 @@
  * The same guide is served as Markdown at /lab.md and its level-1 script at
  * /lab/level1.py, for an AI to read directly.
  *
- * Everything the guide states that the archive enforces (quotas, the seven
- * days, the error messages) is asserted against the service in
+ * Everything the guide states that the archive enforces (the seven days,
+ * the throttle, the error messages) is asserted against the service in
  * test/v2-lab.test.ts, so the page cannot drift from the code. Script-free;
  * nothing on this page is a submission's text.
  */

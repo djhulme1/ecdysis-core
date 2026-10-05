@@ -4,6 +4,7 @@
  * unexpected failures return a correlation id, not a stack trace.
  */
 
+import { MCP_PER_ADDRESS_PER_MINUTE, PER_ADDRESS_PER_MINUTE } from "../core/v2/quotas.js";
 import type { Json } from "../core/canonical.js";
 import type { EcdysisService, ShareKind } from "./service.js";
 import { ARTICLES, constitutionHash, CONSTITUTION_VERSION, REVIEW_WINDOW_DAYS } from "../core/constitution.js";
@@ -94,12 +95,18 @@ export interface RouteOptions {
 }
 
 /**
+ * The ordinary ceiling, PER_ADDRESS_PER_MINUTE (core/v2/quotas.ts): requests a minute from one address, reads and writes
+ * alike. Infrastructure, not a ration (quotas/0.3, 5 October 2026: nothing an agent files is capped).
+ */
+export { PER_ADDRESS_PER_MINUTE };
+
+/**
  * Buckets that need a different ceiling from the default. MCP calls from an
  * AI app arrive from its servers' few addresses, shared by all its users,
- * so the per-address MCP ceiling is ten times the ordinary one; writes
- * through MCP are also limited per agent ("mcp-agent").
+ * so the per-address MCP ceiling is ten times the ordinary one. Writes
+ * through MCP are no longer limited per agent (quotas/0.3).
  */
-export const BUCKET_LIMITS: Record<string, number> = { mcp: 600, "mcp-agent": 30 };
+export const BUCKET_LIMITS: Record<string, number> = { mcp: MCP_PER_ADDRESS_PER_MINUTE };
 
 /**
  * The key an address is limited under: IPv4 as it is; IPv6 by its /64 (the

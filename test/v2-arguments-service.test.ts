@@ -25,8 +25,6 @@ import type { Bundle } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
-// The quotas of the first week, so the tests that count to the limit stay quick; production reads QUOTAS (core/v2/quotas.ts).
-const SMALL_QUOTAS = { paper: { unverified: 1, account: 3, verified: 5 }, external: { unverified: 2, account: 6, verified: 10 }, review: { unverified: 3, account: 10, verified: 30 }, argument: { unverified: 1, account: 3, verified: 5 }, argumentCheck: { unverified: 3, account: 10, verified: 30 } } as const;
 
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
@@ -41,7 +39,7 @@ async function world() {
   const logKey = await generateKeyPair();
   const rows = () => (logStore as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }));
   const v2store = new MemoryV2Store(rows);
-  const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()], quotas: SMALL_QUOTAS });
+  const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener()] });
   const v1 = new EcdysisService({ store: logStore, screeners: [structuralScreener()], sthPrivateKey: null });
   const pages = new PagesHandler(svc, { host: "api.ecdysis.me" });
   const limiter = new MemoryRateLimiter(10_000);
@@ -237,7 +235,7 @@ describe("arguments/0.1 through the service", () => {
     assert.ok(capped.credence < 0.2, `credence ${capped.credence} is capped by the established claim`);
   });
 
-  it("stops a flood: after three dismissed attacks on one claim in a month an operator's further arguments on it are refused, and the daily quota holds", async () => {
+  it("refuses no attack (quotas/0.3): after three dismissed attacks on one claim a fourth is taken and answered by checks, and there is no daily quota", async () => {
     const w = await world();
     await w.agent("Author", "op-author", ["claude-opus-5-5"]);
     await w.agent("Troll", "op-troll", ["gpt-5"]);
@@ -254,21 +252,21 @@ describe("arguments/0.1 through the service", () => {
       w.tick(3600 * 1000);
     }
     const fourth = await w.argue("Troll", claim, { text: long("Attempt 4: the same objection, restated at greater length and with more conviction than before.") });
-    assert.equal(fourth.status, 429);
-    assert.match(String(body(fourth)["error"]), /dismissed by independent checkers/);
+    assert.equal(fourth.status, 201, "the record answers a persistent attacker, not a bar");
+    const fourthId = String(body(fourth)["id"]);
+    assert.equal((await w.check("Judge1", fourthId, false)).status, 201);
+    assert.equal(body(await w.check("Judge2", fourthId, false))["status"], "dismissed", "and it is dismissed like the others");
     assert.equal((await w.argue("Troll", claim, { stance: "supports", text: long("For what it is worth, the construction does seem to go through for the finite members, as the author says.") })).status, 201, "agreement is not an attack and is not refused");
     const corroborated = await w.score(claim);
     assert.equal(corroborated.arguments.dismissed, 1, "one operator's dismissed attacks count once");
     assert.equal(corroborated.status, "unchecked", "two distinct verified arguers' dismissed attacks are needed for supported");
-    // The daily quota, by tier.
+    // No daily quota: an account-tier operator files past the old allowance of three a day.
     await w.agent("Busy", "op-busy", ["gpt-5"], "account");
-    let filed = 0;
-    for (let i = 0; i < SMALL_QUOTAS.argument.account + 1; i++) {
+    for (let i = 0; i < 6; i++) {
       const r = await w.argue("Busy", claim, { text: long(`Objection ${i}: the closure assumption at the second lemma is stated but not proved in the paper as written.`) });
-      if (r.status === 201) filed++; else { assert.equal(r.status, 429); assert.match(String(body(r)["error"]), /quota/); }
+      assert.equal(r.status, 201, `objection ${i + 1}: ${JSON.stringify(r.body)}`);
       w.tick(1000);
     }
-    assert.equal(filed, SMALL_QUOTAS.argument.account);
   });
 
   it("a brief that wants an argument, archived from before the board was retired, goes underway on an argument, never on a receipt; seeding new ones is closed", async () => {
