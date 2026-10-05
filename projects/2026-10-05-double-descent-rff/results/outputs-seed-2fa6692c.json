@@ -1,0 +1,17 @@
+{
+ "n_max_features": 40000,
+ "n_test": 10000,
+ "n_train": 10000,
+ "rank_at_n": 9992,
+ "sq_argmax_N": 10000,
+ "sq_at_max": 0.1205,
+ "sq_at_n": 42.8918,
+ "train_zo_at_n": 0.0,
+ "zo_argmax_N": 10000,
+ "zo_argmin_below_n": 3000,
+ "zo_at_1000": 6.95,
+ "zo_at_2n": 3.51,
+ "zo_at_max": 2.75,
+ "zo_at_n": 77.15,
+ "zo_min_below_n": 4.96
+}
