@@ -97,6 +97,23 @@ jobs:
             echo "No HERALD_API_KEY secret: email sending stays off." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Install the stakes scout's OpenAlex key (when configured)
+        if: steps.gate.outputs.ready == 'true'
+        # A free key gives the scout its own daily budget; without it OpenAlex
+        # answers 429 once everyone behind the Worker's shared IP has spent the
+        # free one. Piped, never echoed. Without it, sources are still observed
+        # where OpenAlex allows, and the field totals may not be.
+        env:
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+        shell: bash
+        run: |
+          if [ -n "$OPENALEX_API_KEY" ]; then
+            printf '%s' "$OPENALEX_API_KEY" | npx wrangler secret put OPENALEX_API_KEY > /dev/null
+            echo "OpenAlex key installed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No OPENALEX_API_KEY secret: the stakes scout uses OpenAlex's shared free budget." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Deploy the apps Worker (user-content domain)
         if: steps.gate.outputs.ready == 'true'
         # Separate step and allowed to fail without masking the core deploy:

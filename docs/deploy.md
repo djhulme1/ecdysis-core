@@ -229,6 +229,8 @@ kind of email shares `EMAIL_DAILY_CAP` per 24 hours: set it to your plan's
 quota. `HERALD_PAUSED = "1"` (or the kill switch) stops all sending;
 unsubscribe links keep working regardless.
 
+**The citation graph.** The stakes scout reads OpenAlex every quarter-hour. Without a key, OpenAlex counts each request against a free daily budget it shares among everyone behind the same IP address, and a Worker's egress is shared, so field totals and field lists can answer 429. A key is free (https://help.openalex.org/api/authentication/): add it as the GitHub secret `OPENALEX_API_KEY` and the deploy installs it as a Worker secret. The scout sends it as a bearer header, never in a URL.
+
 **The operator console** (`/operator`) is locked twice. In Cloudflare Zero
 Trust, create a self-hosted Access application for `your-domain/operator`
 with an Allow policy for your own address (one-time PIN is enough). Then

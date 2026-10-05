@@ -94,9 +94,12 @@ export class QuoteScout {
       if (out.checked >= limit) break;
       if (r.held.has(id)) continue; // out of view: nothing to check until it is back
       const prev = await this.o.store.get(id);
-      if (prev && !((prev.status === "error" || prev.status === "unresolvable") && prev.attempts < MAX_ATTEMPTS && Date.parse(prev.checkedAt) < cutoff)) continue;
+      // A failure of the scout's own making is no attempt on the source: until 5 October (#64) every request failed on the
+      // Worker with "Illegal invocation", spending claims' four attempts in a day. Those rows start again, at once.
+      const ours = prev?.status === "error" && /Illegal invocation/.test(prev.detail ?? "");
+      if (prev && !ours && !((prev.status === "error" || prev.status === "unresolvable") && prev.attempts < MAX_ATTEMPTS && Date.parse(prev.checkedAt) < cutoff)) continue;
       if (out.checked > 0) await this.pause(3000);
-      const row = await this.check(id, x.source, x.quote, (prev?.attempts ?? 0) + 1);
+      const row = await this.check(id, x.source, x.quote, ours ? 1 : (prev?.attempts ?? 0) + 1);
       await this.o.store.put(row);
       out.checked++;
       if (row.status === "verified") out.verified++;

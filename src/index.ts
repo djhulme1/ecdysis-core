@@ -103,6 +103,8 @@ export interface Env {
   REVIEW_ALL?: string;
   /** The Herald (author emails): provider key (secret, installed by the deploy), approver public key, addresses, pause switch. */
   HERALD_API_KEY?: string;
+  /** stakes/0.1: an OpenAlex API key (free), so the stakes scout has its own daily budget rather than the one OpenAlex shares among everyone behind the Worker's IP address. A secret, installed by the deploy from the GitHub secret of the same name. */
+  OPENALEX_API_KEY?: string;
   /** Where a new complaint is announced (a comma-separated list of addresses: the stewards' own); unset, nobody is emailed and the queue waits to be read. */
   ISSUE_ALERT_TO?: string;
   HERALD_APPROVER_PUBLIC_KEY?: string;
@@ -364,7 +366,7 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
   const quoteStore = new D1QuoteCheckStore(env.DB);
   const quotes = new QuoteScout({ store: quoteStore, v2, issues, contact: env.HERALD_REPLY_TO || "replies@ecdysis.me" });
   // The stakes scout (stakes/0.1): on the cron, a few registered sources' reach is read from the public citation graph and logged.
-  const stakes = new StakesScout({ v2, log, candidates, contact: env.HERALD_REPLY_TO || "replies@ecdysis.me" });
+  const stakes = new StakesScout({ v2, log, candidates, contact: env.HERALD_REPLY_TO || "replies@ecdysis.me", apiKey: env.OPENALEX_API_KEY ?? null });
   return {
     v2, notifier, quotes, stakes,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },
