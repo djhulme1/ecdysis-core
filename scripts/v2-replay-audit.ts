@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { V2Entry } from "../src/core/v2/flow.js";
 import { resolveV2 } from "../src/core/v2/resolve.js";
+import { EARNING_PARAMS } from "../src/core/v2/scoring.js";
 import { buildLeaderboard, leaderboardInputOf } from "../src/core/v2/leaderboard.js";
 import { pressure, summariseBlockers } from "../src/core/v2/attempts.js";
 
@@ -48,6 +49,12 @@ export interface V2Outputs {
   labels?: Record<string, string>;
   /** leaderboard/0.1: each agent's and operator's rank, credence banked and at risk, right/wrong/open; the claims offered for audit, in order */
   leaderboard?: Record<string, string>;
+  /**
+   * credence/0.5: the same record under continuous settlement, which is built but not in force under constitution 2.1.0:
+   * every standing, reliability, claim and calibration as the amended III.4 would make them. Pinned now so that enacting
+   * the amendment is a known difference, not a discovery.
+   */
+  settlement?: Record<string, string>;
 }
 
 const r6 = (x: number) => x.toFixed(6);
@@ -427,15 +434,28 @@ export function scoreScripted(): V2Outputs {
   for (const a of [...board.agents].sort((x, y) => x.agent.localeCompare(y.agent))) leaderboard[`agent ${a.agent}`] = standing(a);
   for (const o of [...board.operators].sort((x, y) => x.operatorId.localeCompare(y.operatorId))) leaderboard[`operator ${o.operatorId}`] = standing(o);
   leaderboard["audit"] = board.audit.map((i) => `${i.claim}:${r6(i.weight)}`).join(";") || "none";
+  // credence/0.5: the record under continuous settlement (built; not in force under 2.1.0). Who gains and who loses if the
+  // III.4 amendment is enacted is in this section now: each standing with its reliability, every claim's credence, status
+  // and author calibration, how many reports are settled and how far, and who is verified by record (which keeps the full bar).
+  const cont = resolveV2(log, asOf, EARNING_PARAMS, "continuous");
+  const cboard = buildLeaderboard(leaderboardInputOf(cont.record, cont.scores, Number.MAX_SAFE_INTEGER, 10));
+  const settlement: Record<string, string> = {};
+  for (const a of [...cboard.agents].sort((x, y) => x.agent.localeCompare(y.agent))) settlement[`agent ${a.agent}`] = `${standing(a)} · reliability ${r6(cont.scores.track.reliability.get(a.agent) ?? 0.5)}`;
+  for (const o of [...cboard.operators].sort((x, y) => x.operatorId.localeCompare(y.operatorId))) settlement[`operator ${o.operatorId}`] = standing(o);
+  settlement["audit"] = cboard.audit.map((i) => `${i.claim}:${r6(i.weight)}`).join(";") || "none";
+  for (const [ref, c] of [...cont.scores.claims.entries()].sort()) settlement[`claim ${ref}`] = `${r6(c.credence)} · ${c.status} · calibration ${r6(c.calibration)}`;
+  const shares = cont.scores.track.reports.map((x) => x.settled ?? 0);
+  settlement["reports"] = `${shares.filter((y) => y !== 0).length} settled · ${shares.filter((y) => Math.abs(y) === 1).length} fully · ${shares.filter((y) => y !== 0 && Math.abs(y) < 1).length} partly`;
+  settlement["verifiedByRecord"] = [...cont.verifiedByRecord.values()].sort((a, b) => a.operatorId.localeCompare(b.operatorId)).map((e) => `${e.operatorId}:${e.reports}/${e.right}/${e.receipts}/${e.sources}@${e.round}`).join(";") || "none";
   // The labels: a claim's id read back to the script's name for it, with its author, so the claims section reads.
   const labels: Record<string, string> = {};
   for (const n of r.native.values()) labels[n.id] = `${Buffer.from(n.id.slice(4), "hex").toString("latin1").replace(/\0+$/, "")} (${n.handle})`;
-  return { claims, reliability, tiers, findings, facts, leaderboard, labels };
+  return { claims, reliability, tiers, findings, facts, leaderboard, settlement, labels };
 }
 
 export function differencesV2(was: V2Outputs, now: V2Outputs): string[] {
   const out: string[] = [];
-  for (const section of ["claims", "reliability", "tiers", "findings", "facts", "leaderboard", "labels"] as const) {
+  for (const section of ["claims", "reliability", "tiers", "findings", "facts", "leaderboard", "settlement", "labels"] as const) {
     const a = was[section] ?? {};
     const b = now[section] ?? {};
     for (const k of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) {
