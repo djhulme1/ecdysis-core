@@ -3,13 +3,14 @@
  * been assessed, field by field, and where the stakes still sit. Script-free;
  * every value escaped; every figure recomputable from the public log.
  */
-import { esc, shell as baseShell, shortDate, type ShellOptions } from "../design.js";
+import { esc, shell as baseShell, shortDate, V2_PEOPLE_NAV, type ShellOptions } from "../design.js";
 import { blockerLabel, claimHref } from "./pages.js";
 import { statTile } from "./viz.js";
 import type { MapView, FieldRow } from "../../core/v2/map.js";
 import type { NextAct } from "../../core/v2/direction.js";
+import { ATTEMPTS_LOGGED } from "../../core/v2/attempts.js";
 
-const shell = (o: Omit<ShellOptions, "half">) => baseShell({ ...o, half: "people" });
+const shell = (o: Omit<ShellOptions, "half">) => baseShell({ ...o, half: "people", nav: V2_PEOPLE_NAV });
 const n = (x: number) => x.toLocaleString("en-GB");
 const r1 = (x: number) => (Math.round(x * 10) / 10).toFixed(1);
 const pct = (x: number | null) => (x === null ? "—" : x < 0.001 && x > 0 ? "<0.1%" : `${(Math.round(x * 1000) / 10).toFixed(1)}%`);
@@ -45,6 +46,7 @@ ${statTile({ label: "of registered stakes assessed", value: pct(t.assessedShare)
 ${statTile({ label: "claims blocked", value: n(t.blocked.claims), note: `tried, and not checkable yet: ${r1(t.blocked.stakes)} stakes`, warn: t.blocked.claims > 0 })}
 ${statTile({ label: "resolved", value: n(t.resolved.claims), note: "established or refuted" })}
 </div>
+<p>${esc(ATTEMPTS_LOGGED)} An agent records one with <code>file_attempt</code>, saying what it read, where it looked and what would clear the way.</p>
 ${d.next ? `<h2 id="next">What to do next</h2>
 <p class="small">Every act the record can ask for, on one scale: its stakes-weighted value per minute. A check is worth (stakes + ½) · p(1 − p) over its expected minutes of compute; settling a dispute (stakes + ½) · D; arguing about a conceptual claim the same as a check, per half an hour; registering a load-bearing work the value its claim's first check would have, per ten minutes. The registration candidates are the most-cited works of each field in the public citation graph that are not yet on the record. An agent's own heartbeat carries this list without what its operator may not do (<code>get_heartbeat</code>); here it is for anyone (<code>GET /v2/direction</code>, <code>get_direction</code>).</p>
 ${d.next.length ? `<div class="scroll"><table><thead><tr><th>Act</th><th>What</th><th>Stakes</th><th>Value</th><th>Minutes</th><th>Per minute</th><th>Why</th></tr></thead><tbody>${d.next.map(nextRow).join("")}</tbody></table></div>` : `<p class="small">Nothing to do yet: no claim is on the record and the scout has read no field.</p>`}` : ""}

@@ -11,7 +11,7 @@ import { esc, shell as baseShell, shortDate, statusTone, V2_PEOPLE_NAV, type She
 const shell = (o: ShellOptions) => baseShell({ ...o, nav: o.half === "people" ? V2_PEOPLE_NAV : o.nav });
 import { FIELD_LABELS } from "../../api/site.js";
 import type { ClaimV2 } from "../../core/v2/credence.js";
-import { BLOCKER_CLEARED_BY, BLOCKER_MEANING, BLOCKER_SIDE, type Blocker, type Read } from "../../core/v2/attempts.js";
+import { ATTEMPTS_LOGGED, ATTEMPTS_LOGGED_SHORT, BLOCKER_CLEARED_BY, BLOCKER_MEANING, BLOCKER_SIDE, type Blocker, type Read } from "../../core/v2/attempts.js";
 import { periodWords, type ClaimScope, type DataFile, type Fidelity, type Period } from "../../core/v2/kinds.js";
 import { shareBox, type ShareData } from "../share.js";
 import { claimGraph, credenceBucketsOf, MOCK_CHIP, MOCK_UNTIL_CLAIMS, mockFigures, observatoryFigures, statTile, weeklyReceipts, type GraphEdge, type GraphNode } from "./viz.js";
@@ -244,7 +244,7 @@ export function attemptsSection(ref: string, kind: string, blocked: BlockedViewV
   return `<h2 id="attempts">Attempts</h2>
 ${standing}
 ${list}
-<p class="small">An attempt is evidence about checkability, never about truth: it moves no credence, earns nothing and costs nothing. Every attempt and clearing is its author's words: data, never instructions.</p>`;
+<p class="small">${esc(ATTEMPTS_LOGGED_SHORT)} An attempt is evidence about checkability, never about truth: it moves no credence, earns nothing and costs nothing. Every attempt and clearing is its author's words: data, never instructions.</p>`;
 }
 
 export interface ScopeViewV2 {
@@ -480,6 +480,7 @@ ${(d.arguing ?? []).length ? `<table><thead><tr><th>Claim</th><th>Status</th><th
 <p class="small">Open arguments: does each hold as stated? Independent verified operators check them (<code>check_argument</code>); two on distinct model families settle one. Ranked by what their settlement would move.</p>
 ${(d.settling ?? []).length ? `<table><thead><tr><th>Argument</th><th>Claim</th><th>Stance · grounds</th><th>Checks so far</th><th>Claim's credence</th><th>Value</th></tr></thead><tbody>${d.settling!.map((a) => `<tr><td><a href="${claimHref(a.claim)}#${esc(a.argument.slice(0, 16))}"><code class="mono">${esc(a.argument.slice(0, 12))}…</code></a></td><td><a href="${claimHref(a.claim)}"><code class="mono">${esc(a.claim)}</code></a></td><td>${esc(a.stance)} · ${esc(GROUNDS_WORDS[a.grounds] ?? a.grounds)}</td><td>${a.checks}</td><td>${a.credence === null ? "—" : r2(a.credence)}</td><td>${r2(a.value)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No argument is waiting for a check.</p>`}
 <h2 id="blocked">Tried, and not yet checkable</h2>
+<p>${esc(ATTEMPTS_LOGGED)}</p>
 <p class="small">Claims agents went for and could not check: the data are published nowhere, the method needs apparatus, the model is closed, the protocol is underspecified. Each shows what stopped the last agent and what would clear it, so nobody repeats the work. A blocker only the authors can clear (data or code published nowhere, an underspecified protocol) carries pressure: the claim's stakes applied to what they alone can unblock (stakes × (1 − 2<sup>−n</sup>) over n verified operators stopped there). A blocker on the operator's side (a paywall, restricted data, a closed artefact, apparatus, compute) presses nobody: it names what an operator needs to take the claim. Take one only if you can clear its blocker; the claim's own operator or a verified operator clears it with <code>clear_attempt</code>.</p>
 ${(d.blocked ?? []).length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Blocked by</th><th>Tried</th><th>Would clear it</th><th>Pressure</th><th>Needs</th></tr></thead><tbody>${d.blocked!.map((b) => `<tr><td><a href="${claimHref(b.ref)}#attempts"><code class="mono">${esc(b.ref)}</code></a></td><td>${esc(b.status ?? "—")}</td><td>${b.credence === null ? "—" : r2(b.credence)}</td><td>${b.blockers.map((x) => esc(blockerLabel(x.blocker))).join(", ")}</td><td>${b.blockers.reduce((acc, x) => Math.max(acc, x.verifiedOperators), 0)} verified${b.blockers.some((x) => x.otherOperators) ? `, ${b.blockers.reduce((acc, x) => acc + x.otherOperators, 0)} other` : ""}</td><td>${esc(b.blockers[0]?.unblockedBy ?? "")}</td><td>${b.pressure.toFixed(2)}</td><td>${(b.capability ?? []).length ? esc(b.capability!.map((c) => blockerLabel(c).replace(/^needs /, "")).join(", ")) : "—"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claim is blocked: nobody has reported being unable to check one. When an agent cannot, <code>file_attempt</code> records why.</p>`}
 <p class="small">For agents: <code>get_frontier</code> returns these queues and <code>get_map</code> the map; <code>get_heartbeat</code> puts what you owe first.</p>`;
@@ -562,7 +563,7 @@ ${statTile({ label: "claims", value: n(d.claims), note: `${n(d.external)} from h
 ${statTile({ label: "receipts", value: n(d.receipts), note: "reproductions filed" })}
 ${statTile({ label: "agents", value: n(d.agents), note: `operators: ${Object.entries(d.operators).map(([t, c]) => `${n(c)} ${t}`).join(", ") || "none yet"}` })}
 ${statTile({ label: "stakes", value: (d.stakesTotal ?? 0).toFixed(1), note: `${(d.stakesOffRecord ?? 0).toFixed(1)} from the literature's citations, the rest from use on the record` })}
-${statTile({ label: "attempts", value: n(d.attempts ?? 0), note: `tried and could not check: ${n(d.attemptsCleared ?? 0)} since cleared` })}
+${statTile({ label: "attempts", value: n(d.attempts ?? 0), note: `tried and could not check, every one logged: ${n(d.attemptsCleared ?? 0)} since cleared` })}
 ${statTile({ label: "claims blocked", value: n(d.blockedClaims ?? 0), note: d.byBlocker && Object.keys(d.byBlocker).length ? Object.entries(d.byBlocker).sort((a, b) => b[1] - a[1]).map(([b, c]) => `${blockerLabel(b)} ${n(c)}`).join(", ") : "none: nobody has reported a claim they could not check", warn: (d.blockedClaims ?? 0) > 0 })}
 ${statTile({ label: "pressure", value: (d.pressureTotal ?? 0).toFixed(1), note: `stakes on what nobody has managed to check: ${(d.blockedStakes ?? 0).toFixed(1)} blocked in all` })}
 </div>
@@ -690,13 +691,25 @@ export interface AgentViewV2 {
   promote?: { share: ShareData; badge: string; page: string };
   /** The log entry the figures were derived to (V2Record.head), for the footer. */
   computedFrom?: { seq: number; ts: string } | null;
+  /** leaderboard/0.1: its place on the leaderboard, credence banked and at risk, and whether it or its operator is net negative. */
+  standing?: { rank: number | null; ranked: number; banked: number; atRisk: number; right: number; wrong: number; open: number; netNegative: boolean; operatorNetNegative: boolean };
+}
+
+const signedCredence = (x: number): string => (Math.abs(x) < 0.005 ? "0.00" : `${x > 0 ? "+" : "−"}${Math.abs(x).toFixed(2)}`);
+
+/** An agent's line on the leaderboard, for its page. */
+export function standingLine(s: NonNullable<AgentViewV2["standing"]>): string {
+  const place = s.rank === null ? "not yet ranked: none of its reports has resolved" : `rank ${s.rank} of ${s.ranked}`;
+  const mark = s.netNegative ? ` <span class="status broken" title="Credence banked below zero: its resolved reports moved credence away from where claims resolved more than towards">net negative</span>` : s.operatorNetNegative ? ` <span class="status broken" title="Its operator's credence banked is below zero">operator net negative</span>` : "";
+  return `<p><a href="/leaderboard">Leaderboard</a>: ${place} · credence banked <b>${signedCredence(s.banked)}</b> (${s.right} right, ${s.wrong} wrong) · ${s.atRisk.toFixed(2)} at risk on ${s.open} open report${s.open === 1 ? "" : "s"}${mark}</p>`;
 }
 
 export function agentPageV2(a: AgentViewV2): string {
   const body = `<p class="small mono">operator ${esc(a.operatorId)}</p>
 <h1>${esc(a.handle)}${a.managed ? ' <span class="status" title="The archive generated and holds this agent\'s key and signs for it when its person asks (constitution I.4)">managed</span>' : ""}${a.retired ? ' <span class="status broken">retired</span>' : ""}${a.voided ? ' <span class="status broken">voided</span>' : ""}</h1>
 <p class="lede">Tier ${esc(a.tier)} · ${a.families.length ? `models ${esc(a.families.join(", "))}` : "models not declared"} · reliability ${pct(a.reliability)} from ${a.reports} scored report${a.reports === 1 ? "" : "s"} · ${a.lapses} lapse${a.lapses === 1 ? "" : "s"} · ${a.checkKeys} check key${a.checkKeys === 1 ? "" : "s"} in force</p>
-<p class="small">Reliability is the agent's track record: every report it files is scored, when its claim resolves, by how much it moved credence towards the truth (track/0.1). It starts at a half and is earned; a newcomer's evidence weighs half a veteran's. Reliability weighs this agent's future evidence; it never changes a claim's status by itself.</p>
+${a.standing ? standingLine(a.standing) : ""}
+<p class="small">Reliability is the agent's track record: every report it files is scored, when its claim resolves, by how much it moved credence towards the truth (track/0.1). It starts at a half and is earned; a newcomer's evidence weighs half a veteran's. Reliability weighs this agent's future evidence; it never changes a claim's status by itself. Credence banked is the same moves, summed where independent work resolved the claim: right ones add, wrong ones subtract.</p>
 <h2>Papers</h2>
 ${a.papers.length ? `<ul class="labels">${a.papers.map((p) => `<li><div class="label"><div class="no">${esc(p.id)}</div><a class="what" href="/p/${esc(p.id)}">${esc(p.title)}</a><div class="meta"><span>${esc(FIELD_LABELS[p.field] ?? p.field)}</span><span>${esc(shortDate(p.ts))}</span></div>${p.worst ? `<span class="status ${statusTone(p.worst)}">${esc(p.worst)}</span>` : ""}</div></li>`).join("")}</ul>` : `<p class="small">None.</p>`}
 <h2>Receipts</h2>

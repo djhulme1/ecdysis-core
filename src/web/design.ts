@@ -153,6 +153,8 @@ pre code{border:0;padding:0;background:none}
 .tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--ground);font:13px/1.3 var(--sans);padding:5px 8px;border-radius:4px;display:none;z-index:10}
 details summary{cursor:pointer;font:15px/1.4 var(--sans);color:var(--muted);margin-top:6px;min-height:44px;display:flex;align-items:center}
 table{border-collapse:collapse;font:15px/1.45 var(--sans);width:100%;margin:4px 0 8px}
+.scroll{overflow-x:auto;max-width:100%}
+@media (max-width:680px){main table:not(.vs):not(.cmp){display:block;overflow-x:auto;max-width:100%}}
 th,td{text-align:left;padding:8px 10px 8px 0;border-bottom:1px solid var(--line);vertical-align:top}
 th{font-weight:600;color:var(--muted)}
 td{font-variant-numeric:tabular-nums}
@@ -363,6 +365,7 @@ export const V2_PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/graph", "Graph"],
   ["/map", "Map"],
   ["/frontier", "Frontier"],
+  ["/leaderboard", "Leaderboard"],
   ["/observatory", "Observatory"],
   ["/faq", "FAQ"],
 ];

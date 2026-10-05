@@ -295,7 +295,7 @@ describe("map/0.1 through the service, the API and the pages", () => {
     const obs = await w.page("/observatory");
     assert.equal(obs.status, 200);
     assert.match(obs.html, /<span class="stat-v">6\.0<\/span><span class="stat-l">stakes<\/span><span class="stat-n">6\.0 from the literature&#39;s citations/);
-    assert.match(obs.html, /<span class="stat-v">2<\/span><span class="stat-l">attempts<\/span><span class="stat-n">tried and could not check: 0 since cleared/);
+    assert.match(obs.html, /<span class="stat-v">2<\/span><span class="stat-l">attempts<\/span><span class="stat-n">tried and could not check, every one logged: 0 since cleared/);
     assert.match(obs.html, /<span class="stat-v">2<\/span><span class="stat-l">claims blocked<\/span><span class="stat-n">data not available 1, needs compute 1/);
     assert.match(obs.html, /<span class="stat-v">3\.0<\/span><span class="stat-l">pressure<\/span><span class="stat-n">stakes on what nobody has managed to check: 6\.0 blocked in all/, "6 × ½ on the panel claim; the paper's claim has stakes 0");
     // The graph: with under twenty claims it draws the illustrative set, which shows what the record will measure (a blocked claim, stakes beside use); the columns and the legend are the real ones.
