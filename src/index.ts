@@ -22,6 +22,7 @@ import { ComplaintsHandler, IssueRegistry } from "./api/v2/issues.js";
 import { D1IssueStore } from "./store/v2/issues-d1.js";
 import { QuoteScout } from "./api/v2/quotes.js";
 import { StakesScout, type CandidateSet, type CandidateStore } from "./api/v2/stakes-scout.js";
+import type { Json } from "./core/canonical.js";
 import { D1QuoteCheckStore } from "./store/v2/quotes-d1.js";
 import { sha256Hex } from "./api/access.js";
 import { D1OAuthStore } from "./store/v2/oauth-d1.js";
@@ -299,14 +300,28 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
  */
 const V2_CACHE = new V2Cache();
 
+/**
+ * direction/0.1: the registration candidates (each observed field's most-cited works in the citation graph), which the stakes
+ * scout reads once a month and the direction list offers as `register` acts. They are direction, never a number about any
+ * claim, so they live in ops state rather than on the log.
+ */
+export function candidatesFrom(store: Pick<D1Store, "getOpsState" | "putOpsState">): CandidateStore {
+  return {
+    get: async () => ((await store.getOpsState("direction:candidates"))?.value as unknown as CandidateSet | undefined) ?? null,
+    put: async (set) => { await store.putOpsState("direction:candidates", set as unknown as Json, new Date().toISOString()); },
+  };
+}
+
 function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env), keysAgree = true): { v2: V2Service; me: MeHandler; steward: StewardHandler; pages: PagesHandler; notifier: Notifier; governance: V2Governance; oauth: { logic: OAuth; http: OAuthHandler }; complaints: ComplaintsHandler; quotes: QuoteScout; stakes: StakesScout; issues: IssueRegistry } | null {
   if (env.ECDYSIS_V2 !== "1") return null;
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
   const log = new TransparencyLog(store);
+  const candidates = candidatesFrom(store);
   const v2 = new V2Service({
     log,
     cache: V2_CACHE,
+    candidates,
     store: new D1V2Store(env.DB, store),
     logPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
     screeners: screenersFrom(env),
@@ -349,7 +364,7 @@ function v2From(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => v
   const quoteStore = new D1QuoteCheckStore(env.DB);
   const quotes = new QuoteScout({ store: quoteStore, v2, issues, contact: env.HERALD_REPLY_TO || "replies@ecdysis.me" });
   // The stakes scout (stakes/0.1): on the cron, a few registered sources' reach is read from the public citation graph and logged.
-  const stakes = new StakesScout({ v2, log, contact: env.HERALD_REPLY_TO || "replies@ecdysis.me" });
+  const stakes = new StakesScout({ v2, log, candidates, contact: env.HERALD_REPLY_TO || "replies@ecdysis.me" });
   return {
     v2, notifier, quotes, stakes,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },

@@ -79,7 +79,9 @@ export class QuoteScout {
   private pause: (ms: number) => Promise<void>;
   constructor(private o: QuoteScoutOptions) {
     this.now = o.now ?? (() => new Date());
-    this.fetchImpl = o.fetchImpl ?? fetch;
+    // Wrapped, never stored bare: workerd refuses `fetch` called as a method of another object ("Illegal invocation"), and a
+    // scout that kept it as `this.fetchImpl` failed every request on the deployment while passing every test under Node.
+    this.fetchImpl = o.fetchImpl ?? ((input, init) => fetch(input, init));
     this.pause = o.pause ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
