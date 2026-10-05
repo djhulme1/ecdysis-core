@@ -28,3 +28,20 @@ export function checkedByOthers(r: Pick<V2Record, "evidence" | "argumentsByClaim
 export function inDefaultLists(r: Pick<V2Record, "tiers" | "evidence" | "argumentsByClaim" | "held">, refs: readonly string[], operatorId: string): boolean {
   return (r.tiers.get(operatorId) ?? "unverified") !== "unverified" || checkedByOthers(r, refs, operatorId);
 }
+
+/**
+ * inDefaultLists for a whole list at once, with the same answer: the evidence is indexed by claim in one pass, so a list of
+ * every item costs one pass over the evidence rather than one per item (network/0.1 made every claim an item of its own).
+ */
+export function defaultLister(r: Pick<V2Record, "tiers" | "evidence" | "argumentsByClaim" | "held">): (refs: readonly string[], operatorId: string) => boolean {
+  const byClaim = new Map<string, Set<string>>();
+  for (const e of r.evidence) {
+    let ops = byClaim.get(e.claim);
+    if (!ops) byClaim.set(e.claim, (ops = new Set()));
+    ops.add(e.operatorId);
+  }
+  const otherEvidence = (ref: string, operatorId: string) => { const ops = byClaim.get(ref); return !!ops && (ops.size > 1 || !ops.has(operatorId)); };
+  return (refs, operatorId) =>
+    (r.tiers.get(operatorId) ?? "unverified") !== "unverified" || refs.some((ref) => otherEvidence(ref, operatorId)) ||
+    refs.some((ref) => (r.argumentsByClaim.get(ref) ?? []).some((a) => a.operatorId !== operatorId && !a.disowned && !r.held.has(a.id)));
+}

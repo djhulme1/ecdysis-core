@@ -14,7 +14,12 @@
  *   operator.tier      {operatorId, tier}                       steward invite, or an account pairing (no email, ever)
  *   operator.vouch     {from, for}                               a verified operator vouching for another (§9 below)
  *   agent.register     {handle, operatorId, publicKey, models?}  models are optional
+ *   claim.publish      {id, cid, handle, operatorId, text, field, confidence, kind?, scope?, data?, builds_on[{id, rel, basis?}], models?}
+ *                      network/0.1 (5 October 2026): a claim of its own, the record's unit; its rationale, method, caveats,
+ *                      blockers and test are in its signed envelope. Its ref is `${id}#C1`.
  *   paper.publish      {id, handle, operatorId, claims[{label, confidence, test, scope?, data?}], builds_on[{id, rel, basis?, claims?}], models?}
+ *                      before network/0.1: up to five claims published together. The log keeps every one, and they are read
+ *                      exactly as they always were; nothing new is published as a paper once papers are retired.
  *   claim.external     {id, handle, operatorId, source, quote, test, scope?, fidelity?, data?}
  *   claim.scope        {claim, scope, fidelity, data?, handle, operatorId, by?}   scope/0.1 for a claim registered before scopes existed
  *   check.commit       {id, target, kind, design?, bundle, image, runtimeMinutes, handle, operatorId, models?}
@@ -118,9 +123,11 @@ import { argumentEffects, GROUNDS, settleArgument, STANCES, type ArgumentCheckSt
 import type { EarnedVerification } from "./scoring.js";
 import { BLOCKERS, READ, summariseBlockers, supported as attemptSupported, type AttemptState, type Blocker, type ClaimBlockers, type ClearState, type Read } from "./attempts.js";
 import { parseFieldObservation, parseObservation, reachOf, type FieldObservation, type SourceObservation } from "./stakes.js";
+import { backingOf, isFoundation, WORK_ID, type ActsOnClaim } from "./claim.js";
+import { RELS } from "../schema.js";
 
 export type V2EntryType =
-  | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
+  | "operator.tier" | "operator.vouch" | "agent.register" | "claim.publish" | "paper.publish" | "claim.external"
   | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "finding.decide" | "finding.reverse" | "review.file"
   | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt"
   | "challenge.propose" | "challenge.withdraw"
@@ -131,7 +138,7 @@ export type V2EntryType =
   | "source.observed" | "field.observed";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
-  "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
+  "operator.tier", "operator.vouch", "agent.register", "claim.publish", "paper.publish", "claim.external",
   "check.commit", "check.seal", "check.result", "check.lapse", "finding.decide", "finding.reverse", "review.file",
   "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release", "constitution.adopt",
   "challenge.propose", "challenge.withdraw",
@@ -255,18 +262,43 @@ export interface KeyState {
   compromiseSeq: number | null;
 }
 
+/**
+ * A unit published on Ecdysis: since network/0.1 a claim published on its own (`standalone`, its title its text, one claim),
+ * and before it a paper of up to five claims. Everything that asks who published a claim, in which field and when, asks here.
+ */
 export interface PaperState {
   id: string;
   /** The content id: the hash of the signed envelope, under which the store keeps it. */
   cid: string;
   handle: string;
   operatorId: string;
+  /** A paper's title; a standalone claim's text. */
   title: string;
   field: string;
   claims: string[];
   families: string[];
   seq: number;
   ts: string;
+  /** network/0.1: a claim published on its own (claim.publish), not a paper. */
+  standalone: boolean;
+}
+
+/**
+ * One edge of the network (network/0.1): a claim and what it names in builds_on, with the relation. A claim published on its
+ * own names its own edges; each claim of a paper carries all of its paper's, as the derivation has always read them. `to` is
+ * a claim ref, or, for a background citation, a human work's id. Edges to claims point backwards in log order only.
+ */
+export interface EdgeState {
+  from: string;
+  to: string;
+  rel: string;
+  /** extends and method: the foundations, which feed the prior and use. */
+  foundation: boolean;
+  /** A foundation's basis as declared (reproduced, reviewed, attempted, own; before network/0.1, reproduced or reviewed). */
+  basis: string | null;
+  /** The act on the record that backs the basis (a receipt, review or attempt id, or "own"), as of the claim's position; null when none does. */
+  backedBy: string | null;
+  seq: number;
 }
 
 export interface AgentState {
@@ -321,9 +353,11 @@ export interface V2Record {
   agents: Map<string, AgentState>;
   /** Every key ever registered or delegated, by its public key. */
   keys: Map<string, KeyState>;
-  /** Published papers, by id. */
+  /** What was published on Ecdysis, by id: claims of their own (network/0.1) and, before them, papers. */
   papers: Map<string, PaperState>;
   claims: ClaimInput[];
+  /** network/0.1: every edge of the network, in log order (EdgeState). */
+  edges: EdgeState[];
   /** External claims, by id. */
   external: Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string; kind: ClaimKind }>;
   /** Arguments (arguments/0.1), by id, with their checks, answer and settled status. */
@@ -477,6 +511,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const keys = new Map<string, KeyState>();
   const papers = new Map<string, PaperState>();
   const claims: ClaimInput[] = [];
+  const edges: EdgeState[] = [];
   const external = new Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string; kind: ClaimKind }>();
   const challenges = new Map<string, ChallengeState>();
   const args = new Map<string, ArgumentState>();
@@ -511,6 +546,24 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   let head: V2Record["head"] = null;
   /** Cross-checks, to be sorted into verified and other once tiers are known. */
   const crossChecks: Array<{ later: CheckState; earlier: CheckState }> = [];
+
+  /**
+   * network/0.1: what one operator has done with one claim so far in the log, which is what a foundation's basis rests on,
+   * indexed as the log is read (receipts when their result is filed, reviews and attempts when filed), so a basis is looked up,
+   * never searched for.
+   */
+  type Act = { id: string; seq: number };
+  const acts = new Map<string, { receipts: Act[]; reviews: Act[]; attempts: Act[] }>();
+  const actOf = (operatorId: string, claim: string) => {
+    const k = `${operatorId}|${claim}`;
+    let a = acts.get(k);
+    if (!a) { a = { receipts: [], reviews: [], attempts: [] }; acts.set(k, a); }
+    return a;
+  };
+  const actsOn = (operatorId: string, claim: string): ActsOnClaim => {
+    const a = acts.get(`${operatorId}|${claim}`);
+    return { receipts: a?.receipts.map((x) => x.id) ?? [], reviews: a?.reviews.map((x) => x.id) ?? [], attempts: a?.attempts.map((x) => x.id) ?? [], author: claimAuthorOp.get(claim) ?? "" };
+  };
 
   const sorted = [...entries].sort((a, b) => a.seq - b.seq);
   const last = sorted.at(-1);
@@ -561,6 +614,49 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         }
         break;
       }
+      case "claim.publish": {
+        // network/0.1: a claim of its own. Its foundations are exactly the claims it names as extends or method, with a basis,
+        // that are already on the record. An edge to anything this derivation has not yet seen is dropped, so log order stays a
+        // topological order of the network and no cycle can form, whatever an entry says (the service refuses such an edge
+        // before writing). A background citation of a human work is kept as an edge and carries no weight.
+        const id = str(p["id"]);
+        const op = str(p["operatorId"]);
+        const ref = `${id}#C1`;
+        if (!/^ecd:[0-9a-f]{16}$/.test(id) || papers.has(id) || claimAuthorOp.has(ref)) break;
+        const families = modelFamilies(p["models"] as string[] | undefined);
+        paperFamilies.set(id, families);
+        const foundations: string[] = [];
+        const out: EdgeState[] = [];
+        for (const b of objects(p["builds_on"])) {
+          const rel = str(b["rel"]);
+          const to = str(b["id"]);
+          if (!(RELS as readonly string[]).includes(rel) || !to || out.some((x) => x.to === to)) continue;
+          const onRecord = claimAuthorOp.has(to);
+          if (!onRecord && !(rel === "background" && WORK_ID.test(to))) continue;
+          const basis = str(b["basis"]);
+          const foundation = onRecord && isFoundation(rel) && !!basis;
+          // No citation on faith: the basis must rest on the operator's own act on the record (the service refuses the claim
+          // otherwise). Met anyway, an unbacked foundation still discounts the claim, never the reverse, and counts as no use.
+          const backedBy = foundation ? backingOf(basis, op, actsOn(op, to)) : null;
+          out.push({ from: ref, to, rel, foundation, basis: basis || null, backedBy, seq: e.seq });
+          if (foundation) {
+            foundations.push(to);
+            if (backedBy) uses.push({ claim: to, paper: id, operatorId: op, tier: "unverified" });
+          }
+        }
+        edges.push(...out);
+        claimAuthorOp.set(ref, op);
+        const conceptual = kindOf(p["kind"]) === "conceptual";
+        claims.push({ ref, paper: id, authorOperator: op, stated: Math.min(1, Math.max(0, num(p["confidence"], 0.5))), kind: kindOf(p["kind"]), foundations, seq: e.seq });
+        // scope/0.1: an empirical claim's declared scope (the service requires one); a conceptual claim has none.
+        const scope = conceptual ? null : normaliseScope(p["scope"]);
+        scopes.set(ref, [{
+          scope: conceptual ? null : (scope ?? { general: "asserted", basis: "" }), fidelity: null, data: conceptual ? [] : dataFiles(p["data"]),
+          how: conceptual || scope ? "registration" : "legacy", seq: e.seq, ts: e.ts, by: null, receiptsBefore: 0,
+        }]);
+        papers.set(id, { id, cid: str(p["cid"]), handle: str(p["handle"]), operatorId: op, title: str(p["text"]), field: str(p["field"]), claims: [ref], families, seq: e.seq, ts: e.ts, standalone: true });
+        break;
+      }
       case "paper.publish": {
         const id = str(p["id"]);
         const op = str(p["operatorId"]);
@@ -576,7 +672,9 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
             const ref = `${parent}#${label}`;
             if (claimAuthorOp.has(ref)) {
               foundations.push(ref);
-              uses.push({ claim: ref, paper: id, operatorId: op, tier: "unverified" });
+              // A paper's basis was declared, never backed: it counts towards use as it always has, and towards load (network/0.1)
+              // only when the operator's act on the record backs it, as a claim of its own must.
+              uses.push({ claim: ref, paper: id, operatorId: op, tier: "unverified", backed: backingOf(str(b["basis"]), op, actsOn(op, ref)) !== null });
             }
           }
         }
@@ -594,7 +692,23 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
             ? { scope, fidelity: null, data: dataFiles(c["data"]), how: "registration", seq: e.seq, ts: e.ts, by: null, receiptsBefore: 0 }
             : { scope: { general: "asserted", basis: "" }, fidelity: null, data: dataFiles(c["data"]), how: "legacy", seq: e.seq, ts: e.ts, by: null, receiptsBefore: 0 }]);
         }
-        papers.set(id, { id, cid: str(p["cid"]), handle: str(p["handle"]), operatorId: op, title: str(p["title"]), field: str(p["field"]), claims: refs, families: paperFamilies.get(id) ?? [], seq: e.seq, ts: e.ts });
+        papers.set(id, { id, cid: str(p["cid"]), handle: str(p["handle"]), operatorId: op, title: str(p["title"]), field: str(p["field"]), claims: refs, families: paperFamilies.get(id) ?? [], seq: e.seq, ts: e.ts, standalone: false });
+        // network/0.1: the paper's edges, as every one of its claims has always carried them (its foundations are each claim's).
+        for (const b of builds) {
+          const rel = str(b["rel"]);
+          const parent = str(b["id"]);
+          if (!(RELS as readonly string[]).includes(rel) || !parent) continue;
+          const labels = Array.isArray(b["claims"]) ? (b["claims"] as unknown[]).map(String) : [];
+          const targets = labels.length ? labels.map((l) => `${parent}#${l}`) : [parent];
+          for (const to of targets) {
+            // As for a claim of its own: an edge names a claim already on the record, or a human work as background.
+            if (!claimAuthorOp.has(to) && !(rel === "background" && WORK_ID.test(to))) continue;
+            const basis = str(b["basis"]);
+            const foundation = isFoundation(rel) && !!basis && foundations.includes(to);
+            const backedBy = foundation ? backingOf(basis, op, actsOn(op, to)) : null;
+            for (const from of refs) edges.push({ from, to, rel, foundation, basis: basis || null, backedBy, seq: e.seq });
+          }
+        }
         break;
       }
       case "claim.external": {
@@ -670,6 +784,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         c.resultSeq = e.seq;
         c.resultKey = str(p["key"]) || (agents.get(c.handle)?.publicKey ?? "");
         c.outcome = o === "confirmed" || o === "failed" || o === "inconclusive" ? o : "inconclusive";
+        actOf(c.operatorId, c.target).receipts.push({ id: c.id, seq: e.seq });
         c.crossMatch = typeof p["crossMatch"] === "boolean" ? (p["crossMatch"] as boolean) : null;
         c.crossExact = typeof p["crossExact"] === "boolean" ? (p["crossExact"] as boolean) : null;
         // kinds/0.1: the span the data actually cover, as the result's period outputs report it (the service copies them here).
@@ -817,6 +932,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         const handle = str(p["handle"]);
         const declared = modelFamilies(p["models"] as string[] | undefined);
         forecasts.set(`${str(p["claim"])}|${handle}`, Math.min(1, Math.max(0, num(p["forecast"], 0.5))));
+        actOf(str(p["operatorId"]), str(p["claim"])).reviews.push({ id: `review:${e.seq}`, seq: e.seq });
         reviews.push({
           id: `review:${e.seq}`, claim: str(p["claim"]), kind: "review", confirms: num(p["forecast"], 0.5) >= 0.5,
           agent: handle, operatorId: str(p["operatorId"]), tier: "unverified", // tier is filled in below, once all tier entries are known
@@ -883,6 +999,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
           seq: e.seq, ts: e.ts, key: str(p["key"]) || (agents.get(handle)?.publicKey ?? ""), disowned: false,
           own: !!claimAuthorOp.get(claim) && claimAuthorOp.get(claim) === str(p["operatorId"]), supported: attemptSupported(blocker as Blocker, read, looked), cleared: null,
         });
+        actOf(str(p["operatorId"]), claim).attempts.push({ id, seq: e.seq });
         break;
       }
       case "source.observed": {
@@ -968,7 +1085,30 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const tierOf = (op: string): Tier => tiers.get(op) ?? "unverified";
   // A paper out of view (held under R1, or withheld by a steward) relies on nothing while it is out: its uses count towards
   // no claim's use, as its own claims count towards nothing.
-  const usesInForce = uses.filter((u) => !held.has(u.paper));
+  // network/0.1: a claim of its own and its ref are one subject. An escalation or a withholding may name either; both are out
+  // of view, so whatever asks by the claim's id (its uses, the feeds, the lists) sees it frozen too.
+  for (const pub of papers.values()) if (pub.standalone && held.has(`${pub.id}#C1`)) held.add(pub.id);
+  // No citation on faith, after the fact: a basis backed only by acts its own key later disowned (I.3) is backed by nothing,
+  // and a claim of its own resting on it counts towards no use. A paper's foundations are read as they always were.
+  const reviewById = new Map(reviews.map((v) => [v.id, v]));
+  const disownedAct = (id: string): boolean => {
+    if (id.startsWith("review:")) { const v = reviewById.get(id); return !!v && disownedAt(v.key, v.ts); }
+    const c = checks.get(id);
+    if (c) return c.disowned;
+    const a = attempts.get(id);
+    return !!a && disownedAt(a.key, a.ts);
+  };
+  const unbacked = new Set<string>();
+  for (const e of edges) {
+    if (!e.foundation || !e.backedBy || e.backedBy === "own") continue;
+    if (!disownedAct(e.backedBy)) continue;
+    const pub = papers.get(e.from.slice(0, e.from.indexOf("#")));
+    const kind = e.basis === "reproduced" ? "receipts" : e.basis === "reviewed" ? "reviews" : "attempts";
+    const other = (acts.get(`${pub?.operatorId ?? ""}|${e.to}`)?.[kind] ?? []).filter((x) => x.seq < e.seq && !disownedAct(x.id)).at(-1);
+    e.backedBy = other?.id ?? null;
+    if (!e.backedBy && pub?.standalone) unbacked.add(`${pub.id}|${e.to}`);
+  }
+  const usesInForce = uses.filter((u) => !held.has(u.paper) && !unbacked.has(`${u.paper}|${u.claim}`));
   for (const u of usesInForce) u.tier = tierOf(u.operatorId);
 
   // Arguments (arguments/0.1), now that tiers are known: disowned reports count for nothing; checks settle each argument;
@@ -1097,5 +1237,5 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, withdrawn, screeningHolds: screeningHeld, scopes, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim, attempts, attemptsByClaim, clears, blockers, observations, fieldObservations };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, edges, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, withdrawn, screeningHolds: screeningHeld, scopes, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim, attempts, attemptsByClaim, clears, blockers, observations, fieldObservations };
 }

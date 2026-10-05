@@ -92,13 +92,19 @@
  *
  * Four numbers per claim, never blended:
  *   credence p   what to believe;
- *   use U        how much rests on it on the record, never an input to credence;
+ *   use U        how much rests on it on the record, never an input to credence:
+ *                each operator relying on it counts once, at its weight (network/0.1:
+ *                one operator, one voice, so a line of work split into many claims
+ *                counts as one reliance, as a paper did);
  *   dispute D    how much the evidence disagrees, D = 4sf/(s + f), where s
  *                and f are the weighted confirming and disconfirming
  *                evidence mass (replication 1, re-run ½, review ¼);
- *   stakes S     how much rests on it on and off the record (stakes/0.1,
- *                stakes.ts): S = U + log2(1 + R), where R is the source
- *                paper's reach in the public citation graph as the
+ *   stakes S     how much rests on it on and off the record (stakes/0.2,
+ *                stakes.ts): S = U + log2(1 + L) + log2(1 + R), where L is
+ *                its load (network/0.1: the claims resting on it, directly
+ *                or through other claims, by verified operators independent
+ *                of its author, at most sixteen per operator) and R is the
+ *                source paper's reach in the public citation graph as the
  *                platform's scout observed it. Stakes rank the frontier
  *                ((S + ½)·p(1 − p)) and feed the pressure on blocked
  *                claims; they never enter credence, the statuses or the
@@ -149,7 +155,7 @@
 
 import { ARGUMENT_PARAMS, type ClaimArgumentsInput, type ClaimKind } from "./arguments.js";
 import { scopesOverlap, type ClaimScope } from "./kinds.js";
-import { stakesOf } from "./stakes.js";
+import { loadOf, stakesOf } from "./stakes.js";
 
 export const CREDENCE_V2_VERSION = "credence/0.4";
 
@@ -275,11 +281,15 @@ export interface EvidenceInput {
   crossChecked?: boolean;
 }
 
-/** A later paper relying on a claim (extends or method). */
+/** A later claim (or, before network/0.1, a paper) relying on a claim: it extends it or takes its method. */
 export interface UseInput {
   claim: string;
+  /** The id of what relies on it: a claim published on its own, or a paper. */
   paper: string;
+  /** The relying operator: each counts once per claim (network/0.1: one operator, one voice). */
   operatorId: string;
+  /** network/0.1: whether the operator's act on the record backs the basis. A paper's foundation that nothing backs counts towards use, as it always has, and never towards load. Absent: backed. */
+  backed?: boolean;
   /** The citing operator's tier: use is weighed by it, so free identities cannot raise a claim's threshold or hijack the queues. Absent: unverified. */
   tier?: Tier;
 }
@@ -360,6 +370,8 @@ export interface ClaimV2 {
   f: number;
   dispute: number;
   use: number;
+  /** network/0.1: how much rests on it, directly or through other claims, in claims by verified operators independent of its author, at most sixteen per operator (stakes.ts, loadOf). Enters stakes, never credence. */
+  load: number;
   /** stakes/0.1: the source paper's reach off the record, as observed; 0 when nothing was observed or the claim is an Ecdysis paper's. */
   reach: number;
   /** stakes/0.1: S = use + log2(1 + reach). Ranks the frontier; never enters credence. */
@@ -708,6 +720,7 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
   const byClaim = new Map<string, EvidenceInput[]>();
   for (const e of evidence) byClaim.set(e.claim, [...(byClaim.get(e.claim) ?? []), e]);
   const useBy = new Map<string, Map<string, number>>();
+  const loads = loadOf(claims, uses, (op, author) => independence(op, author, o.vouchLinked, o.ringLinked));
   const out = new Map<string, ClaimV2>();
   const sums = new Map<string, number>();
   const sorted = [...claims].sort((a, b) => a.seq - b.seq);
@@ -716,8 +729,10 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     const a = author.get(u.claim);
     if (a === undefined) continue;
     const w = independence(u.operatorId, a, o.vouchLinked, o.ringLinked) * P.tier[u.tier ?? "unverified"];
+    // network/0.1: one operator, one voice. Keyed by the relying OPERATOR, so splitting work into many claims (or, before,
+    // many papers) never multiplies its use of a foundation, and volume cannot raise the bar for established on anyone's claim.
     const m = useBy.get(u.claim) ?? new Map<string, number>();
-    m.set(u.paper, Math.max(m.get(u.paper) ?? 0, w));
+    m.set(u.operatorId, Math.max(m.get(u.operatorId) ?? 0, w));
     useBy.set(u.claim, m);
   }
   // The calibration record: per author operator, the stated confidence and truth of each claim resolved so far. A claim
@@ -767,11 +782,12 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     if (resolved !== null && c.calibration === undefined && c.authorOperator) pending.push({ op: c.authorOperator, stated: c.stated, truth: resolved });
     const dispute = disputeOf(ev.s, ev.f);
     const reach = Math.max(0, c.reach ?? 0);
-    const stakes = stakesOf(use, reach);
+    const load = loads.get(c.ref) ?? 0;
+    const stakes = stakesOf(use, reach, load);
     sums.set(c.ref, total);
     out.set(c.ref, {
       ref: c.ref, paper: c.paper, external: c.external === true, kind, cap, calibration, prior, logOdds, credence, credenceVerified, credenceReplication,
-      operators: { confirming: ev.confirmingOperators, failing: ev.failingOperators }, s: ev.s, f: ev.f, dispute, use, reach, stakes, threshold, status, resolved,
+      operators: { confirming: ev.confirmingOperators, failing: ev.failingOperators }, s: ev.s, f: ev.f, dispute, use, load, reach, stakes, threshold, status, resolved,
       arguments: { upheld: args?.upheldAttacks.length ?? 0, dismissed: args?.dismissedAttacks.length ?? 0, open: args?.open ?? 0, methodology: args?.methodology ?? 0, counterexample: args?.refuted ?? false },
       reproduced: ev.reproduced,
       families: [...ev.confirmingFamilies].filter((x) => x !== "?").sort(),

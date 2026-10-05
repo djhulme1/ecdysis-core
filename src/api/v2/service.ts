@@ -46,9 +46,11 @@ import { DIRECTION_VERSION, direct, type Candidate, type DirectionArgument, type
 import type { CandidateStore } from "./stakes-scout.js";
 import { ATTEMPTS_VERSION, BLOCKER_CLEARED_BY, BLOCKER_MEANING, BLOCKER_SIDE, pressure, supported as attemptSupported, validateAttemptClearV2, validateAttemptV2, type AttemptClearV2Payload, type AttemptState, type AttemptV2Payload, type ClaimBlockers } from "../../core/v2/attempts.js";
 import { buildMap, UNPLACED_FIELD, type MapClaim, type MapView } from "../../core/v2/map.js";
+import { boardOf, forecastConsensus, fragilityOf, type Board, type BoardQuery, type BoardRow } from "../../core/v2/claims-board.js";
+import { defaultLister } from "../../core/v2/visibility.js";
 import { auditList, buildLeaderboard, contributionsOf, leaderboardInputOf, LEADERBOARD_VERSION, type AuditItem, type Leaderboard, type LeaderboardInput } from "../../core/v2/leaderboard.js";
 import { FIELD_LABELS } from "../site.js";
-import { ARGUMENT_PARAMS, ARGUMENTS_VERSION, CLAIM_KINDS, groundsProblem, validateArgumentAnswerV2, validateArgumentCheckV2, validateArgumentV2, type ArgumentAnswerV2Payload, type ArgumentCheckV2Payload, type ArgumentState, type ArgumentV2Payload, type ClaimKind } from "../../core/v2/arguments.js";
+import { ARGUMENT_PARAMS, ARGUMENTS_VERSION, CLAIM_KINDS, CLAIM_REF, groundsProblem, validateArgumentAnswerV2, validateArgumentCheckV2, validateArgumentV2, type ArgumentAnswerV2Payload, type ArgumentCheckV2Payload, type ArgumentState, type ArgumentV2Payload, type ClaimKind } from "../../core/v2/arguments.js";
 import {
   bundleHash,
   compareOutputs,
@@ -70,6 +72,10 @@ import type { computeV2 } from "../../core/v2/scoring.js";
 import { resolveV2, scoreRecord } from "../../core/v2/resolve.js";
 import { paperPeriodProblems, paperScopeProblems, validateEscalateV2, validatePaperV2, validateReviewV2, type EscalateV2Payload, type PaperV2Payload, type ReviewV2Payload } from "../../core/v2/paper.js";
 import { runScreening, type Screener, type Screenable } from "../../core/hazard.js";
+import {
+  backingOf, BASIS_ACT, CLAIM_BASES, claimIdOf, claimRefOf, claimScopeProblems, claimWordsOf, isFoundation, NETWORK_VERSION, validateClaimV2,
+  type ActsOnClaim, type ClaimBasis, type ClaimPayloadV2,
+} from "../../core/v2/claim.js";
 import type { PaperPayload } from "../../core/schema.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
 
@@ -169,6 +175,7 @@ export function hiddenNote(r: V2Record, subject: string): string {
 
 /** The text fields of each entry type: what a withholding takes out of view. Everything else about the entry stays as data. */
 const TEXT_FIELDS: Record<string, string[]> = {
+  "claim.publish": ["text"],
   "paper.publish": ["title"],
   "claim.external": ["quote", "test"],
   "check.commit": ["methods"],
@@ -207,7 +214,7 @@ function redactWords(type: string, p: Record<string, unknown>): Record<string, u
 function entrySubject(type: string, p: Record<string, unknown>, r: V2Record): string | null {
   const str = (v: unknown) => (typeof v === "string" ? v : "");
   switch (type) {
-    case "paper.publish": case "claim.external": case "challenge.propose": return str(p["id"]) || null;
+    case "claim.publish": case "paper.publish": case "claim.external": case "challenge.propose": return str(p["id"]) || null;
     case "argument.file": return str(p["id"]) || null;
     case "argument.check": case "argument.answer": return str(p["argument"]) || null;
     case "review.file": return str(p["id"]) || null;
@@ -238,8 +245,9 @@ export function redactedPayload(r: V2Record, type: string, payload: Json): Json 
     : type === "check.describe" ? (r.checks.get(subject)?.target ?? null) : null;
   const w = r.withheld.get(subject) ?? (about ? withheldOf(r, about) : null) ?? (type === "challenge.propose" && typeof p["claim"] === "string" ? withheldOf(r, p["claim"]) : null);
   // An amendment carries a paper claim's new test, which is otherwise only in the paper's envelope, served by pages that
-  // honour R1: so it leaves the log's view while its claim is held under R1, as it does while the claim is withheld.
-  if (!w && type === "claim.amend" && isHeld(r, subject)) {
+  // honour R1; a claim of its own (network/0.1) carries its whole text on the log. So both leave the log's view while their
+  // claim is held under R1, as they do while it is withheld. (A paper's log entry carries only its title.)
+  if (!w && (type === "claim.amend" || type === "claim.publish") && isHeld(r, subject)) {
     const out = redactWords(type, p);
     out["withheld"] = { status: "frozen", note: "text withheld while the claim is frozen for a decision under reserved power R1; the payload hash on this entry commits to the full text" };
     return out as Json;
@@ -1260,8 +1268,9 @@ export class V2Service {
     }
     const tier = r.tiers.get(operatorId) ?? "unverified";
     // Screening, fail-closed, no probation (tiers do that job in v2).
-    // The words a claim's scope gives go on the log with it, so they are screened with the paper.
-    const scopeWords = paper.claims.flatMap((c) => [c.scope?.basis, ...dataWordsOf(c.data)]).filter((b): b is string => typeof b === "string" && b.trim() !== "");
+    // Everything a reader is shown is screened with the paper: each claim's test (served with the claim, though screening
+    // reads a claim's text only), and the words a claim's scope gives, which go on the log with it.
+    const scopeWords = paper.claims.flatMap((c) => [c.test, c.scope?.basis, ...dataWordsOf(c.data)]).filter((b): b is string => typeof b === "string" && b.trim() !== "");
     const screenable: PaperPayload = {
       protocol: "ecdysis/0.1", type: "paper", title: paper.title, abstract: scopeWords.length ? [paper.abstract, ...scopeWords].join("\n\n") : paper.abstract, field: paper.field,
       claims: paper.claims.map((c) => ({ text: c.text, confidence: c.confidence })),
@@ -1321,6 +1330,145 @@ export class V2Service {
     return ok(201, {
       status: "published", id, claims: paper.claims.map((_, i) => `${id}#C${i + 1}`), tier,
       note: "Published. Credence starts at your stated confidence, shrunk by your calibration and capped by your foundations; only independent evidence moves it from here.",
+      deprecated: PAPERS_RETIRED,
+    });
+  }
+
+  /* ---------------- claims of their own (network/0.1) ---------------- */
+
+  /**
+   * Publish a claim of its own (network/0.1, 5 October 2026): the record's unit. It carries its rationale, method, data,
+   * caveats and blockers, and names what it rests on. Every edge to a claim must name one already on the record and in view,
+   * so edges point backwards in log order and no cycle can form; every FOUNDATION (extends, method) must be backed by the
+   * operator's own act on it (no citation on faith, enforced: a receipt, a review or an attempt, or its own earlier claim), and
+   * a refusal says how to put the act there. Screened with what it rests on, back along the chain, so a hazard assembled step
+   * by step is seen whole at the step that completes it; published at once when screening passes (III.1).
+   */
+  async publishClaim(env: Json): Promise<ApiResult> {
+    const pausedNow = await this.paused("v2.publishing", "publishing is");
+    if (pausedNow) return pausedNow;
+    const opened = await this.openEnvelope<ClaimPayloadV2>(env, "claim", validateClaimV2, "main");
+    if (!opened.ok) return opened.result;
+    const { payload: claim, operatorId, id: cid, record: r } = opened;
+    const unscoped = claimScopeProblems(claim, this.now().toISOString().slice(0, 10));
+    if (unscoped.length) return err(400, "invalid claim", { detail: unscoped });
+    if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
+    const id = claimIdOf(cid);
+    if (r.papers.has(id)) return err(409, "this exact claim was already published", { id, ref: claimRefOf(id) });
+    const refused = this.edgeRefusal(r, claim, operatorId);
+    if (refused) return refused;
+    const tier = r.tiers.get(operatorId) ?? "unverified";
+    const decision = await runScreening(await this.screenableClaim(r, claim), { agentHandle: claim.agent.handle, operatorId, acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
+    if (decision.verdict === "block") return err(451, "refused by screening", { findings: decision.findings.map((f) => `${f.category}: ${f.note}`) });
+    if (screenerOutage(decision)) return err(503, "screening could not answer; nothing was kept, so send the same claim again in a few minutes", { retry: true });
+    if (!(await this.reserve("claim", cid))) return err(409, "this exact claim was already published", { id, ref: claimRefOf(id) });
+    await this.o.store.putEnvelope(cid, env);
+    if (decision.verdict === "review") {
+      if (this.stewardMatter(decision)) {
+        const entered = await this.enterClaim(claim, cid, operatorId, tier);
+        if (entered.status !== 201) return entered;
+        await this.o.log.append("content.withhold", { subject: id, status: "review", reason: "screening referred this claim to the stewards before it is shown", by: "screening", steward: "" });
+        await this.o.onReferral?.(id, `Screening referred this claim to the stewards: ${decision.findings.map((f) => `${f.category}${f.note ? ` (${f.note})` : ""}`).join("; ")}`).catch(() => {});
+        return ok(202, { status: "under-review", id, ref: claimRefOf(id), note: "Published to the record and at once put under review: screening referred it to the stewards, who will restore it or withdraw it. Nothing about it is shown or counted until then." });
+      }
+      await this.o.log.append("hazard.hold", { subject: cid, reason: decision.failedClosed ? "screening could not answer; held for the steward (R1)" : "screening asked for a human look (R1)", categories: decision.findings.map((f) => f.category) });
+      return ok(202, { status: "held", id: cid, note: "Screening held this for a human decision (reserved power R1). Nothing is published until it is released." });
+    }
+    return this.enterClaim(claim, cid, operatorId, tier);
+  }
+
+  /**
+   * Why a claim's edges cannot stand, as a refusal that carries its fix, or null. An edge to a claim must name one on the record
+   * and in view; a foundation's basis must be backed by the operator's own act on it. A human work cited as background needs
+   * nothing.
+   */
+  private edgeRefusal(r: V2Record, claim: ClaimPayloadV2, operatorId: string): ApiResult | null {
+    for (const [i, b] of claim.builds_on.entries()) {
+      if (!CLAIM_REF.test(b.id)) continue;
+      if (!r.claims.some((c) => c.ref === b.id)) {
+        const how = b.id.startsWith("ext:") ? "register it from its source (register_claim; POST /v2/claims/external)" : "publish it first (publish_claims; POST /v2/claims)";
+        return err(422, `builds_on[${i}]: ${b.id} is not on the record`, {
+          fix: `Put it on the record first: ${how}. ${isFoundation(b.rel) ? "Then reproduce it, review it or attempt it, and publish this claim saying which." : "Then publish this claim."}`,
+        });
+      }
+      if (isHeld(r, b.id)) return err(451, `builds_on[${i}]: ${b.id} is ${hiddenNote(r, b.id)}`);
+      if (!isFoundation(b.rel)) continue;
+      const basis = b.basis as ClaimBasis;
+      const acts = actsOnClaim(r, operatorId, b.id);
+      if (backingOf(basis, operatorId, acts)) continue;
+      const own = acts.author !== "" && acts.author === operatorId;
+      const backs = CLAIM_BASES.filter((x) => x !== basis && backingOf(x, operatorId, acts) !== null);
+      return err(422, `builds_on[${i}]: you rest on ${b.id} as "${basis}", but nothing your operator has done on the record backs that`, {
+        fix: basis === "own"
+          ? `"own" is for your own operator's earlier claims, and ${b.id} is not one. Reproduce it, review it or attempt it, then publish this claim saying which.`
+          : `Put ${BASIS_ACT[basis]} on the record first${own ? ', or say "own": it is your operator\'s claim' : ""}.${backs.length ? ` What your operator has done already backs: ${backs.join(", ")}.` : ""}`,
+        backing: { reproduced: acts.receipts.length, reviewed: acts.reviews.length, attempted: acts.attempts.length, own },
+      });
+    }
+    return null;
+  }
+
+  /** A claim as screening reads it: its own words, then the words of what it rests on, back along the chain (bounded). */
+  private async screenableClaim(r: V2Record, claim: ClaimPayloadV2): Promise<Screenable> {
+    const own = [
+      claim.test, claim.rationale, claim.method, ...(claim.caveats ?? []), ...(claim.blockers ?? []).flatMap((b) => [b.detail, b.unblockedBy]),
+      claim.scope?.basis, ...dataWordsOf(claim.data), ...claim.builds_on.map((b) => b.note),
+    ].filter((t): t is string => typeof t === "string" && t.trim() !== "");
+    const chain = await this.chainWords(r, claim.builds_on.filter((b) => CLAIM_REF.test(b.id)).map((b) => b.id));
+    const screenable: PaperPayload = {
+      protocol: "ecdysis/0.1", type: "paper", title: claim.text, abstract: [...own, ...(chain.length ? ["It rests on:", ...chain] : [])].join("\n\n"), field: claim.field,
+      claims: [{ text: claim.text, confidence: claim.confidence }],
+      builds_on: claim.builds_on.map((b) => ({ id: b.id, rel: b.rel })),
+      ...(claim.artefacts ? { artefacts: claim.artefacts } : {}), agent: claim.agent, ts: claim.ts,
+    };
+    return screenable as Screenable;
+  }
+
+  /** The words of the claims a claim rests on, breadth first along their foundations: at most 20 claims and 16,000 characters. */
+  private async chainWords(r: V2Record, start: string[]): Promise<string[]> {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const queue = [...start];
+    let chars = 0;
+    while (queue.length && seen.size < 20 && chars < 16_000) {
+      const ref = queue.shift()!;
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      const words = await this.claimText(r, ref);
+      if (words) { const line = `${ref}: ${words}`.slice(0, 2000); out.push(line); chars += line.length; }
+      for (const f of r.claims.find((c) => c.ref === ref)?.foundations ?? []) if (!seen.has(f)) queue.push(f);
+    }
+    return out;
+  }
+
+  /** A claim's text and the start of its rationale, from the record and its envelope. */
+  private async claimText(r: V2Record, ref: string): Promise<string> {
+    const hash = ref.indexOf("#");
+    const id = hash > 0 ? ref.slice(0, hash) : ref;
+    if (id.startsWith("ext:")) return r.external.get(id)?.quote ?? "";
+    const p = r.papers.get(id);
+    if (!p) return "";
+    const env = (await this.o.store.getEnvelope(p.cid)) as { payload?: unknown } | null;
+    const w = claimWordsOf(env?.payload, hash > 0 ? ref.slice(hash + 1) : "C1");
+    return w ? [w.text, w.rationale.slice(0, 1500)].filter((t) => t).join(" | ") : p.title;
+  }
+
+  /** The claim.publish entry: the moment a claim of its own enters the record. Its words stay in its signed envelope. */
+  private async enterClaim(claim: ClaimPayloadV2, cid: string, operatorId: string, tier: Tier): Promise<ApiResult> {
+    const id = claimIdOf(cid);
+    const scope = claim.kind === "conceptual" ? null : normaliseScope(claim.scope);
+    const data = claim.kind === "conceptual" ? [] : normaliseData(claim.data);
+    await this.o.log.append("claim.publish", {
+      id, cid, handle: claim.agent.handle, operatorId, text: claim.text, field: claim.field, confidence: claim.confidence,
+      ...(claim.kind === "conceptual" ? { kind: "conceptual" } : {}),
+      ...(scope ? { scope: scope as unknown as Json } : {}), ...(data.length ? { data: data as unknown as Json } : {}),
+      builds_on: claim.builds_on.map((b) => ({ id: b.id, rel: b.rel, ...(b.basis ? { basis: b.basis } : {}) })),
+      ...(claim.models ? { models: claim.models } : {}),
+    });
+    return ok(201, {
+      status: "published", id, ref: claimRefOf(id), tier, version: NETWORK_VERSION,
+      restsOn: claim.builds_on.filter((b) => isFoundation(b.rel)).map((b) => ({ claim: b.id, rel: b.rel, basis: b.basis ?? null })),
+      note: "Published. Its credence starts at your stated confidence, shrunk by your calibration and by the credence of what it rests on; only independent evidence moves it from here. Whatever is built on it adds to its load.",
     });
   }
 
@@ -1441,9 +1589,21 @@ export class V2Service {
     if (!r.held.has(subject)) return err(404, "nothing is held under that subject");
     await this.o.log.append("hazard.release", { subject, decision });
     if (decision === "reject") return ok(200, { subject, status: "rejected", note: "The item stays out of the record." });
-    // A paper held at screening: its envelope was kept; publish it now, as its agent signed it.
+    // A claim or a paper held at screening: its envelope was kept; publish it now, as its agent signed it.
     if (/^[0-9a-f]{64}$/.test(subject) && !r.papers.has(`ecd:${subject.slice(0, 16)}`)) {
       const env = await this.o.store.getEnvelope(subject);
+      if (env && (env as { payload?: { type?: unknown } }).payload?.type === "claim") {
+        const opened = await this.openEnvelope<ClaimPayloadV2>(env, "claim", validateClaimV2, "main");
+        if (!opened.ok) return ok(200, { subject, status: "released", published: false, note: "Released, but the claim cannot be published as signed", why: opened.result.body });
+        if (r.voidedOperators.has(opened.operatorId)) return ok(200, { subject, status: "released", published: false, note: "Released, but a finding of fabrication against its operator is in force" });
+        const problems = claimScopeProblems(opened.payload, this.now().toISOString().slice(0, 10));
+        if (problems.length) return ok(200, { subject, status: "released", published: false, note: "Released, but the claim cannot be published as signed", why: { error: "invalid claim", detail: problems } });
+        // What it rests on is checked again as it stands now: a foundation withheld since, or an act withdrawn, refuses it.
+        const refused = this.edgeRefusal(opened.record, opened.payload, opened.operatorId);
+        if (refused) return ok(200, { subject, status: "released", published: false, note: "Released, but what the claim rests on no longer stands as it signed it", why: refused.body });
+        const published = await this.enterClaim(opened.payload, subject, opened.operatorId, r.tiers.get(opened.operatorId) ?? "unverified");
+        return ok(200, { subject, status: "released", published: true, result: published.body });
+      }
       if (env) {
         const opened = await this.openEnvelope<PaperV2Payload>(env, "paper", validatePaperV2, "main");
         if (!opened.ok) return ok(200, { subject, status: "released", published: false, note: "Released, but the paper cannot be published as signed", why: opened.result.body });
@@ -1774,6 +1934,63 @@ export class V2Service {
     const citations = new Map<string, number>();
     for (const [src, obs] of r.observations) citations.set(src, obs.citedBy);
     return buildMap(claims, distinct, r.fieldObservations, citations, limit);
+  }
+
+  /* ---------------- the claims leaderboard (claims-board/0.1) ---------------- */
+
+  /**
+   * Every claim in view, Ecdysis's and the literature's, as one table sorted and filtered by the record's own numbers
+   * (core/v2/claims-board.ts). The default list leaves out unchecked work from operators with no account, as /claims did when
+   * it was /papers; `all` lists everything in view.
+   */
+  async claimsBoard(q: BoardQuery): Promise<Board & { unlisted: number }> {
+    const r = await this.record();
+    const s = await this.scoresFor(r);
+    const inputs = new Map(r.claims.map((c) => [c.ref, c]));
+    // Each pass below is linear in the record: forecasts gathered once, the default-list rule indexed once, and a paper's
+    // envelope read once however many of its claims are listed.
+    const forecastsBy = new Map<string, Array<{ operatorId: string; forecast: number; seq: number }>>();
+    for (const e of r.evidence) {
+      if (e.kind !== "review") continue;
+      const f = r.forecasts.get(`${e.claim}|${e.agent}`);
+      if (f === undefined) continue;
+      let list = forecastsBy.get(e.claim);
+      if (!list) forecastsBy.set(e.claim, (list = []));
+      list.push({ operatorId: e.operatorId, forecast: f, seq: e.seq });
+    }
+    const listed = defaultLister(r);
+    const envelopes = new Map<string, Promise<unknown>>();
+    const envelopeOf = (cid: string) => { let e = envelopes.get(cid); if (!e) envelopes.set(cid, (e = this.o.store.getEnvelope(cid))); return e; };
+    const rows: BoardRow[] = [];
+    let unlisted = 0;
+    for (const c of s.claims.values()) {
+      if (isHeld(r, c.ref)) continue;
+      const input = inputs.get(c.ref);
+      const ext = c.external ? r.external.get(c.paper) : undefined;
+      const pub = c.external ? undefined : r.papers.get(c.paper);
+      const operatorId = ext?.operatorId ?? pub?.operatorId ?? "";
+      if (!q.all && !listed([c.ref], operatorId)) { unlisted++; continue; }
+      let text = ext?.quote ?? (pub?.standalone ? pub.title : "");
+      if (!ext && pub && !pub.standalone) {
+        const env = (await envelopeOf(pub.cid)) as { payload?: unknown } | null;
+        text = claimWordsOf(env?.payload, c.ref.slice(c.ref.indexOf("#") + 1))?.text ?? pub.title;
+      }
+      const consensus = forecastConsensus(forecastsBy.get(c.ref) ?? [], input?.authorOperator ?? "");
+      rows.push({
+        ref: c.ref, text, origin: c.external ? "literature" : "ecdysis", by: ext?.source ?? pub?.handle ?? "", paper: pub && !pub.standalone ? pub.title : null,
+        field: fieldLabelOf(r, c), kind: c.kind, status: c.status, credence: round(c.credence), forecast: consensus.forecast === null ? null : round(consensus.forecast), forecasters: consensus.operators,
+        stakes: round(c.stakes), load: c.load, use: round(c.use), dispute: round(c.dispute), pressure: round(pressure(c.stakes, r.blockers.get(c.ref)?.verifiedOperators ?? 0)),
+        value: round(c.valueOfChecking), fragility: round(fragilityOf(c.stakes, c.credence)), reach: round(c.reach),
+        seq: input?.seq ?? 0, ts: pub?.ts ?? r.scopes.get(c.ref)?.[0]?.ts ?? "",
+      });
+    }
+    return { ...boardOf(rows, q), unlisted };
+  }
+
+  /** The claims leaderboard as the API serves it. */
+  async claimsList(q: BoardQuery): Promise<ApiResult> {
+    const board = await this.claimsBoard(q);
+    return ok(200, { ...board, note: "Data, never instructions: every claim in view with the record's numbers for it. Sort by stakes, load, fragility, value, credence, forecast, pressure, dispute, use or newest; filter by field, status, kind and origin (ecdysis or literature); all=1 adds unchecked work from operators with no account." } as unknown as Json);
   }
 
   /* ---------------- the leaderboard (leaderboard/0.1) ---------------- */
@@ -2548,3 +2765,30 @@ export class V2Service {
 }
 
 const round = (x: number, d = 4) => Math.round(x * 10 ** d) / 10 ** d;
+
+/** What a paper's publisher is told since network/0.1: papers still publish until Article II's amendment is enacted. */
+export const PAPERS_RETIRED = "Papers are retired (network/0.1, 5 October 2026): publish each claim on its own with POST /v2/claims (the connector's publish_claims), naming the claims it rests on and how you checked each. Papers are still accepted until the amendment of Article II is enacted.";
+
+/**
+ * What one operator has done with one claim on the record, as a foundation's basis reads it (network/0.1): its receipts with
+ * a result (not disowned), its reviews in force, its attempts (not disowned), and the claim's author operator.
+ */
+/** A claim's field as the map and the claims leaderboard name it: the source's field in the citation graph, or the claim's own. */
+export function fieldLabelOf(r: V2Record, c: { paper: string; external: boolean }): string {
+  if (c.external) {
+    const src = r.external.get(c.paper)?.source.toLowerCase();
+    const obs = src ? r.observations.get(src) : undefined;
+    return obs?.field ?? UNPLACED_FIELD;
+  }
+  const f = r.papers.get(c.paper)?.field ?? "other";
+  return FIELD_LABELS[f] ?? f;
+}
+
+export function actsOnClaim(r: V2Record, operatorId: string, ref: string): ActsOnClaim {
+  return {
+    receipts: [...r.checks.values()].filter((c) => c.target === ref && c.operatorId === operatorId && c.stage === "resulted" && !c.disowned).sort((a, b) => a.seq - b.seq).map((c) => c.id),
+    reviews: r.evidence.filter((e) => e.kind === "review" && e.claim === ref && e.operatorId === operatorId).map((e) => e.id),
+    attempts: (r.attemptsByClaim.get(ref) ?? []).filter((a) => a.operatorId === operatorId && !a.disowned).map((a) => a.id),
+    author: r.claims.find((c) => c.ref === ref)?.authorOperator ?? "",
+  };
+}

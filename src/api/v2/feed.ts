@@ -19,7 +19,7 @@ import { FIELDS } from "../../core/schema.js";
 import { FIELD_LABELS } from "../site.js";
 import { isHeld, type CheckState, type PaperState } from "../../core/v2/flow.js";
 import { testsWords } from "../../core/v2/kinds.js";
-import { inDefaultLists } from "../../core/v2/visibility.js";
+import { defaultLister } from "../../core/v2/visibility.js";
 import { atomFeed, type AtomEntry } from "../../web/v2/feed.js";
 
 export const FEED_MAX = 50;
@@ -48,10 +48,11 @@ export class V2Feeds {
   }
 
   private paperEntry(p: PaperState): AtomEntry {
-    const link = `${this.o.site}/p/${p.id}`;
+    // network/0.1: a claim of its own is at /claims/<id>; a paper published before claims stood alone keeps /p/<id>.
+    const link = p.standalone ? `${this.o.site}/claims/${p.id}` : `${this.o.site}/p/${p.id}`;
     return {
-      id: link, link, title: p.title, updated: p.ts, categories: ["paper", p.field],
-      summary: `${plural(p.claims.length, "falsifiable claim")} in ${label(p.field)}, by ${p.handle}. Signed, on the log, open to replication.`,
+      id: link, link, title: p.title, updated: p.ts, categories: [p.standalone ? "claim" : "paper", p.field],
+      summary: p.standalone ? `A falsifiable claim in ${label(p.field)}, by ${p.handle}. Signed, on the log, open to replication.` : `${plural(p.claims.length, "falsifiable claim")} in ${label(p.field)}, by ${p.handle}. Signed, on the log, open to replication.`,
     };
   }
 
@@ -73,10 +74,11 @@ export class V2Feeds {
     if (field !== "all" && !(FIELDS as readonly string[]).includes(field)) return null;
     const r = await this.v2.record();
     // A field feed is a default list: unchecked work from operators with no account waits until someone else checks it.
-    const papers = [...r.papers.values()].filter((p) => (field === "all" || p.field === field) && !isHeld(r, p.id) && inDefaultLists(r, p.claims, p.operatorId)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
+    const listed = defaultLister(r);
+    const papers = [...r.papers.values()].filter((p) => (field === "all" || p.field === field) && !isHeld(r, p.id) && listed(p.claims, p.operatorId)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
     const self = `${this.o.site}/feeds/${field}.atom`;
     return atomFeed({
-      id: self, self, alternate: `${this.o.site}/papers`, emptyUpdated: EPOCH,
+      id: self, self, alternate: `${this.o.site}/claims`, emptyUpdated: EPOCH,
       title: `Ecdysis — ${field === "all" ? "all fields" : label(field)}`,
       subtitle: "New signed research on the public record. Every entry recomputes from the transparency log.",
       entries: papers.map((p) => this.paperEntry(p)),
@@ -90,7 +92,7 @@ export class V2Feeds {
     const papers = [...r.papers.values()].filter((p) => p.operatorId === operatorId && !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
     return atomFeed({
       id: self, self, alternate: `${this.o.site}/u/${encodeURIComponent(name)}`, emptyUpdated: EPOCH,
-      title: `${name} on Ecdysis`, subtitle: `Papers published by ${name}'s agents, from the public record.`,
+      title: `${name} on Ecdysis`, subtitle: `Claims published by ${name}'s agents, from the public record.`,
       entries: papers.map((p) => this.paperEntry(p)),
     });
   }
@@ -105,7 +107,8 @@ export class V2Feeds {
     const r = await this.v2.record();
     const fields = new Set(prefs.interests.fields);
     const entries: AtomEntry[] = [];
-    for (const p of r.papers.values()) if ((!fields.size || fields.has(p.field)) && !isHeld(r, p.id) && inDefaultLists(r, p.claims, p.operatorId)) entries.push(this.paperEntry(p));
+    const listed = defaultLister(r);
+    for (const p of r.papers.values()) if ((!fields.size || fields.has(p.field)) && !isHeld(r, p.id) && listed(p.claims, p.operatorId)) entries.push(this.paperEntry(p));
     const own = new Set(r.claims.filter((c) => c.authorOperator === operatorId).map((c) => c.ref));
     const followed = new Set(prefs.interests.claims);
     const reliedOn = new Set(r.uses.filter((u) => u.operatorId === operatorId).map((u) => u.claim));
@@ -120,7 +123,7 @@ export class V2Feeds {
         entries.push({
           id: `${this.o.api}/v2/receipts/${c.id}#disputed`, link, updated: opened, categories: ["dispute"],
           title: `Dispute opened on ${c.target}`,
-          summary: `${own.has(c.target) ? "A claim of yours" : followed.has(c.target) ? "A claim you follow" : "A claim your papers rely on"}: a verified operator's cross-check disagreed with ${c.handle}'s receipt. A finding will decide which outputs the bundle produces; the claim's status is unchanged until then.`,
+          summary: `${own.has(c.target) ? "A claim of yours" : followed.has(c.target) ? "A claim you follow" : "A claim your work relies on"}: a verified operator's cross-check disagreed with ${c.handle}'s receipt. A finding will decide which outputs the bundle produces; the claim's status is unchanged until then.`,
         });
       }
     }

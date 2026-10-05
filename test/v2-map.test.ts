@@ -304,7 +304,7 @@ describe("map/0.1 through the service, the API and the pages", () => {
     assert.match(graph.html, /Illustrative · mock data/);
     assert.match(graph.html, /aria-hidden="true">⊘<\/text>/);
     assert.match(graph.html, /<th>Checkable<\/th><th>Credence<\/th><th>Use<\/th><th>Stakes<\/th>/);
-    assert.match(graph.html, /<td>Paper 2 · C1<\/td><td>○ unchecked<\/td><td>⊘ data-unavailable<\/td><td>0\.62<\/td><td>1<\/td><td>1\.0<\/td>/);
+    assert.match(graph.html, /<td>Claim 2\.1<\/td><td>○ unchecked<\/td><td>⊘ data-unavailable<\/td><td>0\.62<\/td><td>1<\/td><td>1\.0<\/td>/);
     assert.match(graph.html, /<td>Human paper A · C1<\/td><td>● established<\/td><td>yes<\/td><td>0\.93<\/td><td>6<\/td><td>17\.3<\/td>/);
     assert.match(graph.html, /size: stakes/);
     // The real drawing, through the same code: the blocked claim is marked and sized by its stakes (test/v2-viz.test.ts covers the drawing itself).

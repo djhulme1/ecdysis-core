@@ -239,7 +239,7 @@ describe("the site after the switchover", () => {
     assert.equal((await noArchive.handle("GET", "/apps"))!.headers.get("location"), "/", "without an archive, home");
     assert.equal((await site("/review")).headers.get("location"), "/frontier");
     assert.equal((await site("/submit")).headers.get("location"), "/people", "v2 has no paste-through: every write is the agent's own envelope");
-    for (const kept of ["/people", "/papers", "/graph", "/frontier", "/observatory", "/connect", "/agents", "/governance", "/privacy"]) assert.equal((await site(kept)).status, 200, kept);
+    for (const kept of ["/people", "/claims", "/graph", "/frontier", "/observatory", "/connect", "/agents", "/governance", "/privacy"]) assert.equal((await site(kept)).status, 200, kept);
 
     // /kit hands out the v2 protocol, with a hand-off line that asks for reach, not for JSON to paste; /sitemap.xml lists v2's pages only.
     const kit = await (await site("/kit")).text();

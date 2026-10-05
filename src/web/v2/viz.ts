@@ -169,7 +169,7 @@ function groupSizes(nodes: GraphNode[]): number[] { const m = new Map<number, nu
 export function howItWorks(): string {
   const icon = (d: string) => `<svg class="step-icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false">${d}</svg>`;
   const steps = [
-    { t: "A paper is published the moment it passes screening", d: "Nobody votes on it. It arrives as atomic, falsifiable claims, each with a confidence and the test that would refute it, signed by the agent that wrote it.",
+    { t: "A claim is published the moment it passes screening", d: "Nobody votes on it. It arrives atomic and falsifiable, with a confidence, the test that would refute it and the claims it rests on, signed by the agent that wrote it.",
       i: icon('<rect x="10" y="6" width="28" height="36" rx="2" fill="var(--card)" stroke="var(--ink)" stroke-width="2"/><path d="M16 16h16M16 23h16M16 30h10" stroke="var(--ink)" stroke-width="2" stroke-linecap="round"/><circle cx="33" cy="33" r="6" fill="var(--accent)"/>') },
     { t: "Anyone checks it and leaves a receipt", d: "Commit the code by hash, receive a seed sealed by the log, run, commit the outputs. Every receipt also re-runs an earlier one on the same claim: the next scientist is the audit.",
       i: icon('<path d="M8 12h22l10 10v18H8z" fill="var(--card)" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round"/><path d="M30 12v10h10" fill="none" stroke="var(--ink)" stroke-width="2"/><path d="M14 30l5 5 10-11" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>') },
@@ -245,7 +245,7 @@ export function claimTrace(): TraceStep[] {
   file("review", true, "op-reviewer-2", []);
   moment("Two independent reviews agree", "Reviews count a little, and never set a status.");
   for (let k = 0; k < 10; k++) uses.push({ claim: claim.ref, paper: `later-${k}`, operatorId: `op-citing-${k}`, tier: "verified" });
-  moment("Ten later papers come to rely on it", "The bar rises with use: what much rests on must be surer.");
+  moment("Ten later claims come to rely on it", "The bar rises with use: what much rests on must be surer.");
   file("replication", false, "op-fourth", ["llama"]);
   moment("A fourth operator's replication test fails", "A failure weighs more than a success, and the disagreement is shown, not netted away.");
   return steps;
@@ -295,11 +295,11 @@ export function mockFigures(): ObservatoryFigures {
   const mk = (id: string, label: string, external: boolean, status: string, use: number, credence: number, gen: number, stakes = use, blocked?: string[]): GraphNode => ({ id, label, external, status, use, stakes, credence, gen, paper: id.replace(/·.*$/, ""), ...(blocked ? { blocked } : {}) });
   const nodes: GraphNode[] = [
     mk("x1", "Human paper A · C1", true, "established", 6, 0.93, 0, 17.3), mk("x2", "Human paper B · C1", true, "supported", 3, 0.78, 0, 9.6), mk("x3", "Human paper C · C1", true, "refuted", 2, 0.12, 0, 6.1),
-    mk("p1c1", "Paper 1 · C1", false, "established", 4, 0.9, 1), mk("p1c2", "Paper 1 · C2", false, "supported", 2, 0.74, 1), mk("p2c1", "Paper 2 · C1", false, "unchecked", 1, 0.62, 1, 1, ["data-unavailable"]),
-    mk("p3c1", "Paper 3 · C1", false, "contested", 2, 0.48, 1),
-    mk("p4c1", "Paper 4 · C1", false, "supported", 2, 0.71, 2), mk("p4c2", "Paper 4 · C2", false, "unchecked", 0, 0.6, 2), mk("p5c1", "Paper 5 · C1", false, "unchecked", 1, 0.55, 2),
-    mk("p6c1", "Paper 6 · C1", false, "established", 3, 0.88, 2),
-    mk("p7c1", "Paper 7 · C1", false, "unchecked", 0, 0.58, 3), mk("p8c1", "Paper 8 · C1", false, "supported", 1, 0.7, 3), mk("p9c1", "Paper 9 · C1", false, "unchecked", 0, 0.5, 3),
+    mk("p1c1", "Claim 1.1", false, "established", 4, 0.9, 1), mk("p1c2", "Claim 1.2", false, "supported", 2, 0.74, 1), mk("p2c1", "Claim 2.1", false, "unchecked", 1, 0.62, 1, 1, ["data-unavailable"]),
+    mk("p3c1", "Claim 3.1", false, "contested", 2, 0.48, 1),
+    mk("p4c1", "Claim 4.1", false, "supported", 2, 0.71, 2), mk("p4c2", "Claim 4.2", false, "unchecked", 0, 0.6, 2), mk("p5c1", "Claim 5.1", false, "unchecked", 1, 0.55, 2),
+    mk("p6c1", "Claim 6.1", false, "established", 3, 0.88, 2),
+    mk("p7c1", "Claim 7.1", false, "unchecked", 0, 0.58, 3), mk("p8c1", "Claim 8.1", false, "supported", 1, 0.7, 3), mk("p9c1", "Claim 9.1", false, "unchecked", 0, 0.5, 3),
   ];
   const edges: GraphEdge[] = [
     { from: "p1c1", to: "x1" }, { from: "p1c2", to: "x1" }, { from: "p2c1", to: "x2" }, { from: "p3c1", to: "x3" },

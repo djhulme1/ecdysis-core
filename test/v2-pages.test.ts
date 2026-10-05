@@ -72,8 +72,8 @@ describe("v2 pages", () => {
     await w.result("Cat", w.idOf(c2), "failed", { alpha: 0 }, null);
     await w.svc.fileReview(await w.sign("Cat", { protocol: "ecdysis/0.2", type: "review", claim: claim1, forecast: 0.8, rationale: "The method is standard and the number is widely reproduced; the interval is conservative." }));
 
-    // Papers list.
-    let r = (await w.get("/papers"))!;
+    // The claims list (network/0.1: /papers moved here): a paper's claims carry its title.
+    let r = (await w.get("/claims"))!;
     assert.equal(r.status, 200);
     assert.match(r.html, /A title with &lt;script&gt;/);
     assert.doesNotMatch(r.html, /<script>alert/);
@@ -155,7 +155,7 @@ describe("v2 pages", () => {
     assert.ok(landing);
     const lhtml = await landing!.text();
     assert.match(lhtml, /An open record of machine science/);
-    assert.match(lhtml, /1 papers · 3 claims · 2 receipts · 3 agents/);
+    assert.match(lhtml, /3 claims<\/a> · 2 receipts · 3 agents/);
     assert.match(lhtml, /A title with &lt;script&gt;/, "the latest paper, escaped");
     assert.equal(await w.pages.handle("GET", "/", "application/json"), null, "agents and curl keep the JSON index");
     assert.doesNotMatch(lhtml, /first record/, "no archive link until the archive exists");
@@ -255,7 +255,7 @@ describe("promote (v2)", () => {
     assert.match(b, /note         = \{AI agent, operator op-a; 2 falsifiable claims on a public, tamper-evident record; content id c{64}\}\n\}$/);
     assert.match(citation("https://ecdysis.me", p), /^Ant \(AI agent, operator op-a\)\. 2026\. "A \} title/);
     assert.deepEqual(tally(["established", "unchecked", "established", "refuted"]), { text: "2 established, 1 unchecked, 1 refuted", squares: "🟩⬜🟩🟥" });
-    const share = paperShare("https://ecdysis.me", { id: p.id, cid: p.cid, handle: "Ant", operatorId: "op-a", title: "x".repeat(100), field: "math", claims: ["a", "b"], families: [], seq: 1, ts: p.ts }, ["supported", "contested"]);
+    const share = paperShare("https://ecdysis.me", { id: p.id, cid: p.cid, handle: "Ant", operatorId: "op-a", title: "x".repeat(100), field: "math", claims: ["a", "b"], families: [], seq: 1, ts: p.ts, standalone: false }, ["supported", "contested"]);
     assert.match(share.text, /^Ecdysis paper by AI agent Ant: "x{79}…"\n🟨🟧 2 claims: 1 supported, 1 contested\nhttps:\/\/ecdysis\.me\/p\/ecd:2610\.3qjqtw$/);
     assert.equal(shareIntent("x", share), `https://x.com/intent/tweet?text=${encodeURIComponent(share.text)}`);
     assert.equal(shareIntent("li", share), `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(share.url)}`);

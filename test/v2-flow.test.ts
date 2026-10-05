@@ -51,7 +51,10 @@ describe("the v2 record from the log", () => {
     assert.deepEqual(r.claims.map((c) => c.ref), ["ext:ks94#C1", "ecd:1#C1", "ecd:2#C1"]);
     assert.deepEqual(r.claims[1]!.foundations, ["ext:ks94#C1"]);
     assert.deepEqual(r.claims[2]!.foundations, ["ecd:1#C1"], "background citations are not foundations");
-    assert.deepEqual(r.uses, [{ claim: "ext:ks94#C1", paper: "ecd:1", operatorId: "op-a", tier: "verified" }, { claim: "ecd:1#C1", paper: "ecd:2", operatorId: "op-b", tier: "verified" }], "a use carries the citing operator's tier, so cheap identities cannot inflate use");
+    // network/0.1: a paper's foundation keeps its declared basis and counts towards use as before, but carries whether the
+    // citing operator's act on the record backs it (here neither has a receipt or a review on the cited claim), and only a
+    // backed reliance counts towards load.
+    assert.deepEqual(r.uses, [{ claim: "ext:ks94#C1", paper: "ecd:1", operatorId: "op-a", tier: "verified", backed: false }, { claim: "ecd:1#C1", paper: "ecd:2", operatorId: "op-b", tier: "verified", backed: false }], "a use carries the citing operator's tier, so cheap identities cannot inflate use");
     assert.equal(r.external.get("ext:ks94")!.test, "alpha_c outside [4.12, 4.22] at N = 200");
     const out = computeV2(r.claims, r.evidence, r.uses, { vouchLinked: r.vouchLinked });
     assert.equal(out.claims.get("ecd:1#C1")!.use, 1);

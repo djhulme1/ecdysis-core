@@ -28,7 +28,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "audit");
 const BASELINE = join(ROOT, "v2-baseline.json");
 
 export interface V2Outputs {
-  /** claim ref → "credence · verified-only · status · use · dispute · stakes" (stakes/0.1: equal to use until a source is observed) */
+  /** claim ref → "credence · verified-only · status · use · dispute · stakes" (stakes/0.2: use + log2(1 + load) + log2(1 + reach)) */
   claims: Record<string, string>;
   /** agent → reliability (6 decimals) */
   reliability: Record<string, string>;
@@ -346,6 +346,20 @@ export function scriptedLog(): V2Entry[] {
   const overlapping = argue("Mole", "op-k3", "ecd:p25#C1", "contradiction", { cites: ["ecd:p24#C1"], confidence: 0.6 });
   checkArg("Lark", "op-k2", overlapping, true);
   checkArg("Newt", "op-k4", overlapping, true);
+  // network/0.1 (5 October 2026): claims of their own, each naming what it rests on, as deep as their authors like. Ant
+  // publishes a line N1 ← N2 ← N3, each resting on the one before (own); Bee, having reviewed N1, builds N4 on it; Cat builds
+  // N5 on N1 with a basis nothing on the record backs (no receipt: the service would refuse it; the derivation, meeting it
+  // anyway, discounts N5 by N1 and counts it towards no use). Load: N1 carries N2, N3 and N4 (N5's edge is unbacked); use counts
+  // op-v2 once, and Ant's reliance on its own claims weighs nothing.
+  const nid = (n: number) => `ecd:${"n".charCodeAt(0).toString(16)}${String(n).padStart(14, "0")}`;
+  const native = (n: number, handle: string, op: string, confidence: number, builds: Array<{ id: string; rel: string; basis?: string }> = []) =>
+    push("claim.publish", { id: nid(n), cid: `${nid(n).slice(4)}`.padEnd(64, "0"), handle, operatorId: op, text: `Claim N${n}`, field: "math", confidence, scope: GENERAL, builds_on: builds });
+  native(1, "Ant", "op-v1", 0.8);
+  native(2, "Ant", "op-v1", 0.8, [{ id: `${nid(1)}#C1`, rel: "extends", basis: "own" }]);
+  native(3, "Ant", "op-v1", 0.8, [{ id: `${nid(2)}#C1`, rel: "extends", basis: "own" }]);
+  push("review.file", { claim: `${nid(1)}#C1`, handle: "Bee", operatorId: "op-v2", forecast: 0.7 });
+  native(4, "Bee", "op-v2", 0.7, [{ id: `${nid(1)}#C1`, rel: "extends", basis: "reviewed" }]);
+  native(5, "Cat", "op-v3", 0.7, [{ id: `${nid(1)}#C1`, rel: "method", basis: "reproduced" }]);
   return out;
 }
 

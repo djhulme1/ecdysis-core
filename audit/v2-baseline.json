@@ -1,6 +1,11 @@
 {
  "claims": {
-  "ecd:p1#C1": "0.869727 · 0.893072 · supported · use 2.750000 · dispute 0.000000 · stakes 2.750000",
+  "ecd:6e00000000000001#C1": "0.715454 · 0.715454 · unchecked · use 0.500000 · dispute 0.000000 · stakes 1.084963",
+  "ecd:6e00000000000002#C1": "0.526106 · 0.526106 · unchecked · use 0.000000 · dispute 0.000000 · stakes 0.000000",
+  "ecd:6e00000000000003#C1": "0.413336 · 0.413336 · unchecked · use 0.000000 · dispute 0.000000 · stakes 0.000000",
+  "ecd:6e00000000000004#C1": "0.486345 · 0.486345 · unchecked · use 0.000000 · dispute 0.000000 · stakes 0.000000",
+  "ecd:6e00000000000005#C1": "0.457498 · 0.457498 · unchecked · use 0.000000 · dispute 0.000000 · stakes 0.000000",
+  "ecd:p1#C1": "0.869727 · 0.893072 · supported · use 2.750000 · dispute 0.000000 · stakes 3.750000",
   "ecd:p1#C2": "0.176852 · 0.176852 · refuted · use 0.500000 · dispute 0.000000 · stakes 0.500000",
   "ecd:p10#C1": "0.872860 · 0.872860 · supported · use 0.000000 · dispute 0.259392 · stakes 0.000000",
   "ecd:p10#C2": "0.591040 · 0.591040 · unchecked · use 0.000000 · dispute 0.000000 · stakes 0.000000",
@@ -32,7 +37,7 @@
   "ecd:p7#C1": "0.512981 · 0.512981 · unchecked · use 0.000000 · dispute 0.000000 · stakes 0.000000",
   "ecd:p8#C1": "0.530515 · 0.530515 · unchecked · use 0.000000 · dispute 0.000000 · stakes 0.000000",
   "ecd:p9#C1": "0.530515 · 0.530515 · unchecked · use 0.000000 · dispute 0.000000 · stakes 0.000000",
-  "ext:0123456789abcdef#C1": "0.818579 · 0.818579 · supported · use 1.000000 · dispute 0.000000 · stakes 1.000000",
+  "ext:0123456789abcdef#C1": "0.818579 · 0.818579 · supported · use 1.000000 · dispute 0.000000 · stakes 2.584963",
   "ext:1111111111111111#C1": "0.723742 · 0.723742 · supported · use 0.000000 · dispute 0.000000 · stakes 0.000000",
   "ext:2222222222222222#C1": "0.165721 · 0.165721 · contested · use 0.000000 · dispute 0.000000 · stakes 0.000000",
   "ext:3333333333333333#C1": "0.153709 · 0.153709 · refuted · use 0.000000 · dispute 0.000000 · stakes 0.000000",
@@ -93,7 +98,7 @@
   "disowned": "1",
   "held": "ecd:p6#C1,ext:eeeeeeeeeeeeeeee",
   "anchors": "ext:fedcba9876543210#C1:false",
-  "reports": "112",
+  "reports": "113",
   "resolved": "57",
   "arguments": "ecd:p13#C1:counterexample:upheld;ecd:p13#C2:contradiction:upheld;ecd:p13#C3:logical-gap:upheld;ecd:p13#C3:unsupported-premise:dismissed;ecd:p13#C3:logical-gap:dismissed;ecd:p13#C3:logical-gap:open;ecd:p12#C1:methodological-flaw:upheld;ext:cccccccccccccccc#C1:logical-gap:upheld;ext:cccccccccccccccc#C1:unsupported-premise:open;ecd:p23#C1:contradiction:upheld;ecd:p25#C1:contradiction:upheld",
   "verifiedByRecord": "op-a3:9/9/8/7@1;op-a4:5/5/3/4@2",
@@ -104,11 +109,11 @@
   "demoted": "ext:1111111111111111#C1:reproduction→extension",
   "described": "ext:1111111111111111#C1:extension",
   "scopes": "ext:1111111111111111#C1:legacy>declared(2009-04-01..2012-07-31)@2",
-  "statusReads": "ecd:p1#C2:0.191648;ecd:p10#C1:0.883108;ecd:p18#C1:0.945816;ecd:p22#C1:0.966174;ecd:p22#C2:0.968383;ecd:p25#C1:0.640000;ecd:p5#C1:0.752500;ext:dddddddddddddddd#C1:0.885682"
+  "statusReads": "ecd:6e00000000000001#C1:0.695575;ecd:p1#C2:0.191648;ecd:p10#C1:0.883108;ecd:p18#C1:0.945816;ecd:p22#C1:0.966174;ecd:p22#C2:0.968383;ecd:p25#C1:0.640000;ecd:p5#C1:0.752500;ext:dddddddddddddddd#C1:0.885682"
  },
  "leaderboard": {
   "agent Ant": "10 · banked 0.050000 · at risk 0.327125 · 1/1/4",
-  "agent Bee": "5 · banked 0.300000 · at risk 2.320675 · 1/0/11",
+  "agent Bee": "5 · banked 0.300000 · at risk 2.338705 · 1/0/12",
   "agent Cat": "2 · banked 0.665960 · at risk 1.915104 · 9/0/9",
   "agent Dog": "3 · banked 0.440258 · at risk 0.770889 · 7/1/5",
   "agent Emu": "- · banked 0.000000 · at risk 1.474875 · 0/0/7",
@@ -142,10 +147,10 @@
   "operator op-u2": "13 · banked -0.200000 · at risk 0.003654 · 0/1/1 · net negative",
   "operator op-u3": "- · banked 0.000000 · at risk 0.000000 · 0/0/0 · voided",
   "operator op-v1": "10 · banked 0.050000 · at risk 0.327125 · 1/1/4",
-  "operator op-v2": "5 · banked 0.300000 · at risk 2.320675 · 1/0/11",
+  "operator op-v2": "5 · banked 0.300000 · at risk 2.338705 · 1/0/12",
   "operator op-v3": "2 · banked 0.665960 · at risk 1.915104 · 9/0/9",
   "operator op-v4": "3 · banked 0.440258 · at risk 0.865690 · 7/1/6",
   "operator op-v5": "- · banked 0.000000 · at risk 1.474875 · 0/0/7",
-  "audit": "ecd:p13#C3:0.900000;ecd:p1#C1:0.716658;ecd:p13#C2:0.450000;ecd:p12#C1:0.423754;ext:0123456789abcdef#C1:0.420283;ecd:p1#C2:0.398306;ecd:p3#C1:0.397797;ecd:p2#C1:0.333374;ext:aaaaaaaaaaaaaaaa#C1:0.325687;ecd:p13#C1:0.300000"
+  "audit": "ecd:p1#C1:0.937169;ecd:p13#C3:0.900000;ext:0123456789abcdef#C1:0.864372;ecd:p13#C2:0.450000;ecd:p12#C1:0.423754;ecd:p1#C2:0.398306;ecd:p3#C1:0.397797;ecd:p2#C1:0.333374;ext:aaaaaaaaaaaaaaaa#C1:0.325687;ecd:p13#C1:0.300000"
  }
 }

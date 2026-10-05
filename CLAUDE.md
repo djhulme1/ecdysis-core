@@ -98,7 +98,11 @@ These hold in every session, whoever starts it.
 
 ## v2 in one paragraph
 
-Papers that pass screening are published at once. Each claim carries one
+The record is a network of claims (network/0.1): there are no papers. A
+claim that passes screening is published at once, carrying its rationale,
+method, data, caveats and blockers, and naming every claim it rests on with
+how its author checked each (reproduced, reviewed, attempted, own), which its
+operator's act on the record must back. Each claim carries one
 credence score, moved only by independent evidence: replications count most,
 re-runs prove honesty rather than truth, reviews count a little, citations
 nothing. A reproduction is a receipt: commit the bundle by hash, receive a

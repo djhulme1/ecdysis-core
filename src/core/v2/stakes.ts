@@ -20,10 +20,17 @@
  *             citedness × 2). Author h-index is not used: it measures the
  *             person, not the claim.
  *
- *   S = U + log2(1 + R)
+ *   load L    network/0.1 (stakes/0.2, 5 October 2026): how much rests on the
+ *             claim, directly or through other claims, in claims by verified
+ *             operators independent of its author, at most sixteen per
+ *             operator (loadOf below). Agents build claims on claims on
+ *             claims; whatever a deep line of work rests on carries its load.
+ *
+ *   S = U + log2(1 + L) + log2(1 + R)
  *
  * Each doubling of citations adds one unit of stakes, so a paper with a
- * thousand citations counts like a claim with ten dependants on the record.
+ * thousand citations counts like a claim with ten dependants on the record;
+ * each doubling of the claims built on a claim does the same.
  * The log compresses a measure that is inflated and noisy (self-citation,
  * review articles, fashion) into a direction number, and says plainly that
  * it is one. Stakes enter the frontier's value of checking and the pressure
@@ -32,7 +39,7 @@
  * its reach. Pure: no runtime dependencies, no environment.
  */
 
-export const STAKES_VERSION = "stakes/0.1";
+export const STAKES_VERSION = "stakes/0.2";
 
 export const STAKES_PARAMS = {
   /** A source younger than this (by publication year) takes its venue's expected citations when they exceed its own. */
@@ -122,6 +129,60 @@ export function reachOf(obs: SourceObservation | null | undefined, now: Date): n
 }
 
 /** S = U + log2(1 + R). */
-export function stakesOf(use: number, reach: number): number {
-  return Math.max(0, use) + Math.log2(1 + Math.max(0, reach));
+export function stakesOf(use: number, reach: number, load = 0): number {
+  return Math.max(0, use) + Math.log2(1 + Math.max(0, load)) + Math.log2(1 + Math.max(0, reach));
+}
+
+/** Load's bounds: at most this many claims from any one operator count towards a claim's load. */
+export const LOAD_PARAMS = { perOperator: 16 } as const;
+
+/**
+ * LOAD (network/0.1; Daniel, 5 October 2026, 12:00: "Agents can then go as deep as they like, building on claims upon claims
+ * upon claims ... the system should start to surface dependent claims by the pressure (dependencies) they have"): how much of
+ * the network rests on a claim, directly or through other claims, in claims by VERIFIED operators independent of its author,
+ * at most sixteen from any one operator:
+ *
+ *   L(c) = Σ_o w(o, author(c)) · min(16, n_o(c))
+ *
+ * where n_o(c) counts operator o's claims resting on c through any chain (a claim reached by two paths counts twice, which the
+ * cap bounds) and w is use's independence weight (0 for the author's own operator, ½ if vouch-linked or ring-linked, else 1).
+ * A claim rests on another when it, or the paper it was published in, names it as a backed foundation: a use. Volume earns
+ * nothing (IV.2): an author's own line adds no load to its own claims, a free identity adds none, and no operator adds more
+ * than sixteen. Load enters stakes (stakes/0.2), so the frontier, direction and pressure rise with what is built on a claim,
+ * however deep; it never enters credence, a status or the threshold for established, which stay on use.
+ *
+ * One reverse pass over log order, keeping per claim only a count per verified operator: linear in the edges.
+ */
+export function loadOf(
+  claims: ReadonlyArray<{ ref: string; paper: string; seq: number; authorOperator: string }>,
+  uses: ReadonlyArray<{ claim: string; paper: string; operatorId: string; tier?: string; backed?: boolean }>,
+  weight: (operatorId: string, author: string) => number,
+): Map<string, number> {
+  const K = LOAD_PARAMS.perOperator;
+  const byPublication = new Map<string, string[]>();
+  for (const c of claims) byPublication.set(c.paper, [...(byPublication.get(c.paper) ?? []), c.ref]);
+  // Who relies on each claim: the relying publications' claims, with the relying operator and whether it is verified.
+  const resting = new Map<string, Array<{ ref: string; operatorId: string; verified: boolean }>>();
+  const seen = new Set<string>();
+  for (const u of uses) {
+    const k = `${u.claim}|${u.paper}`;
+    if (u.backed === false || seen.has(k)) continue;
+    seen.add(k);
+    for (const d of byPublication.get(u.paper) ?? []) if (d !== u.claim) resting.set(u.claim, [...(resting.get(u.claim) ?? []), { ref: d, operatorId: u.operatorId, verified: u.tier === "verified" }]);
+  }
+  const counts = new Map<string, Map<string, number>>();
+  const out = new Map<string, number>();
+  for (const c of [...claims].sort((a, b) => b.seq - a.seq)) {
+    const mine = new Map<string, number>();
+    const add = (op: string, n: number) => mine.set(op, Math.min(K, (mine.get(op) ?? 0) + n));
+    for (const d of resting.get(c.ref) ?? []) {
+      if (d.verified) add(d.operatorId, 1);
+      for (const [op, n] of counts.get(d.ref) ?? []) add(op, n);
+    }
+    counts.set(c.ref, mine);
+    let load = 0;
+    for (const [op, n] of mine) load += weight(op, c.authorOperator) * n;
+    out.set(c.ref, load);
+  }
+  return out;
 }

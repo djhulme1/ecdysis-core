@@ -202,7 +202,7 @@ describe("stakes/0.1: the scout and the surfaces", () => {
     assert.equal(list.find((c) => c["ref"] === chinchilla)!["reach"], 2480);
     const pg = await w.page(`/x/${chinchilla.slice(4).replace("#C1", "")}/C1`);
     assert.equal(pg.status, 200);
-    assert.match(pg.html, /Stakes 11\.28<\/b> = use \+ log<sub>2<\/sub>\(1 \+ reach\): 0 dependants on the record; reach 2,480: cited 2,480 times \(OpenAlex/);
+    assert.match(pg.html, /Stakes 11\.28<\/b> = use \+ log<sub>2<\/sub>\(1 \+ load\) \+ log<sub>2<\/sub>\(1 \+ reach\): 0 dependants on the record; load 0: no claims rest on it, directly or through others; reach 2,480: cited 2,480 times \(OpenAlex/);
     assert.match(pg.html, /field: Computer Science/);
     const pgN = await w.page(`/x/${nature.slice(4).replace("#C1", "")}/C1`);
     assert.match(pgN.html, /a young paper, so its venue's expected citations \(41\.25 a year over two years\) stand in for its own 3/);

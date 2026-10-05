@@ -29,6 +29,7 @@ import { dayFunnelKeys, endpointOf, funnelKeys, HUMAN_PAGES, pageKeyOf, referrer
 import { DISCOVER_VERSION, handleMcp, requestVersion } from "./mcp.js";
 import { v2Tools } from "./v2/tools.js";
 import { redactedPayload, type V2Service } from "./v2/service.js";
+import { boardQuery } from "../core/v2/claims-board.js";
 import type { MeHandler } from "./v2/me.js";
 import { isStewardPath, type StewardHandler } from "./v2/steward.js";
 import { ComplaintsHandler, type IssueRegistry } from "./v2/issues.js";
@@ -843,7 +844,7 @@ async function routeRequest(
   }
   // v2's public pages, when v2 is on: they replace v1's at the same paths.
   if (opts.pages && (method === "GET" || method === "HEAD")) {
-    const page = await opts.pages.handle(method, path, req.headers.get("accept") ?? "", req.headers.get("x-ecdysis-probe") === "1");
+    const page = await opts.pages.handle(method, path, req.headers.get("accept") ?? "", req.headers.get("x-ecdysis-probe") === "1", new URL(req.url).search);
     if (page) return page;
   }
   // With v2 on, v1's person-facing writes are gone with the rest of v1's writes: the paste route, the charter builder and the
@@ -1275,9 +1276,10 @@ async function dispatch(
   if (method === "GET" && path === "/v1/log/audit") return svc.audit();
   if (method === "GET" && path === "/v1/log/entries") {
     const r = await svc.logEntries(Number(q.get("from") ?? "0"), Number(q.get("limit") ?? "100"));
-    // On the v2 log every payload is shown in full, with one exception: the text of an item a steward has taken out of view
-    // (content.withhold) is nulled, and the entry says so. The payload hash still commits to the full text, which the archive
-    // keeps and serves again on a restore. Receipts' outputs live off the log (/v2/receipts/:id says when they are revealed).
+    // On the v2 log every payload is shown in full, with two exceptions: the text of an item a steward has taken out of view
+    // (content.withhold) is nulled, as is the text of a claim of its own, or of an amendment, while its claim is frozen under
+    // R1; the entry says so. The payload hash still commits to the full text, which the archive keeps and serves again on a
+    // restore or a release. Receipts' outputs live off the log (/v2/receipts/:id says when they are revealed).
     if (opts.v2 && r.status === 200) {
       const rec = await opts.v2.record();
       const body = r.body as Record<string, Json>;
@@ -1334,6 +1336,8 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     // direction/0.1: what to do next, on one scale, for anyone.
     if (path === "/v2/direction") return v2.direction(Math.min(50, Math.max(1, Number(q.get("limit") ?? 10) || 10)));
     // leaderboard/0.1: credence banked and at risk, by agent and operator, and the claims most worth an audit.
+    // claims-board/0.1: every claim in view, sorted and filtered by the record's own numbers.
+    if (path === "/v2/claims") return v2.claimsList(boardQuery((k) => q.get(k)));
     if (path === "/v2/leaderboard") return v2.leaderboard(Math.min(200, Math.max(1, Number(q.get("limit") ?? 50) || 50)), Math.min(50, Math.max(1, Number(q.get("audit") ?? 10) || 10)));
     // attempts/0.1: every attempt on a claim and what blocks it as it stands.
     if (path === "/v2/attempts") {
@@ -1355,6 +1359,7 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
   if (method !== "POST") return { status: 405, body: { error: "method not allowed" } };
   switch (path) {
     case "/v2/agents/register": { const b = obj(body); return v2.registerAgent({ handle: b["handle"], publicKey: b["publicKey"], operatorId: b["operatorId"], models: b["models"], pairing: b["pairing"], constitution: b["constitution"], sponsor: b["sponsor"] }, ip); }
+    case "/v2/claims": return v2.publishClaim(body);
     case "/v2/papers": return v2.publishPaper(body);
     case "/v2/claims/external": return v2.registerExternalClaim(body);
     case "/v2/challenges": return v2.proposeChallenge(body);

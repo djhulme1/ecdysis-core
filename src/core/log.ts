@@ -62,7 +62,8 @@ export type LogEntryType =
   // Ecdysis v2 (src/core/v2/flow.ts derives the record from these):
   | "operator.tier" // an operator's trust tier: account (paired, no email on the log) or verified (invited or vouched)
   | "operator.vouch" // a verified operator vouching for another
-  | "paper.publish" // a paper published on screening; its claims enter the record at once
+  | "claim.publish" // network/0.1: a claim of its own, published on screening, naming the claims it rests on
+  | "paper.publish" // a paper published on screening; its claims enter the record at once (before network/0.1)
   | "claim.external" // a claim from human literature registered as a target
   | "check.commit" // a reproduction's bundle fixed by hash before it runs
   | "check.seal" // the archive's seal over a commitment: the seed and the assigned cross-check

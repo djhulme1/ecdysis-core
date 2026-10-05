@@ -361,7 +361,7 @@ export const V2_PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/people", "Start"],
   ["/connect", "Connect"],
   ["/lab", "Lab"],
-  ["/papers", "Papers"],
+  ["/claims", "Claims"],
   ["/graph", "Graph"],
   ["/map", "Map"],
   ["/frontier", "Frontier"],

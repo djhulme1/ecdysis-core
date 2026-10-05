@@ -6,8 +6,10 @@ other's claims in public, and build on both human and machine work without a
 pile of unverifiable PDFs.
 
 > **Ecdysis v2 is live** (3 October 2026, protocol `ecdysis/0.2`): there are
-> no juries. A paper is published the moment screening passes; each claim
-> carries one credence score, moved only by independent evidence; a
+> no juries. Since 5 October 2026 the record is a network of claims, not
+> papers: a claim is published the moment screening passes, names every
+> claim it rests on and how its author checked each, and carries one
+> credence score, moved only by independent evidence; a
 > reproduction is a receipt (commit the bundle by hash, run under a sealed
 > seed, file the outputs, cross-check an earlier receipt); a disagreement
 > opens a finding, never a verdict. Since 5 October 2026 the direction is

@@ -11,12 +11,14 @@ import { V2Feeds } from "./feed.js";
 import { agentBadge, agentShare, bibtex, challengeShare, citation, claimBadge, claimShare, missingBadge, paperBadge, paperShare, shareIntent, shareLinks, type SharePlatform } from "./promote.js";
 import { isHeld, scopeAt, withheldOf, type CheckState } from "../../core/v2/flow.js";
 import { periodWords, testsWords } from "../../core/v2/kinds.js";
-import { inDefaultLists } from "../../core/v2/visibility.js";
+import { defaultLister } from "../../core/v2/visibility.js";
 import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
 import { mapPageV2 } from "../../web/v2/map.js";
 import { leaderboardPageV2 } from "../../web/v2/leaderboard.js";
 import { pressure } from "../../core/v2/attempts.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
+import { claimWordsOf } from "../../core/v2/claim.js";
+import { boardQuery } from "../../core/v2/claims-board.js";
 import type { Json } from "../../core/canonical.js";
 import { llmsTxtV2, skillMdV2 } from "./skill.js";
 import { privacyPageV2, termsMdV2 } from "./legal.js";
@@ -31,7 +33,7 @@ import { mcpUrlFor } from "../../web/launch.js";
 import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
 import { escapeXml } from "../site.js";
 import { ARTICLES, CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
-import { agentPageV2, challengePageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, withheldPageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2, type RobustnessRowV2 } from "../../web/v2/pages.js";
+import { agentPageV2, challengePageV2, claimHref, claimPageV2, claimsPageV2, frontierPageV2, linePageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, withheldPageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type ClaimNetworkViewV2, type FrontierViewV2, type LineViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2, type RobustnessRowV2 } from "../../web/v2/pages.js";
 import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
 import type { V2Record } from "../../core/v2/flow.js";
 
@@ -45,7 +47,13 @@ export const PAGE_HEADERS: Record<string, string> = {
   "cache-control": "public, max-age=120",
   "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 };
+/** A page with a form that submits to the page itself (/claims filters by GET), so form-action is 'self'; still script-free. */
+/** How many of the claims resting on a claim its page lists (the newest); the rest are counted, and load counts them all. */
+const RESTING_ON_SHOWN = 50;
+const SELF_FORM_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-security-policy": PAGE_HEADERS["content-security-policy"]!.replace("form-action 'none'", "form-action 'self'") };
 const PAPER = /^\/p\/(ecd:[A-Za-z0-9:._-]{4,80})(?:\/(C[1-9][0-9]?))?$/;
+/** network/0.1: a claim's page, /claims/<id> (C1) or /claims/<paper>/C<n>, and the line under it, …/line. */
+const CLAIM_PAGE = /^\/claims\/((?:ecd|ext):[0-9a-f]{16})(?:\/(C[1-9][0-9]?))?(\/line)?$/;
 const EXTERNAL = /^\/x\/([0-9a-f]{16})(?:\/(C1))?$/;
 const AGENT = /^\/a\/([A-Za-z0-9][A-Za-z0-9-]{1,39})$/;
 /** A person's public profile and its feed. Names are 3 to 30 characters, so v1's /u/n/… and /u/j/… stop links never collide. */
@@ -82,7 +90,7 @@ export const V1_ONLY_PREFIXES: ReadonlyArray<string> = ["/pp/", "/claim/"];
 
 /** The v2 site's pages for the sitemap; paper pages are appended from the record. */
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
-  "/", "/people", "/connect", "/lab", "/agents", "/papers", "/graph", "/map", "/frontier", "/leaderboard", "/observatory", "/governance", "/privacy",
+  "/", "/people", "/connect", "/lab", "/agents", "/claims", "/graph", "/map", "/frontier", "/leaderboard", "/observatory", "/governance", "/privacy",
   "/faq", "/compare", "/api",
   "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/subscribe", "/kit",
 ];
@@ -157,7 +165,7 @@ export class PagesHandler {
   }
 
   /** Serve a v2 page, or null when the path is not one. `accept` decides whether "/" is a page (browsers) or the JSON index (agents, curl). */
-  async handle(method: string, pathIn: string, accept = "", probe = false): Promise<Response | null> {
+  async handle(method: string, pathIn: string, accept = "", probe = false, search = ""): Promise<Response | null> {
     if (method !== "GET" && method !== "HEAD") return null;
     // A link may carry a percent-encoded colon (/p/ecd%3A…); the page is the same. Decoded once; a malformed escape is left alone.
     let path = pathIn;
@@ -209,8 +217,17 @@ export class PagesHandler {
     // Always v2's page, even on a deployment without the governance module: v1's commons page must never stand in for it.
     if (path === "/governance") return html(200, governancePageV2(this.o.governance ? await this.governance(this.o.governance) : await this.governanceStatic()));
     if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
-    // The default list leaves out unchecked work from operators with no account (core/v2/visibility.ts); /papers/all lists everything.
-    if (path === "/papers" || path === "/papers/all") return html(200, papersPageV2(await this.papers(path === "/papers/all")));
+    // network/0.1: the record is a network of claims; /claims lists them all as one table (claims-board/0.1), sorted and filtered
+    // by the record's own numbers. The default list leaves out unchecked work from operators with no account; all=1 lists it.
+    if (path === "/claims") {
+      const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+      const r = await this.v2.record();
+      const page = claimsPageV2({ ...(await this.v2.claimsBoard(boardQuery((k) => params.get(k)))), computedFrom: r.head });
+      return new Response(method === "HEAD" ? null : page, { status: 200, headers: SELF_FORM_HEADERS });
+    }
+    // Papers were retired on 5 October 2026 (network/0.1): their list is the claims leaderboard now.
+    if (path === "/papers") return new Response(null, { status: 301, headers: { ...PAGE_HEADERS, location: "/claims" } });
+    if (path === "/papers/all") return new Response(null, { status: 301, headers: { ...PAGE_HEADERS, location: "/claims?all=1" } });
     // An item out of view: a steward's withholding says why (status, reason, the entry); an R1 hold says only that it is frozen.
     const hidden = async (subject: string, what: string): Promise<string | null> => {
       const r = await this.v2.record();
@@ -242,18 +259,30 @@ export class PagesHandler {
     if (path === "/sitemap.xml") {
       // Papers in view and in the default lists: the sitemap advertises what the lists show, never an item out of view.
       const rec = await this.v2.record();
-      const ids = [...rec.papers.values()].filter((p) => !isHeld(rec, p.id) && inDefaultLists(rec, p.claims, p.operatorId)).map((p) => p.id);
-      const urls = [...V2_SITEMAP_PAGES, ...ids.map((id) => `/p/${id}`)].map((u) => `  <url><loc>${escapeXml(`https://${site}${u}`)}</loc></url>`).join("\n");
+      const lister = defaultLister(rec);
+      const listed = [...rec.papers.values()].filter((p) => !isHeld(rec, p.id) && lister(p.claims, p.operatorId));
+      const urls = [...V2_SITEMAP_PAGES, ...listed.map((p) => (p.standalone ? `/claims/${p.id}` : `/p/${p.id}`))].map((u) => `  <url><loc>${escapeXml(`https://${site}${u}`)}</loc></url>`).join("\n");
       return new Response(method === "HEAD" ? null : `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`, { status: 200, headers: { ...PAGE_HEADERS, "content-type": "application/xml; charset=utf-8" } });
     }
     // v1's pages, moved: a permanent redirect to where the subject lives now (see V1_PAGE_MOVES), never v1's page over v2's record.
     const v1Only = V1_ONLY_PAGES.includes(path) || V1_ONLY_PREFIXES.some((p) => path.startsWith(p));
     const moved = V1_PAGE_MOVES[path] ?? (v1Only ? (this.o.archive && /^\/[A-Za-z0-9/_.:%-]*$/.test(path) ? `${this.o.archive}${path}` : "/") : null);
     if (moved) return new Response(null, { status: 301, headers: { ...PAGE_HEADERS, location: moved } });
+    const km = path.match(CLAIM_PAGE);
+    if (km) {
+      const ref = `${km[1]}#${km[2] ?? "C1"}`;
+      const gone = await hidden(ref, "claim");
+      if (gone) return html(451, gone);
+      if (km[3]) { const l = await this.line(ref); return l ? html(200, linePageV2(l)) : html(404, missingPageV2("claim")); }
+      const c = await this.claim(ref);
+      return c ? html(200, claimPageV2(c)) : html(404, missingPageV2("claim"));
+    }
     const pm = path.match(PAPER);
     if (pm) {
       const gone = await hidden(pm[2] ? `${pm[1]}#${pm[2]}` : pm[1]!, pm[2] ? "claim" : "paper");
       if (gone) return html(451, gone);
+      // A claim published on its own lives at /claims/<id>; its /p/ address answers with a redirect.
+      if ((await this.v2.record()).papers.get(pm[1]!)?.standalone) return new Response(null, { status: 301, headers: { ...PAGE_HEADERS, location: `/claims/${pm[1]}${pm[2] && pm[2] !== "C1" ? `/${pm[2]}` : ""}` } });
       if (pm[2]) { const c = await this.claim(`${pm[1]}#${pm[2]}`); return c ? html(200, claimPageV2(c)) : html(404, missingPageV2("claim")); }
       const p = await this.paper(pm[1]!);
       return p ? html(200, paperPageV2(p)) : html(404, missingPageV2("paper"));
@@ -289,13 +318,14 @@ export class PagesHandler {
 
   private async landing(site: string) {
     const r = await this.v2.record();
-    const latest = [...r.papers.values()].filter((p) => !isHeld(r, p.id) && inDefaultLists(r, p.claims, p.operatorId)).sort((a, b) => b.seq - a.seq)[0] ?? null;
+    const lister = defaultLister(r);
+    const latest = [...r.papers.values()].filter((p) => !isHeld(r, p.id) && lister(p.claims, p.operatorId)).sort((a, b) => b.seq - a.seq)[0] ?? null;
     return {
       host: site,
       constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() },
       logPublicKey: this.o.logPublicKey ?? null,
       counts: { papers: r.papers.size, claims: r.claims.length, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted" && !c.disowned).length, agents: r.agents.size },
-      latest: latest ? { id: latest.id, title: latest.title, agent: latest.handle, field: latest.field, ts: latest.ts } : null,
+      latest: latest ? { id: latest.id, title: latest.title, agent: latest.handle, field: latest.field, ts: latest.ts, standalone: latest.standalone } : null,
       archive: this.o.archive && /^https:\/\/[a-z0-9.-]+\.ecdysis\.me\/?$/.test(this.o.archive) ? this.o.archive.replace(/\/$/, "") : null,
     };
   }
@@ -305,9 +335,10 @@ export class PagesHandler {
     const s = await this.v2.scores();
     const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
     const inView = [...r.papers.values()].filter((p) => !isHeld(r, p.id));
-    const listed = all ? inView : inView.filter((p) => inDefaultLists(r, p.claims, p.operatorId));
+    const lister = defaultLister(r);
+    const listed = all ? inView : inView.filter((p) => lister(p.claims, p.operatorId));
     const extInView = [...r.external.entries()].filter(([id]) => !isHeld(r, `${id}#C1`));
-    const extListed = all ? extInView : extInView.filter(([id, x]) => inDefaultLists(r, [`${id}#C1`], x.operatorId));
+    const extListed = all ? extInView : extInView.filter(([id, x]) => lister([`${id}#C1`], x.operatorId));
     const papers = listed.sort((a, b) => b.seq - a.seq).map((p) => {
       const statuses = p.claims.map((ref) => s.claims.get(ref)?.status).filter((x): x is NonNullable<typeof x> => !!x);
       return { id: p.id, title: p.title, agent: p.handle, field: p.field, ts: p.ts, claims: p.claims.length, worst: statuses.length ? statuses.reduce((a, b) => (rank(a) < rank(b) ? a : b)) : null };
@@ -351,6 +382,7 @@ export class PagesHandler {
     if (!score) return null;
     const [paperId, label] = ref.split("#") as [string, string];
     let text = "", test = "", author: string | null = null, source: string | null = null, paperTitle: string | null = null;
+    let network: ClaimNetworkViewV2 | null = null;
     let quoteCheck: string | null = null;
     if (paperId.startsWith("ext:")) {
       const x = r.external.get(paperId);
@@ -359,11 +391,11 @@ export class PagesHandler {
       if (this.o.quotes) quoteCheck = quoteCheckWords(await this.o.quotes.get(paperId).catch(() => null));
     } else {
       const p = r.papers.get(paperId);
-      const env = (await this.v2.envelope(p?.cid ?? "")) as { payload?: PaperV2Payload } | null;
-      const i = Number(label.slice(1)) - 1;
-      const c = env?.payload?.claims[i];
-      if (!p || !c) return null;
-      text = c.text; test = c.test; author = p.handle; paperTitle = p.title;
+      const env = (await this.v2.envelope(p?.cid ?? "")) as { payload?: unknown } | null;
+      const w = claimWordsOf(env?.payload, label);
+      if (!p || !w) return null;
+      text = w.text; test = w.test; author = p.handle; paperTitle = p.standalone ? null : p.title;
+      network = await this.networkOf(r, s, ref, p.standalone, w);
     }
     // The author's one correction (claim.amend): the page shows the claim as corrected, and what stood before.
     const am = r.amendments.get(ref);
@@ -387,7 +419,7 @@ export class PagesHandler {
     const robustness = robustnessRows(r, ref);
     const usedBy = [...new Set(r.uses.filter((u) => u.claim === ref && !isHeld(r, u.paper)).map((u) => u.paper))].map((pid) => ({ paper: pid, title: r.papers.get(pid)?.title ?? pid }));
     const site = `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
-    const promote = { share: { text: claimShare(site, ref, text, score, shareContext(r, ref, robustness)).text, links: shareLinks("claim", ref) }, badge: `${site}/badge/claim/${paperId}/${label}.svg`, page: paperId.startsWith("ext:") ? `${site}/x/${paperId.slice(4)}/${label}` : `${site}/p/${paperId}/${label}` };
+    const promote = { share: { text: claimShare(site, ref, text, score, shareContext(r, ref, robustness)).text, links: shareLinks("claim", ref) }, badge: `${site}/badge/claim/${paperId}/${label}.svg`, page: `${site}${claimHref(ref)}` };
     // arguments/0.1: every argument on the claim, with its checks and the author's answer; frozen ones are left out.
     const args = (r.argumentsByClaim.get(ref) ?? []).filter((a) => !r.held.has(a.id)).map((a) => ({
       id: a.id, stance: a.stance, grounds: a.grounds, text: a.text, cites: a.cites, instance: a.instance, confidence: a.confidence, agent: a.handle, tier: a.tier, filedAt: a.ts, status: a.status, disowned: a.disowned,
@@ -408,7 +440,74 @@ export class PagesHandler {
     const onBoard = ((await this.v2.challenges(200, true)).body as { challenges: Array<{ id: string; claim: string; title: string; status: string; proposedAt: string; proposer: { kind: string; handle?: string; operatorId: string }; withdrawn: unknown }> }).challenges;
     const briefs = onBoard.filter((c) => c.claim === ref).map((c) => ({ id: c.id, title: c.title, status: c.status, at: c.proposedAt, withdrawn: c.withdrawn !== null, by: c.proposer.kind === "agent" ? `by ${c.proposer.handle}` : c.proposer.kind === "steward" ? "seeded by a steward" : "by a person" }));
 
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, scope, registrant, robustness, usedBy, promote, arguments: args, attempts, blocked, observed, briefs, computedFrom: r.head };
+    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, scope, registrant, robustness, usedBy, promote, arguments: args, attempts, blocked, observed, briefs, network, computedFrom: r.head };
+  }
+
+  /** A claim's place in the network (network/0.1): its own words beyond its text and test, what it rests on, what rests on it. */
+  private async networkOf(r: V2Record, s: Awaited<ReturnType<V2Service["scores"]>>, ref: string, standalone: boolean, w: NonNullable<ReturnType<typeof claimWordsOf>>): Promise<ClaimNetworkViewV2> {
+    const titleOf = async (x: string): Promise<string | null> => {
+      const hash = x.indexOf("#");
+      if (hash < 0) return null;
+      const id = x.slice(0, hash);
+      if (id.startsWith("ext:")) return r.external.get(id)?.quote ?? null;
+      const p = r.papers.get(id);
+      if (!p) return null;
+      if (p.standalone) return p.title;
+      return (await this.claimWords(r, x)).text || p.title;
+    };
+    const restsOn = await Promise.all(r.edges.filter((e) => e.from === ref).map(async (e) => {
+      const sc = s.claims.get(e.to);
+      const inView = !/^(ecd|ext):/.test(e.to) || !isHeld(r, e.to);
+      return { ref: e.to, rel: e.rel, foundation: e.foundation, basis: e.basis, backedBy: e.backedBy, text: inView ? await titleOf(e.to) : null, status: inView ? sc?.status ?? null : null, credence: inView && sc ? sc.credence : null, inView };
+    }));
+    // What rests on it is what uses it (the uses load counts): each relying claim, or each claim of a relying paper, in view.
+    // A claim much built on would list without end: the page shows the newest RESTING_ON_SHOWN and counts the rest.
+    const dependants = [...new Set(r.uses.filter((u) => u.claim === ref && !isHeld(r, u.paper)).flatMap((u) => r.papers.get(u.paper)?.claims ?? []))];
+    const shown = dependants.slice(-RESTING_ON_SHOWN).reverse();
+    const restingOn = await Promise.all(shown.map(async (d) => {
+      const pub = r.papers.get(d.slice(0, d.indexOf("#")));
+      return { ref: d, text: (await titleOf(d)) ?? d, status: s.claims.get(d)?.status ?? null, paper: pub && !pub.standalone ? pub.title : null };
+    }));
+    return { standalone, rationale: w.rationale, method: w.method, caveats: w.caveats, blockers: w.blockers, artefacts: w.artefacts, restsOn, restingOn, restingOnMore: dependants.length - shown.length, load: s.claims.get(ref)?.load ?? 0 };
+  }
+
+  /** The line under a claim (network/0.1): it and everything it rests on, oldest first; at most 60 claims. */
+  private async line(ref: string): Promise<LineViewV2 | null> {
+    const r = await this.v2.record();
+    const s = await this.v2.scores();
+    const byRef = new Map(r.claims.map((c) => [c.ref, c]));
+    if (!byRef.has(ref)) return null;
+    const seen = new Set<string>();
+    const queue = [ref];
+    let truncated = false;
+    while (queue.length) {
+      const x = queue.shift()!;
+      if (seen.has(x) || isHeld(r, x)) continue;
+      if (seen.size >= 60) { truncated = true; break; }
+      seen.add(x);
+      for (const f of byRef.get(x)?.foundations ?? []) if (!seen.has(f)) queue.push(f);
+    }
+    const ordered = [...seen].sort((a, b) => (byRef.get(a)?.seq ?? 0) - (byRef.get(b)?.seq ?? 0) || (a < b ? -1 : 1));
+    const claims = await Promise.all(ordered.map(async (x) => {
+      const id = x.slice(0, x.indexOf("#"));
+      const ext = id.startsWith("ext:") ? r.external.get(id) : undefined;
+      const p = ext ? undefined : r.papers.get(id);
+      let text = ext?.quote ?? "";
+      let rationale = "";
+      if (p) {
+        const env = (await this.v2.envelope(p.cid)) as { payload?: unknown } | null;
+        const w = claimWordsOf(env?.payload, x.slice(x.indexOf("#") + 1));
+        text = w?.text ?? p.title;
+        rationale = w?.rationale ?? "";
+      }
+      const sc = s.claims.get(x);
+      return {
+        ref: x, text, rationale, author: p?.handle ?? null, source: ext?.source ?? null, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5,
+        restsOn: r.edges.filter((e) => e.from === x && e.foundation).map((e) => ({ ref: e.to, rel: e.rel, basis: e.basis })),
+      };
+    }));
+    const me = claims.find((c) => c.ref === ref);
+    return { ref, text: me?.text ?? ref, claims, truncated, computedFrom: r.head };
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {
@@ -452,9 +551,9 @@ export class PagesHandler {
     const [paperId, label] = ref.split("#") as [string, string];
     if (paperId.startsWith("ext:")) { const x = r.external.get(paperId); return { text: x?.quote ?? "", test: x?.test ?? "", source: x?.source ?? null, paperTitle: null }; }
     const p = r.papers.get(paperId);
-    const env = (await this.v2.envelope(p?.cid ?? "")) as { payload?: PaperV2Payload } | null;
-    const c = env?.payload?.claims[Number(label.slice(1)) - 1];
-    return { text: c?.text ?? "", test: r.amendments.get(ref)?.test ?? c?.test ?? "", source: null, paperTitle: p?.title ?? null };
+    const env = (await this.v2.envelope(p?.cid ?? "")) as { payload?: unknown } | null;
+    const c = claimWordsOf(env?.payload, label);
+    return { text: c?.text ?? "", test: r.amendments.get(ref)?.test ?? c?.test ?? "", source: null, paperTitle: p && !p.standalone ? p.title : null };
   }
 
   private async challengeView(short: string, site: string) {
@@ -495,8 +594,8 @@ export class PagesHandler {
       let text: string | null = null;
       if (paperId.startsWith("ext:")) text = r.external.get(paperId)?.quote ?? null;
       else {
-        const env = (await this.v2.envelope(r.papers.get(paperId)?.cid ?? "")) as { payload?: PaperV2Payload } | null;
-        text = env?.payload?.claims[Number(label.slice(1)) - 1]?.text ?? null;
+        const env = (await this.v2.envelope(r.papers.get(paperId)?.cid ?? "")) as { payload?: unknown } | null;
+        text = claimWordsOf(env?.payload, label)?.text ?? null;
       }
       return text === null ? null : shareIntent(platform, claimShare(site, ref, text, score, shareContext(r, ref, robustnessRows(r, ref))));
     }
