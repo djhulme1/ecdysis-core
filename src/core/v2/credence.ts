@@ -229,6 +229,26 @@ export type EvidenceKind = "replication" | "rerun" | "review";
 export type Tier = "unverified" | "account" | "verified";
 export type ClaimStatusV2 = "established" | "supported" | "unchecked" | "contested" | "refuted";
 
+/**
+ * How a report is settled, and so scored (credence/0.5; design: claude/ecdysis-credence-0.5-design.md).
+ *   "resolution"  a report is scored once its claim resolves without the reporter's operator: established or refuted at
+ *                 the bar for zero use (constitution III.4 as adopted in 2.1.0: "Every report is scored when its claim
+ *                 resolves").
+ *   "continuous"  a report is scored in proportion to how far independent replication work has settled its claim
+ *                 (settledShare): exactly as under "resolution" once the claim resolves, and partly before (the reading of
+ *                 the III.4 amendment proposed on 5 October 2026: "Every report is scored in proportion to how far
+ *                 independent work has settled its claim").
+ */
+export type SettlementMode = "resolution" | "continuous";
+
+/**
+ * The settlement the record is scored under: resolution, as constitution 2.1.0's III.4 says. Continuous settlement is
+ * built, tested, and its effect on the scripted record pinned by the replay audit's "settlement" section, so that its
+ * enactment is a known difference. It switches on only in the release that enacts the amended III.4 (Article V.4):
+ * changing this without that amendment would change what the constitution means, and must not be done.
+ */
+export const SETTLEMENT: SettlementMode = "resolution";
+
 export interface ClaimInput {
   /** The claim's id: "ecd:…" (published here) or "ext:…" (registered from human literature). */
   ref: string;
@@ -303,6 +323,8 @@ export interface CredenceV2Options {
   anchors?: Map<string, boolean>;
   /** arguments/0.1: what each claim's SETTLED arguments do to it (arguments.ts, argumentEffects), by claim ref. Absent: none. */
   arguments?: Map<string, ClaimArgumentsInput>;
+  /** credence/0.5: how an author's earlier claims count towards their calibration. Absent: SETTLEMENT. */
+  settlement?: SettlementMode;
 }
 
 export interface CountedItem {
@@ -473,10 +495,63 @@ export function diversityFactor(s: string[], confirms: boolean, earlier: Earlier
  * resolved, each with the stated confidence q and the truth T.
  * (k·ρ0 + Σ(1 − 2(q − T)²)) / (k + n), clamped to [0, 1]: ρ0 with no record.
  */
-export function calibrationOf(record: ReadonlyArray<{ stated: number; truth: 0 | 1 }>): number {
+/**
+ * ρ_a = (k·ρ0 + Σ w_i·(1 − 2(q_i − T_i)²)) / (k + Σ w_i). Each claim counts with weight w_i: 1 once resolved (absent, as
+ * under resolution), or its settled share |y_i| under continuous settlement (credence/0.5), so a claim independent work
+ * has half settled counts half.
+ */
+export function calibrationOf(record: ReadonlyArray<{ stated: number; truth: 0 | 1; weight?: number }>): number {
   let sum = P.rhoK * P.rho0;
-  for (const r of record) sum += 1 - 2 * (r.stated - r.truth) ** 2;
-  return Math.max(0, Math.min(1, sum / (P.rhoK + record.length)));
+  let n = P.rhoK;
+  for (const r of record) {
+    const w = r.weight ?? 1;
+    sum += w * (1 - 2 * (r.stated - r.truth) ** 2);
+    n += w;
+  }
+  return Math.max(0, Math.min(1, sum / n));
+}
+
+/**
+ * credence/0.5: the settled share y ∈ [−1, 1] of a report (or, for calibration, of a claim): how far the verified
+ * replications in `without` (everyone's but the reporter's operator, weighed as the scoring pass weighs them) have carried
+ * the claim from its prior towards the established bar (y > 0) or the refuted bar (y < 0), times the share they have met
+ * of the independence those statuses need. In order:
+ *
+ *   resolved by today's rule                          y = 2T − 1 (a revealed canary's known truth included)
+ *   contested (the replications disagree)             y = 0
+ *   towards established (a confirming replication,    y = min(1, (Λ − Λ0)/(ℓ+ − Λ0)) · min(1, n+/2) · min(1, m/2)
+ *     Λ above Λ0, no refuted foundation)
+ *   towards refuted (a failing replication,           y = −min(1, (Λ0 − Λ)/(Λ0 − ℓ−)) · min(1, n−/2)
+ *     Λ below Λ0)
+ *   otherwise                                         y = 0
+ *
+ * Λ0 = logit of the prior; Λ = logit of `credence`, the prior and the replications exactly as statusOf reads them; ℓ+ and
+ * ℓ− the established and refuted bars at zero use; n+ the confirming operators (never the registrant), m their declared
+ * model families, n− the failing operators. The partial branches reach ±1 only under statusOf's own conditions (the same
+ * `credence`, compared with the same bars), so |y| = 1 exactly when today's rule resolves: credence/0.5 changes nothing that
+ * resolves, and the approach to the bar is continuous. Before any independent verified replication, y = 0.
+ */
+export function settledShare(x: { prior: number; credence: number; without: EvidenceSum; resolved: 0 | 1 | null; foundationRefuted: boolean }): number {
+  if (x.resolved !== null) return 2 * x.resolved - 1;
+  const s = x.without;
+  const mass = s.sReplication + s.fReplication;
+  const r = mass > 0 ? s.sReplication / mass : 0;
+  if (s.sReplication > 0 && s.fReplication > 0 && 4 * r * (1 - r) >= P.contestedAt) return 0;
+  const l0 = logit(x.prior);
+  const l = logit(x.credence);
+  const bar = thresholdOf(0);
+  if (l > l0 && s.confirmingReplication) {
+    if (x.foundationRefuted) return 0;
+    const lp = logit(bar);
+    const frac = x.credence >= bar || l0 >= lp ? 1 : (l - l0) / (lp - l0);
+    return frac * Math.min(1, s.confirmingOperators / P.operatorsForEstablished) * Math.min(1, familyCount(s.confirmingFamilies) / P.familiesForEstablished);
+  }
+  if (l < l0 && s.failingReplication) {
+    const lm = logit(P.refutedBelow);
+    const frac = x.credence <= P.refutedBelow || l0 <= lm ? 1 : (l0 - l) / (l0 - lm);
+    return -frac * Math.min(1, s.failingOperators / P.operatorsForRefuted);
+  }
+  return 0;
 }
 
 /** A claim's resolution: a revealed canary's known truth first; else established → 1, refuted → 0, anything else not yet. */
@@ -729,13 +804,15 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     m.set(u.operatorId, Math.max(m.get(u.operatorId) ?? 0, w));
     useBy.set(u.claim, m);
   }
-  // The calibration record: per author operator, the stated confidence and truth of each claim resolved so far. A claim
-  // joins the record only once the log has moved past its position, so claims resolved by one entry never feed each other.
-  const record = new Map<string, Array<{ stated: number; truth: 0 | 1 }>>();
-  let pending: Array<{ op: string; stated: number; truth: 0 | 1 }> = [];
+  // The calibration record: per author operator, the stated confidence and truth of each claim resolved so far (under
+  // continuous settlement, of each claim settled at all, weighed by its settled share). A claim joins the record only once
+  // the log has moved past its position, so claims settled by one entry never feed each other.
+  const continuous = (o.settlement ?? SETTLEMENT) === "continuous";
+  const record = new Map<string, Array<{ stated: number; truth: 0 | 1; weight: number }>>();
+  let pending: Array<{ op: string; stated: number; truth: 0 | 1; weight: number }> = [];
   let pendingSeq: number | null = null;
   const flush = () => {
-    for (const p of pending) record.set(p.op, [...(record.get(p.op) ?? []), { stated: p.stated, truth: p.truth }]);
+    for (const p of pending) record.set(p.op, [...(record.get(p.op) ?? []), { stated: p.stated, truth: p.truth, weight: p.weight }]);
     pending = [];
   };
   for (const c of sorted) {
@@ -773,7 +850,12 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     const status = statusAt(threshold);
     // Resolved at the bar for zero use: a citation raises what a claim must clear to READ established, never what a record is judged against.
     const resolved = resolutionOf(statusAt(thresholdOf(0)), o.anchors?.get(c.ref));
-    if (resolved !== null && c.calibration === undefined && c.authorOperator) pending.push({ op: c.authorOperator, stated: c.stated, truth: resolved });
+    // credence/0.5: under continuous settlement an empirical claim joins its author's record as far as independent work has
+    // settled it (the author's own evidence weighs nothing on it already); a conceptual claim still settles by argument.
+    const settled = continuous && kind !== "conceptual"
+      ? settledShare({ prior, credence: credenceReplication, without: ev, resolved, foundationRefuted })
+      : resolved === null ? 0 : 2 * resolved - 1;
+    if (settled !== 0 && c.calibration === undefined && c.authorOperator) pending.push({ op: c.authorOperator, stated: c.stated, truth: settled > 0 ? 1 : 0, weight: Math.abs(settled) });
     const dispute = disputeOf(ev.s, ev.f);
     const reach = Math.max(0, c.reach ?? 0);
     const stakes = stakesOf(use, reach);

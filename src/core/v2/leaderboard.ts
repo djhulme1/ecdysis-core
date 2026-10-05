@@ -22,6 +22,12 @@
  * checks of them (arguments/0.1) count the same way against their own
  * settlement, from a neutral ½: an argument is a claim about a claim.
  *
+ * Under continuous settlement (credence/0.5, built but not in force under
+ * constitution 2.1.0) a move banks as independent work settles its claim:
+ * banked = (p′ − p)·y and at risk = |p′ − p|·(1 − |y|), with y the settled
+ * share (credence.ts, settledShare). That is exactly the rule above once the
+ * claim resolves, and the part of it that work has settled before.
+ *
  * Only agents with something resolved are ranked, by credence banked.
  * Volume buys nothing: a report banks only when independent work resolves
  * its claim, so filing more changes the table only once others confirm it,
@@ -68,9 +74,11 @@ export interface Contribution {
   moved: number;
   /** Where the claim (or the argument) resolved without the reporter's operator; null while it has not. */
   resolved: 0 | 1 | null;
-  /** moved·(2T − 1) once resolved; 0 before. */
+  /** credence/0.5: how far independent work has settled it, in [−1, 1]: 2T − 1 once resolved, 0 before (partly, under continuous settlement). */
+  settled: number;
+  /** moved·settled: moved·(2T − 1) once resolved; 0 before (under continuous settlement, the settled part as it comes). */
   banked: number;
-  /** |moved| while unresolved; 0 after. */
+  /** |moved|·(1 − |settled|): |moved| while unresolved, 0 after. */
   atRisk: number;
 }
 
@@ -80,10 +88,11 @@ export function contributionsOf(reports: readonly ScoredReport[], operatorOf: (a
   for (const r of reports) {
     const moved = r.after - r.before;
     if (Math.abs(moved) <= EPS) continue;
-    const banked = r.resolved === null ? 0 : moved * (2 * r.resolved - 1);
+    // credence/0.5: the settled share, 2T − 1 once resolved (and, under continuous settlement, partly before).
+    const settled = r.settled ?? (r.resolved === null ? 0 : 2 * r.resolved - 1);
     out.push({
       id: r.id, agent: r.agent, operatorId: r.operatorId ?? operatorOf(r.agent) ?? "", claim: r.claim, kind: r.kind ?? "argument", seq: r.seq,
-      before: r.before, after: r.after, moved, resolved: r.resolved, banked, atRisk: r.resolved === null ? Math.abs(moved) : 0,
+      before: r.before, after: r.after, moved, resolved: r.resolved, settled, banked: moved * settled, atRisk: Math.abs(moved) * (1 - Math.abs(settled)),
     });
   }
   return out;
@@ -243,13 +252,13 @@ export function auditList(
 ): AuditItem[] {
   const byClaim = new Map<string, Contribution[]>();
   for (const c of contributions) {
-    if (c.resolved !== null || o.exclude?.(c) || o.skipClaim?.(c.claim)) continue;
+    if (Math.abs(c.settled) >= 1 || o.exclude?.(c) || o.skipClaim?.(c.claim)) continue;
     byClaim.set(c.claim, [...(byClaim.get(c.claim) ?? []), c]);
   }
   const items: AuditItem[] = [];
   for (const [claim, cs] of byClaim) {
     const S = Math.max(0, stakes(claim));
-    const atRisk = cs.reduce((a, c) => a + Math.abs(c.moved), 0);
+    const atRisk = cs.reduce((a, c) => a + c.atRisk, 0);
     // One line per agent and kind of report: an agent's second review of a claim adds to its first rather than repeating it.
     const groups = new Map<string, { id: string; agent: string; operatorId: string; kind: ContributionKind; moved: number; reports: number; top: number }>();
     for (const c of [...cs].sort((a, b) => a.seq - b.seq)) {
@@ -292,7 +301,7 @@ export function buildLeaderboard(input: LeaderboardInput): Leaderboard {
     const s = row(c.agent, c.operatorId);
     s.banked += c.banked;
     s.atRisk += c.atRisk;
-    if (c.resolved === null) s.open += 1;
+    if (c.settled === 0) s.open += 1;
     else if (c.banked > EPS) s.right += 1;
     else if (c.banked < -EPS) s.wrong += 1;
   }

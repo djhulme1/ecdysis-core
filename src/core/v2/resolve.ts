@@ -18,7 +18,7 @@
 
 import { deriveV2, type V2Entry, type V2Record } from "./flow.js";
 import { computeV2, earnedVerification, EARNING_PARAMS, type EarnedVerification, type TrackRecord } from "./scoring.js";
-import type { ClaimV2 } from "./credence.js";
+import { SETTLEMENT, type ClaimV2, type SettlementMode } from "./credence.js";
 
 export interface ResolvedV2 {
   record: V2Record;
@@ -36,11 +36,11 @@ export interface ResolvedV2 {
  */
 export const MAX_ROUNDS = 32;
 
-export function resolveV2(entries: V2Entry[], now: Date, params = EARNING_PARAMS): ResolvedV2 {
+export function resolveV2(entries: V2Entry[], now: Date, params = EARNING_PARAMS, settlement: SettlementMode = SETTLEMENT): ResolvedV2 {
   const earned = new Map<string, EarnedVerification>();
   for (let round = 1; ; round++) {
     const record = deriveV2(entries, now, { verifiedByRecord: new Set(earned.keys()) });
-    const scores = scoreRecord(record);
+    const scores = scoreRecord(record, settlement);
     const verified = (op: string) => record.tiers.get(op) === "verified";
     // A claim's source, for the spread the rule asks for: the human paper a registered claim comes from, else the claim itself.
     const sourceOf = (ref: string) => record.external.get(ref)?.source.toLowerCase() ?? ref;
@@ -55,10 +55,14 @@ export function resolveV2(entries: V2Entry[], now: Date, params = EARNING_PARAMS
   }
 }
 
-/** The numbers for a derived record, as the service and the audit compute them. */
-export function scoreRecord(r: V2Record): { claims: Map<string, ClaimV2>; track: TrackRecord } {
+/**
+ * The numbers for a derived record, as the service and the audit compute them. `settlement` is the constitution's
+ * (SETTLEMENT); the replay audit also scores the scripted record under continuous settlement, to pin what its enactment
+ * would change (credence/0.5).
+ */
+export function scoreRecord(r: V2Record, settlement: SettlementMode = SETTLEMENT): { claims: Map<string, ClaimV2>; track: TrackRecord } {
   return computeV2(r.claims, r.evidence, r.uses, {
     ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators,
-    lapses: r.lapses, anchors: r.anchors, arguments: r.argumentEffects, argumentStates: r.argumentsInForce,
+    lapses: r.lapses, anchors: r.anchors, arguments: r.argumentEffects, argumentStates: r.argumentsInForce, settlement,
   });
 }

@@ -17,6 +17,19 @@
  * E[(p′ − T)²], martingale increments being orthogonal. ∎ Lying and sloppy
  * work are penalised alike; intent never has to be established.
  *
+ * Settlement (credence/0.5, built but not in force under constitution
+ * 2.1.0; see SETTLEMENT in credence.ts). Nothing in the rule above needs a
+ * moment of resolution. For any x known at time t and Y_t = P(T = 1 | the
+ * record at t without the reporter's operator), E[(x − T)² | ℱ_t] =
+ * (x − Y_t)² + Y_t(1 − Y_t), so E[C_i | ℱ_t] = (p′ − p)(2Y_t − p − p′):
+ * scoring against where independent work stands is unbiased at every t
+ * (Theorem 3). Under continuous settlement each report is credited
+ * C_i = |y|·[S(p′, T̂) − S(p, T̂)], with y the settled share (settledShare)
+ * and T̂ the side it points to: the conservative form of Theorem 3. It is
+ * zero until independent work arrives, so filing first never shows a
+ * provisional loss of −(p′ − p)²; it is signed as the evidence points; and
+ * it is exactly C_i above once the claim resolves.
+ *
  * An agent's reliability is ω = σ(ΣC/κ): ½ with no record, towards 1 with
  * a good one, towards 0 with a bad one. A lapse (a committed check never
  * reported) costs a little. Proven fabrication sets ω to 0.
@@ -43,6 +56,8 @@ import {
   familyCount,
   logit,
   resolutionOf,
+  settledShare,
+  SETTLEMENT,
   sigma,
   statusOf,
   sumArguments,
@@ -52,6 +67,7 @@ import {
   type ClaimV2,
   type EvidenceInput,
   type EvidenceKind,
+  type SettlementMode,
   type UseInput,
 } from "./credence.js";
 
@@ -79,6 +95,11 @@ export interface ScoredReport {
   after: number;
   /** The claim's resolution without this report: 1 established, 0 refuted, null not yet. */
   resolved: 0 | 1 | null;
+  /**
+   * credence/0.5: how far independent work has settled the claim without this report's operator, in [−1, 1]: 2T − 1 once
+   * resolved; under continuous settlement, partly before (settledShare). Absent on older callers: read from `resolved`.
+   */
+  settled?: number;
   credit: number;
   /** The reporting operator (verification by record counts per operator). Absent on argument reports. */
   operatorId?: string;
@@ -185,6 +206,8 @@ export interface TrackOptions {
   arguments?: Map<string, ClaimArgumentsInput>;
   /** arguments/0.1: every argument with its checks, to score arguers and checkers against each settlement. */
   argumentStates?: ArgumentState[];
+  /** credence/0.5: how reports are settled and scored. Absent: SETTLEMENT (resolution, under constitution 2.1.0). */
+  settlement?: SettlementMode;
 }
 
 /**
@@ -202,14 +225,14 @@ export function scoreArguments(args: ReadonlyArray<ArgumentState>, voidedOperato
     if (a.status === "open") continue;
     const t: 0 | 1 = a.status === "upheld" ? 1 : 0;
     if (!a.disowned && !voidedOperators?.has(a.operatorId) && !fabricators?.has(a.handle)) {
-      out.push({ id: a.id, agent: a.handle, claim: a.claim, seq: a.seq, before: 0.5, after: a.confidence, resolved: t, credit: marketCredit(0.5, a.confidence, t) });
+      out.push({ id: a.id, agent: a.handle, claim: a.claim, seq: a.seq, before: 0.5, after: a.confidence, resolved: t, settled: 2 * t - 1, credit: marketCredit(0.5, a.confidence, t) });
     }
     for (const c of a.checks) {
       if (c.disowned || voidedOperators?.has(c.operatorId) || fabricators?.has(c.handle)) continue;
       const without = settleArgument(a.checks.filter((x) => x.operatorId !== c.operatorId));
-      if (without.status === "open" || without.status !== a.status) { out.push({ id: c.id, agent: c.handle, claim: a.claim, seq: c.seq, before: 0.5, after: c.holds ? A.checkConfidence : 1 - A.checkConfidence, resolved: null, credit: 0 }); continue; }
+      if (without.status === "open" || without.status !== a.status) { out.push({ id: c.id, agent: c.handle, claim: a.claim, seq: c.seq, before: 0.5, after: c.holds ? A.checkConfidence : 1 - A.checkConfidence, resolved: null, settled: 0, credit: 0 }); continue; }
       const after = c.holds ? A.checkConfidence : 1 - A.checkConfidence;
-      out.push({ id: c.id, agent: c.handle, claim: a.claim, seq: c.seq, before: 0.5, after, resolved: t, credit: marketCredit(0.5, after, t) });
+      out.push({ id: c.id, agent: c.handle, claim: a.claim, seq: c.seq, before: 0.5, after, resolved: t, settled: 2 * t - 1, credit: marketCredit(0.5, after, t) });
     }
   }
   return out;
@@ -218,6 +241,14 @@ export function scoreArguments(args: ReadonlyArray<ArgumentState>, voidedOperato
 /** The improvement a move from p to p′ made, once the truth T is known. */
 export function marketCredit(before: number, after: number, t: 0 | 1): number {
   return (before - t) ** 2 - (after - t) ** 2;
+}
+
+/**
+ * credence/0.5: the settled part of a report's credit, |y|·[(p − T̂)² − (p′ − T̂)²] with T̂ the side work has settled
+ * towards. With y = 2T − 1 it is marketCredit exactly; with y = 0, nothing.
+ */
+export function settledCredit(before: number, after: number, settled: number): number {
+  return settled === 0 ? 0 : Math.abs(settled) * marketCredit(before, after, settled > 0 ? 1 : 0);
 }
 
 export function reliabilityOf(credit: number): number {
@@ -237,6 +268,7 @@ export function scoreTrackRecord(
 ): TrackRecord {
   const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent) || !!o.voidedOperators?.has(e.operatorId);
   const opts = { ringLinked: o.ringLinked, voided };
+  const settlement = o.settlement ?? SETTLEMENT;
   const byClaim = new Map<string, EvidenceInput[]>();
   for (const e of evidence) byClaim.set(e.claim, [...(byClaim.get(e.claim) ?? []), e]);
   const reports: ScoredReport[] = [];
@@ -261,20 +293,26 @@ export function scoreTrackRecord(
       // A conceptual claim resolves by argument (an upheld counterexample), never by replication; its reviews are scored against that.
       // credence/0.4: an empirical claim resolves on its verified replication tests alone, as its status reads them.
       const verifiedBase = logit(r.prior) + argSum.verified;
+      const replicationCredence = sigma(clampLogOdds(logit(r.prior) + without.replicationSum));
       const status = r.kind === "conceptual"
         ? conceptualStatusOf(sigma(clampLogOdds(verifiedBase + without.sumVerified)), args, r.cap !== null)
         : statusOf({
-          credence: sigma(clampLogOdds(logit(r.prior) + without.replicationSum)), sReplication: without.sReplication, fReplication: without.fReplication, threshold: thresholdOf(0),
+          credence: replicationCredence, sReplication: without.sReplication, fReplication: without.fReplication, threshold: thresholdOf(0),
           confirmingReplication: without.confirmingReplication, failingReplication: without.failingReplication,
           confirmingFamilies: familyCount(without.confirmingFamilies), confirmingOperators: without.confirmingOperators, failingOperators: without.failingOperators,
           foundationRefuted,
         });
       const resolved = resolutionOf(status, o.anchors?.get(c.ref));
+      // credence/0.5: under continuous settlement an empirical claim's report is settled as far as the same independent work
+      // has carried the claim (the same credence and the same bars statusOf just read); a conceptual claim settles by argument.
+      const settled = settlement === "continuous" && r.kind !== "conceptual"
+        ? settledShare({ prior: r.prior, credence: replicationCredence, without, resolved, foundationRefuted })
+        : resolved === null ? 0 : 2 * resolved - 1;
       // Early: nobody verified, other than this operator, had replicated the claim yet when this report was filed.
       const early = !prefix.some((e) => e.tier === "verified" && e.kind !== "review" && e.operatorId !== item.operatorId && e.auditable !== false);
       reports.push({
-        id: item.id, agent: item.agent, claim: c.ref, seq: item.seq, before, after, resolved,
-        credit: resolved === null ? 0 : marketCredit(before, after, resolved),
+        id: item.id, agent: item.agent, claim: c.ref, seq: item.seq, before, after, resolved, settled,
+        credit: settledCredit(before, after, settled),
         operatorId: item.operatorId, kind: item.kind, early, resolvers: without.replicatingOperators, ...(item.crossChecked ? { crossChecked: true } : {}),
       });
     }
@@ -300,10 +338,10 @@ export function computeV2(
   o: TrackOptions = {},
 ): { claims: Map<string, ClaimV2>; track: TrackRecord } {
   const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent) || !!o.voidedOperators?.has(e.operatorId);
-  const neutral = computeCredenceV2(claims, evidence, uses, { ringLinked: o.ringLinked, voided, anchors: o.anchors, arguments: o.arguments });
+  const neutral = computeCredenceV2(claims, evidence, uses, { ringLinked: o.ringLinked, voided, anchors: o.anchors, arguments: o.arguments, settlement: o.settlement });
   const track = scoreTrackRecord(claims, evidence, neutral, o);
   const weighed = computeCredenceV2(claims, evidence, uses, {
-    ringLinked: o.ringLinked, voided, anchors: o.anchors, arguments: o.arguments,
+    ringLinked: o.ringLinked, voided, anchors: o.anchors, arguments: o.arguments, settlement: o.settlement,
     reliability: (a) => track.reliability.get(a) ?? 0.5,
   });
   return { claims: weighed, track };
