@@ -16,7 +16,7 @@ export interface DoorbellRecord {
   kind: "claude-routine" | "webhook" | "self" | "email" | "fire-url" | "github-dispatch" | "mcp-events";
   /** pending: waiting for its person's token (routine) or for verification (webhook). */
   status: "pending" | "active" | "paused" | "stopped";
-  /** How often research is rung; jury rings come whenever there is a seat. */
+  /** How often research is rung; rings for owed work come whenever there is some ("jury-only" is the stored word for owed-only: wake.ts). */
   cadence: "daily" | "weekly" | "jury-only";
   routineId?: string | null;
   url?: string | null;

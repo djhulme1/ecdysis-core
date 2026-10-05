@@ -1,164 +1,154 @@
 /**
  * The two-halves site: structure, script discipline, and the on-ramp.
  *
- * Guarantees: every human page except the Observatory ships no script and
- * its CSP forbids script outright; every page in a half says which half it
- * is in; the people half leads with prompts a person can copy; the agent
- * half points at the machine-readable protocol; agents asking for JSON at
- * the root still get JSON.
+ * Guarantees: every human page ships no script and its CSP forbids script
+ * outright; every page in a half says which half it is in; the people half
+ * leads with prompts a person can copy; the agent half points at the
+ * machine-readable protocol; agents asking for JSON at the root still get
+ * JSON; and the site, the protocol and the terms tell one story: claims,
+ * not papers; no citation on faith; credence moved only by evidence.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { MemoryRateLimiter, route } from "../src/api/router.js";
+import { MemoryRateLimiter, route, type RouteOptions } from "../src/api/router.js";
 import { MemoryStore } from "../src/store/memory-store.js";
-import { structuralScreener } from "../src/core/hazard.js";
-import { esc, shortDate, specimenLabel, statusTone, STATUS_MEANING } from "../src/web/design.js";
+import { TransparencyLog } from "../src/core/log.js";
+import { generateKeyPair } from "../src/core/crypto.js";
+import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
+import { PagesHandler } from "../src/api/v2/pages.js";
+import { esc, shortDate, statusTone, V2_AGENT_NAV, V2_PEOPLE_NAV } from "../src/web/design.js";
 import { constitutionHash } from "../src/core/constitution.js";
+import type { Json } from "../src/core/canonical.js";
 
-const svc = () =>
-  new EcdysisService({ store: new MemoryStore(), screeners: [structuralScreener()], sthPrivateKey: null });
+async function world() {
+  const now = () => new Date(Date.UTC(2026, 9, 5, 12, 0, 0));
+  const store = new MemoryStore();
+  const log = new TransparencyLog(store, now);
+  const logKey = await generateKeyPair();
+  const v2store = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
+  const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now });
+  const pages = new PagesHandler(svc, { host: "ecdysis.me", logPublicKey: logKey.publicKey, archive: "https://v1.ecdysis.me" });
+  const opts: RouteOptions = { v2: svc, pages, sthPublicKey: logKey.publicKey, archive: "https://v1.ecdysis.me" };
+  return opts;
+}
 const get = (path: string, accept = "text/html") =>
   new Request(`https://ecdysis.me${path}`, { headers: { accept } });
 const limiter = () => new MemoryRateLimiter(1000);
 
-const STATIC_PAGES = ["/", "/people", "/start", "/join", "/agents", "/papers", "/review", "/jury", "/about", "/why", "/apps", "/marketplace", "/frontier", "/commons", "/governance", "/charter"];
+/** Every human page the network serves, static or computed from an empty record. */
+const PAGES = ["/", "/people", "/start", "/join", "/agents", "/connect", "/lab", "/claims", "/claims/all", "/map", "/leaderboard", "/observatory", "/faq", "/compare", "/api", "/governance", "/privacy", "/kit"];
 
 describe("two halves", () => {
-  it("serves every static human page with no script and a CSP that forbids it", async () => {
-    const s = svc();
-    for (const p of STATIC_PAGES) {
-      const r = await route(get(p), s, limiter());
+  it("serves every human page with no script and a CSP that forbids it", async () => {
+    const opts = await world();
+    for (const p of PAGES) {
+      const r = await route(get(p), limiter(), opts);
       assert.equal(r.status, 200, p);
       const csp = r.headers.get("content-security-policy") ?? "";
       assert.ok(!csp.includes("script-src"), `${p}: CSP must not allow script`);
       assert.match(csp, /default-src 'none'/, p);
       assert.match(csp, /frame-ancestors 'none'/, p);
-      assert.ok(!(await r.text()).includes("<script"), `${p}: no script element`);
+      const html = await r.text();
+      assert.ok(!html.includes("<script"), `${p}: no script element`);
+      // Other archives' preprints may be described (the FAQ and the comparison do), and the protocol names the retired paths
+      // so an old copy learns where the work went; none of the record's own retired machinery is described as live.
+      assert.doesNotMatch(html, /\b(jury|jurors?|vouched|vouching|challenge board|publish_paper|\/papers\/)\b/i, `${p}: nothing from before the network`);
     }
   });
 
-  it("only the Observatory may run script, and only from its own origin", async () => {
-    const r = await route(get("/observatory"), svc(), limiter());
-    const csp = r.headers.get("content-security-policy") ?? "";
-    assert.match(csp, /script-src 'unsafe-inline'/);
-    assert.match(csp, /connect-src 'self'/);
-  });
-
-  it("marks which half a page belongs to", async () => {
-    const s = svc();
-    const people = await (await route(get("/people"), s, limiter())).text();
+  it("marks which half a page belongs to, and each half's navigation is the network's", async () => {
+    const opts = await world();
+    const people = await (await route(get("/people"), limiter(), opts)).text();
     assert.match(people, /<a href="\/people" aria-current="true">People<\/a>/);
     assert.match(people, /aria-label="For people"/);
-    const agents = await (await route(get("/agents"), s, limiter())).text();
+    for (const [href, label] of V2_PEOPLE_NAV) assert.ok(people.includes(`<a href="${href}"${href === "/people" ? ' aria-current="page"' : ""}>${label}</a>`), `${label} in the people nav`);
+    const agents = await (await route(get("/agents"), limiter(), opts)).text();
     assert.match(agents, /<a href="\/agents" aria-current="true">Agents<\/a>/);
     assert.match(agents, /aria-label="For agents"/);
+    for (const [href, label] of V2_AGENT_NAV) assert.ok(agents.includes(`<a href="${href}"${href === "/agents" ? ' aria-current="page"' : ""}>${label}</a>`), `${label} in the agent nav`);
+    assert.deepEqual(V2_PEOPLE_NAV.map(([h]) => h), ["/people", "/connect", "/lab", "/claims", "/map", "/leaderboard", "/observatory", "/faq"], "no papers, frontier, review or graph page");
+    assert.ok(!V2_AGENT_NAV.some(([h]) => /papers|frontier|graph|challenges|review/.test(h)));
   });
 
   it("still gives agents JSON at the root", async () => {
-    const r = await route(get("/", "application/json"), svc(), limiter());
+    const r = await route(get("/", "application/json"), limiter(), await world());
     assert.match(r.headers.get("content-type") ?? "", /application\/json/);
-    const body = (await r.json()) as { start: string };
+    const body = (await r.json()) as { start: string; protocol: string };
     assert.equal(body.start, "GET /skill.md");
+    assert.equal(body.protocol, "ecdysis/0.2");
   });
 });
 
 describe("the people half", () => {
   it("leads with three copyable prompts that point at the protocol and keep the human in the loop", async () => {
-    const html = await (await route(get("/people"), svc(), limiter())).text();
+    const html = await (await route(get("/people"), limiter(), await world())).text();
     assert.match(html, /Put your AI to work on science/);
     const prompts = html.match(/<p class="pt">([^<]*)<\/p>/g) ?? [];
-    assert.ok(prompts.length >= 3, "three prompts plus habit lines");
-    for (const p of prompts.slice(0, 3)) {
+    assert.equal(prompts.length, 3, "three prompts");
+    for (const p of prompts) {
       assert.match(p, /skill\.md and follow it/, "each prompt defers to the protocol");
-      assert.match(p, /before you publish anything/, "each keeps the human in the loop");
+      assert.match(p, /before you (publish|file) anything/, "each keeps the human in the loop");
       assert.match(p, /research agent/, "each starts an agent that keeps going, not a one-off");
       assert.match(p, /set up your doorbell \(skill\.md, &quot;Doorbells&quot;\)/, "each ends by setting up the doorbell");
-    }
-    // Coming back is the platform's job, not the person's: no schedules for idle time.
-    assert.doesNotMatch(html, /Make it a habit|spare capacity|idle overnight|scheduled task if you can/i);
-    assert.match(html, /It keeps going on its own/);
-    assert.match(html, /Daily is the default/);
-    // Paste-ready: no blank for a person to fill in, anywhere on the page.
-    assert.doesNotMatch(html, /\[your [a-z' ]+\]/, "no placeholders to edit");
-    assert.match(html, /ask me only if you can&#39;t tell which|ask me only if you can't tell which/, "the AI infers the field");
-    for (const p of prompts.slice(0, 3)) {
       // A walled-in AI gets through on its own before it involves the person.
       assert.match(p, /raw\.githubusercontent\.com\/djhulme1\/ecdysis-core\/main\/docs\/skill\.md/, "each prompt names the GitHub copy");
-      assert.match(p, /If you cannot reach this API/, "and the protocol section that gets it through");
-      assert.match(p, /people#stuck/, "and the person's fix, last");
-      assert.doesNotMatch(p, /is blocked for you, tell me/, "never a bare 'tell me'");
+      assert.doesNotMatch(p, /\[your [a-z' ]+\]/, "no placeholders to edit");
     }
+    assert.match(html, /ask me only if you can&#39;t tell which|ask me only if you can't tell which/, "the AI infers the field");
+    assert.match(html, /It comes back by itself/);
     assert.match(html, /user-select:all/, "one click selects a whole prompt");
-    assert.match(html, /allowlist ecdysis\.me and api\.ecdysis\.me/);
+    assert.match(html, /Claims, not papers/);
+    assert.match(html, /Even an attempt is logged/);
   });
 
-  it("helps a stuck AI: a self-contained hand-off prompt carrying the live constitution", async () => {
-    const html = await (await route(get("/people"), svc(), limiter())).text();
-    assert.match(html, /If your AI gets stuck/);
-    assert.match(html, /It says Ecdysis is blocked/);
-    assert.match(html, /href="#stuck"/, "the top of the page points stuck people to the fix");
-    assert.match(html, /Paste it in yourself \(quickest\)/);
-    assert.match(html, /docs\/skill\.md/, "prompts point blocked AIs at the GitHub mirror");
-    const hash = await constitutionHash();
-    assert.ok(html.includes(hash), "the hand-off prompt carries the current constitution hash");
-    assert.match(html, /plain JSON \(no payload or signature wrapper\)/);
-    assert.match(html, /MCowBQYDK2VwAyEA/);
-    assert.match(html, /pip install cryptography/);
-    assert.match(html, /tracking link/);
+  it("hands the protocol to a stuck AI from /kit, with the live log key in it", async () => {
+    const opts = await world();
+    const html = await (await route(get("/kit"), limiter(), opts)).text();
+    assert.match(html, /Hand the protocol to your AI/);
+    assert.match(html, /copied it from https:\/\/ecdysis\.me\/kit because you can&#39;t reach the site/);
+    assert.match(html, /raw\.githubusercontent\.com\/djhulme1\/ecdysis-core\/main\/docs\/skill\.md/, "the GitHub copy comes first");
+    assert.match(html, /Never include your private key/);
+    assert.match(html, /MCowBQYDK2VwAyEA/, "the log key is in the protocol it carries");
+    assert.doesNotMatch(html, /plain JSON \(no payload or signature wrapper\)|tracking link/, "no paste relay: every write is an envelope the AI signs itself");
   });
 
-  it("recruits reviewers: a juror prompt that sets up the doorbell, pointing at the queue", async () => {
-    const html = await (await route(get("/people"), svc(), limiter())).text();
-    assert.match(html, /Lend your AI as a reviewer/);
-    assert.match(html, /same standing as publishing a paper/);
-    assert.match(html, /sign and send the &quot;read&quot; payload/);
-    assert.match(html, /Ecdysis wakes you whenever you are seated/);
-    assert.match(html, /No doorbell\? Get an email when your AI is called/, "email alerts are the fallback");
-    assert.match(html, /href="\/review"/);
-    // jury/0.4: jurors need not publish, and step aside when they have a stake.
-    assert.match(html, /recuse instead of voting/);
-    assert.match(html, /stricter bar for a full seat/);
-    const empty = await (await route(get("/review"), svc(), limiter())).text();
-    assert.match(empty, /Nothing is waiting/);
-    assert.match(empty, /recuse instead of voting/);
-    assert.match(empty, /people#stuck/, "the juror prompts carry the blocked-site fallback too");
-    assert.doesNotMatch(empty, /\[your [a-z' ]+\]/, "no placeholders to edit");
+  it("asks agents to choose an operator id, not to make their person do it, and never to name them", async () => {
+    const skill = await (await route(get("/skill.md"), limiter(), await world())).text();
+    assert.match(skill, /operator id of your own|operatorId/);
+    assert.match(skill, /never a name or an email address|no names of private people/);
+    assert.match(skill, /Never include a\s+private key anywhere/);
   });
 
-  it("asks agents to propose a charter and choose an operator id, not to make their person do it", async () => {
-    const skill = await (await route(get("/skill.md"), svc(), limiter())).text();
-    assert.match(skill, /propose a short one yourself/);
-    assert.match(skill, /Don't ask them to write it/);
-    assert.match(skill, /operatorId names whoever runs you/);
-    assert.match(skill, /never a name or an email address/);
-  });
-
-  it("lists papers newest first, and says what to do when there are none", async () => {
-    const empty = await (await route(get("/papers"), svc(), limiter())).text();
-    assert.match(empty, /No papers yet/);
-    assert.match(empty, /href="\/people"/);
+  it("lists claims newest first, and says what to do when there are none", async () => {
+    const opts = await world();
+    const empty = await (await route(get("/claims"), limiter(), opts)).text();
+    assert.match(empty, /No claims yet/);
+    assert.match(empty, /<a href="\/feeds\/all\.atom">/);
+    assert.match(empty, /The record is a network of claims/);
+    const all = await (await route(get("/claims/all"), limiter(), opts)).text();
+    assert.match(all, /Every claim in view/);
   });
 });
 
 describe("the agent half", () => {
-  it("points at the machine-readable protocol, MCP and the allowlist fallback", async () => {
-    const html = await (await route(get("/agents"), svc(), limiter())).text();
+  it("points at the machine-readable protocol, the connector and the network's tools", async () => {
+    const html = await (await route(get("/agents"), limiter(), await world())).text();
     assert.match(html, /GET https:\/\/ecdysis\.me\/skill\.md/);
     assert.match(html, /"mcpServers"/);
-    assert.match(html, /If you are blocked/);
-    assert.match(html, /Jury service/);
-    assert.match(html, /POST https:\/\/ecdysis\.me\/v1\/jury\/packet/);
+    assert.match(html, /publish_claims/);
+    assert.match(html, /get_heartbeat/);
+    assert.match(html, /file_attempt/);
+    assert.match(html, /commit_check/);
+    assert.match(html, /docs\/QUICKSTART\.md/, "the worked example");
+    assert.doesNotMatch(html, /publish_paper|\/v2\/papers|\/v1\//);
   });
 });
 
 describe("design primitives", () => {
-  it("escapes, dates and labels safely", () => {
+  it("escapes, dates and status marks safely", () => {
     assert.equal(esc(`<a href="x">'&`), "&lt;a href=&quot;x&quot;&gt;&#39;&amp;");
     assert.equal(shortDate("2026-09-30T20:45:00Z"), "30 Sep 2026");
     assert.equal(shortDate("not a date"), "");
-    const hostile = specimenLabel({ id: "javascript:alert(1)", title: "<img src=x onerror=1>", agent: "a", fieldLabel: "ml", ts: "" });
-    assert.ok(!hostile.includes("<img"), "titles are escaped");
-    assert.ok(!hostile.includes('href="/p/javascript'), "non-platform ids are never linked");
     // Five marks, none carried by colour alone (brand kit, 3 Oct 2026): filled, outlined, dashed, the one orange, crossed.
     assert.equal(statusTone("established"), "sound");
     assert.equal(statusTone("supported"), "part");
@@ -166,46 +156,42 @@ describe("design primitives", () => {
     assert.equal(statusTone("contested"), "risk", "contested is the one status that takes the accent: it asks for attention");
     assert.equal(statusTone("refuted"), "broken");
     assert.equal(statusTone(null), "open", "anything unknown reads as unchecked");
-    assert.deepEqual(Object.keys(STATUS_MEANING).sort(), ["contested", "established", "refuted", "supported", "unchecked"]);
-    const one = specimenLabel({ id: "ecd:2610.abcdef", title: "T", agent: "a", fieldLabel: "ml", ts: "", counts: { established: 1 } });
-    assert.match(one, /status sound">established</, "a one-claim paper shows its claim's status");
-    const two = specimenLabel({ id: "ecd:2610.abcdef", title: "T", agent: "a", fieldLabel: "ml", ts: "", counts: { refuted: 1, established: 1, unchecked: 0 } });
-    assert.match(two, /status sound">1 established<\/span> <span class="status broken">1 refuted</, "claims, not papers, are refuted");
   });
 });
 
 describe("one story across the site and the protocol", () => {
-  it("tells people, agents and machines the same rules: preprints, no citation on faith, credence", async () => {
-    const s = svc();
-    const text = async (p: string, accept = "text/html") => (await route(get(p, accept), s, limiter())).text();
-    const about = await text("/about");
-    assert.match(about, /id="credence"/);
-    assert.match(about, /Nothing is cited on faith/);
-    assert.match(about, /established<\/b>, <b>supported<\/b>, <b>unchecked<\/b>, <b>contested<\/b> or <b>refuted/);
-    assert.match(about, /Preprints\./);
+  it("tells people, agents and machines the same rules: claims not papers, no citation on faith, credence moved only by evidence", async () => {
+    const opts = await world();
+    const text = async (p: string, accept = "text/html") => (await route(get(p, accept), limiter(), opts)).text();
+    const landing = await text("/");
+    assert.match(landing, /There are no papers, only claims building on claims/);
+    assert.match(landing, /Published as claims, each tested on its own/);
+    assert.ok(landing.includes(await constitutionHash()));
+    const faq = await text("/faq");
+    assert.match(faq, /Where are the papers\?/);
+    assert.match(faq, /What is a claim\?/);
     const agents = await text("/agents");
-    assert.match(agents, /No citation on faith/);
-    assert.match(agents, /href="\/v1\/credence"/);
+    assert.match(agents, /no citation on faith/);
     const people = await text("/people");
-    assert.match(people, /Check before you build/);
-    assert.match(people, /href="\/preprints"/);
-    const papers = await text("/papers");
-    assert.match(papers, /What the labels mean/);
-    assert.match(papers, /claims are refuted, not papers/);
+    assert.match(people, /Claims, not papers/);
+    assert.match(people, /a citation never moves a credence/);
     const skill = await text("/skill.md", "text/markdown");
-    for (const h of ["## Citing: no citation on faith", "## Preprints", "## Credence and use"]) assert.ok(skill.includes(h), h);
-    assert.match(skill, /"basis": "reproduced"/);
-    assert.match(skill, /"preprint": true/);
+    for (const h of ["## Publishing claims (network/0.1)", "## Claims from human literature", "## Receipts: the only way to check", "## Credence, use, dispute, stakes: four numbers, never blended", "## The network (network/0.1)", "## Verify, don't trust"]) assert.ok(skill.includes(h), h);
+    assert.match(skill, /there are no papers/);
+    assert.match(skill, /No citation on faith/);
+    assert.match(skill, /basis "reproduced"/);
+    assert.doesNotMatch(skill, /"preprint"|publish_paper|vouching|jury/);
+    assert.match(skill, /Paths retired with the papers \(\/v2\/papers, \/v2\/frontier,\s+\/v2\/challenges, \/v2\/vouch\) answer 410/, "an old copy learns where the work went");
     const llms = await text("/llms.txt", "text/plain");
-    assert.match(llms, /Credence/);
-    assert.match(llms, /Preprints/);
+    assert.match(llms, /network of claims, not of papers/);
+    assert.match(llms, /nothing is cited on faith/);
+    assert.match(llms, /\/v2\/direction/);
     const terms = await text("/terms", "text/markdown");
-    assert.match(terms, /Preprints\. An author may ask/);
-    const apps = await text("/apps");
-    assert.match(apps, /Sound means every claim underneath is established/);
-    const missing = await route(get(`/pp/${"0".repeat(64)}`), s, limiter());
+    assert.match(terms, /## Claims, not assertions/);
+    assert.doesNotMatch(terms, /preprint|paper|vouch/i);
+    const missing = await route(get(`/c/ecd:${"0".repeat(16)}`), limiter(), opts);
     assert.equal(missing.status, 404);
-    assert.match(await missing.text(), /No such preprint/);
+    assert.match(await missing.text(), /No claim by that id is on the record/);
   });
 });
 

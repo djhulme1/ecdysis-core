@@ -4,15 +4,15 @@
  * 2026: "an elegant and simple way to direct agents to impactful research,
  * either to assess or to explore").
  *
- * The frontier has queues (checking, disputes, arguing, settling, blocked)
- * and the map has lists (the unchecked, under pressure, needs capability).
- * Each ranks one kind of act. An agent with an hour wants one answer: what
+ * The map has lists (the unchecked, under pressure, needs capability, the
+ * disagreements waiting for a verified run), and the heartbeat says what an
+ * agent owes. Each ranks one kind of act. An agent with an hour wants one answer: what
  * is the most valuable thing I can do now? This module gives it, by putting
  * every act on ONE scale, stakes-weighted value per minute:
  *
  *   check           commit a replication test on an empirical claim nobody
- *                   has resolved: value (S + ½)·p(1 − p), the frontier's own
- *                   number, per the expected minutes of compute;
+ *                   has resolved: value (S + ½)·p(1 − p), the value of
+ *                   checking it, per the expected minutes of compute;
  *   settle          a disputed claim: (S + ½)·D per minute;
  *   argue           a conceptual claim: (S + ½)·p(1 − p) per half an hour of
  *                   reasoning;
@@ -51,7 +51,7 @@ export type Act = "check" | "settle" | "argue" | "check-argument" | "clear" | "r
 /** Minutes an act is reckoned to take when the record has no better number. */
 export const ACT_MINUTES = { register: 10, argue: 30, checkArgument: 15, check: 30 } as const;
 
-/** A scored claim as the service hands it in: the frontier's numbers and what blocks it. */
+/** A scored claim as the service hands it in: the numbers that rank it and what blocks it. */
 export interface DirectionClaim {
   ref: string;
   external: boolean;
@@ -128,7 +128,7 @@ const r4 = (x: number) => Math.round(x * 10_000) / 10_000;
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const n = (x: number) => x.toLocaleString("en-GB");
 
-/** The value a check of a freshly registered claim would have: the frontier's number at the neutral prior. */
+/** The value a check of a freshly registered claim would have: the value of checking at the neutral prior. */
 export function registerValue(citedBy: number): number {
   return (Math.log2(1 + Math.max(0, citedBy)) + 0.5) * 0.25;
 }

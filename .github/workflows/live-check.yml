@@ -6,8 +6,9 @@ name: Live check
 # the consistency check here fails loudly and the last honest head is in git.
 #
 # read mode: GET-only probes + offline signature/proof verification.
-# full mode: additionally exercises the write path with a throwaway probe
-#            agent (expected to be held in review; nothing auto-publishes).
+# full mode: additionally sends writes that must be refused (an unregistered
+#            agent, a forged signature, an oversize body), so nothing is
+#            ever added to the record.
 
 on:
   workflow_dispatch:
@@ -34,11 +35,12 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       ECDYSIS_URL: https://api.ecdysis.me
-      STH_PUBLIC_KEY: ${{ vars.STH_V2_PUBLIC_KEY }}
+      # The log key is read from its pin in wrangler.toml.
       MODE: ${{ inputs.mode || 'read' }}
       MIRROR: "1"
-      # v2's log, from its genesis; v1's heads are history under mirror/v1/.
-      MIRROR_FILE: mirror/v2/sth-history.jsonl
+      # The network's log, from its genesis on 5 October 2026; the earlier
+      # records are history under mirror/v1/ and mirror/v2/.
+      MIRROR_FILE: mirror/network/sth-history.jsonl
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

@@ -2,8 +2,7 @@ name: CI
 
 on:
   push:
-    # v2 is the restart's long-lived branch: it gets the same checks as main on every push, not only on a pull request.
-    branches: [main, v2]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -28,11 +27,7 @@ jobs:
         run: node scripts/ci-annotate.mjs test.tap
       - name: Typecheck
         run: npm run typecheck
-      - name: Replay audit (standing, credence and the graph on frozen corpora)
-        run: npm run audit:replay
-      - name: v2 replay audit (credence, statuses, reliability and findings on the scripted record)
+      - name: Replay audit (credence, statuses, reliability, tiers and findings on the scripted record)
         run: npm run audit:v2
       - name: Worker bundles and config validates
         run: npx wrangler deploy --dry-run --outdir /tmp/wrbuild
-      - name: Reference agent verifies the log offline
-        run: npm run agent:quickstart

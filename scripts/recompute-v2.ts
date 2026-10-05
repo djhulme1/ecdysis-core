@@ -1,26 +1,31 @@
 /**
- * Verify, don't trust (v2): rebuild the record from the public log and check
- * every credence the server publishes.
+ * Verify, don't trust: rebuild the record from its public log and check what
+ * the server publishes.
  *
- *   npm run recompute:v2                          # the live archive
+ *   npm run recompute:v2                          # the live record
  *   npm run recompute:v2 -- https://api.example  # any deployment
  *
- * Fetches every log entry (GET /v1/log/entries, paged), derives the v2
- * record (src/core/v2/flow.ts) and computes credence/0.3 and track/0.2
- * (src/core/v2/scoring.ts) from nothing but those entries, then compares
- * GET /v2/credence claim by claim: credence, status, use and dispute must
- * agree. Exits non-zero on any mismatch. The log's own integrity (chain,
- * Merkle root, signed tree head) is what scripts/recompute.ts checks; run
- * both.
+ * Checks the log (every entry chains, every payload hashes to its
+ * commitment, the Merkle root matches the signed tree head, and the head's
+ * signature verifies with the log's public key pinned in wrangler.toml),
+ * then recomputes every claim's credence, status, use and dispute from
+ * nothing but the entries and compares them with GET /v2/credence. Exits
+ * non-zero on any mismatch. Read-only, and marked as a probe so it is never
+ * counted.
  */
+import { readFileSync } from "node:fs";
 import { recomputeV2 } from "../src/api/v2/recompute.js";
 
 const base = (process.argv[2] ?? "https://api.ecdysis.me").replace(/\/+$/, "");
+// The log's public key, as pinned in wrangler.toml (STH_PUBLIC_KEY); an environment variable overrides it.
+const pinned = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8").match(/^STH_PUBLIC_KEY\s*=\s*"([^"]+)"/m)?.[1] ?? null;
+const publicKey = process.env["STH_PUBLIC_KEY"] ?? (pinned && !pinned.startsWith("REPLACE") ? pinned : null);
 const report = await recomputeV2(async <T>(path: string): Promise<T> => {
   const r = await fetch(`${base}${path}`, { headers: { "x-ecdysis-probe": "1", accept: "application/json" } });
   if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
   return (await r.json()) as T;
-});
+}, new Date(), { publicKey });
 for (const m of report.mismatches) console.error(`MISMATCH ${m}`);
-console.log(`read ${report.entries} v2 entries; ${report.compared} claims compared, ${report.mismatches.length} mismatch${report.mismatches.length === 1 ? "" : "es"}; ${report.agents} agents, ${report.receipts} receipts, ${report.findings} findings, ${report.voided} voided operators`);
+console.log(`log: ${report.entries} entries chain, ${report.entries - report.withheld} payloads hash-checked (${report.withheld} with words out of view); head ${report.head}`);
+console.log(`numbers: ${report.compared} claims compared, ${report.mismatches.length} mismatch${report.mismatches.length === 1 ? "" : "es"}; ${report.agents} agents, ${report.receipts} receipts, ${report.findings} findings, ${report.voided} voided operators`);
 process.exit(report.mismatches.length ? 1 : 0);

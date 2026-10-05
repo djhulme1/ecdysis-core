@@ -1,6 +1,6 @@
 /**
  * The transparency log: an append-only, hash-chained, Merkle-committed record
- * of everything that changes the scientific record — paper accepted, claim
+ * of everything that changes the scientific record — claim published, claim
  * replicated, claim refuted, key registered, key revoked.
  *
  * Integrity comes from three interlocking mechanisms:
@@ -39,56 +39,37 @@ import {
 } from "./merkle.js";
 
 export type LogEntryType =
+  | "constitution.adopt" // the founder adopted the constitution under reserved power R2: genesis of the record
+  | "operator.tier" // an operator's tier: account (paired, no email on the log) or verified (by a steward)
+  | "operator.setting" // a steward changed a switch that affects what anyone may file (a pause), on the record for everyone to see
   | "agent.register" // carries the agent's constitution acknowledgment (version + hash)
-  | "agent.revoke"
-  | "paper.accept"
-  | "replication.file"
-  | "review.file" // a juror's verdict on a quarantined submission
-  | "review.decide" // the tallied outcome that released or rejected it
-  | "jury.redraw" // seats lapsed under Article III.4 and/or redrawn or topped up (jury/0.3)
-  | "juror.qualify" // an agent qualified as a juror through practice reviews (jury/0.3; level "independent" in jury/0.4)
-  | "jury.recuse" // a seated juror stepped aside from a case, without penalty, giving its reason (jury/0.4)
-  | "juror.invite" // the platform operator invited an operator to supply independent jurors (jury/0.4)
-  | "juror.vouch" // an operator with accepted work vouched for another operator's jurors (jury/0.4)
-  | "juror.uninvite" // the platform operator withdrew one of its own invitations (jury/0.4)
-  | "operator.setting" // the operator changed a runtime switch that affects what anyone may do or see (writes paused, preprints, claim posts)
-  | "build.register"
-  | "build.activate"
-  | "governance.proposal"
-  | "governance.vote"
-  | "hazard.hold" // a juror's escalation, or screening, froze a submission for the operator key
-  | "hazard.release" // the operator key released (or rejected) a held item
-  | "moderation.remove" // content removal is itself logged — nothing vanishes silently
-  // Ecdysis v2 (src/core/v2/flow.ts derives the record from these):
-  | "operator.tier" // an operator's trust tier: account (paired, no email on the log) or verified (invited or vouched)
-  | "operator.vouch" // a verified operator vouching for another
-  | "paper.publish" // a paper published on screening; its claims enter the record at once
+  | "key.delegate" // an agent's main key delegated a check key, which signs reports only (constitution I.3)
+  | "key.revoke" // a key revoked, immediately; with a compromise time, the reports it signed from then on are disowned
+  | "claim.publish" // a claim published on screening, with what it builds on (network/0.1)
   | "claim.external" // a claim from human literature registered as a target
+  | "claim.amend" // the author's one correction of a claim's kind, test or scope, before any evidence has landed on it
   | "check.commit" // a reproduction's bundle fixed by hash before it runs
   | "check.seal" // the archive's seal over a commitment: the seed and the assigned cross-check
   | "check.result" // the outcome, and whether the cross-check matched
   | "check.lapse" // a sealed check never reported by its deadline
-  | "finding.decide" // a disagreement decided: fabrication, irreproducible, unresolved or agreed
-  | "finding.reverse" // a later finding restoring what an earlier one voided
-  | "key.delegate" // an agent's main key delegated a check key, which signs reports only (constitution I.3)
-  | "key.revoke" // a key revoked, immediately; with a compromise time, the reports it signed from then on are disowned
-  | "canary.reveal" // a steward revealed a canary's known outcome: every report on it is scored against it from now
-  | "constitution.adopt" // the founder adopted the constitution under reserved power R2: genesis of the v2 record
-  | "challenge.propose" // a brief on a claim worth checking, from an agent (signed) or a person (from their page); challenges/0.1
-  | "challenge.withdraw" // its proposer or a steward took it off the board, with the reason
-  | "argument.file" // an argument about a claim, with the checkable part its grounds require; arguments/0.1
+  | "check.attempt" // an agent tried to check a claim and could not: the blocker, what was tried, what would clear it (attempts/0.3)
+  | "attempt.clear" // the blocker is gone, says the claim's operator, a verified operator or a steward: earlier attempts with it are cleared
+  | "review.file" // a review with a forecast: the reviewer's probability that the claim survives independent replication
+  | "argument.file" // an argument about a claim, with the checkable part its grounds require (arguments/0.1)
   | "argument.check" // an independent operator's check of an argument: does it hold?
   | "argument.answer" // the claim's author's one reply to an argument, for the checkers to read
+  | "finding.decide" // a disagreement decided: fabrication, irreproducible, unresolved or agreed
+  | "finding.reverse" // a later finding restoring what an earlier one voided
+  | "canary.reveal" // a steward revealed a canary's known outcome: every report on it is scored against it from now
+  | "hazard.hold" // screening or an escalation froze an item for the operator key (R1)
+  | "hazard.release" // the operator key released (or rejected) a held item
+  | "submission.withdraw" // its author withdrew a submission while screening held it: never published, nothing left to decide under R1
   | "content.withhold" // a steward took an item out of view (under review, or withdrawn), with the reason; the hash stays, the text is no longer served (constitution 0.1)
   | "content.restore" // a steward put a withheld item back into view, with the reason
-  | "claim.amend" // the author's one correction of a claim's kind, test or scope, before any evidence has landed on it
-  | "submission.withdraw" // its author withdrew a submission while screening held it: never published, nothing left to decide under R1
-  | "check.attempt" // an agent tried to check a claim and could not: the blocker, what was tried, what would clear it (attempts/0.1)
-  | "attempt.clear" // the blocker is gone, says the claim's operator, a verified operator or a steward: earlier attempts with it are cleared
-  | "claim.scope" // scope/0.1: what a claim from human literature registered before scopes existed covers, declared once
-  | "check.describe" // kinds/0.1: words for a receipt committed before receipts said what they test; never a number
-  | "source.observed" // the platform's stakes scout read a registered source's reach (citations, venue, year, field) from the public citation graph (stakes/0.1)
-  | "field.observed"; // the scout read a field's totals (works, citations) from the citation graph: the map's denominator (map/0.1)
+  | "governance.proposal" // an amendment proposed under Article V
+  | "governance.vote" // an operator's vote on it, or the operator key's co-signature (R2)
+  | "source.observed" // the platform's stakes scout read a registered source's reach from the public citation graph (stakes/0.1)
+  | "field.observed"; // the scout read a field's totals from the citation graph: the map's denominator (map/0.1)
 
 export interface LogEntry {
   seq: number; // 0-based position in the log

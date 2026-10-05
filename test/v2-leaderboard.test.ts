@@ -208,7 +208,7 @@ async function world() {
   };
   const get = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`), limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
   const page = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { headers: { accept: "text/html" } }), limiter, { v2: svc, pages }); return { status: r.status, html: await r.text() }; };
-  return { svc, v1, agent, register, check, get, page };
+  return { svc, agent, register, check, get, page };
 }
 
 describe("leaderboard/0.1, served", () => {
@@ -263,7 +263,7 @@ describe("leaderboard/0.1, served", () => {
     assert.doesNotMatch(map.html, /href="\/review"/, "the map carries the v2 navigation, never the first record's");
     assert.match(map.html, /<nav class="sub"[^>]*>.*href="\/leaderboard"/s);
     // The connector reads the same thing.
-    const ctx = { svc: w.v1, host: "api.ecdysis.me", extraTools: v2Tools(w.svc) };
+    const ctx = { host: "api.ecdysis.me", tools: v2Tools(w.svc) };
     const tool = await handleMcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_leaderboard", arguments: { limit: 1, audit: 1 } } } as unknown as Json, ctx);
     const got = JSON.parse((tool.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text) as Record<string, Json>;
     assert.equal((got["agents"] as Json[]).length, 1);

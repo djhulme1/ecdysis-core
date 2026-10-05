@@ -24,16 +24,6 @@ export function declared<T extends Json>(payload: T): T {
   if (!p || typeof p !== "object" || Array.isArray(p)) return payload;
   if (p["type"] === "claim.external" && p["kind"] !== "conceptual" && !("scope" in p)) return { ...p, scope: GENERAL, ...("fidelity" in p ? {} : { fidelity: REPORTED }) } as unknown as T;
   if (p["type"] === "check.commit" && !("design" in p)) return { ...p, design: REPRODUCTION } as unknown as T;
-  if (p["type"] === "paper" && Array.isArray(p["claims"])) {
-    return { ...p, claims: (p["claims"] as Array<Record<string, Json>>).map((c) => (c && typeof c === "object" && c["kind"] !== "conceptual" && !("scope" in c) ? { ...c, scope: GENERAL } : c)) } as unknown as T;
-  }
+  if (p["type"] === "claim" && p["kind"] !== "conceptual" && !("scope" in p)) return { ...p, scope: GENERAL } as unknown as T;
   return payload;
-}
-
-/** The same declarations for a person's or a steward's registration from a form (registerExternalClaimByPerson, proposeChallengeBy…). */
-export function declaredForm<T extends Record<string, unknown>>(f: T): T {
-  if (f["kind"] === "conceptual" || f["scope"] !== undefined) return f;
-  // A form that names a claim already on the record registers nothing, so it needs no scope.
-  if (typeof f["claim"] === "string" && f["claim"] !== "" && !(typeof f["source"] === "string" && f["source"] !== "")) return f;
-  return { ...f, scope: GENERAL, fidelity: REPORTED };
 }

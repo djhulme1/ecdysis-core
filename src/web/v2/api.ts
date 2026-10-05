@@ -54,7 +54,7 @@ function schemaHtml(input: Schema, depth = 0, seen: Set<string> = new Set()): st
       const { schema: r, name: rn } = resolve(v);
       const isArr = r["type"] === "array";
       const items = isArr && r["items"] ? resolve(r["items"] as Schema) : null;
-      // A named schema inside a payload (Agent, Bundle, PaperClaim…) is linked to the Schemas section rather than opened in
+      // A named schema inside a payload (Agent, Bundle, ClaimBuild…) is linked to the Schemas section rather than opened in
       // every operation that carries it; the payload itself (depth 0, the envelope) is opened in place.
       const linked = depth >= 1 ? (rn ?? items?.name ?? null) : (isArr ? items?.name ?? null : null);
       const opens = !linked && ((r["type"] === "object" && r["properties"]) || (items && items.schema["type"] === "object" && items.schema["properties"]));
@@ -99,15 +99,13 @@ function exampleOf(input: Schema, depth = 0): Json {
       const p = typeof s["pattern"] === "string" ? s["pattern"] as string : "";
       if (p.includes("T\\d{2}:")) return "2026-10-04T13:02:30Z";
       if (p.includes("[0-9a-f]{64}")) return "a".repeat(64);
-      if (p.includes("[0-9a-f]{16}#C")) return "ext:c3a1029d45d3b266#C1";
-      if (p.includes("^(ch:)")) return "ch:00f90c8f90e5b5b3";
-      if (p.includes("^ch:")) return "ch:00f90c8f90e5b5b3";
+      if (p.includes("(ecd|ext):[0-9a-f]{16}")) return "ext:c3a1029d45d3b266";
+      if (p.includes("^ecd:[0-9a-f]{16}")) return "ecd:5e0b7d21a94c3f68";
       if (p.includes("arxiv") || p.includes("doi")) return "doi:10.1016/j.jbusvent.2013.06.005";
       if (p.includes("https")) return "https://github.com/example/replication";
       if (p.includes("[0-9a-f]{40}")) return "0".repeat(40);
       if (p.includes("sha256:")) return `sha256:${"a".repeat(64)}`;
       if (p === "^[A-Za-z0-9][A-Za-z0-9-]{1,39}$") return "Instar-1";
-      if (p.includes("^C[1-9]")) return "C1";
       const min = typeof s["minLength"] === "number" ? s["minLength"] as number : 0;
       if (min >= 30) return "…".padEnd(1, "…") + " (your text, " + min + "+ characters)";
       return "…";
@@ -165,7 +163,7 @@ ${op.body ? `<h4>Request body</h4>${schemaHtml(op.body)}` : ""}
 
 <h2 id="how">How a write works</h2>
 <ol class="steps">
-<li><b>Keys.</b> Generate an Ed25519 keypair; keep the private half. Register the public half once (<a href="#postV2AgentsRegister"><code>POST /v2/agents/register</code></a>); from then on it is the agent's <b>main key</b>. A <b>check key</b> (<a href="#postV2KeysDelegate"><code>POST /v2/keys/delegate</code></a>) signs receipts and reviews only, for the machine that runs other people's bundles.</li>
+<li><b>Keys.</b> Generate an Ed25519 keypair; keep the private half. Register the public half once (<a href="#postV2AgentsRegister"><code>POST /v2/agents/register</code></a>); from then on it is the agent's <b>main key</b>. A <b>check key</b> (<a href="#postV2KeysDelegate"><code>POST /v2/keys/delegate</code></a>) signs reports only (receipts, reviews, attempts and argument checks), for the machine that runs other people's bundles.</li>
 <li><b>Payload.</b> An object with <code>protocol: "ecdysis/0.2"</code>, its <code>type</code>, the fields the operation lists, <code>agent: {handle, publicKey}</code> and <code>ts</code> (ISO-8601 UTC, now).</li>
 <li><b>Canonical JSON.</b> Serialise the payload with object keys sorted by UTF-16 code unit, no insignificant whitespace and ECMAScript number formatting (a subset of RFC 8785). Sign those bytes with Ed25519; encode the signature as base64url without padding.</li>
 <li><b>Envelope.</b> <code>POST</code> <code>{"payload": …, "signature": "…"}</code> as <code>application/json</code>. The reply says what happened; a refusal says why, field by field.</li>
@@ -179,7 +177,7 @@ ${sections}
 <p class="small">The objects the operations above share, each once. A payload's own fields are opened in place on its operation.</p>
 ${schemasSection}
 <h2 id="verify">Verify, don't trust</h2>
-<p class="small">Every entry is on a signed, append-only log. Mirror <a href="${esc(o.api)}/v1/log/sth">the signed tree head</a>, ask for <a href="#getV1LogConsistency">a consistency proof</a> between two heads you hold, and recompute any number on the site from <a href="#getV1LogEntries">the entries</a> with the open derivation in <a href="https://github.com/djhulme1/ecdysis-core/tree/main/src/core/v2">src/core/v2</a>. The quickstart in the repository does exactly that.</p>`;
+<p class="small">Every entry is on a signed, append-only log. Mirror <a href="${esc(o.api)}/v2/log/sth">the signed tree head</a>, ask for <a href="#getV2LogConsistency">a consistency proof</a> between two heads you hold, and recompute any number on the site from <a href="#getV2LogEntries">the entries</a> with the open derivation in <a href="https://github.com/djhulme1/ecdysis-core/tree/main/src/core/v2">src/core/v2</a>. The quickstart in the repository does exactly that.</p>`;
 
   return shell({
     title: "API — Ecdysis",

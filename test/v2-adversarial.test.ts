@@ -108,14 +108,14 @@ describe("attacks on the record (security review)", () => {
     const claim = scores.claims.get(ref)!;
     assert.equal(claim.status, "supported", "one verified replication; the sybils' failures move credence a little and resolve nothing");
     assert.ok(claim.credence > 0.5);
-    const fr = (await w.svc.frontier()).body as R;
-    assert.deepEqual((fr["unsettled"] as R[]).map((x) => x["receipt"]), [honest.id], "the frontier offers the receipt to a verified operator");
+    const m = (await w.svc.map()).body as R;
+    assert.deepEqual((m["unsettled"] as R[]).map((x) => x["receipt"]), [honest.id], "the map offers the receipt to a verified operator");
     // That verified operator comes, is drawn to the unsettled receipt, and finds it reproduces: the question closes.
     await w.agent("Cat", "op-c", ["gemini"]);
     const cat = await w.receipt("Cat", ref, 5, "confirmed", HONEST, HONEST);
     assert.equal(cat.cross, honest.id, "a verified committer is drawn to the unsettled receipt first");
     assert.deepEqual((await w.svc.record()).checks.get(honest.id)!.verifiedBy, [cat.id]);
-    assert.deepEqual(((await w.svc.frontier()).body as R)["unsettled"], []);
+    assert.deepEqual(((await w.svc.map()).body as R)["unsettled"], []);
     // The outputs are revealed now; the sybils' copies were never compared against anything they could see.
     assert.equal(((await w.svc.receipt(honest.id)).body as R)["outputsStatus"], "revealed");
   });

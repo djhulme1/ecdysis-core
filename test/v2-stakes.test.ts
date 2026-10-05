@@ -188,25 +188,25 @@ describe("stakes/0.1: the scout and the surfaces", () => {
       assert.equal(s.get(ref)!.status, "unchecked");
       assert.equal(s.get(ref)!.threshold, before.get(ref)!.threshold, "the bar for established stays on use");
     }
-    // The frontier ranks by stakes: Chinchilla first, the unknown last among equals.
-    const fr = await w.get("/v2/frontier");
-    const checking = fr.body["checking"] as Array<Record<string, Json>>;
+    // The direction list ranks checks by stakes: Chinchilla first, the unknown last among equals.
+    const dir = await w.get("/v2/direction");
+    const checking = (dir.body["next"] as Array<Record<string, Json>>).filter((a) => a["act"] === "check");
     assert.equal(checking[0]!["ref"], chinchilla);
-    assert.equal(checking[0]!["stakes"], 11.2767, "the API rounds to four places");
+    assert.equal(checking[0]!["stakes"], 11.28, "the direction list rounds stakes to two places");
     assert.ok((checking[0]!["value"] as number) > (checking[1]!["value"] as number));
     assert.equal(checking[1]!["ref"], nature);
     // The API serves stakes and reach; the claim page states the inputs.
     const list = (await w.get("/v2/credence")).body["claims"] as Array<Record<string, Json>>;
     assert.equal(list.find((c) => c["ref"] === chinchilla)!["reach"], 2480);
-    const pg = await w.page(`/x/${chinchilla.slice(4).replace("#C1", "")}/C1`);
+    const pg = await w.page(`/c/${chinchilla}`);
     assert.equal(pg.status, 200);
-    assert.match(pg.html, /Stakes 11\.28<\/b> = use \+ log<sub>2<\/sub>\(1 \+ reach\): 0 dependants on the record; reach 2,480: cited 2,480 times \(OpenAlex/);
+    assert.match(pg.html, /Stakes 11\.28<\/b> = use \+ log<sub>2<\/sub>\(1 \+ reach\): use 0\.00 from the operators whose claims rest on it; reach 2,480: its source cited 2,480 times \(OpenAlex/);
     assert.match(pg.html, /field: Computer Science/);
-    const pgN = await w.page(`/x/${nature.slice(4).replace("#C1", "")}/C1`);
+    const pgN = await w.page(`/c/${nature}`);
     assert.match(pgN.html, /a young paper, so its venue's expected citations \(41\.25 a year over two years\) stand in for its own 3/);
-    const pgU = await w.page(`/x/${nobody.slice(4).replace("#C1", "")}/C1`);
+    const pgU = await w.page(`/c/${nobody}`);
     assert.match(pgU.html, /reach 0: no open index knew this source/);
-    const pgD = await w.page(`/x/${down.slice(4).replace("#C1", "")}/C1`);
+    const pgD = await w.page(`/c/${down}`);
     assert.match(pgD.html, /reach not yet observed/);
     // Nothing on the record moved for anyone's credence; the audit's strings would show it if it had.
   });
@@ -216,7 +216,7 @@ describe("stakes/0.1: the scout and the surfaces", () => {
     await w.agent("Ant", "op-a", ["claude-opus-5-5"]);
     const ref = await w.register("Ant", "arxiv:2203.15556", "for compute-optimal training, the model size and the number of training tokens should be scaled equally");
     for (const path of ["/v2/sources/observed", "/v2/observations", "/v2/stakes"]) {
-      const r = await route(new Request(`https://api.ecdysis.me${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "source.observed", source: "arxiv:2203.15556", provider: "openalex", citedBy: 1e9 })) }), new EcdysisService({ store: new MemoryStore(), screeners: [structuralScreener()], sthPrivateKey: null }), new MemoryRateLimiter(1000), { v2: w.svc, pages: new PagesHandler(w.svc, { host: "api.ecdysis.me" }) });
+      const r = await route(new Request(`https://api.ecdysis.me${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "source.observed", source: "arxiv:2203.15556", provider: "openalex", citedBy: 1e9 })) }), new MemoryRateLimiter(1000), { v2: w.svc, pages: new PagesHandler(w.svc, { host: "api.ecdysis.me" }) });
       assert.equal(r.status, 404, path);
     }
     assert.equal((await w.svc.scores()).claims.get(ref)!.stakes, 0);

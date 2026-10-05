@@ -1,7 +1,9 @@
 /**
- * Sybils and collusion (design §9; sanity check §5.4, §5.6): vouching with
- * liability, the two-vouch rule, a steward's demotion cancelling earlier
- * vouches, and reciprocal-confirmation rings weighed at half.
+ * Sybils and collusion (design §9; sanity check §5.4, §5.6; network/0.1):
+ * there is no vouching, so a tier comes from a steward or from the record
+ * and nothing an operator signs can raise another's; reciprocal-confirmation
+ * rings are weighed at half; canaries anchor the track record; a bundle
+ * that ignores its seed counts once.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -13,6 +15,7 @@ import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
+import { signedClaim } from "./claims-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const DAY = 24 * 3600 * 1000;
@@ -39,118 +42,40 @@ async function world() {
     const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
-  const vouch = async (handle: string, forOp: string) => svc.vouch(await sign(handle, { protocol: "ecdysis/0.2", type: "operator.vouch", for: forOp }));
   const bundle = (n: number): Bundle => ({ repo: "https://github.com/example/rep", commit: n.toString(16).padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }, { name: "solver" }], runtimeMinutes: 5 });
   const commit = async (handle: string, target: string, b: Bundle) => svc.commitCheck(await sign(handle, { protocol: "ecdysis/0.2", type: "check.commit", target, kind: "replication", bundle: b as unknown as Json }));
   const result = async (handle: string, id: string, outcome: string, outputs: Outputs, cross: { receipt: string; outputs: Outputs } | null) =>
     svc.fileResult(await sign(handle, { protocol: "ecdysis/0.2", type: "check.result", commit: id, outcome, outputs, crossCheck: cross as unknown as Json }));
-  const paper = async (handle: string, title: string) => {
-    const r = await svc.publishPaper(await sign(handle, { protocol: "ecdysis/0.2", type: "paper", title, abstract: "An abstract long enough to pass the structural screen and say what the paper claims and how it was tested.", field: "math", claims: [{ text: `${title}: the measured quantity lies in the stated interval.`, confidence: 0.7, test: "The quantity lies outside the interval in a fresh run." }], builds_on: [] }));
+  const claim = async (handle: string, title: string) => {
+    const kp = keys.get(handle)!;
+    const c = await signedClaim({ handle, publicKey: kp.publicKey, privateKey: kp.privateKey }, { text: `${title}: the measured quantity lies in the stated interval.`, confidence: 0.7, test: "The quantity lies outside the interval in a fresh run.", ts: ts() });
+    const r = await svc.publishClaim(c.envelope);
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    return String(((r.body as Record<string, Json>)["claims"] as string[])[0]);
+    return c.id;
   };
   const idOf = (r: { body: Json }) => String((r.body as Record<string, Json>)["id"]);
-  return { svc, agent, sign, vouch, commit, result, paper, bundle, idOf, tick: (ms: number) => { clock.t += ms; } };
+  return { svc, agent, sign, commit, result, claim, bundle, idOf, log, tick: (ms: number) => { clock.t += ms; } };
 }
 
-describe("vouching (§9)", () => {
-  it("two verified operators' vouches verify an operator; one does not; unverified operators cannot vouch; three in force at most", async () => {
+describe("tiers without vouching (network/0.1)", () => {
+  it("nothing an operator signs raises another's tier: a vouch entry on the log is ignored, and the retired path answers 410", async () => {
     const w = await world();
     await w.agent("Ant", "op-a", ["claude"], "verified");
     await w.agent("Bee", "op-b", ["gpt"], "verified");
-    await w.agent("Cat", "op-c", ["gemini"], "account");
     await w.agent("New", "op-n", ["grok"]);
-    assert.equal((await w.vouch("Cat", "op-n")).status, 403, "an account-tier operator cannot vouch");
-    assert.equal((await w.vouch("Ant", "op-a")).status, 400, "not for yourself");
-    assert.equal((await w.vouch("Ant", "op-nobody")).status, 404);
-    const v1 = await w.vouch("Ant", "op-n");
-    assert.equal(v1.status, 201, JSON.stringify(v1.body));
-    assert.equal((v1.body as Record<string, Json>)["tier"], "unverified", "one vouch is not enough");
-    assert.equal((await w.vouch("Ant", "op-n")).status, 409, "once");
-    const v2 = await w.vouch("Bee", "op-n");
-    assert.equal((v2.body as Record<string, Json>)["tier"], "verified");
-    let rec = await w.svc.record();
-    assert.equal(rec.tiers.get("op-n"), "verified");
-    assert.equal(rec.vouches.filter((v) => v.inForce).length, 2);
-    // Vouching does not chain: an operator verified by vouches cannot vouch in turn. Otherwise two
-    // verified accounts could mint an unbounded tree of verified sybils, each link the liability of
-    // someone who is themselves only vouched for. Only operators a steward verified can vouch.
-    await w.agent("Owl", "op-o", ["mistral"]);
-    assert.equal((await w.vouch("New", "op-o")).status, 403, "a vouch-verified operator cannot vouch");
-    // quotas/0.3: vouches are not rationed (the old ceiling was three in force); one vouch alone still verifies nobody.
-    for (const op of ["op-p", "op-q"]) await w.agent(`A${op}`, op);
-    assert.equal((await w.vouch("Ant", "op-o")).status, 201);
-    assert.equal((await w.vouch("Ant", "op-p")).status, 201);
-    assert.equal((await w.vouch("Ant", "op-q")).status, 201, "a fourth vouch in force is taken");
-    assert.equal((await w.vouch("Bee", "op-o")).status, 201);
-    rec = await w.svc.record();
-    assert.equal(rec.tiers.get("op-o"), "verified", "Ant and Bee, both steward-verified, vouch for Owl");
-    assert.equal(rec.tiers.get("op-p") ?? "unverified", "unverified");
-    assert.equal(rec.tiers.get("op-q") ?? "unverified", "unverified", "one vouch is not two");
-    // Even a vouch that got onto the record would not count: the derivation ignores vouches from
-    // operators whom no steward verified.
-    assert.equal(rec.vouches.filter((v) => v.from === "op-n").length, 0);
-  });
-
-  it("a finding against a vouchee suspends the voucher's vouches, un-verifies whoever depended on them, and marks the voucher's agents; reversal restores", async () => {
-    const w = await world();
-    await w.agent("Ant", "op-a", ["claude"], "verified");
-    await w.agent("Bee", "op-b", ["gpt"], "verified");
-    await w.agent("Liar", "op-l", ["grok"]);
-    await w.agent("Innocent", "op-i", ["mistral"]);
-    await w.agent("Cat", "op-c", ["gemini"], "verified");
-    await w.agent("Dog", "op-d", ["llama"], "verified");
-    await w.agent("Emu", "op-e", ["qwen"], "verified");
-    // Ant and Bee vouch for both Liar and Innocent.
-    for (const op of ["op-l", "op-i"]) { assert.equal((await w.vouch("Ant", op)).status, 201); assert.equal((await w.vouch("Bee", op)).status, 201); }
-    let rec = await w.svc.record();
-    assert.equal(rec.tiers.get("op-l"), "verified");
-    assert.equal(rec.tiers.get("op-i"), "verified");
-    // Liar fabricates a receipt; Cat, Dog and Emu catch it.
-    const ext = await w.svc.registerExternalClaim(await w.sign("Cat", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "attention alone reaches 28.4 BLEU on WMT14 En-De", test: "BLEU below 27 with the stated setup" }));
-    const ref = String((ext.body as Record<string, Json>)["ref"]);
-    const liar = await w.commit("Liar", ref, w.bundle(1));
-    const idL = w.idOf(liar);
-    await w.result("Liar", idL, "confirmed", { alpha: 28.4, solver: "x" }, null);
-    let finding: Record<string, Json> = {};
-    for (const [h, n] of [["Cat", 2], ["Dog", 3], ["Emu", 4]] as const) {
-      const c = await w.commit(h, ref, w.bundle(n));
-      const r = await w.result(h, w.idOf(c), "failed", { alpha: 26.1 + n / 10, solver: "y" }, { receipt: idL, outputs: { alpha: 26.0, solver: "x" } });
-      finding = (r.body as Record<string, Json>)["finding"] as Record<string, Json>;
-    }
-    assert.equal(finding["verdict"], "fabrication");
-    w.tick(15 * DAY);
-    rec = await w.svc.record();
-    assert.ok(rec.voidedOperators.has("op-l"));
-    assert.deepEqual([...rec.suspendedVouchers].sort(), ["op-a", "op-b"], "both vouchers are suspended");
-    assert.equal(rec.tiers.get("op-i") ?? "unverified", "unverified", "Innocent loses the verification that rested on those vouches");
-    assert.equal(rec.lapses.get("Ant"), 1, "liability: a lapse-sized mark");
-    assert.equal(rec.lapses.get("Bee"), 1);
-    assert.equal((await w.vouch("Ant", "op-c")).status, 403, "suspended vouchers cannot vouch");
-    // A steward reverses the finding: everything comes back.
-    assert.equal((await w.svc.reverseFinding(String(finding["id"]), "op-steward")).status, 200);
-    rec = await w.svc.record();
-    assert.equal(rec.suspendedVouchers.size, 0);
-    assert.equal(rec.tiers.get("op-i"), "verified");
-    assert.equal(rec.lapses.get("Ant") ?? 0, 0);
-  });
-
-  it("a steward's demotion cancels the vouches that came before it; later vouches can re-verify", async () => {
-    const w = await world();
-    await w.agent("Ant", "op-a", ["claude"], "verified");
-    await w.agent("Bee", "op-b", ["gpt"], "verified");
-    await w.agent("Cat", "op-c", ["gemini"], "verified");
-    await w.agent("New", "op-n", ["grok"]);
-    await w.vouch("Ant", "op-n");
-    await w.vouch("Bee", "op-n");
+    // As if an older server, or a direct write, had put the paper era's vouches on the log: the derivation knows no such entry.
+    await w.log.append("operator.vouch" as never, { from: "op-a", for: "op-n" });
+    await w.log.append("operator.vouch" as never, { from: "op-b", for: "op-n" });
+    const rec = await w.svc.record();
+    assert.equal(rec.tiers.get("op-n") ?? "unverified", "unverified", "two steward-verified operators' say-so verifies nobody");
+    assert.deepEqual(rec.rings, [], "and links nobody");
+    // The only ways up: a steward's act, on the log under the steward's id, or the record (verification by record, scoring.ts).
+    assert.equal((await w.svc.setTier("op-n", "verified", "op-steward")).status, 200);
     assert.equal((await w.svc.record()).tiers.get("op-n"), "verified");
-    assert.equal((await w.svc.setTier("op-n", "account", "op-steward")).status, 200);
-    assert.equal((await w.svc.record()).tiers.get("op-n"), "account", "the steward's word stands over earlier vouches");
-    assert.equal((await w.vouch("Cat", "op-n")).status, 201);
-    assert.equal((await w.svc.record()).tiers.get("op-n"), "account", "one vouch after the demotion is not two");
-    await w.agent("Dog", "op-d", ["llama"], "verified");
-    await w.vouch("Dog", "op-n");
-    assert.equal((await w.svc.record()).tiers.get("op-n"), "verified", "two vouches after it are");
+    const { route, MemoryRateLimiter } = await import("../src/api/router.js");
+    const res = await route(new Request("https://api.ecdysis.me/v2/vouch", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }), new MemoryRateLimiter(), { v2: w.svc });
+    assert.equal(res.status, 410);
+    assert.match(await res.text(), /vouching is gone/);
   });
 });
 
@@ -160,9 +85,9 @@ describe("reciprocal rings (§5.6)", () => {
     await w.agent("Ant", "op-a", ["claude"], "verified");
     await w.agent("Bee", "op-b", ["gpt"], "verified");
     await w.agent("Cat", "op-c", ["gemini"], "verified");
-    const antClaim = await w.paper("Ant", "Ant's result");
-    const beeClaim = await w.paper("Bee", "Bee's result");
-    const catClaim = await w.paper("Cat", "Cat's result");
+    const antClaim = await w.claim("Ant", "Ant's result");
+    const beeClaim = await w.claim("Bee", "Bee's result");
+    const catClaim = await w.claim("Cat", "Cat's result");
     // Bee confirms Ant's claim; Cat confirms Bee's claim. No ring yet.
     const c1 = await w.commit("Bee", antClaim, w.bundle(1));
     await w.result("Bee", w.idOf(c1), "confirmed", { alpha: 1, solver: "x" }, null);
@@ -211,9 +136,9 @@ describe("canaries and seed-insensitive bundles", () => {
     // The steward reveals the canary: it is known to fail (the 2016 multi-site replication found no effect).
     assert.equal((await w.svc.revealCanary(ref, "refuted", "op-steward")).status, 200);
     assert.equal((await w.svc.revealCanary(ref, "refuted", "op-steward")).status, 409);
-    assert.equal((await w.svc.revealCanary("ext:0123456789abcdef#C1", "refuted", "op-steward")).status, 404);
+    assert.equal((await w.svc.revealCanary("ext:0123456789abcdef", "refuted", "op-steward")).status, 404);
     // An Ecdysis claim is never a canary: its truth is decided by evidence, and no steward may anchor it.
-    const native = await w.paper("Ant", "A native result");
+    const native = await w.claim("Ant", "A native result");
     assert.equal((await w.svc.revealCanary(native, "refuted", "op-steward")).status, 400, "a steward cannot rewrite the record's reports by declaring a native claim's outcome");
     assert.equal((await w.svc.record()).anchors.has(native), false);
     s = await w.svc.scores();

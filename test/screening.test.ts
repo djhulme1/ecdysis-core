@@ -1,23 +1,28 @@
 /**
- * Screening with the safety classifier (Workers AI, Llama Guard 3).
+ * Screening with the safety classifier (Workers AI, Llama Guard 3), on the
+ * network of claims.
  *
- * Guarantees: possible hazards are frozen for a human (R1) and never reach a
- * jury or the public; the gravest category is refused outright; other flags
- * go to the jury; with review-all on (the default) nothing skips the jury;
- * a failing classifier fails closed; jury reasons are screened once, at
- * filing, and only cleared reasons are ever shown publicly. No hazard
- * vocabulary appears here: the fake classifier keys on a neutral marker.
+ * Guarantees: a possible hazard is frozen for the owner (R1) and never
+ * published; the gravest category is refused outright; a finding that is the
+ * stewards' business publishes the claim under review, out of view until a
+ * steward looks; a classifier that cannot answer fails closed (nothing is
+ * published) without spending the owner's key on an outage; the words a
+ * receipt shows are screened like a claim's; and no hazard vocabulary appears
+ * here: the fake classifier keys on a neutral marker.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
-import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
+import { TransparencyLog } from "../src/core/log.js";
+import { generateKeyPair, type KeyPairB64 } from "../src/core/crypto.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { guardScreener, parseGuard, structuralScreener, type AiLike } from "../src/core/hazard.js";
+import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { screenersFrom, type Env } from "../src/index.js";
+import { signedClaim } from "./claims-kit.js";
 import type { Json } from "../src/core/canonical.js";
 
-const NOW = Date.UTC(2026, 9, 1, 12, 0, 0);
+const NOW = Date.UTC(2026, 9, 5, 12, 0, 0);
 
 /** Flags any text containing MARKER-<label> with that label, else safe. */
 function fakeAi(shape: "object" | "string" = "object", fail = false): AiLike & { calls: number } {
@@ -35,32 +40,27 @@ function fakeAi(shape: "object" | "string" = "object", fail = false): AiLike & {
   return ai;
 }
 
-async function world(ai: AiLike, reviewAll?: boolean) {
+async function world(ai: AiLike, o: { stewardCategories?: string[] } = {}) {
   const store = new MemoryStore();
-  const svc = new EcdysisService({
-    store, screeners: [structuralScreener(), guardScreener(ai)], sthPrivateKey: null, now: () => new Date(NOW),
-    ...(reviewAll === undefined ? {} : { reviewAll }),
+  const now = () => new Date(NOW);
+  const log = new TransparencyLog(store, now);
+  const logKey = await generateKeyPair();
+  const v2store = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
+  const referrals: string[] = [];
+  const svc = new V2Service({
+    log, store: v2store, logPrivateKey: logKey.privateKey, now, screeners: [structuralScreener(), guardScreener(ai)],
+    ...(o.stewardCategories ? { stewardCategories: new Set(o.stewardCategories) } : {}),
+    onReferral: async (subject, detail) => { referrals.push(`${subject}: ${detail}`); },
   });
   const ack = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
-  const add = async (handle: string, op: string, accepted: number) => {
+  const add = async (handle: string, op: string) => {
     const kp = await generateKeyPair();
     assert.equal((await svc.registerAgent({ handle, publicKey: kp.publicKey, operatorId: op, constitution: ack })).status, 201);
-    for (let i = 0; i < accepted; i++) await store.bumpAccepted(handle);
     return kp;
   };
-  const juror = await add("Juror-1", "op-j", 1);
-  return { store, svc, add, juror };
-}
-
-async function paper(svc: EcdysisService, kp: KeyPairB64, handle: string, abstractExtra = "") {
-  const payload: Json = {
-    protocol: "ecdysis/0.1", type: "paper", title: "A small replication with seeds attached",
-    abstract: `We re-run a published analysis at small scale and report the outcome. ${abstractExtra}`.trim(),
-    field: "ml", claims: [{ text: "The effect replicates at small scale.", confidence: 0.6 }],
-    builds_on: [{ id: "arxiv:1706.03762", rel: "replicates" }],
-    agent: { handle, publicKey: kp.publicKey }, ts: "2026-10-01T11:00:00Z",
-  };
-  return svc.submitPaper({ payload, signature: await signJson(kp.privateKey, payload) });
+  const claim = async (handle: string, kp: KeyPairB64, rationaleExtra = "") =>
+    signedClaim({ handle, ...kp }, { rationale: `Weight decay makes the generalising circuit cheaper than memorisation, so it wins once the loss has converged. ${rationaleExtra}`.trim(), ts: "2026-10-05T11:00:00Z" });
+  return { store, svc, add, claim, referrals, logKey };
 }
 
 describe("the safety classifier's answers", () => {
@@ -74,91 +74,93 @@ describe("the safety classifier's answers", () => {
   });
 });
 
-describe("screening routes work by risk", () => {
-  it("a possible hazard is frozen for a human: no jury, nothing public", async () => {
-    const { svc, store, add } = await world(fakeAi());
-    const a = await add("Author-1", "op-a", 0);
-    const r = await paper(svc, a, "Author-1", "MARKER-S9");
-    assert.equal(r.status, 202);
-    const id = (r.body as { id: string }).id;
-    assert.equal((r.body as { status: string }).status, "held");
-    const q = (await store.getQuarantine(id))!;
-    assert.equal(q.status, "hazard_hold");
-    assert.deepEqual(q.jury, [], "no juror ever sees it");
-    const queue = (await svc.reviewQueue()).body as Record<string, any>;
-    const item = queue.items.find((i: any) => i.id === id);
-    assert.match(item.stage, /human decision/);
-    assert.equal(item.field, null);
+describe("screening routes a claim by risk", () => {
+  it("a possible hazard is held for the owner (R1): nothing is published, nothing is shown", async () => {
+    const { svc, add, claim } = await world(fakeAi());
+    const a = await add("Author-1", "op-a");
+    const c = await claim("Author-1", a, "MARKER-S9");
+    const r = await svc.publishClaim(c.envelope);
+    assert.equal(r.status, 202, JSON.stringify(r.body));
+    const b = r.body as { status: string; id: string; claim: string };
+    assert.equal(b.status, "held");
+    assert.equal(b.id, c.cid, "the hold names the submission by its content id");
+    assert.equal(b.claim, c.id, "and says what id the claim would enter under");
+    const rec = await svc.record();
+    assert.ok(rec.held.has(c.cid) && rec.screeningHolds.has(c.cid));
+    assert.ok(!rec.native.has(c.id), "not on the record");
+    assert.equal((await svc.claim(c.id)).status, 404, "nothing to read");
+    const list = (await svc.claimsList({ limit: 10, all: true })).body as { claims: unknown[] };
+    assert.equal(list.claims.length, 0);
+    const holds = await svc.holds();
+    assert.equal(holds.length, 1);
+    assert.equal(holds[0]!.subject, c.cid);
+    assert.equal(holds[0]!.state, "open");
+    const again = await svc.publishClaim(c.envelope);
+    assert.equal(again.status, 409, "sending it again while held changes nothing");
   });
 
-  it("the gravest category is refused outright, and works on the string shape too", async () => {
-    const { svc, add } = await world(fakeAi("string"));
-    const a = await add("Author-2", "op-a2", 0);
-    const r = await paper(svc, a, "Author-2", "MARKER-S4");
+  it("the gravest category is refused outright, with nothing kept, and works on the string shape too", async () => {
+    const { svc, add, claim } = await world(fakeAi("string"));
+    const a = await add("Author-2", "op-a2");
+    const c = await claim("Author-2", a, "MARKER-S4");
+    const r = await svc.publishClaim(c.envelope);
     assert.equal(r.status, 451);
+    const rec = await svc.record();
+    assert.ok(!rec.held.has(c.cid) && !rec.native.has(c.id));
+    assert.equal((await svc.holds()).length, 0, "no hold: a refusal needs no decision");
   });
 
-  it("other flags go to the jury", async () => {
-    const { svc, store, add } = await world(fakeAi());
-    const a = await add("Author-3", "op-a3", 0);
-    const r = await paper(svc, a, "Author-3", "MARKER-S7");
-    assert.equal(r.status, 202);
-    const q = (await store.getQuarantine((r.body as { id: string }).id))!;
-    assert.equal(q.status, "pending");
-    assert.deepEqual(q.jury, ["Juror-1"]);
+  it("a finding that is the stewards' business publishes the claim under review, out of view until a steward looks", async () => {
+    const { svc, add, claim, referrals } = await world(fakeAi(), { stewardCategories: ["privacy", "defamation"] });
+    const a = await add("Author-3", "op-a3");
+    const c = await claim("Author-3", a, "MARKER-S7");
+    const r = await svc.publishClaim(c.envelope);
+    assert.equal(r.status, 202, JSON.stringify(r.body));
+    assert.equal((r.body as { status: string }).status, "under-review");
+    const rec = await svc.record();
+    assert.ok(rec.native.has(c.id), "on the record");
+    assert.ok(rec.held.has(c.id), "but out of view");
+    assert.equal(rec.withheld.get(c.id)?.status, "review");
+    assert.equal(rec.withheld.get(c.id)?.steward, "", "nobody's decision yet: screening referred it");
+    assert.equal((await svc.claim(c.id)).status, 451, "nothing about it is shown");
+    assert.equal(referrals.length, 1, "the stewards are told");
+    assert.match(referrals[0]!, /privacy/);
+    // The same finding without a steward category is a hazard hold, not a referral.
+    const plain = await world(fakeAi());
+    const b = await plain.add("Author-4", "op-a4");
+    const c2 = await plain.claim("Author-4", b, "MARKER-S7");
+    assert.equal(((await plain.svc.publishClaim(c2.envelope)).body as { status: string }).status, "held");
   });
 
-  it("with review-all on (the default), even clean work from a veteran goes to a jury", async () => {
-    const { svc, add } = await world(fakeAi());
-    const v = await add("Veteran-1", "op-v", 5);
-    const r = await paper(svc, v, "Veteran-1");
-    assert.equal(r.status, 202, "nothing skips the jury");
-    const { svc: open, add: add2 } = await world(fakeAi(), false);
-    const v2 = await add2("Veteran-2", "op-v2", 5);
-    assert.equal((await paper(open, v2, "Veteran-2")).status, 201, "only a deliberate setting allows direct publication");
+  it("a classifier that cannot answer fails closed: nothing is published, nothing is held, and the same envelope is taken later", async () => {
+    const down = fakeAi("object", true);
+    const { svc, add, claim } = await world(down);
+    const a = await add("Author-5", "op-a5");
+    const c = await claim("Author-5", a);
+    const r = await svc.publishClaim(c.envelope);
+    assert.equal(r.status, 503, JSON.stringify(r.body));
+    assert.equal((r.body as { retry: boolean }).retry, true);
+    const rec = await svc.record();
+    assert.ok(!rec.native.has(c.id) && !rec.held.has(c.cid), "an outage spends nobody's key");
+    // Back up: the very same envelope is published.
+    const up = await world(fakeAi());
+    const b = await up.add("Author-5", "op-a5");
+    const c2 = await up.claim("Author-5", b);
+    assert.equal((await up.svc.publishClaim(c2.envelope)).status, 201);
   });
 
-  it("a failing classifier fails closed to review, never to publication", async () => {
-    const { svc, store, add } = await world(fakeAi("object", true), false);
-    const v = await add("Veteran-3", "op-v3", 5);
-    const r = await paper(svc, v, "Veteran-3");
-    assert.equal(r.status, 202);
-    assert.equal((await store.getQuarantine((r.body as { id: string }).id))!.status, "pending");
-  });
-});
-
-describe("jury reasons", () => {
-  async function decide(ai: ReturnType<typeof fakeAi>, rationale: string) {
-    const w = await world(ai);
-    const a = await w.add("Author-9", "op-a9", 0);
-    const id = ((await paper(w.svc, a, "Author-9")).body as { id: string }).id;
-    const payload: Json = {
-      protocol: "ecdysis/0.1", type: "review", subject: id, verdict: "reject", rationale,
-      agent: { handle: "Juror-1", publicKey: w.juror.publicKey }, ts: "2026-10-01T12:00:00Z",
-    };
-    const filed = await w.svc.fileReview({ payload, signature: await signJson(w.juror.privateKey, payload) });
-    assert.equal(filed.status, 200, JSON.stringify(filed.body));
-    return { ...w, id };
-  }
-
-  it("cleared reasons are public, screened once at filing and never again on page views", async () => {
+  it("clean work is published at once, with no probation and no vote", async () => {
     const ai = fakeAi();
-    const { svc, store, id } = await decide(ai, "The claims are not supported by the attached evidence; add seeds and code.");
-    assert.equal((await store.getQuarantine(id))!.votes[0]!.publicReasons, true);
+    const { svc, add, claim } = await world(ai);
+    const a = await add("Author-6", "op-a6");
+    const c = await claim("Author-6", a);
+    const r = await svc.publishClaim(c.envelope);
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal((r.body as { id: string }).id, c.id);
     const before = ai.calls;
-    for (let i = 0; i < 3; i++) {
-      const pub = (await svc.reviewStatus(id)).body as Record<string, any>;
-      assert.match(pub.verdicts[0].rationale, /attached evidence/);
-    }
-    await svc.recentDecisions(10);
-    assert.equal(ai.calls, before, "no classifier calls on reads");
-  });
-
-  it("flagged reasons stay private, though the author can still read them", async () => {
-    const { svc, store, id } = await decide(fakeAi(), "Rejected for reasons MARKER-S10 that should not be shown publicly.");
-    assert.equal((await store.getQuarantine(id))!.votes[0]!.publicReasons, false);
-    const pub = (await svc.reviewStatus(id)).body as Record<string, any>;
-    assert.equal(pub.verdicts[0].rationale, null);
+    await svc.claim(c.id);
+    await svc.claimsList({ limit: 10 });
+    assert.equal(ai.calls, before, "no classifier calls on reads: screening happens once, at publication");
   });
 });
 

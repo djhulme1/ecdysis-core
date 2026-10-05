@@ -205,21 +205,21 @@ describe("OAuth 2.1 for the connector, and managed agents (I.4)", () => {
     assert.deepEqual(who.body["managedAgents"], []);
     assert.equal((await w.mcp("whoami", {}, "x".repeat(43))).status, 401, "a made-up token is refused outright");
 
-    // The archive signs content and votes for a managed agent, never keys, vouches, escalations or doorbells: a token-holder
-    // cannot mint itself a durable check key, retire the agent, or speak for the person's standing.
+    // The archive signs content and votes for a managed agent, never keys, escalations or doorbells: a token-holder cannot
+    // mint itself a durable check key, retire the agent, or speak for the person's standing.
     const forbidden = await w.mcp("delegate_key", { envelope: { payload: { protocol: "ecdysis/0.2", type: "key.delegate", key: (await generateKeyPair()).publicKey, scope: "reports", agent: { handle: "Wren" }, ts: w.now().toISOString() } } }, access);
     assert.equal(forbidden.isError, true);
-    assert.match(String(forbidden.body["error"]), /keys, vouches, escalations and doorbells stay with the person/);
+    assert.match(String(forbidden.body["error"]), /keys, escalations and doorbells stay with the person/);
     // An unsigned write without a managed agent is refused; create one; then it is signed here and labelled managed.
-    const paper = (handle: string) => ({ protocol: "ecdysis/0.2", type: "paper", title: "A managed agent's first paper", abstract: "An abstract long enough to pass the structural screen and say what the paper claims and how it was tested.", field: "math", claims: [{ text: "The measured quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval.", scope: GENERAL }], builds_on: [], agent: { handle }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") });
-    let pub = await w.mcp("publish_paper", { envelope: { payload: paper("Wren") } }, access);
+    const claim = (handle: string, text = "The measured quantity lies in the stated interval in the stated regime.", builds_on: Json[] = []) => ({ protocol: "ecdysis/0.2", type: "claim", text, confidence: 0.7, test: "A fresh run outside the interval.", field: "math", scope: GENERAL, rationale: "A rationale long enough to pass the structural screen and say what the claim rests on and how it was tested.", builds_on, agent: { handle }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") });
+    let pub = await w.mcp("publish_claims", { envelopes: [{ payload: claim("Wren") }] }, access);
     assert.equal(pub.isError, true);
     assert.match(String(pub.body["error"]), /not a managed agent of your account/);
-    assert.equal((await w.mcp("publish_paper", { envelope: { payload: paper("Wren") } }, null)).body["http_status"], 401, "anonymous: sign it yourself");
+    assert.equal((await w.mcp("publish_claims", { envelopes: [{ payload: claim("Wren") }] }, null)).body["http_status"], 401, "anonymous: sign it yourself");
     const created = await w.mcp("create_managed_agent", { handle: "Wren", models: ["gpt-5.2"] }, access);
     assert.equal(created.body["http_status"], 201, JSON.stringify(created.body));
-    for (const type of ["key.delegate", "key.revoke", "operator.vouch", "hazard.escalate", "doorbell.set"]) {
-      const no = await w.mcp(type === "key.delegate" ? "delegate_key" : type === "key.revoke" ? "revoke_key" : type === "operator.vouch" ? "vouch_for" : type === "hazard.escalate" ? "escalate" : "set_doorbell", { envelope: { payload: { protocol: "ecdysis/0.2", type, agent: { handle: "Wren" }, ts: w.now().toISOString(), key: "x", scope: "reports", for: "op-x", subject: "x", reason: "r".repeat(40), kind: "self" } } }, access);
+    for (const type of ["key.delegate", "key.revoke", "hazard.escalate", "doorbell.set"]) {
+      const no = await w.mcp(type === "key.delegate" ? "delegate_key" : type === "key.revoke" ? "revoke_key" : type === "hazard.escalate" ? "escalate" : "set_doorbell", { envelope: { payload: { protocol: "ecdysis/0.2", type, agent: { handle: "Wren" }, ts: w.now().toISOString(), key: "x", scope: "reports", subject: "x", reason: "r".repeat(40), kind: "self" } } }, access);
       assert.equal(no.isError, true, `${type} is never signed for a managed agent`);
     }
     assert.deepEqual((await w.v2.record()).agents.get("Wren")!.checkKeys, [], "no check key appeared");
@@ -227,17 +227,41 @@ describe("OAuth 2.1 for the connector, and managed agents (I.4)", () => {
     const rec = await w.v2.record();
     assert.equal(rec.agents.get("Wren")!.managed, true, "the record says who held the pen");
     assert.equal(rec.agents.get("Wren")!.operatorId, who.body["operatorId"]);
-    pub = await w.mcp("publish_paper", { envelope: { payload: paper("Wren") } }, access);
+    // A line of two unsigned claims: a managed agent has no key to compute the first claim's id with, so the second names it
+    // as "batch:1" and the archive puts the id in before signing. The ids are the signed envelopes' hashes.
+    pub = await w.mcp("publish_claims", { envelopes: [{ payload: claim("Wren") }, { payload: claim("Wren", "A second claim of the line, resting on the first by review.", [{ id: "batch:1", rel: "extends", basis: "reviewed", note: "Read the first claim's method and data against its stated test." }]) }] }, access);
     assert.equal(pub.body["http_status"], 201, JSON.stringify(pub.body));
+    const published = pub.body["published"] as Array<{ n: number; id: string }>;
+    assert.equal(published.length, 2);
+    assert.match(published[0]!.id, /^ecd:[0-9a-f]{16}$/);
+    const recAfter = await w.v2.record();
+    assert.deepEqual(recAfter.edges.filter((e) => e.from === published[1]!.id).map((e) => e.to), [published[0]!.id], "the batch reference became the first claim's id");
+    assert.equal(recAfter.agents.get("Wren")!.managed, true, "the record says who held the pen");
+    assert.equal(recAfter.native.get(published[0]!.id)!.handle, "Wren");
     who = await w.mcp("whoami", {}, access);
     assert.deepEqual(who.body["managedAgents"], ["Wren"]);
-    // Another person cannot act as Wren, and nobody can have the archive sign for a self-custodied agent.
+    // A batch reference in a SIGNED envelope is left alone (rewriting it would break the signature) and refused as no claim.
     const kp = await generateKeyPair();
     assert.equal((await w.v2.registerAgent({ constitution: ACK, handle: "Owl", publicKey: kp.publicKey, operatorId: "op-owl" })).status, 201);
-    const asOwl = await w.mcp("publish_paper", { envelope: { payload: paper("Owl") } }, access);
+    const owlFirst = { ...claim("Owl"), agent: { handle: "Owl", publicKey: kp.publicKey } } as Json;
+    const owlSecond = { ...claim("Owl", "Owl's second claim, naming a batch reference it signed itself.", [{ id: "batch:1", rel: "extends", basis: "reviewed", note: "Read the first claim's method and data against its stated test." }]), agent: { handle: "Owl", publicKey: kp.publicKey } } as Json;
+    const signedBatch = await w.mcp("publish_claims", { envelopes: [{ payload: owlFirst, signature: await signJson(kp.privateKey, owlFirst) }, { payload: owlSecond, signature: await signJson(kp.privateKey, owlSecond) }] }, access);
+    assert.equal(signedBatch.body["http_status"], 400, JSON.stringify(signedBatch.body));
+    assert.equal(signedBatch.body["stoppedAt"], 2, "the first entered; the second's batch reference is not a claim ref");
+    // Another person cannot act as Owl, and nobody can have the archive sign for a self-custodied agent.
+    const asOwl = await w.mcp("publish_claims", { envelopes: [{ payload: claim("Owl", "A claim the archive must not sign for a self-custodied agent.") }] }, access);
     assert.equal(asOwl.isError, true, "self-custodied agents sign their own envelopes");
-    const signedByOwl = await signJson(kp.privateKey, { ...paper("Owl"), agent: { handle: "Owl", publicKey: kp.publicKey } } as Json);
-    assert.equal((await w.mcp("publish_paper", { envelope: { payload: { ...paper("Owl"), agent: { handle: "Owl", publicKey: kp.publicKey } }, signature: signedByOwl } }, access)).body["http_status"], 201, "a signed envelope passes through untouched, token or not");
+    const owlThird = { ...claim("Owl", "Owl's third claim, signed by Owl itself and passed through."), agent: { handle: "Owl", publicKey: kp.publicKey } } as Json;
+    assert.equal((await w.mcp("publish_claims", { envelopes: [{ payload: owlThird, signature: await signJson(kp.privateKey, owlThird) }] }, access)).body["http_status"], 201, "a signed envelope passes through untouched, token or not");
+    // A managed agent files an attempt through the connector (the archive signs it): logged, shown, and its own-operator
+    // rule still holds, so an attempt on the account's own claim counts nowhere.
+    const owlClaimId = ((await w.v2.record()).claims.find((c) => c.authorOperator === "op-owl") ?? { ref: "" }).ref;
+    const attempt = await w.mcp("file_attempt", { envelope: { payload: { protocol: "ecdysis/0.2", type: "check.attempt", claim: owlClaimId, blocker: "compute", read: "full", detail: "The stated run needs a week on hardware this account does not have; nothing smaller is stated in the claim's method.", unblockedBy: "A smaller instance stated in the method, or a grant of compute.", agent: { handle: "Wren" }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") } } }, access);
+    assert.equal(attempt.body["http_status"], 201, JSON.stringify(attempt.body));
+    assert.equal(attempt.body["own"], false);
+    const own = await w.mcp("file_attempt", { envelope: { payload: { protocol: "ecdysis/0.2", type: "check.attempt", claim: published[0]!.id, blocker: "compute", read: "full", detail: "An attempt on the account's own claim, which is kept and counted nowhere (Article 0.5), however it was signed.", unblockedBy: "Nothing: it is the author's own claim.", agent: { handle: "Wren" }, ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") } } }, access);
+    assert.equal(own.body["http_status"], 201, JSON.stringify(own.body));
+    assert.equal(own.body["own"], true, "the archive signing for a managed agent changes nothing about whose claim it is");
 
     // Refresh: rotation, single use. (Half an hour on, so the two access tokens expire at different times.)
     w.tick(30 * MIN);
@@ -282,8 +306,8 @@ describe("OAuth 2.1 for the connector, and managed agents (I.4)", () => {
     assert.equal(w.oauthStore.managed.get("Wren")!.privateSealed, "", "the sealed key is erased");
     const after = await w.v2.record();
     assert.ok(after.agents.get("Wren")!.revokedAt, "the agent is retired");
-    assert.equal(after.papers.size, 2, "what it signed stays");
-    assert.equal((await w.mcp("publish_paper", { envelope: { payload: paper("Wren") } }, access3)).isError, true, "nothing signs for it any more");
+    assert.equal([...after.native.values()].filter((c) => c.handle === "Wren").length, 2, "what it signed stays");
+    assert.equal((await w.mcp("publish_claims", { envelopes: [{ payload: claim("Wren", "A claim after the key was destroyed.") }] }, access3)).isError, true, "nothing signs for it any more");
     // A managed agent retired from the keys section of the page (not the destroy button) is treated as destroyed too.
     assert.equal((await w.mcp("create_managed_agent", { handle: "Lark" }, access3)).body["http_status"], 201);
     const larkKey = (await w.v2.record()).agents.get("Lark")!.publicKey;

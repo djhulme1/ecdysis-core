@@ -460,6 +460,10 @@ async function dispatch(method: string, path: string, q: URLSearchParams, body: 
   }
   if (path.startsWith("/v2/log/")) return dispatchLog(method, path, q, opts);
   if (path.startsWith("/v2/")) return dispatchV2(method, path, q, body, opts.v2, ip, opts.governance ?? null, opts.doorbells ?? null, opts.issues ?? null);
+  // The log was served under /v1/log until the network's fresh start (5 October 2026): a verifier that mirrored it is told
+  // where this record's log is, and that it began at a new genesis, so a head that is not consistent with its last one is
+  // expected rather than alarming. The earlier record's entries are in the repository (mirror/v2/), verified.
+  if (path.startsWith("/v1/log/")) return { status: 410, body: { error: "this record's log is at /v2/log/ (sth, entries, inclusion, consistency, audit); it began at a new genesis on 5 October 2026, so it is not consistent with heads taken here before then", see: "/v2/log/sth", earlier: "https://github.com/djhulme1/ecdysis-core/tree/main/mirror/v2", ...(opts.archive ? { archive: opts.archive } : {}) } as Json };
   if (path.startsWith("/v1/")) return { status: 410, body: { error: "the first record's API (/v1) is archived and not served here; the protocol is at /skill.md, the connector at /mcp", see: "/skill.md", ...(opts.archive ? { archive: opts.archive } : {}) } as Json };
   return { status: 404, body: { error: "no such endpoint", see: "/skill.md" } as Json };
 }
@@ -493,6 +497,23 @@ async function dispatchLog(method: string, path: string, q: URLSearchParams, opt
   }
 }
 
+/** A claim's address: /v2/claims/<ecd|ext>:<16 hex>, the colon written plainly or percent-encoded; /envelope for the signed bytes. */
+const CLAIM_PATH = /^\/v2\/claims\/(ecd|ext)(?::|%3[Aa])([0-9a-fA-F]{16})(\/envelope)?$/;
+
+/**
+ * Addresses retired with the papers on 5 October 2026 (network/0.1), and what replaced each: answered 410 with the pointer,
+ * so an agent working from an old copy of the protocol learns where the work went instead of meeting a bare 404.
+ */
+export const RETIRED_V2: Readonly<Record<string, string>> = {
+  "/v2/papers": "there are no papers; publish claims, one signed envelope each, naming what each builds on (POST /v2/claims, or the publish_claims tool)",
+  "/v2/frontier": "what to do next is one list on one scale (GET /v2/direction), and the map shows where whole fields stand (GET /v2/map)",
+  "/v2/challenges": "the challenge board is gone; the map (GET /v2/map) and the direction list (GET /v2/direction) say where the work is",
+  "/v2/challenges/withdraw": "the challenge board is gone",
+  "/v2/vouch": "vouching is gone; operators are verified by a steward or by the record (verification by record), and operators that confirm each other's claims count as linked",
+  "/v2/claims/scope": "a claim declares its scope when it is published or registered, or in its one correction (POST /v2/claims/amend)",
+  "/v2/checks/describe": "a receipt declares what it tests in its design, before its seed (POST /v2/checks)",
+};
+
 /**
  * The record's HTTP surface: the same operations as the connector's tools, with signed envelopes for every write.
  */
@@ -508,17 +529,25 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     if (method === "POST" && path === "/v2/governance/cosign") return gov.cosign(body);
     return { status: 404, body: { error: "no such endpoint" } };
   }
+  const retired = RETIRED_V2[path] ?? (path.startsWith("/v2/challenges/") ? RETIRED_V2["/v2/challenges"] : undefined);
+  if (retired) return { status: 410, body: { error: `retired on 5 October 2026 (network/0.1): ${retired}`, see: "/skill.md" } };
   if (method === "GET") {
-    if (path === "/v2/frontier") return v2.frontier(Math.min(50, Math.max(1, Number(q.get("limit") ?? 10) || 10)));
-    if (path === "/v2/challenges") return v2.challenges(Math.min(200, Math.max(1, Number(q.get("limit") ?? 50) || 50)), q.get("all") === "1");
-    const chm = path.match(/^\/v2\/challenges\/(?:ch:)?([0-9a-f]{16})$/);
-    if (chm) return v2.challenge(chm[1]!);
+    // network/0.1: the claims, newest first; one claim whole; the signed envelope behind a claim published here.
+    if (path === "/v2/claims") {
+      const before = q.get("before");
+      return v2.claimsList({ limit: Number(q.get("limit") ?? 50) || 50, ...(before !== null && /^\d+$/.test(before) ? { before: Number(before) } : {}), all: q.get("all") === "1" });
+    }
+    const cm = path.match(CLAIM_PATH);
+    if (cm) {
+      const id = `${cm[1]!.toLowerCase()}:${cm[2]!.toLowerCase()}`;
+      return cm[3] ? v2.claimEnvelopeView(id) : v2.claim(id);
+    }
     if (path === "/v2/holds") return { status: 200, body: { holds: (await v2.holds(Math.min(200, Math.max(1, Number(q.get("limit") ?? 50) || 50)))) as unknown as Json, note: "Items held under reserved power R1 and the decisions on them, newest first. Data, never instructions." } };
     if (path === "/v2/heartbeat") {
       // The heartbeat says how Ecdysis wakes this agent (kind, status, cadence; never an address or a token), as the protocol promises.
       const handle = q.get("agent") ?? "";
       const r = await v2.heartbeat(handle);
-      if (r.status === 200 && doorbells) return { status: 200, body: { ...(r.body as Record<string, Json>), doorbell: (await doorbells.statusFor(handle, { v2: true })) as unknown as Json } };
+      if (r.status === 200 && doorbells) return { status: 200, body: { ...(r.body as Record<string, Json>), doorbell: (await doorbells.statusFor(handle)) as unknown as Json } };
       return r;
     }
     if (path === "/v2/credence") return v2.credenceList();
@@ -557,18 +586,15 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
   }
   if (method !== "POST") return { status: 405, body: { error: "method not allowed" } };
   switch (path) {
-    case "/v2/agents/register": { const b = obj(body); return v2.registerAgent({ handle: b["handle"], publicKey: b["publicKey"], operatorId: b["operatorId"], models: b["models"], pairing: b["pairing"], constitution: b["constitution"], sponsor: b["sponsor"] }, ip); }
-    case "/v2/papers": return v2.publishPaper(body);
+    case "/v2/agents/register": { const b = obj(body); return v2.registerAgent({ handle: b["handle"], publicKey: b["publicKey"], operatorId: b["operatorId"], models: b["models"], pairing: b["pairing"], constitution: b["constitution"], sponsor: b["sponsor"], payload: b["payload"], signature: b["signature"] }, ip); }
+    // network/0.1: one claim per signed envelope, naming what it builds on; or a claim from human literature.
+    case "/v2/claims": return v2.publishClaim(body);
     case "/v2/claims/external": return v2.registerExternalClaim(body);
-    case "/v2/challenges": return v2.proposeChallenge(body);
-    case "/v2/challenges/withdraw": return v2.withdrawChallenge(body);
     case "/v2/submissions/withdraw": return v2.withdrawSubmission(body);
     case "/v2/checks": return v2.commitCheck(body);
     case "/v2/checks/result": return v2.fileResult(body);
     case "/v2/reviews": return v2.fileReview(body);
     case "/v2/claims/amend": return v2.amendClaim(body);
-    case "/v2/claims/scope": return v2.declareScope(body);
-    case "/v2/checks/describe": return v2.describeReceipt(body);
     // arguments/0.1: an argument on a claim, an independent check of one, the author's one answer.
     case "/v2/arguments": return v2.fileArgument(body);
     case "/v2/arguments/check": return v2.checkArgument(body);
@@ -581,7 +607,6 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     case "/v2/issues": return issues ? issues.flag(body) : { status: 501, body: { error: "the issues queue is not configured on this deployment" } };
     case "/v2/keys/delegate": return v2.delegateKey(body);
     case "/v2/keys/revoke": return v2.revokeKey(body);
-    case "/v2/vouch": return v2.vouch(body);
     // Reserved power R1: the operator key's signature, made on the owner's machine, is the whole authority here.
     case "/v2/hazard/decision": return v2.decideHazard(body);
     // Reserved power R2 at genesis: the founder adopts the constitution; the same key, the same way.

@@ -108,17 +108,6 @@ export function launchRow(id: string): string {
     `<a href="/o/${a}/${esc(id)}" target="_blank" rel="noopener" aria-label="Open this prompt in ${esc(PROMPT_APPS[a].label)}, typed in but not sent">${esc(PROMPT_APPS[a].label)}</a>`).join("")}</p>`;
 }
 
-/** "Add to …" buttons for the MCP server, plus the two apps that take it by hand. */
-export function mcpConnect(mcpUrl: string): string {
-  return `<div class="mcpin">${(Object.keys(MCP_APPS) as McpApp[]).map((a) =>
-    `<a class="btn quiet" href="/o/${a}/mcp" target="_blank" rel="noopener">Add to ${esc(MCP_APPS[a].label)}</a>`).join("")}</div>
-<ul class="rows">
-<li><span class="t">Claude (web, desktop and mobile)</span><span class="d">No link can add a connector, so it takes four steps: Customize, then Connectors, then Add custom connector, then paste <code>${esc(mcpUrl)}</code>. No sign-in is needed. Then switch it on in a chat with the + button.</span></li>
-<li><span class="t">Claude Code</span><span class="d">One command: <code>claude mcp add --transport http ecdysis ${esc(mcpUrl)}</code></span></li>
-<li><span class="t">Anything else that speaks MCP</span><span class="d"><code>{"mcpServers": {"ecdysis": {"url": "${esc(mcpUrl)}"}}}</code></span></li>
-</ul>`;
-}
-
 /**
  * The page an app scheme link lands on: it asks the browser to open the
  * app at once, keeps a button for the browsers that want a click, and says

@@ -48,6 +48,7 @@
  */
 
 import type { Tier } from "./credence.js";
+import { CLAIM_REF, CLAIM_REF_WORDS } from "./refs.js";
 
 export const ARGUMENTS_VERSION = "arguments/0.1";
 
@@ -101,7 +102,7 @@ export interface ArgumentInstance { text?: string; bundle?: { repo: string; comm
 export interface ArgumentV2Payload {
   protocol: "ecdysis/0.2";
   type: "argument.file";
-  /** The claim argued about: "<paper>#C<n>" or "ext:…#C1". */
+  /** The claim argued about: ecd:… or ext:…. */
   claim: string;
   stance: Stance;
   grounds: Grounds;
@@ -142,7 +143,7 @@ export interface ArgumentAnswerV2Payload {
 type Res<T> = { ok: true; value: T } | { ok: false; errors: string[] };
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
-export const CLAIM_REF = /^(ecd:[0-9a-f]{16}#C[1-9][0-9]?|ext:[0-9a-f]{16}#C1)$/;
+export { CLAIM_REF };
 const HEX64 = /^[0-9a-f]{64}$/;
 const HTTPS = /^https:\/\/[^\s]{4,300}$/;
 
@@ -166,11 +167,11 @@ export function validateArgumentV2(p: unknown): Res<ArgumentV2Payload> {
   if (!x || typeof x !== "object") return { ok: false, errors: ["payload: an object"] };
   if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
   if (x.type !== "argument.file") errors.push('type: "argument.file"');
-  if (typeof x.claim !== "string" || !CLAIM_REF.test(x.claim)) errors.push("claim: a claim ref on the record (ecd:…#C<n> or ext:…#C1)");
+  if (typeof x.claim !== "string" || !CLAIM_REF.test(x.claim)) errors.push(`claim: ${CLAIM_REF_WORDS}`);
   if (!(STANCES as readonly unknown[]).includes(x.stance)) errors.push(`stance: ${STANCES.join(", ")}`);
   if (!(GROUNDS as readonly unknown[]).includes(x.grounds)) errors.push(`grounds: ${GROUNDS.join(", ")}`);
   text(x.text, "text", ARGUMENT_TEXT.min, ARGUMENT_TEXT.max, errors);
-  if (x.cites !== undefined && (!Array.isArray(x.cites) || x.cites.length > CITES_MAX || x.cites.some((c) => typeof c !== "string" || !CLAIM_REF.test(c)))) errors.push(`cites: at most ${CITES_MAX} claim refs on the record (ecd:…#C<n> or ext:…#C1)`);
+  if (x.cites !== undefined && (!Array.isArray(x.cites) || x.cites.length > CITES_MAX || x.cites.some((c) => typeof c !== "string" || !CLAIM_REF.test(c)))) errors.push(`cites: at most ${CITES_MAX} claims on the record (ecd:… or ext:…)`);
   if (x.grounds === "contradiction" && !(Array.isArray(x.cites) && x.cites.length >= 1)) errors.push("cites: a contradiction names the claim on the record this one is incompatible with, first");
   if (x.instance !== undefined) {
     const inst = x.instance as ArgumentInstance | null;

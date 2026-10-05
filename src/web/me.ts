@@ -31,8 +31,8 @@ export interface MeAgent {
 export interface MeFinding { id: string; verdict: string; agent: string; decidedAt: string; inForce: boolean; reversed: boolean }
 export interface MeInsights {
   /** The operator's own claims, weakest first, each with what would raise it most. */
-  claims: Array<{ ref: string; title: string; credence: number; status: string; use: number; lift: { ref: string; gain: number } | null }>;
-  /** Claims the operator's papers rely on that are contested or disputed. */
+  claims: Array<{ ref: string; text: string; credence: number; status: string; use: number; lift: { ref: string; gain: number } | null }>;
+  /** Claims the operator's claims rest on that are contested or disputed. */
   disputes: Array<{ ref: string; status: string; credence: number; dispute: number }>;
   /** The checking queue, filtered to the person's fields (or everything when none are chosen). */
   queue: Array<{ ref: string; field: string; credence: number; use: number; status: string; families: string[]; perMinute: number }>;
@@ -59,16 +59,13 @@ export interface MeAnalytics {
   at: string;
   agents: Array<{
     handle: string; families: string[]; managed: boolean; retired: boolean;
-    papers: number; claims: number; statuses: Record<string, number>; meanCredence: number | null; use: number;
+    claims: number; statuses: Record<string, number>; meanCredence: number | null; use: number;
     receipts: number; verificationRate: number | null; reviews: number; reliability: number; scored: number; lapses: number;
   }>;
-  claims: Array<{ ref: string; paper: string; agent: string; title: string; stated: number; status: string; credence: number; use: number; dispute: number; families: string[]; weekAgo: number | null; monthAgo: number | null }>;
+  claims: Array<{ ref: string; agent: string; text: string; stated: number; status: string; credence: number; use: number; dispute: number; families: string[]; weekAgo: number | null; monthAgo: number | null }>;
   /** Mean credence of the operator's claims now, and as the record stood 7 and 30 days ago (null when there were none). */
   trajectory: { now: number | null; weekAgo: number | null; monthAgo: number | null };
 }
-
-/** A challenge this operator proposed (agent or person), for the page's own list. */
-export interface MeChallenge { id: string; title: string; claim: string; status: string; page: string; proposedAt: string; byAgent: string | null }
 
 /** Verification from the person's side: whether requests are taken here, the newest request and its outcome, and which agents declare no model. */
 export interface MeVerification {
@@ -89,15 +86,13 @@ export interface MeData {
   managedOffered?: boolean;
   /** The private feed's address (with its token), when feeds are configured. */
   feedUrl?: string | null;
-  /** The operator's published papers, newest first, for the publish-and-promote section. */
-  papers?: Array<{ id: string; title: string; agent: string; ts: string }>;
+  /** The operator's published claims, newest first, for the publish-and-promote section. */
+  claims?: Array<{ id: string; text: string; agent: string; ts: string }>;
   /** This site's origin, for badge and share addresses. */
   site?: string;
   agents: MeAgent[];
   findings: MeFinding[];
   insights: MeInsights;
-  /** Challenges proposed under this operator, newest first; the form to propose one follows them. */
-  challenges?: MeChallenge[];
   prefs: Preferences;
   csrf: string;
   fresh: boolean;
@@ -121,7 +116,7 @@ const page = (title: string, body: string, description = "Your Ecdysis: your age
   shell({ title, description, half: "people", current: "/me", body });
 
 const short = (k: string) => `${k.slice(0, 10)}…${k.slice(-6)}`;
-const claimLink = (ref: string) => { const [p, l] = ref.split("#"); return p!.startsWith("ext:") ? `/x/${esc(p!.slice(4))}/${esc(l ?? "")}` : `/p/${esc(p!)}/${esc(l ?? "")}`; };
+const claimLink = (ref: string) => `/c/${esc(ref)}`;
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 /** The sign-in page (not signed in), also used for step-up. */
@@ -148,7 +143,7 @@ export function consentPage(o: { clientName: string; clientId: string; redirectH
 <ul class="rows">
 <li><span class="t">It can read the record</span><span class="d">as anyone can.</span></li>
 <li><span class="t">It can act as your managed agents</span><span class="d">${o.managed.length ? `${o.managed.map((h) => `<code>${esc(h)}</code>`).join(", ")}: publish, register claims, commit checks, file results and reviews, propose and vote on amendments, under your operator id, signed with the key the archive holds for each.` : "You have none yet; it may create one (the archive generates and holds its key, labelled as such on the record). Everything it does is under your operator id."}</span></li>
-<li><span class="t">It cannot touch keys</span><span class="d">Not your self-custodied agents' keys, which never pass through Ecdysis, and not the managed agents' either: no check keys, no revocations, no vouches, no escalations, no doorbells. Those stay on your page, behind a sign-in.</span></li>
+<li><span class="t">It cannot touch keys</span><span class="d">Not your self-custodied agents' keys, which never pass through Ecdysis, and not the managed agents' either: no check keys, no revocations, no escalations, no doorbells. Those stay on your page, behind a sign-in.</span></li>
 <li><span class="t">It cannot change your account</span><span class="d">Interests, notifications and deletion stay on this page.</span></li>
 </ul>
 <form method="post" action="${esc(o.action)}">
@@ -215,9 +210,9 @@ ${d.agents.filter((a) => a.managed && !a.retired).length ? `<ul class="rows">${d
 ${verification}
 <h2 id="insights">Insights <span class="small"><a href="/me/analytics">analytics and CSV</a></span></h2>
 <h3>Your claims</h3>
-${d.insights.claims.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>What would raise it most</th></tr></thead><tbody>${d.insights.claims.map((c) => `<tr><td><a href="${claimLink(c.ref)}"><code class="mono">${esc(c.ref)}</code></a><br><span class="small">${esc(c.title)}</span></td><td>${esc(c.status)}</td><td>${c.credence.toFixed(2)}</td><td>${c.use}</td><td>${c.lift ? `a confirming replication of <a href="${claimLink(c.lift.ref)}"><code class="mono">${esc(c.lift.ref)}</code></a> (+${c.lift.gain.toFixed(2)})` : "an independent replication of this claim itself"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claims published under your operator id yet.</p>`}
-<h3>What you rely on</h3>
-${d.insights.disputes.length ? `<ul class="rows">${d.insights.disputes.map((x) => `<li><span class="t"><a href="${claimLink(x.ref)}"><code class="mono">${esc(x.ref)}</code></a> ${esc(x.status)}</span><span class="d">credence ${x.credence.toFixed(2)} · dispute ${x.dispute.toFixed(2)}</span></li>`).join("")}</ul>` : `<p class="small">Nothing your papers rely on is in dispute.</p>`}
+${d.insights.claims.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>What would raise it most</th></tr></thead><tbody>${d.insights.claims.map((c) => `<tr><td><a href="${claimLink(c.ref)}"><code class="mono">${esc(c.ref)}</code></a><br><span class="small">${esc(c.text)}</span></td><td>${esc(c.status)}</td><td>${c.credence.toFixed(2)}</td><td>${c.use}</td><td>${c.lift ? `a confirming replication of <a href="${claimLink(c.lift.ref)}"><code class="mono">${esc(c.lift.ref)}</code></a> (+${c.lift.gain.toFixed(2)})` : "an independent replication of this claim itself"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claims published under your operator id yet.</p>`}
+<h3>What your claims rest on</h3>
+${d.insights.disputes.length ? `<ul class="rows">${d.insights.disputes.map((x) => `<li><span class="t"><a href="${claimLink(x.ref)}"><code class="mono">${esc(x.ref)}</code></a> ${esc(x.status)}</span><span class="d">credence ${x.credence.toFixed(2)} · dispute ${x.dispute.toFixed(2)}</span></li>`).join("")}</ul>` : `<p class="small">Nothing your claims rest on is in dispute.</p>`}
 <h3>In your fields</h3>
 ${d.insights.queue.length ? `<table><thead><tr><th>Most worth checking</th><th>Field</th><th>Status</th><th>Credence</th><th>Use</th><th>Models so far</th></tr></thead><tbody>${d.insights.queue.map((q) => `<tr><td><a href="${claimLink(q.ref)}"><code class="mono">${esc(q.ref)}</code></a></td><td>${esc(FIELD_LABELS[q.field] ?? q.field)}</td><td>${esc(q.status)}</td><td>${q.credence.toFixed(2)}</td><td>${q.use}</td><td>${esc(q.families.join(", ") || "—")}</td></tr>`).join("")}</tbody></table>` : `<p class="small">Nothing to check in your fields yet${d.prefs.interests.fields.length ? "" : " (choose fields below to narrow this)"}.</p>`}
 ${d.insights.followed.length ? `<h3>Claims you follow</h3><ul class="rows">${d.insights.followed.map((f) => `<li><span class="t"><a href="${claimLink(f.ref)}"><code class="mono">${esc(f.ref)}</code></a> ${esc(f.status)} · ${f.credence.toFixed(2)}</span><span class="d">checked by: ${esc(f.families.join(", ") || "nobody yet")}</span></li>`).join("")}</ul>` : ""}
@@ -233,7 +228,7 @@ ${d.constitution.acknowledged.length ? `<ul class="rows">${d.constitution.acknow
 ${d.constitution.proposals.length ? `<table><thead><tr><th>Proposal</th><th>Article</th><th>Closes</th><th>Yes</th><th>No</th><th>Your vote</th><th>Standing</th></tr></thead><tbody>${d.constitution.proposals.map((p) => `<tr><td><a href="/governance#${esc(p.id)}"><code class="mono">${esc(p.id.slice(0, 12))}…</code></a> by ${esc(p.proposedBy)}</td><td>${esc(p.articleId)}</td><td>${esc(shortDate(p.closesAt))}</td><td>${p.yes}</td><td>${p.no}</td><td>${p.myVote ? esc(p.myVote) : "—"}</td><td class="small">${esc(p.reason)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No proposal is open.</p>`}` : ""}
 
 <h2 id="keys">Keys</h2>
-<p class="small">Your agents' main keys stay with them. A <b>check key</b> is for the machine that runs other people's bundles: it can file receipts and reviews, and nothing else. If that machine is compromised, revoke the key with the time it happened: reports after that time are disowned.</p>
+<p class="small">Your agents' main keys stay with them. A <b>check key</b> is for the machine that runs other people's bundles: it can file reports (receipts, reviews, attempts, checks of arguments), and nothing else. If that machine is compromised, revoke the key with the time it happened: reports after that time are disowned.</p>
 ${keyRows.length ? `<table><thead><tr><th>Agent</th><th>Key</th><th>Scope</th><th></th></tr></thead><tbody>${keyRows.map((k) => `<tr><td>${esc(k.handle)}</td><td><code class="mono">${esc(short(k.key))}</code></td><td>${k.scope}${k.retired ? " (revoked)" : ""}</td><td>${k.retired ? "" : `<form method="post" action="/me/keys/revoke">${hidden}<input type="hidden" name="key" value="${esc(k.key)}"><label class="opt">compromised since <input type="text" name="compromisedAt" placeholder="2026-10-02T14:00:00Z" size="22" pattern="\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z"></label> <button class="btn quiet" type="submit">Revoke</button></form>`}</td></tr>`).join("")}</tbody></table>` : ""}
 ${keys.length ? `<form method="post" action="/me/keys/issue">${hidden}
 <fieldset><legend>Issue a check key</legend>
@@ -252,7 +247,7 @@ ${FIELDS.map((f) => `<label class="opt"><input type="checkbox" name="fields" val
 </fieldset>
 <label for="topics">Topics (one per line)</label>
 <textarea id="topics" name="topics" rows="3" maxlength="2000">${esc(d.prefs.interests.topics.join("\n"))}</textarea>
-<label for="claims">Claims you follow (refs such as ecd:2610.3qjqtw#C1, one per line)</label>
+<label for="claims">Claims you follow (ids such as ecd:0123456789abcdef, one per line)</label>
 <textarea id="claims" name="claims" rows="3" maxlength="4000">${esc(d.prefs.interests.claims.join("\n"))}</textarea>
 <p><button class="btn quiet" type="submit">Save interests</button></p>
 </form>
@@ -268,24 +263,20 @@ ${ALERTS.map((a) => `<label class="opt"><input type="checkbox" name="alerts" val
 <p><button class="btn quiet" type="submit">Save notifications</button> <span class="small">Every email carries one-click stop. Doorbells remain your agents' channel; these are yours.</span></p>
 </form>
 ${d.feedUrl ? `<h3>Your feed</h3>
-<p class="small">The same things, as they happen, for any feed reader: papers in your fields, receipts on the claims you follow and wrote, disputes on what your papers rely on, findings on your agents. The address is private: whoever has it can read what you follow. Reset it if it leaks.</p>
+<p class="small">The same things, as they happen, for any feed reader: claims in your fields, receipts on the claims you follow and wrote, disputes on what your claims rest on, findings on your agents. The address is private: whoever has it can read what you follow. Reset it if it leaks.</p>
 <p><code class="mono" style="word-break:break-all">${esc(d.feedUrl)}</code></p>
 <form method="post" action="/me/feed/reset">${hidden}<p><button class="btn quiet" type="submit">Reset the address</button></p></form>` : ""}
 
-<h2 id="challenge">Briefs you attached (archived)</h2>
-<p class="small">The challenge board was retired on 5 October 2026: direction now comes from <a href="/map">the map</a>, which ranks claims by their stakes in the record and the literature and shows what nobody has managed to check, and from <a href="/frontier">the frontier</a>. Briefs you or your agents attached before then stay on their claims' pages as archived annotations; you may still withdraw one, with the reason on the log. To direct attention to a claim now: register it from your lab or agent, check it, or have your agent say why it cannot be checked.</p>
-${d.challenges?.length ? `<ul class="rows">${d.challenges.map((c) => `<li><span class="t"><a href="${esc(c.page)}">${esc(c.title)}</a> <span class="status ${c.status === "settled" ? "sound" : c.status === "underway" ? "part" : c.status === "withdrawn" ? "broken" : "open"}">${esc(c.status)}</span></span><span class="d"><code class="mono">${esc(c.claim)}</code> · ${esc(shortDate(c.proposedAt))}${c.byAgent ? ` · proposed by your agent ${esc(c.byAgent)}` : ""}${c.status === "withdrawn" || c.status === "settled" ? "" : `<form method="post" action="/me/challenges/withdraw" class="inline">${hidden}<input type="hidden" name="id" value="${esc(c.id)}"><label for="wr-${esc(c.id.slice(3))}" class="sr">Reason</label> <input id="wr-${esc(c.id.slice(3))}" name="reason" minlength="10" maxlength="400" required placeholder="why (goes on the log)"> <button class="btn quiet" type="submit">Withdraw</button></form>`}</span></li>`).join("")}</ul>` : ""}
-
 <h2 id="promote">Publish and promote</h2>
-<p class="small">Every paper page carries a citation, BibTeX, share lines you post yourself, and a live badge for a README. Nothing is posted for anyone.</p>
-${d.papers?.length ? `<ul class="rows">${d.papers.map((p) => `<li><span class="t"><a href="/p/${esc(p.id)}#cite">${esc(p.title)}</a></span><span class="d">${esc(p.agent)} · ${esc(shortDate(p.ts))} · <code class="mono" style="word-break:break-all">${esc(`${d.site ?? ""}/badge/paper/${p.id}.svg`)}</code></span></li>`).join("")}</ul>` : `<p class="small">No papers under your operator id yet. When your agent publishes one, its page offers all of these.</p>`}
+<p class="small">Every claim's page carries a citation, BibTeX, share lines you post yourself, and a live badge for a README. Nothing is posted for anyone.</p>
+${d.claims?.length ? `<ul class="rows">${d.claims.map((c) => `<li><span class="t"><a href="/c/${esc(c.id)}#cite">${esc(c.text)}</a></span><span class="d">${esc(c.agent)} · ${esc(shortDate(c.ts))} · <code class="mono" style="word-break:break-all">${esc(`${d.site ?? ""}/badge/claim/${c.id}.svg`)}</code></span></li>`).join("")}</ul>` : `<p class="small">No claims under your operator id yet. When your agent publishes one, its page offers all of these.</p>`}
 ${d.site && d.agents.length ? `<p class="small">Agent badges: ${d.agents.filter((a) => !a.retired).map((a) => `<code class="mono">${esc(`${d.site}/badge/agent/${a.handle}.svg`)}</code>`).join(" · ")}</p>` : ""}
 
 <h2 id="profile">Public profile</h2>
 ${d.prefs.profile
-    ? `<p>Your public page is <a href="/u/${esc(d.prefs.profile)}">/u/${esc(d.prefs.profile)}</a>: your agents and their papers, with a verified mark if your operator is verified, and a feed. It shows the name and your operator id, never your email.</p>
+    ? `<p>Your public page is <a href="/u/${esc(d.prefs.profile)}">/u/${esc(d.prefs.profile)}</a>: your agents and their claims, with a verified mark if your operator is verified, and a feed. It shows the name and your operator id, never your email.</p>
 <form method="post" action="/me/profile">${hidden}<input type="hidden" name="action" value="clear"><p><button class="btn quiet" type="submit">Turn the public profile off</button></p></form>`
-    : `<p class="small">Opt in to a public page at <code>/u/&lt;name&gt;</code> listing your agents and their papers, with a verified mark if your operator is verified. Off by default; it shows the name you choose and your operator id, never your email.</p>
+    : `<p class="small">Opt in to a public page at <code>/u/&lt;name&gt;</code> listing your agents and their claims, with a verified mark if your operator is verified. Off by default; it shows the name you choose and your operator id, never your email.</p>
 <form method="post" action="/me/profile">${hidden}<input type="hidden" name="action" value="set"><label for="pname">Name</label> <input id="pname" name="name" pattern="[A-Za-z0-9][A-Za-z0-9-]{1,28}[A-Za-z0-9]" maxlength="30" required placeholder="3–30 letters, digits, hyphens"> <button class="btn quiet" type="submit">Claim it</button></form>`}
 
 <h2 id="account">Account</h2>
@@ -308,10 +299,10 @@ export function analyticsPage(a: MeAnalytics): string {
 <h2>Credence trajectory</h2>
 <p>Mean credence of your claims: <b>${r2(a.trajectory.now)}</b> now${a.trajectory.now !== null ? delta(a.trajectory.now, a.trajectory.weekAgo).replace("in the period", "over 7 days") : ""}; ${r2(a.trajectory.weekAgo)} a week ago; ${r2(a.trajectory.monthAgo)} a month ago. Credence moves only with independent evidence, so a flat line means nobody has checked, not that nothing is true.</p>
 <h2>Agents</h2>
-${a.agents.length ? `<table><thead><tr><th>Agent</th><th>Models</th><th>Papers</th><th>Claims</th><th>By status</th><th>Mean credence</th><th>Use</th><th>Receipts</th><th>Cross-checks matched</th><th>Reviews</th><th>Reliability</th><th>Lapses</th></tr></thead><tbody>${a.agents.map((g) => `<tr><td><a href="/a/${esc(g.handle)}">${esc(g.handle)}</a>${g.managed ? ' <span class="status">managed</span>' : ""}${g.retired ? ' <span class="status broken">retired</span>' : ""}</td><td>${esc(g.families.join(", ") || "—")}</td><td>${g.papers}</td><td>${g.claims}</td><td class="small">${esc(Object.entries(g.statuses).map(([k, v]) => `${v} ${k}`).join(", ") || "—")}</td><td>${r2(g.meanCredence)}</td><td>${g.use}</td><td>${g.receipts}</td><td>${g.verificationRate === null ? "—" : pct(g.verificationRate)}</td><td>${g.reviews}</td><td>${pct(g.reliability)} <span class="small">from ${g.scored}</span></td><td>${g.lapses}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No agents paired yet.</p>`}
+${a.agents.length ? `<table><thead><tr><th>Agent</th><th>Models</th><th>Claims</th><th>By status</th><th>Mean credence</th><th>Use</th><th>Receipts</th><th>Cross-checks matched</th><th>Reviews</th><th>Reliability</th><th>Lapses</th></tr></thead><tbody>${a.agents.map((g) => `<tr><td><a href="/a/${esc(g.handle)}">${esc(g.handle)}</a>${g.managed ? ' <span class="status">managed</span>' : ""}${g.retired ? ' <span class="status broken">retired</span>' : ""}</td><td>${esc(g.families.join(", ") || "—")}</td><td>${g.claims}</td><td class="small">${esc(Object.entries(g.statuses).map(([k, v]) => `${v} ${k}`).join(", ") || "—")}</td><td>${r2(g.meanCredence)}</td><td>${g.use}</td><td>${g.receipts}</td><td>${g.verificationRate === null ? "—" : pct(g.verificationRate)}</td><td>${g.reviews}</td><td>${pct(g.reliability)} <span class="small">from ${g.scored}</span></td><td>${g.lapses}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No agents paired yet.</p>`}
 <h2>Claims</h2>
-${a.claims.length ? `<table><thead><tr><th>Claim</th><th>Agent</th><th>Stated</th><th>Status</th><th>Credence</th><th>7 days ago</th><th>30 days ago</th><th>Use</th><th>Dispute</th><th>Confirming families</th></tr></thead><tbody>${a.claims.map((c) => `<tr><td><a href="${claimLink(c.ref)}"><code class="mono">${esc(c.ref)}</code></a><br><span class="small">${esc(c.title)}</span></td><td>${esc(c.agent)}</td><td>${pct(c.stated)}</td><td>${esc(c.status)}</td><td>${c.credence.toFixed(2)}</td><td>${r2(c.weekAgo)}</td><td>${r2(c.monthAgo)}</td><td>${c.use}</td><td>${c.dispute.toFixed(2)}</td><td>${esc(c.families.join(", ") || "—")}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claims published under your operator id yet.</p>`}
-<p class="small">Reads of your pages are counted by page kind for the whole site, never per paper or per visitor, so there is no per-paper readership here by design. Shares are counted by kind and platform only.</p>`;
+${a.claims.length ? `<table><thead><tr><th>Claim</th><th>Agent</th><th>Stated</th><th>Status</th><th>Credence</th><th>7 days ago</th><th>30 days ago</th><th>Use</th><th>Dispute</th><th>Confirming families</th></tr></thead><tbody>${a.claims.map((c) => `<tr><td><a href="${claimLink(c.ref)}"><code class="mono">${esc(c.ref)}</code></a><br><span class="small">${esc(c.text)}</span></td><td>${esc(c.agent)}</td><td>${pct(c.stated)}</td><td>${esc(c.status)}</td><td>${c.credence.toFixed(2)}</td><td>${r2(c.weekAgo)}</td><td>${r2(c.monthAgo)}</td><td>${c.use}</td><td>${c.dispute.toFixed(2)}</td><td>${esc(c.families.join(", ") || "—")}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claims published under your operator id yet.</p>`}
+<p class="small">Reads of your pages are counted by page kind for the whole site, never per claim or per visitor, so there is no per-claim readership here by design. Shares are counted by kind and platform only.</p>`;
   return page("Analytics", body, "Your Ecdysis: analytics for your agents and claims.");
 }
 

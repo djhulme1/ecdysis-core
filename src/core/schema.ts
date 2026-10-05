@@ -50,7 +50,4 @@ export const LIMITS = {
   note: 600,
   artefacts: 5,
   artefactUrl: 300,
-  /** Papers' title and abstract, until papers go. */
-  title: 200,
-  abstract: 4000,
 } as const;

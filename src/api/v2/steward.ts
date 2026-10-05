@@ -8,12 +8,12 @@
  */
 
 import { verifyAccess, accessConfigured, type AccessConfig } from "../access.js";
+import { funnelView } from "../funnel.js";
 import { APPEAL_MS } from "../../core/v2/receipts.js";
 import { ME_HEADERS, sameOrigin } from "./me.js";
 import { cookie, type Accounts, type Signed } from "./accounts.js";
-import type { V2Service } from "./service.js";
-import { fidelityFromForm, scopeFromForm } from "../../core/v2/kinds.js";
-import { scopeFormValues } from "../../web/v2/scope-form.js";
+import { subjectKind, type V2Service } from "./service.js";
+import type { V2Record } from "../../core/v2/flow.js";
 import type { CanaryRegistry } from "./canaries.js";
 import type { IssueRegistry } from "./issues.js";
 import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, healthPage, overviewPage, peoplePage, refusedPage, type AgentRow, type HealthSwitch, type PersonRow, type VerificationRequestRow } from "../../web/steward.js";
@@ -41,6 +41,8 @@ export interface HealthSource {
   /** A full audit of the log (read-only); the result is recorded as the last audit. */
   runAudit(): Promise<{ intact: boolean; problem: string | null; size: number }>;
   switches: HealthSwitch[];
+  /** The operational counters (api/funnel.ts), raw: fixed names and counts, never who. Absent: the page says so. */
+  counters?: () => Promise<Array<{ id: string; count: number }>>;
 }
 
 const MAX_FORM = 8 * 1024;
@@ -124,23 +126,6 @@ export class StewardHandler {
         if (r.status !== 200) return this.page("/steward/controls", signed, url, null, `Couldn't change the switch: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
         return this.redirect(`/steward/controls?ok=${encodeURIComponent((r.body as Record<string, unknown>)["changed"] ? `${key} is now ${value}; the change is on the log.` : `${key} was already ${value}.`)}`);
       }
-      case "/steward/content/challenge-seed": case "/steward/content/challenge-seed-many": {
-        // The challenge board was retired on 5 October 2026 (map/0.1): seeding is gone, and a stale form answers with where to go.
-        return this.page("/steward/content", signed, url, null, "The challenge board was retired on 5 October 2026: direction now comes from the map (/map). To put a load-bearing paper on the map, register its claim from your own page or lab; the briefs already on the record stay on their claims' pages.");
-      }
-      case "/steward/content/scope": {
-        // scope/0.1: what a claim from human literature registered before scopes existed covers, declared once under this
-        // steward's operator id. It governs receipts committed from now on; never act on a claim your own operator registered
-        // or checked without saying so in the basis, and leave a contested reading to the other steward.
-        const sf = scopeFormValues((n) => f.get(n));
-        const r = await this.o.v2.declareScopeBySteward(steward, { claim: (f.get("claim") ?? "").trim(), scope: scopeFromForm(sf.scope), fidelity: fidelityFromForm(sf.fidelity) });
-        if (r.status !== 201) {
-          const b = r.body as Record<string, unknown>;
-          const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[];
-          return this.page("/steward/content", signed, url, null, `Couldn't declare the scope: ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}.`);
-        }
-        return this.redirect(`/steward/content?ok=${encodeURIComponent(String((r.body as Record<string, unknown>)["note"] ?? "Declared."))}#scopes`);
-      }
       case "/steward/content/withhold": {
         const r = await this.o.v2.withholdContent(f.get("subject"), f.get("status"), f.get("reason"), steward);
         if (r.status !== 200) return this.page("/steward/content", signed, url, null, `Couldn't take it out of view: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
@@ -163,11 +148,6 @@ export class StewardHandler {
         if (!this.o.health) return this.html(404, refusedPage("Health is not configured on this deployment."));
         const r = await this.o.health.runAudit();
         return this.redirect(`/steward/health?ok=${encodeURIComponent(r.intact ? `The log is intact over ${r.size} entries.` : `The audit found a problem: ${r.problem ?? "unknown"}`)}`);
-      }
-      case "/steward/content/challenge-withdraw": {
-        const r = await this.o.v2.withdrawChallengeBySteward(f.get("id") ?? "", f.get("reason") ?? "", steward);
-        if (r.status !== 200) return this.page("/steward/content", signed, url, null, `Couldn't withdraw: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
-        return this.redirect("/steward/content?ok=Challenge+withdrawn%3B+the+reason+is+on+the+log+under+your+operator+id.");
       }
       case "/steward/canaries/register": {
         if (!this.o.canaries) return this.html(404, refusedPage("The canary registry is not configured on this deployment."));
@@ -253,7 +233,7 @@ export class StewardHandler {
           handle, operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", families: a.families, managed: a.managed,
           retired: a.revokedAt !== null, voided: r.voidedOperators.has(a.operatorId), lapses: r.lapses.get(handle) ?? 0,
           reliability: s.track.reliability.get(handle) ?? 0.5, checkKeys: a.checkKeys.length,
-          papers: [...r.papers.values()].filter((p) => p.handle === handle).length,
+          claims: [...r.native.values()].filter((c) => c.handle === handle).length,
           receipts: checks.filter((c) => c.handle === handle && c.stage === "resulted" && !c.disowned).length,
           owed: checks.filter((c) => c.handle === handle && c.stage === "sealed" && !c.disowned).length,
           constitution: a.constitution,
@@ -285,20 +265,19 @@ export class StewardHandler {
       case "/steward/controls":
         return this.html(200, controlsPage({ switches: await this.o.v2.settingsView(), csrf, fresh, readOnly: !!this.o.readOnly }, flash, problem, who));
       case "/steward/content": {
-        const board = (await this.o.v2.challenges(200, true)).body as { challenges: Array<{ id: string; title: string; claim: string; status: string; proposedAt: string; page: string; proposer: { kind: string; handle?: string; operatorId: string }; withdrawn: { at: string; by: string; reason: string } | null }> };
-        const challenges = board.challenges.map((c) => ({ id: c.id, title: c.title, claim: c.claim, status: c.status, proposedAt: c.proposedAt, page: c.page, withdrawn: c.withdrawn, proposer: c.proposer.kind === "agent" ? `agent ${c.proposer.handle ?? ""} (${c.proposer.operatorId})` : c.proposer.kind === "steward" ? `steward ${c.proposer.operatorId} (founding)` : `person ${c.proposer.operatorId}` }));
         const open = this.o.issues ? await this.o.issues.list("open", 100) : [];
         const issues = await Promise.all(open.map(async (i) => ({
-          id: i.id, kind: i.kind, subject: i.subject, severity: i.severity, detail: i.detail, source: i.source, openedAt: i.openedAt,
+          id: i.id, kind: i.kind, subject: i.subject, severity: i.severity, detail: i.detail, source: i.source, openedAt: i.openedAt, href: subjectPage(r, i.subject),
           complaints: (await this.o.issues!.complaintsFor(i.id)).map((c) => ({ at: c.at, text: c.text, contact: c.contact })),
           flags: (await this.o.issues!.flagsFor(i.id)).map((x) => ({ at: x.at, handle: x.handle, operatorId: x.operatorId, stake: x.stake, detail: x.detail })),
         })));
-        return this.html(200, contentPage({ holds: await this.o.v2.holds(100), challenges, issues, withheld: await this.o.v2.withheldItems(), unscoped: await this.o.v2.unscopedClaims(), csrf, fresh }, flash, problem, who));
+        return this.html(200, contentPage({ holds: await this.o.v2.holds(100), issues, withheld: await this.o.v2.withheldItems(), csrf, fresh }, flash, problem, who));
       }
       case "/steward/health": {
         if (!this.o.health) return this.html(404, refusedPage("Health is not configured on this deployment."));
         const h = this.o.health;
-        return this.html(200, healthPage({ sth: await h.sth(), logSize: await h.logSize(), cron: await h.opsState("cron:last"), audit: await h.opsState("audit:last"), switches: h.switches, csrf }, flash, problem, who, this.now()));
+        const funnel = h.counters ? funnelView(await h.counters(), this.now().toISOString().slice(0, 10)) : null;
+        return this.html(200, healthPage({ sth: await h.sth(), logSize: await h.logSize(), cron: await h.opsState("cron:last"), audit: await h.opsState("audit:last"), switches: h.switches, funnel, csrf }, flash, problem, who, this.now()));
       }
       case "/steward/audit":
         return this.html(200, auditPage({ rows: await this.o.v2.audit(200) }, flash, problem, who));
@@ -306,4 +285,14 @@ export class StewardHandler {
         return this.html(404, refusedPage("There is nothing at that address."));
     }
   }
+}
+
+/** Where a steward can see an item: a claim's page; a receipt or an argument on the record API; a review or an attempt on its claim's page. */
+export function subjectPage(r: V2Record, subject: string): string {
+  const kind = subjectKind(r, subject);
+  if (kind === "claim" || kind === "external") return `/c/${subject}`;
+  if (kind === "receipt") return `https://api.ecdysis.me/v2/receipts/${subject}`;
+  if (kind === "argument") return `https://api.ecdysis.me/v2/arguments/${subject}`;
+  const claim = r.attempts.get(subject)?.claim ?? r.evidence.find((e) => e.id === subject)?.claim;
+  return claim ? `/c/${claim}` : `https://api.ecdysis.me/v2/record`;
 }

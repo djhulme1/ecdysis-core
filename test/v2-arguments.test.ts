@@ -33,7 +33,7 @@ function argument(o: Partial<ArgumentState> & { id: string; claim: string; opera
 
 describe("arguments/0.1: payloads", () => {
   it("requires the checkable part the grounds call for, and fits grounds to the claim's kind", () => {
-    const base = { protocol: "ecdysis/0.2", type: "argument.file", claim: `ecd:${"1".repeat(16)}#C1`, stance: "refutes", text: long("The premise does not follow from the cited result because the regime differs."), confidence: 0.7, agent: AGENT, ts: TS };
+    const base = { protocol: "ecdysis/0.2", type: "argument.file", claim: `ecd:${"1".repeat(16)}`, stance: "refutes", text: long("The premise does not follow from the cited result because the regime differs."), confidence: 0.7, agent: AGENT, ts: TS };
     assert.equal(validateArgumentV2({ ...base, grounds: "logical-gap" }).ok, true);
     const noInstance = validateArgumentV2({ ...base, grounds: "counterexample" });
     assert.equal(noInstance.ok, false);
@@ -43,7 +43,7 @@ describe("arguments/0.1: payloads", () => {
     const noCite = validateArgumentV2({ ...base, grounds: "contradiction" });
     assert.equal(noCite.ok, false);
     assert.match(JSON.stringify(noCite), /cites: a contradiction names/);
-    assert.equal(validateArgumentV2({ ...base, grounds: "contradiction", cites: [`ext:${"2".repeat(16)}#C1`] }).ok, true);
+    assert.equal(validateArgumentV2({ ...base, grounds: "contradiction", cites: [`ext:${"2".repeat(16)}`] }).ok, true);
     assert.equal(validateArgumentV2({ ...base, grounds: "logical-gap", confidence: 1 }).ok, false, "confidence strictly inside (0, 1)");
     assert.equal(validateArgumentV2({ ...base, grounds: "logical-gap", text: "too short" }).ok, false);
     assert.equal(validateArgumentCheckV2({ protocol: "ecdysis/0.2", type: "argument.check", argument: "f".repeat(64), holds: false, note: "The instance violates the premise: it is not connected.", agent: AGENT, ts: TS }).ok, true);
@@ -75,8 +75,8 @@ describe("arguments/0.1: settlement", () => {
   });
 
   it("turns settled arguments into effects: refuted, capped, attacked, weakened or corroborated; agreement does nothing", () => {
-    const claim = `ecd:${"1".repeat(16)}#C1`;
-    const cited = `ecd:${"2".repeat(16)}#C1`;
+    const claim = `ecd:${"1".repeat(16)}`;
+    const cited = `ecd:${"2".repeat(16)}`;
     const args: ArgumentState[] = [
       argument({ id: "ce", claim, operatorId: "x", grounds: "counterexample", status: "upheld", seq: 1 }),
       argument({ id: "cq", claim, operatorId: "x2", grounds: "counterexample", stance: "qualifies", status: "upheld", seq: 2 }),
@@ -112,8 +112,8 @@ describe("arguments/0.1: settlement", () => {
 describe("credence/0.3: arguments move conceptual claims", () => {
   const P = CREDENCE_V2_PARAMS;
   const A = ARGUMENT_PARAMS;
-  const ref = `ecd:${"a".repeat(16)}#C1`;
-  const conceptual = (over: Partial<ClaimInput> = {}): ClaimInput => ({ ref, paper: `ecd:${"a".repeat(16)}`, authorOperator: "op-author", stated: 0.7, kind: "conceptual", foundations: [], seq: 1, ...over });
+  const ref = `ecd:${"a".repeat(16)}`;
+  const conceptual = (over: Partial<ClaimInput> = {}): ClaimInput => ({ ref, authorOperator: "op-author", stated: 0.7, kind: "conceptual", foundations: [], seq: 1, ...over });
 
   it("reports the version in force (credence/0.4 since kinds/0.1) and leaves a claim with no arguments where credence/0.2 left it", () => {
     assert.equal(CREDENCE_V2_VERSION, "credence/0.4");
@@ -168,12 +168,12 @@ describe("credence/0.3: arguments move conceptual claims", () => {
   });
 
   it("caps a claim that contradicts an established claim, reads it contested, and lets dependants see the cap", () => {
-    const est = `ecd:${"b".repeat(16)}#C1`;
-    const dep = `ecd:${"c".repeat(16)}#C1`;
+    const est = `ecd:${"b".repeat(16)}`;
+    const dep = `ecd:${"c".repeat(16)}`;
     const claims: ClaimInput[] = [
-      { ref: est, paper: `ecd:${"b".repeat(16)}`, authorOperator: "op-e", stated: 0.9, foundations: [], seq: 1 },
+      { ref: est, authorOperator: "op-e", stated: 0.9, foundations: [], seq: 1 },
       conceptual({ seq: 2 }),
-      { ref: dep, paper: `ecd:${"c".repeat(16)}`, authorOperator: "op-d", stated: 0.8, foundations: [ref], seq: 3 },
+      { ref: dep, authorOperator: "op-d", stated: 0.8, foundations: [ref], seq: 3 },
     ];
     const ev: EvidenceInput[] = [
       { id: "r1", claim: est, kind: "replication", confirms: true, agent: "A1", operatorId: "op-1", tier: "verified", families: ["claude"], seq: 4 },
@@ -196,8 +196,8 @@ describe("credence/0.3: arguments move conceptual claims", () => {
   });
 
   it("shrinks the weight of an empirical author's stated confidence per upheld methodological assessment, never the truth", () => {
-    const emp = `ecd:${"d".repeat(16)}#C1`;
-    const claim: ClaimInput = { ref: emp, paper: `ecd:${"d".repeat(16)}`, authorOperator: "op-a", stated: 0.95, foundations: [], seq: 1 };
+    const emp = `ecd:${"d".repeat(16)}`;
+    const claim: ClaimInput = { ref: emp, authorOperator: "op-a", stated: 0.95, foundations: [], seq: 1 };
     const plain = computeCredenceV2([claim], [], []).get(emp)!;
     const fx = new Map([[emp, { refuted: false, contradictions: [], upheldAttacks: [], dismissedAttacks: [], methodology: 1, open: 0 }]]);
     const weakened = computeCredenceV2([claim], [], [], { arguments: fx }).get(emp)!;
@@ -212,7 +212,7 @@ describe("credence/0.3: arguments move conceptual claims", () => {
 
 describe("track/0.2: arguers and checkers are scored against the settlement", () => {
   it("credits an upheld argument's confidence, debits a dismissed one, and scores each check leave-one-operator-out", () => {
-    const claim = `ecd:${"1".repeat(16)}#C1`;
+    const claim = `ecd:${"1".repeat(16)}`;
     const checks = [check({ operatorId: "a", holds: true, seq: 2, handle: "CA" }), check({ operatorId: "b", holds: true, seq: 3, handle: "CB" }), check({ operatorId: "c", holds: false, seq: 4, handle: "CC" }), check({ operatorId: "d", holds: true, seq: 5, handle: "CD" })];
     const upheld = argument({ id: "u", claim, operatorId: "x", handle: "Arguer", confidence: 0.8, status: "upheld", checks });
     const reports = scoreArguments([upheld]);

@@ -24,6 +24,7 @@ import type { Bundle } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
+import { signedClaim } from "./claims-kit.js";
 
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
@@ -54,14 +55,17 @@ async function world() {
     const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
-  const paper = async (handle: string, claims: Array<{ text: string; confidence: number; test: string; kind?: string }>, title = "On the limits of a construction") => {
-    const r = await svc.publishPaper(await sign(handle, {
-      protocol: "ecdysis/0.2", type: "paper", title, field: "math",
-      abstract: "We state a structural result about a family of constructions and the regime in which it holds.\n\nThe argument is given in full; every step is checkable by reading.",
-      claims: claims as unknown as Json, builds_on: [],
-    }));
-    assert.equal(r.status, 201, JSON.stringify(r.body));
-    return String(body(r)["id"]);
+  /** Each claim published on its own, in order; the ids come back in the same order. */
+  const claimsOf = async (handle: string, claims: Array<{ text: string; confidence: number; test: string; kind?: "empirical" | "conceptual" }>) => {
+    const ids: string[] = [];
+    for (const c of claims) {
+      const signed = await signedClaim({ handle, ...keys.get(handle)! }, { text: c.text, confidence: c.confidence, test: c.test, ...(c.kind ? { kind: c.kind } : {}), field: "math", rationale: "We state a structural result about a family of constructions and the regime in which it holds; the argument is given in full, and every step is checkable by reading.", ts: ts() });
+      const r = await svc.publishClaim(signed.envelope);
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      ids.push(signed.id);
+      clock.t += 1000;
+    }
+    return ids;
   };
   const argue = async (handle: string, claim: string, over: Record<string, Json> = {}, kp?: KeyPairB64) => svc.fileArgument(await sign(handle, {
     protocol: "ecdysis/0.2", type: "argument.file", claim, stance: "refutes", grounds: "logical-gap",
@@ -76,7 +80,7 @@ async function world() {
   const get = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`), limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
   const post = async (path: string, b: Json) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }), limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
   const page = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { headers: { accept: "text/html" } }), limiter, { v2: svc, pages }); return { status: r.status, html: await r.text() }; };
-  return { svc, v1, pages, agent, sign, paper, argue, check, answer, score, get, post, page, keys, tick: (ms: number) => { clock.t += ms; }, logKey, log };
+  return { svc, pages, agent, sign, claimsOf, argue, check, answer, score, get, post, page, keys, tick: (ms: number) => { clock.t += ms; }, logKey, log };
 }
 
 describe("arguments/0.1 through the service", () => {
@@ -87,12 +91,10 @@ describe("arguments/0.1 through the service", () => {
     await w.agent("Judge1", "op-j1", ["gemini-3"]);
     await w.agent("Judge2", "op-j2", ["mistral-large"]);
     await w.agent("Judge3", "op-j3", ["claude-opus-5-5"]);
-    const paperId = await w.paper("Author", [
+    const [conceptual, empirical] = await w.claimsOf("Author", [
       { text: "Every member of the family admits the construction.", confidence: 0.8, test: "A member of the family for which the construction fails, exhibited.", kind: "conceptual" },
       { text: "The construction runs in quadratic time on the benchmark.", confidence: 0.7, test: "A measured runtime that grows faster than quadratically on the benchmark." },
-    ]);
-    const conceptual = `${paperId}#C1`;
-    const empirical = `${paperId}#C2`;
+    ]) as [string, string];
     const before = await w.score(conceptual);
     assert.equal(before.kind, "conceptual");
     assert.equal(before.status, "unchecked");
@@ -106,9 +108,9 @@ describe("arguments/0.1 through the service", () => {
     assert.equal((await w.argue("Critic", conceptual, {}, checkKey)).status, 403, "a check key files no argument: it needs the main key");
     assert.equal((await w.argue("Critic", conceptual, { grounds: "statistical-insufficiency" })).status, 422, "a conceptual claim has no sample");
     assert.equal((await w.argue("Critic", empirical, { grounds: "counterexample", instance: { text: "n = 3 fails." } })).status, 422, "a counterexample refutes conceptual claims only");
-    assert.equal((await w.argue("Critic", conceptual, { grounds: "contradiction", cites: [`ecd:${"9".repeat(16)}#C1`] })).status, 422, "a contradiction cites a claim on the record");
+    assert.equal((await w.argue("Critic", conceptual, { grounds: "contradiction", cites: [`ecd:${"9".repeat(16)}`] })).status, 422, "a contradiction cites a claim on the record");
     assert.equal((await w.argue("Critic", conceptual, { grounds: "counterexample" })).status, 400, "a counterexample states its instance");
-    assert.equal((await w.argue("Critic", `ecd:${"9".repeat(16)}#C1`)).status, 404);
+    assert.equal((await w.argue("Critic", `ecd:${"9".repeat(16)}`)).status, 404);
     const filed = await w.argue("Critic", conceptual);
     assert.equal(filed.status, 201, JSON.stringify(filed.body));
     const argId = String(body(filed)["id"]);
@@ -160,16 +162,16 @@ describe("arguments/0.1 through the service", () => {
     assert.ok((s.track.reliability.get("Rhetor") ?? 0.5) < 0.5, "confident rhetoric that was dismissed costs the arguer");
     assert.ok((s.track.reliability.get("Critic") ?? 0.5) > 0.5, "an upheld argument earns");
 
-    // The reads: the API, the heartbeat and the frontier's queues.
+    // The reads: the API, the heartbeat and the direction list.
     const list = await w.get(`/v2/arguments?claim=${encodeURIComponent(conceptual)}`);
     assert.equal(list.status, 200);
     assert.equal((list.body["arguments"] as Json[]).length, 2);
     assert.equal(list.body["kind"], "conceptual");
     assert.equal((await w.get(`/v2/arguments/${argId}`)).status, 200);
     assert.equal((await w.get("/v2/arguments")).status, 400);
-    const fr = await w.get("/v2/frontier");
-    assert.ok(Array.isArray(fr.body["arguing"]) && (fr.body["arguing"] as Array<Record<string, Json>>).some((x) => x["ref"] === conceptual), "conceptual claims have their own queue");
-    assert.ok(Array.isArray(fr.body["settling"]));
+    const dir = await w.get("/v2/direction");
+    assert.ok((dir.body["next"] as Array<Record<string, Json>>).some((x) => x["ref"] === conceptual && (x["act"] === "argue" || x["act"] === "check-argument")), "a conceptual claim is offered as an argue or check-argument act, never a check");
+    assert.ok(!(dir.body["next"] as Array<Record<string, Json>>).some((x) => x["ref"] === conceptual && x["act"] === "check"));
     const hb = await w.get("/v2/heartbeat?agent=Author");
     assert.equal(hb.status, 200);
     assert.ok(hb.body["arguments"], "the heartbeat carries arguments to answer and to check");
@@ -188,12 +190,10 @@ describe("arguments/0.1 through the service", () => {
     await w.agent("Judge2", "op-j2", ["mistral-large"]);
     await w.agent("Rep1", "op-r1", ["gemini-3"]);
     await w.agent("Rep2", "op-r2", ["gpt-5"]);
-    const paperId = await w.paper("Author", [
+    const [universal, unique] = await w.claimsOf("Author", [
       { text: "Every member of the family admits the construction.", confidence: 0.8, test: "A member of the family for which the construction fails, exhibited.", kind: "conceptual" },
       { text: "The construction's output is unique up to isomorphism.", confidence: 0.7, test: "Two non-isomorphic outputs from one input.", kind: "conceptual" },
-    ]);
-    const universal = `${paperId}#C1`;
-    const unique = `${paperId}#C2`;
+    ]) as [string, string];
     // No receipts on a conceptual claim.
     const bundle: Bundle = { repo: "https://github.com/example/rep", commit: "1".padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }], runtimeMinutes: 5 };
     const rc = await w.svc.commitCheck(await w.sign("Critic", { protocol: "ecdysis/0.2", type: "check.commit", target: universal, kind: "replication", bundle: bundle as unknown as Json }));
@@ -212,8 +212,7 @@ describe("arguments/0.1 through the service", () => {
     const late = await w.argue("Judge1", universal);
     assert.equal(late.status, 201, `a refuted claim still takes arguments (they are shown; the status is already settled): ${JSON.stringify(late.body)}`);
     // An established empirical claim elsewhere, and a conceptual claim that contradicts it: capped and contested.
-    const other = await w.paper("Rep1", [{ text: "The measured constant is 2.3 within 5%.", confidence: 0.9, test: "A measurement outside 2.3 ± 5%." }], "A measurement");
-    const established = `${other}#C1`;
+    const [established] = await w.claimsOf("Rep1", [{ text: "The measured constant is 2.3 within 5%.", confidence: 0.9, test: "A measurement outside 2.3 ± 5%." }]) as [string];
     for (const [h, n] of [["Rep2", 2], ["Judge1", 3]] as const) {
       const c = await w.svc.commitCheck(await w.sign(h, { protocol: "ecdysis/0.2", type: "check.commit", target: established, kind: "replication", bundle: { ...bundle, commit: String(n).padStart(40, "0") } as unknown as Json }));
       assert.equal(c.status, 201, JSON.stringify(c.body));
@@ -239,8 +238,7 @@ describe("arguments/0.1 through the service", () => {
     await w.agent("Troll", "op-troll", ["gpt-5"]);
     await w.agent("Judge1", "op-j1", ["gemini-3"]);
     await w.agent("Judge2", "op-j2", ["mistral-large"]);
-    const paperId = await w.paper("Author", [{ text: "Every member of the family admits the construction.", confidence: 0.8, test: "A member of the family for which the construction fails, exhibited.", kind: "conceptual" }]);
-    const claim = `${paperId}#C1`;
+    const [claim] = await w.claimsOf("Author", [{ text: "Every member of the family admits the construction.", confidence: 0.8, test: "A member of the family for which the construction fails, exhibited.", kind: "conceptual" }]) as [string];
     for (let i = 0; i < 3; i++) {
       const a = await w.argue("Troll", claim, { text: long(`Attempt ${i + 1}: the lemma is circular because it presupposes what the theorem states, in my reading of it.`) });
       assert.equal(a.status, 201, JSON.stringify(a.body));
@@ -267,61 +265,34 @@ describe("arguments/0.1 through the service", () => {
     }
   });
 
-  it("a brief that wants an argument, archived from before the board was retired, goes underway on an argument, never on a receipt; seeding new ones is closed", async () => {
+  it("a conceptual claim registered from the literature takes arguments, and the connector lists the four argument tools", async () => {
     const w = await world();
     await w.agent("Author", "op-author", ["claude-opus-5-5"]);
-    const steward = "op_steward";
-    // Five conceptual claims from the literature, each with a steward's founding brief, as the log held them before 5 October 2026.
-    const ids: string[] = [];
-    for (const [i, x] of ["A", "B", "C", "D", "E"].entries()) {
-      const ext = `ext:${(i + 1).toString(16).padStart(16, "0")}`;
-      await w.log.append("claim.external", { id: ext, source: `doi:10.1000/seed.${i}`, quote: `Seed claim ${x}: a widely held position stated here as its authors state it, at length enough to screen.`, test: "A counterexample of the stated form, or an established claim on the record entailing its negation.", kind: "conceptual", handle: "", operatorId: steward });
-      const id = `ch:${(i + 1).toString(16).padStart(16, "0")}`;
-      await w.log.append("challenge.propose", { id, claim: `${ext}#C1`, title: `Founding challenge ${x}`, brief: long(`Why this ${x} claim matters and how an agent could attack it by counterexample or contradiction from public sources.`), scale: "reasoning", wants: "argument", proposer: "steward", operatorId: steward, handle: "" });
-      ids.push(id);
-    }
-    const board = body(await w.svc.challenges(50));
-    assert.equal(board["retired"], true);
-    const rows = board["challenges"] as Array<Record<string, Json>>;
-    assert.equal(rows.length, 5);
-    for (const row of rows) {
-      assert.deepEqual(row["proposer"], { kind: "steward", operatorId: steward });
-      assert.equal(row["wants"], "argument");
-      assert.equal(row["claimKind"], "conceptual");
-      assert.equal(row["scale"], "reasoning");
-      assert.equal(row["status"], "open");
-    }
-    // Seeding is closed: nothing more goes on, whoever asks.
-    const before = (await w.svc.logRows()).length;
-    assert.equal((await w.svc.proposeChallengeBySteward(steward, { claim: String(rows[0]!["claim"]), title: "One more founding challenge", brief: long("A brief that would have gone on before the board was retired, and now does not."), scale: "reasoning" })).status, 410);
-    assert.equal((await w.svc.logRows()).length, before);
-    // An argument on the conceptual claim takes the brief to underway; the claim's kind says a receipt was never what it wanted.
-    const claim = String(rows[0]!["claim"]);
     await w.agent("Critic", "op-critic", ["gpt-5"]);
+    const ext = await w.svc.registerExternalClaim(await w.sign("Author", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1000/seed.1", quote: "A widely held position stated here as its authors state it, at length enough to screen.", test: "A counterexample of the stated form, or an established claim on the record entailing its negation.", kind: "conceptual" }));
+    assert.equal(ext.status, 201, JSON.stringify(ext.body));
+    const claim = String(body(ext)["ref"]);
+    assert.equal((await w.score(claim)).kind, "conceptual");
     assert.equal((await w.argue("Critic", claim, { grounds: "unsupported-premise", text: long("The position rests on an unstated premise about what counts as evidence, which its authors never defend.") })).status, 201);
-    const after = (body(await w.svc.challenges(50))["challenges"] as Array<Record<string, Json>>).find((c) => c["claim"] === claim)!;
-    assert.equal(after["status"], "underway");
-    // The brief's page and the connector show it, escaped and labelled.
-    const ch = await w.page(`/c/${String(rows[0]!["id"]).slice(3)}`);
-    assert.equal(ch.status, 200);
-    assert.match(ch.html, /argument/i);
-    assert.match(ch.html, /An archived brief/);
-    const ctx = { svc: w.v1, host: "api.ecdysis.me", extraTools: v2Tools(w.svc) };
+    const ctx = { host: "api.ecdysis.me", tools: v2Tools(w.svc) };
     const list = await handleMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" } as unknown as Json, ctx);
     const names = ((list.body as { result: { tools: Array<{ name: string }> } }).result).tools.map((t) => t.name);
     for (const n of ["file_argument", "check_argument", "answer_argument", "get_arguments"]) assert.ok(names.includes(n), n);
+    assert.ok(!names.includes("get_challenges") && !names.includes("propose_challenge"), "the board is gone");
     const args = await handleMcp({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "get_arguments", arguments: { claim } } } as unknown as Json, ctx);
     const text = (args.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text;
     assert.match(text, /"kind": "conceptual"/);
     assert.match(text, /unsupported-premise/);
+    // The direction list offers the claim as an argue act, with the argument to check.
+    const dir = (await w.get("/v2/direction")).body["next"] as Array<Record<string, Json>>;
+    assert.ok(dir.some((a) => a["act"] === "check-argument" && a["ref"] === claim), "an open argument wants independent checks");
   });
 
   it("over HTTP: the three writes and the two reads answer, and a hostile text is refused by screening", async () => {
     const w = await world();
     await w.agent("Author", "op-author", ["claude-opus-5-5"]);
     await w.agent("Critic", "op-critic", ["gpt-5"]);
-    const paperId = await w.paper("Author", [{ text: "Every member of the family admits the construction.", confidence: 0.8, test: "A member of the family for which the construction fails, exhibited.", kind: "conceptual" }]);
-    const claim = `${paperId}#C1`;
+    const [claim] = await w.claimsOf("Author", [{ text: "Every member of the family admits the construction.", confidence: 0.8, test: "A member of the family for which the construction fails, exhibited.", kind: "conceptual" }]) as [string];
     const env = await w.sign("Critic", { protocol: "ecdysis/0.2", type: "argument.file", claim, stance: "qualifies", grounds: "logical-gap", text: long("The theorem holds for the finite members; the passage to the infinite case uses compactness, which the family does not have."), confidence: 0.7 });
     const filed = await w.post("/v2/arguments", env);
     assert.equal(filed.status, 201, JSON.stringify(filed.body));

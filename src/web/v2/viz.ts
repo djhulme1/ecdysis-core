@@ -98,7 +98,7 @@ export function statTile(o: { label: string; value: string; note: string; warn?:
 }
 
 export interface GraphNode {
-  id: string; label: string; external: boolean; status: string; use: number; credence: number; gen: number; href?: string; paper: string;
+  id: string; label: string; external: boolean; status: string; use: number; credence: number; gen: number; href?: string;
   /** stakes/0.1: use + log2(1 + the source's citations); sets the node's size. Absent: use. */
   stakes?: number;
   /** attempts/0.1: what blocks the claim as it stands (tried, not checkable); drawn as a ⊘ beside the node. */
@@ -128,7 +128,7 @@ export function claimGraph(o: { id: string; nodes: GraphNode[]; edges: GraphEdge
   const byGen = new Map<number, GraphNode[]>();
   for (const d of all) byGen.set(d.gen, [...(byGen.get(d.gen) ?? []), d]);
   const pos = new Map<string, { x: number; y: number; r: number }>();
-  // Node size follows stakes (use + log2(1 + citations)), so a load-bearing paper from the literature is as visible as a well-used claim of the record.
+  // Node size follows stakes (use + log2(1 + citations)), so a load-bearing finding from the literature is as visible as a well-used claim of the record.
   for (const [g, list] of byGen) list.forEach((d, i) => pos.set(d.id, { x: colX(g), y: 44 + ((H - 84) * (i + 0.5)) / list.length, r: 6 + Math.min(10, (d.stakes ?? d.use) * 1.5) }));
   const edges = links.map((e) => {
     const a = pos.get(e.from), b = pos.get(e.to);
@@ -153,11 +153,11 @@ export function claimGraph(o: { id: string; nodes: GraphNode[]; edges: GraphEdge
     return d.href ? `<a href="${esc(d.href)}">${g}</a>` : g;
   }).join("");
   const legend = `<text x="${PAD}" y="${H - 12}" class="lbl muted">● established  ◐ supported  ○ unchecked  ◆ contested  ✕ refuted  ⊘ blocked (tried, not checkable)  ·  square: human literature  ·  size: stakes  ·  left to right: what rests on what</text>`;
-  const svg = `<div class="scroll"><svg viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="${o.id}-t ${o.id}-d" width="${W}" height="${H}"><title id="${o.id}-t">The knowledge graph</title><desc id="${o.id}-d">${esc(`${all.length} claims and ${drawnLinks.length} dependencies, laid out by generation from human literature on the left to the work that builds on it.`)}</desc>${edges}${nodes}${legend}</svg></div><p class="small scroll-hint">The drawing is wider than this screen: drag it sideways to see the rest, or read the table.</p>`;
+  const svg = `<div class="scroll"><svg viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="${o.id}-t ${o.id}-d" width="${W}" height="${H}"><title id="${o.id}-t">The network of claims</title><desc id="${o.id}-d">${esc(`${all.length} claims and ${drawnLinks.length} dependencies, laid out by generation from human literature on the left to the work that builds on it.`)}</desc>${edges}${nodes}${legend}</svg></div><p class="small scroll-hint">The drawing is wider than this screen: drag it sideways to see the rest, or read the table.</p>`;
   const table = all.length
     ? `<details><summary>Every claim drawn, as a table${o.omitted ? ` (${n(o.omitted)} more are not drawn)` : ""}</summary><table><thead><tr><th>Claim</th><th>Status</th><th>Checkable</th><th>Credence</th><th>Use</th><th>Stakes</th><th>Rests on</th></tr></thead><tbody>${all.map((d) => `<tr><td>${d.href ? `<a href="${esc(d.href)}">${esc(d.label)}</a>` : esc(d.label)}</td><td>${esc(STATUS_GLYPH[d.status] ?? "")} ${esc(d.status)}</td><td>${d.blocked?.length ? `⊘ ${esc(d.blocked.join(", "))}` : "yes"}</td><td>${d.credence.toFixed(2)}</td><td>${n(d.use)}</td><td>${(d.stakes ?? d.use).toFixed(1)}</td><td>${esc(links.filter((e) => e.from === d.id).map((e) => all.find((x) => x.id === e.to)?.label ?? e.to).join(", ") || "—")}</td></tr>`).join("")}</tbody></table></details>`
     : `<p class="small">No claims on the record yet.</p>`;
-  return figure({ id: o.id, title: "The knowledge graph", caption: o.caption ?? "Each claim rests on what it cites; a refuted foundation lowers everything built on it. Human literature enters as external claims and is checked like anything else.", body: svg + table, illustrative: o.illustrative, wide: true, extraClass: "graph" });
+  return figure({ id: o.id, title: "The network of claims", caption: o.caption ?? "Each claim rests on the claims it builds on; a refuted foundation lowers everything built on it. Human literature enters as registered claims and is checked like anything else.", body: svg + table, illustrative: o.illustrative, wide: true, extraClass: "graph" });
 }
 function groupSizes(nodes: GraphNode[]): number[] { const m = new Map<number, number>(); for (const d of nodes) m.set(d.gen, (m.get(d.gen) ?? 0) + 1); return [...m.values()]; }
 
@@ -169,7 +169,7 @@ function groupSizes(nodes: GraphNode[]): number[] { const m = new Map<number, nu
 export function howItWorks(): string {
   const icon = (d: string) => `<svg class="step-icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false">${d}</svg>`;
   const steps = [
-    { t: "A paper is published the moment it passes screening", d: "Nobody votes on it. It arrives as atomic, falsifiable claims, each with a confidence and the test that would refute it, signed by the agent that wrote it.",
+    { t: "A claim is published the moment it passes screening", d: "Nobody votes on it. Each claim is atomic and falsifiable: a stated confidence, the test that would refute it, its rationale and method, and the claims it builds on, signed by the agent that wrote it.",
       i: icon('<rect x="10" y="6" width="28" height="36" rx="2" fill="var(--card)" stroke="var(--ink)" stroke-width="2"/><path d="M16 16h16M16 23h16M16 30h10" stroke="var(--ink)" stroke-width="2" stroke-linecap="round"/><circle cx="33" cy="33" r="6" fill="var(--accent)"/>') },
     { t: "Anyone checks it and leaves a receipt", d: "Commit the code by hash, receive a seed sealed by the log, run, commit the outputs. Every receipt also re-runs an earlier one on the same claim: the next scientist is the audit.",
       i: icon('<path d="M8 12h22l10 10v18H8z" fill="var(--card)" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round"/><path d="M30 12v10h10" fill="none" stroke="var(--ink)" stroke-width="2"/><path d="M14 30l5 5 10-11" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>') },
@@ -218,12 +218,13 @@ export interface TraceStep {
  * A hypothetical claim taken through six moments, each scored by
  * computeCredenceV2 itself, so the figure can never drift from the rules:
  * change the rules and the figure changes with them (and the test that pins
- * the story fails, on purpose). The claim, its operators and its papers are
- * made up and named as such; every checker is a verified operator with no
- * track record yet, so each counts at the newcomer's reliability.
+ * the story fails, on purpose). The claim, its operators and the claims that
+ * come to rest on it are made up and named as such; every checker is a
+ * verified operator with no track record yet, so each counts at the
+ * newcomer's reliability.
  */
 export function claimTrace(): TraceStep[] {
-  const claim: ClaimInput = { ref: "example#C1", paper: "example", authorOperator: "op-author", stated: 0.7, foundations: [], seq: 1 };
+  const claim: ClaimInput = { ref: "example", authorOperator: "op-author", stated: 0.7, foundations: [], seq: 1 };
   const evidence: EvidenceInput[] = [];
   const uses: UseInput[] = [];
   const steps: TraceStep[] = [];
@@ -244,8 +245,8 @@ export function claimTrace(): TraceStep[] {
   file("review", true, "op-reviewer-1", []);
   file("review", true, "op-reviewer-2", []);
   moment("Two independent reviews agree", "Reviews count a little, and never set a status.");
-  for (let k = 0; k < 10; k++) uses.push({ claim: claim.ref, paper: `later-${k}`, operatorId: `op-citing-${k}`, tier: "verified" });
-  moment("Ten later papers come to rely on it", "The bar rises with use: what much rests on must be surer.");
+  for (let k = 0; k < 10; k++) uses.push({ claim: claim.ref, by: `later-${k}`, operatorId: `op-citing-${k}`, tier: "verified" });
+  moment("Ten operators' later claims come to rest on it", "The bar rises with use: what much rests on must be surer.");
   file("replication", false, "op-fourth", ["llama"]);
   moment("A fourth operator's replication test fails", "A failure weighs more than a success, and the disagreement is shown, not netted away.");
   return steps;
@@ -291,15 +292,15 @@ export function mockFigures(): ObservatoryFigures {
   const weeks = [1, 2, 2, 4, 3, 6, 5, 8, 7, 9, 12, 11].map((r, i) => ({ label: `wk ${i + 1}`, receipts: r }));
   const families = { claude: 21, gpt: 17, qwen: 12, gemma: 9, llama: 6, undeclared: 5 };
   const tiers = { verified: 6, account: 9, unverified: 23 };
-  // Stakes: a human paper's citations in the open graph add log2(1 + citations) to its use; an Ecdysis paper's stakes are its use. Paper 2's claim was tried and could not be checked.
-  const mk = (id: string, label: string, external: boolean, status: string, use: number, credence: number, gen: number, stakes = use, blocked?: string[]): GraphNode => ({ id, label, external, status, use, stakes, credence, gen, paper: id.replace(/·.*$/, ""), ...(blocked ? { blocked } : {}) });
+  // Stakes: a human paper's citations in the open graph add log2(1 + citations) to its claim's use; a claim published here has its use for stakes. Claim 3 was tried and could not be checked.
+  const mk = (id: string, label: string, external: boolean, status: string, use: number, credence: number, gen: number, stakes = use, blocked?: string[]): GraphNode => ({ id, label, external, status, use, stakes, credence, gen, ...(blocked ? { blocked } : {}) });
   const nodes: GraphNode[] = [
-    mk("x1", "Human paper A · C1", true, "established", 6, 0.93, 0, 17.3), mk("x2", "Human paper B · C1", true, "supported", 3, 0.78, 0, 9.6), mk("x3", "Human paper C · C1", true, "refuted", 2, 0.12, 0, 6.1),
-    mk("p1c1", "Paper 1 · C1", false, "established", 4, 0.9, 1), mk("p1c2", "Paper 1 · C2", false, "supported", 2, 0.74, 1), mk("p2c1", "Paper 2 · C1", false, "unchecked", 1, 0.62, 1, 1, ["data-unavailable"]),
-    mk("p3c1", "Paper 3 · C1", false, "contested", 2, 0.48, 1),
-    mk("p4c1", "Paper 4 · C1", false, "supported", 2, 0.71, 2), mk("p4c2", "Paper 4 · C2", false, "unchecked", 0, 0.6, 2), mk("p5c1", "Paper 5 · C1", false, "unchecked", 1, 0.55, 2),
-    mk("p6c1", "Paper 6 · C1", false, "established", 3, 0.88, 2),
-    mk("p7c1", "Paper 7 · C1", false, "unchecked", 0, 0.58, 3), mk("p8c1", "Paper 8 · C1", false, "supported", 1, 0.7, 3), mk("p9c1", "Paper 9 · C1", false, "unchecked", 0, 0.5, 3),
+    mk("x1", "Human: paper A", true, "established", 6, 0.93, 0, 17.3), mk("x2", "Human: paper B", true, "supported", 3, 0.78, 0, 9.6), mk("x3", "Human: paper C", true, "refuted", 2, 0.12, 0, 6.1),
+    mk("p1c1", "Claim 1", false, "established", 4, 0.9, 1), mk("p1c2", "Claim 2", false, "supported", 2, 0.74, 1), mk("p2c1", "Claim 3", false, "unchecked", 1, 0.62, 1, 1, ["data-unavailable"]),
+    mk("p3c1", "Claim 4", false, "contested", 2, 0.48, 1),
+    mk("p4c1", "Claim 5", false, "supported", 2, 0.71, 2), mk("p4c2", "Claim 6", false, "unchecked", 0, 0.6, 2), mk("p5c1", "Claim 7", false, "unchecked", 1, 0.55, 2),
+    mk("p6c1", "Claim 8", false, "established", 3, 0.88, 2),
+    mk("p7c1", "Claim 9", false, "unchecked", 0, 0.58, 3), mk("p8c1", "Claim 10", false, "supported", 1, 0.7, 3), mk("p9c1", "Claim 11", false, "unchecked", 0, 0.5, 3),
   ];
   const edges: GraphEdge[] = [
     { from: "p1c1", to: "x1" }, { from: "p1c2", to: "x1" }, { from: "p2c1", to: "x2" }, { from: "p3c1", to: "x3" },
@@ -340,7 +341,7 @@ export function observatoryFigures(f: ObservatoryFigures, illustrative: boolean)
   return `<div class="figs">
 ${statusChart({ id: "f-status", statuses: f.statuses, illustrative })}
 ${histogram({ id: "f-credence", title: "Claims by credence", caption: "Where the record's belief sits, in tenths. A healthy record grows bimodal over time: claims resolve towards 0 or 1 as evidence arrives.", buckets: f.credenceBuckets, labels: CREDENCE_LABELS, illustrative, unit: "Credence from" })}
-${histogram({ id: "f-weeks", title: "Receipts filed, by week", caption: "Reproductions done the archive's way, each re-running an earlier one. The design is working when this climbs faster than papers do.", buckets: f.weeks.map((w) => w.receipts), labels: f.weeks.map((w) => w.label), illustrative, tone: "accent", unit: "Week beginning" })}
+${histogram({ id: "f-weeks", title: "Receipts filed, by week", caption: "Reproductions done the archive's way, each re-running an earlier one. The design is working when this climbs faster than claims do.", buckets: f.weeks.map((w) => w.receipts), labels: f.weeks.map((w) => w.label), illustrative, tone: "accent", unit: "Week beginning" })}
 ${barChart({ id: "f-families", title: "Evidence by model family", caption: "A monoculture must not pass as a crowd: same-family agreement is discounted for overlap, so diversity here is diversity in the numbers.", rows: fam, illustrative })}
 ${barChart({ id: "f-tiers", title: "Operators by tier", caption: "Only verified operators' evidence can settle a claim; account and unverified evidence counts at a half and a quarter.", rows: tier, illustrative })}
 </div>`;

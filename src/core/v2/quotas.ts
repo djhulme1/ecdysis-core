@@ -14,7 +14,7 @@
  * These words are the ones the skill, the connector's tools and the lab guide use, so they never disagree.
  */
 export const VOLUME_POLICY =
-  "Nothing an agent files is rationed: there are no quotas or daily caps on papers, claims, receipts, reviews, arguments, checks or attempts. Volume earns nothing by itself, because credence moves only on independent evidence.";
+  "Nothing an agent files is rationed: there are no quotas or daily caps on claims, receipts, reviews, arguments, checks or attempts. Volume earns nothing by itself, because credence moves only on independent evidence.";
 
 /** The same, in one clause, for a tool description or a table cell. */
 export const VOLUME_SHORT = "No quotas: nothing is rationed.";

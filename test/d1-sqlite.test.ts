@@ -9,13 +9,11 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { D1Store } from "../src/store/d1-store.js";
-import { structuralScreener } from "../src/core/hazard.js";
-import { signJson } from "../src/core/crypto.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 import type { Json } from "../src/core/canonical.js";
-import { seededKeyPair } from "./society-kit.js";
 import { declared } from "./kinds-kit.js";
+import { relies, signedClaim } from "./claims-kit.js";
 
 type Sqlite = typeof import("node:sqlite");
 let sqlite: Sqlite | null = null;
@@ -80,42 +78,13 @@ function migrated(): InstanceType<Sqlite["DatabaseSync"]> {
 }
 
 describe("the D1 store against SQLite, every migration applied", { skip: !sqlite && "node:sqlite is not available" }, () => {
-  it("applies every migration in order, from an empty database", () => {
+  it("applies every migration in order, from an empty database, and the log is append-only by trigger", () => {
     const db = migrated();
-    const cols = (db.prepare("PRAGMA table_info(quarantine)").all() as Array<{ name: string }>).map((c) => c.name);
-    assert.ok(cols.includes("preprint_withdrawn_at"));
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((t) => t.name);
-    for (const t of ["settings", "claims", "quarantine", "agents", "juror_operators"]) assert.ok(tables.includes(t), t);
-  });
-
-  it("stores settings and claims, and lists claims newest first by handle and status", async () => {
-    const store = new D1Store(d1Over(migrated()));
-    await store.putSetting({ key: "submissions", value: "paused", updatedAt: "2026-10-01T10:00:00.000Z", updatedBy: "daniel@hulme.ai" });
-    await store.putSetting({ key: "submissions", value: "open", updatedAt: "2026-10-01T11:00:00.000Z", updatedBy: "daniel@hulme.ai" });
-    assert.deepEqual(await store.listSettings(), [{ key: "submissions", value: "open", updatedAt: "2026-10-01T11:00:00.000Z", updatedBy: "daniel@hulme.ai" }]);
-    const base = {
-      handle: "Moth-1", operatorId: "op-moth", status: "issued" as const, expiresAt: "2026-10-15T10:00:00.000Z",
-      platform: null, account: null, postUrl: null, show: true, verifiedAt: null, verifiedBy: null, attempts: 0, lastError: null,
-    };
-    await store.putClaim({ ...base, id: "a".repeat(32), code: "ecd-2222-3333", createdAt: "2026-10-01T10:00:00.000Z" });
-    await store.putClaim({ ...base, id: "b".repeat(32), code: "ecd-4444-5555", createdAt: "2026-10-01T11:00:00.000Z" });
-    await store.putClaim({ ...base, id: "c".repeat(32), code: "ecd-6666-7777", createdAt: "2026-10-01T12:00:00.000Z", handle: "Wasp-1" });
-    await store.putClaim({
-      ...base, id: "a".repeat(32), code: "ecd-2222-3333", createdAt: "2026-10-01T10:00:00.000Z",
-      status: "verified", platform: "x", account: "alice", postUrl: "https://x.com/alice/status/1840000000000000001", show: false,
-      verifiedAt: "2026-10-01T10:05:00.000Z", verifiedBy: "auto", attempts: 1,
-    });
-    const a = (await store.getClaim("a".repeat(32)))!;
-    assert.equal(a.status, "verified");
-    assert.equal(a.show, false);
-    assert.equal(a.account, "alice");
-    assert.equal((await store.getClaimByCode("ecd-4444-5555"))?.id, "b".repeat(32));
-    assert.deepEqual((await store.listClaims({ handle: "Moth-1", limit: 10 })).map((c) => c.id), ["b".repeat(32), "a".repeat(32)]);
-    assert.deepEqual((await store.listClaims({ status: "issued", limit: 10 })).map((c) => c.id), ["c".repeat(32), "b".repeat(32)]);
-    assert.deepEqual((await store.listClaims({ handle: "Moth-1", status: "verified", limit: 10 })).map((c) => c.id), ["a".repeat(32)]);
-    assert.equal((await store.listClaims({ limit: 2 })).length, 2);
-    // The code is unique: a second claim can't reuse one.
-    await assert.rejects(store.putClaim({ ...base, id: "d".repeat(32), code: "ecd-2222-3333", createdAt: "2026-10-01T13:00:00.000Z" }));
+    for (const t of ["log_entries", "doorbells", "jury_alert_sends", "ops_state", "access_counts", "v2_envelopes", "v2_bundles", "v2_outputs", "accounts", "managed_keys", "v2_issues", "v2_flags", "v2_quote_checks"]) assert.ok(tables.includes(t), t);
+    db.exec(`INSERT INTO log_entries (seq, ts, type, payload_hash, prev_hash, entry_hash, leaf_hash, payload_json) VALUES (0, '2026-10-05T12:00:00.000Z', 'constitution.adopt', '${"a".repeat(64)}', '${"0".repeat(64)}', '${"b".repeat(64)}', '${"c".repeat(64)}', '{}')`);
+    assert.throws(() => db.exec("UPDATE log_entries SET payload_json = '{\"x\":1}' WHERE seq = 0"), /append-only|abort|constraint/i, "no entry is ever rewritten");
+    assert.throws(() => db.exec("DELETE FROM log_entries WHERE seq = 0"), /append-only|abort|constraint/i, "or deleted");
   });
 
   it("stores doorbells: an upsert keeps the creation time, the setup id is unique, and every column round-trips", async () => {
@@ -197,59 +166,10 @@ describe("the D1 store against SQLite, every migration applied", { skip: !sqlite
       VALUES ('Y','email','active','daily','${"s".repeat(32)}','t','a','a','a')`));
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='doorbells_status'").get(), "the status index is rebuilt");
   });
-
-  it("runs registration, a preprint, a switch, a withdrawal and an uninvite through the real SQL", async () => {
-    const store = new D1Store(d1Over(migrated()));
-    let t = Date.UTC(2026, 9, 1, 9, 0, 0);
-    const svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null, now: () => new Date((t += 1000)) });
-    const ack = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
-    const kp = await seededKeyPair("d1/Moth-1");
-    const reg = await svc.registerAgent({ handle: "Moth-1", publicKey: kp.publicKey, operatorId: "op-moth", constitution: ack });
-    assert.equal(reg.status, 201, JSON.stringify(reg.body));
-    const claimUrl = String(((reg.body as Record<string, Json>)["claim"] as Record<string, Json>)["url"]);
-    assert.match(claimUrl, /\/claim\/[0-9a-f]{32}$/);
-    assert.equal((await store.listClaims({ handle: "Moth-1", limit: 5 })).length, 1);
-
-    const payload = {
-      protocol: "ecdysis/0.1", type: "paper", title: "A preprint stored through the real SQL",
-      abstract: "A careful measurement with its configuration, seeds and code attached so that anyone can recompute it.",
-      field: "ml", claims: [{ text: "The effect holds under the stated set-up", confidence: 0.7 }],
-      builds_on: [{ id: "arxiv:2203.15556", rel: "replicates" }], preprint: true,
-      agent: { handle: "Moth-1", publicKey: kp.publicKey }, ts: new Date(t).toISOString().replace(/\.\d{3}Z$/, "Z"),
-    } as unknown as Json;
-    const sub = await svc.submitPaper({ payload, signature: await signJson(kp.privateKey, payload) });
-    assert.equal(sub.status, 202, JSON.stringify(sub.body));
-    const receipt = String((sub.body as Record<string, Json>)["id"]);
-    const before = (await store.getQuarantine(receipt))!;
-    assert.equal(((await svc.preprints()).body as { preprints: unknown[] }).preprints.length, 1);
-
-    // Withdraw: one column, one way; a full-row write from a stale read can't undo it.
-    assert.equal((await svc.withdrawPreprint(receipt)).status, 200);
-    await store.putQuarantine(before);
-    assert.ok((await store.getQuarantine(receipt))!.preprintWithdrawnAt, "COALESCE keeps the withdrawal");
-    assert.equal(((await svc.preprints()).body as { preprints: unknown[] }).preprints.length, 0);
-
-    // A switch: stored, logged, read back by a fresh instance (a new request).
-    assert.equal((await svc.setSetting("submissions", "paused", "daniel@hulme.ai")).status, 200);
-    const next = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null, now: () => new Date((t += 1000)) });
-    assert.equal(await next.setting("submissions"), "paused");
-    assert.equal((await next.registerAgent({ handle: "Late-1", publicKey: (await seededKeyPair("d1/late")).publicKey, operatorId: "op-late", constitution: ack })).status, 503);
-
-    // Invite, then withdraw the invitation.
-    assert.equal((await next.inviteJurorOperator("op-moth")).status, 201);
-    assert.equal((await next.uninviteJurorOperator("op-moth")).status, 200);
-    assert.equal(await store.getJurorOperator("op-moth"), null);
-
-    // The log took every change and is intact.
-    const audit = await next.audit();
-    assert.equal((audit.body as { intact: boolean }).intact, true);
-    const types = (await store.listLog(0, 100)).map((e) => e.type);
-    for (const ty of ["agent.register", "moderation.remove", "operator.setting", "juror.invite", "juror.uninvite"]) assert.ok(types.includes(ty as never), ty);
-  });
 });
 
 describe("the v2 store against SQLite, every migration applied", { skip: !sqlite && "node:sqlite is not available" }, () => {
-  it("runs registration, an external claim, two receipts with a cross-check and the scores through the real SQL", async () => {
+  it("runs registration, an external claim, a published claim, two receipts with a cross-check and the scores through the real SQL", async () => {
     const { D1V2Store } = await import("../src/store/v2/d1.js");
     const { V2Service } = await import("../src/api/v2/service.js");
     const { TransparencyLog } = await import("../src/core/log.js");
@@ -294,10 +214,18 @@ describe("the v2 store against SQLite, every migration applied", { skip: !sqlite
     const v2store = new D1V2Store(d1Over(db), store, now);
     assert.deepEqual(await v2store.getOutputs(id1), { alpha: 28.4 });
     assert.equal((await v2store.getBundle(id1))!.run, "python run.py");
+    // network/0.1: a claim of Bee's resting on the external one, through SQL: its envelope is kept under its cid and served back whole.
+    const mine = await signedClaim({ handle: "Bee", ...b }, { builds_on: [relies(ref)], ts: "2026-10-03T09:04:00Z" });
+    const pub = await svc.publishClaim(mine.envelope);
+    assert.equal(pub.status, 201, JSON.stringify(pub.body));
+    assert.equal((pub.body as Record<string, Json>)["id"], mine.id, "the id the author computed");
+    assert.deepEqual(await v2store.getEnvelope(mine.cid), mine.envelope);
+    const view = await svc.claim(mine.id);
+    assert.equal(view.status, 200, JSON.stringify(view.body));
+    assert.equal(((view.body as Record<string, Json>)["buildsOn"] as Array<Record<string, Json>>)[0]!["id"], ref);
     const types = (await store.listLog(0, 100)).map((e) => e.type);
-    for (const ty of ["agent.register", "operator.tier", "claim.external", "check.commit", "check.seal", "check.result"]) assert.ok(types.includes(ty), ty);
-    const audit = await new (await import("../src/api/service.js")).EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null }).audit();
-    assert.equal((audit.body as { intact: boolean }).intact, true);
+    for (const ty of ["agent.register", "operator.tier", "claim.external", "claim.publish", "check.commit", "check.seal", "check.result"]) assert.ok(types.includes(ty), ty);
+    assert.equal(await log.audit(), null, "the log is intact");
   });
 
   it("keeps a verification request in the issues table through the real SQL: open, newest by subject, decided", async () => {
@@ -397,7 +325,7 @@ describe("the account store against SQLite, every migration applied", { skip: !s
     assert.equal(created.status, 201, JSON.stringify(created.body));
     const keyRow = db.prepare("SELECT private_sealed FROM managed_keys WHERE handle = 'Wren'").get() as { private_sealed: string };
     assert.ok(keyRow.private_sealed.length > 40 && !keyRow.private_sealed.startsWith("MC4C"), "the private key is sealed, never stored plain");
-    const signed = await oauth.signAs(principal, { protocol: "ecdysis/0.2", type: "review", claim: "ecd:x#C1", forecast: 0.5, rationale: "r".repeat(40), agent: { handle: "Wren" }, ts: now().toISOString() });
+    const signed = await oauth.signAs(principal, { protocol: "ecdysis/0.2", type: "review", claim: "ecd:5e0b7d21a94c3f68", forecast: 0.5, rationale: "r".repeat(40), agent: { handle: "Wren" }, ts: now().toISOString() });
     assert.ok(signed.ok);
     assert.ok((await svc.record()).agents.get("Wren")!.managed, "the log says the archive held the pen");
     // Public profile names are unique in SQL (migration 0016): the index decides a race, and deletion frees the name.

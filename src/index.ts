@@ -41,7 +41,6 @@ import { signJson, verifyJson } from "./core/crypto.js";
 export interface Env {
   DB: D1Database;
   ENVIRONMENT: string;
-  PROTOCOL_VERSION: string;
   /** Public half of the log key (base64url SPKI), pinned in wrangler.toml. */
   STH_PUBLIC_KEY: string;
   /**
@@ -267,8 +266,9 @@ export function candidatesFrom(store: Pick<D1Store, "getOpsState" | "putOpsState
 }
 
 /** The log read over HTTP and the connector: heads, proofs, entries, the audit. */
-export function logApiFrom(env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "READ_ONLY" | "FINAL_STH">, store: D1Store): LogApi {
-  return new LogApi({ log: new TransparencyLog(store), reader: store, signingKey: env.STH_SIGNING_KEY_PKCS8 ?? null, finalSth: finalSthFrom(env) });
+export function logApiFrom(env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "READ_ONLY" | "FINAL_STH">, store: D1Store, keysAgree = true): LogApi {
+  // A key that is not the other half of the pin signs nothing: heads are served unsigned until the right key is installed.
+  return new LogApi({ log: new TransparencyLog(store), reader: store, signingKey: keysAgree ? env.STH_SIGNING_KEY_PKCS8 ?? null : null, finalSth: finalSthFrom(env) });
 }
 
 /** Everything the record needs, for the request path and the cron alike. */
@@ -276,14 +276,15 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
   const accountStore = new D1AccountStore(env.DB);
   const accounts = accountsFrom(env, accountStore);
   const log = new TransparencyLog(store);
-  const logApi = logApiFrom(env, store);
+  const logApi = logApiFrom(env, store, keysAgree);
   const candidates = candidatesFrom(store);
   const v2 = new V2Service({
     log,
     cache: V2_CACHE,
     candidates,
     store: new D1V2Store(env.DB, store),
-    logPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
+    // Seeds are sealed with the log key only when it is the other half of the pin (writes are refused otherwise anyway).
+    logPrivateKey: keysAgree ? env.STH_SIGNING_KEY_PKCS8 ?? null : null,
     screeners: screenersFrom(env),
     stewardCategories: new Set((env.SCREEN_STEWARD_CATEGORIES ?? "").split(",").map((c) => c.trim()).filter(Boolean)),
     pairing: (code, ip) => accounts.consumePairing(code, ip),
@@ -333,6 +334,7 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
         sth: async () => (await logApi.sth()) as unknown as Record<string, unknown>,
         logSize: () => store.logSize(),
         opsState: async (key) => { const v = await store.getOpsState(key); return v ? { value: (v.value && typeof v.value === "object" && !Array.isArray(v.value) ? v.value : null) as Record<string, unknown> | null, at: v.at } : null; },
+        counters: async () => [...(await store.listAccessPrefix("funnel:")), ...(await store.listAccessPrefix("pv:")), ...(await store.listAccessPrefix("op:")), ...(await store.listAccessPrefix("mcpw:"))],
         runAudit: async () => {
           const r = await logApi.audit();
           const body = r.body as { intact?: boolean; problem?: string | null };
@@ -359,14 +361,16 @@ export function doorbellsFrom(
   env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "DOORBELL_KEY" | "READ_ONLY"> & Partial<Pick<Env, "HERALD_API_KEY" | "HERALD_PAUSED" | "HERALD_REPLY_TO" | "EMAIL_DAILY_CAP" | "DOORBELL_FROM">>,
   store: Store,
   v2: V2Service,
+  keysAgree = true,
 ): Doorbells {
   return new Doorbells({
     store,
     siteBase: "https://ecdysis.me",
     apiBase: "https://api.ecdysis.me",
-    sthPrivateKey: env.STH_SIGNING_KEY_PKCS8 ?? null,
+    // A log key that is not the other half of the pin signs no ring and seals nothing, and the doorbells take no changes.
+    sthPrivateKey: keysAgree ? env.STH_SIGNING_KEY_PKCS8 ?? null : null,
     sealSecret: env.DOORBELL_KEY ?? null,
-    readOnly: readOnly(env),
+    readOnly: readOnly(env) || !keysAgree,
     now: () => new Date(),
     random: csprng,
     // Email doorbells: the same provider, pause switch and shared daily cap as every other email Ecdysis sends.
@@ -454,6 +458,12 @@ export default {
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (readOnly(env)) return;
+    // A log key that does not match its pin stops the cron as it stops every write: no lapse, seal, observation or ring is
+    // made under a key the pin cannot verify (the window between a fresh start's merge and the new key's installation).
+    if (!(await logKeysAgree(env))) {
+      console.error("log key mismatch: STH_SIGNING_KEY_PKCS8 is not the other half of STH_PUBLIC_KEY; the cron does nothing");
+      return;
+    }
     const store = new D1Store(env.DB);
     ctx.waitUntil((async () => {
       const at = new Date().toISOString();
@@ -499,7 +509,7 @@ export default {
       log: rec.logApi,
       sthPublicKey: realKey(env.STH_PUBLIC_KEY),
       readOnly: frozen,
-      doorbells: doorbellsFrom(env, store, rec.v2),
+      doorbells: doorbellsFrom(env, store, rec.v2, keysAgree),
       openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE ?? null,
       waitUntil: (p) => ctx.waitUntil(p),
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },

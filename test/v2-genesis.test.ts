@@ -1,8 +1,8 @@
 /**
- * Genesis: the founder adopts the constitution under reserved power R2,
- * and the record opens. Before that entry nothing may register; the entry
- * is accepted once, for the text the archive carries, signed by the
- * operator key and no other.
+ * Genesis: the founder adopts the constitution (2.1.0, the network of
+ * claims) under reserved power R2, and the record opens. Before that entry
+ * nothing may register; the entry is accepted once, for the text the
+ * archive carries, signed by the operator key and no other.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -13,7 +13,7 @@ import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { route } from "../src/api/router.js";
 import { MemoryRateLimiter } from "../src/api/router.js";
 import { structuralScreener } from "../src/core/hazard.js";
-import { CONSTITUTION_V1_HASH, CONSTITUTION_V2_HASH, CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
+import { CONSTITUTION_HASH, CONSTITUTION_V1_HASH, CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import type { Json } from "../src/core/canonical.js";
 
 async function world(withOperatorKey = true) {
@@ -45,15 +45,15 @@ describe("genesis: the constitution is adopted under R2 before anything else", (
     const before = await w.register("Early");
     assert.equal(before.status, 503, JSON.stringify(before.body));
     assert.equal((before.body as { status?: string }).status, "before genesis");
-    assert.deepEqual((before.body as { constitution?: Json }).constitution, { version: "2.0.0", hash: CONSTITUTION_V2_HASH }, "the refusal names the text that will be adopted");
+    assert.deepEqual((before.body as { constitution?: Json }).constitution, { version: "2.1.0", hash: CONSTITUTION_HASH }, "the refusal names the text that will be adopted");
     const r = await w.adopt();
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.equal((r.body as { seq: number }).seq, 0, "the first entry of the record");
     const rec = await w.svc.record();
-    assert.deepEqual(rec.constitution && { version: rec.constitution.version, hash: rec.constitution.hash, seq: rec.constitution.seq }, { version: "2.0.0", hash: CONSTITUTION_V2_HASH, seq: 0 });
+    assert.deepEqual(rec.constitution && { version: rec.constitution.version, hash: rec.constitution.hash, seq: rec.constitution.seq }, { version: "2.1.0", hash: CONSTITUTION_HASH, seq: 0 });
     const after = await w.register("Moth-1");
     assert.equal(after.status, 201, JSON.stringify(after.body));
-    assert.deepEqual((after.body as { constitution: Json }).constitution, { version: "2.0.0", hash: CONSTITUTION_V2_HASH }, "the agent acknowledged the adopted text");
+    assert.deepEqual((after.body as { constitution: Json }).constitution, { version: "2.1.0", hash: CONSTITUTION_HASH }, "the agent acknowledged the adopted text");
   });
 
   it("only the operator key adopts: the log key, a stranger, a stale time, a wrong text and a second adoption are all refused", async () => {
@@ -63,7 +63,7 @@ describe("genesis: the constitution is adopted under R2 before anything else", (
     assert.equal((await w.adopt({ ts: new Date(w.clock.t - 2 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "Z") })).status, 400, "a signature captured earlier cannot be replayed");
     const wrongText = await w.adopt({ version: "1.0.0", hash: CONSTITUTION_V1_HASH });
     assert.equal(wrongText.status, 409, "the archive adopts only the text it carries");
-    assert.match(String((wrongText.body as { error: string }).error), /carries constitution 2\.0\.0/);
+    assert.match(String((wrongText.body as { error: string }).error), /carries constitution 2\.1\.0/);
     assert.equal((await w.adopt({ hash: "ab".repeat(32) })).status, 409);
     assert.equal((await w.svc.record()).constitution, null, "nothing refused reached the log");
     assert.equal((await w.adopt()).status, 201);
@@ -86,8 +86,8 @@ describe("genesis: the constitution is adopted under R2 before anything else", (
     const res = await route(new Request("https://api.ecdysis.me/v2/constitution/adopt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, signature: await signJson(w.operatorKey.privateKey, { op: "adopt", ...body }) }) }), new MemoryRateLimiter(), { v2: w.svc });
     assert.equal(res.status, 201, await res.text());
     const shown = (await read()).constitution as { version: string; hash: string; seq: number };
-    assert.equal(shown.version, "2.0.0");
-    assert.equal(shown.hash, CONSTITUTION_V2_HASH);
+    assert.equal(shown.version, "2.1.0");
+    assert.equal(shown.hash, CONSTITUTION_HASH);
     assert.equal(shown.seq, 0);
   });
 });

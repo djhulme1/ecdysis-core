@@ -58,7 +58,7 @@
  * evidence about CHECKABILITY, and feeds two things only:
  *
  *   the blocked list   what agents should not repeat unless they can clear
- *                      the blocker (the heartbeat and the frontier show it);
+ *                      the blocker (the heartbeat and the map show it);
  *   pressure           stakes applied to what only the authors can unblock:
  *                      P = S · (1 − 2^−n) over n distinct VERIFIED operators
  *                      holding uncleared AUTHOR-side attempts (others'
@@ -73,7 +73,7 @@
  */
 
 import type { Tier } from "./credence.js";
-import { CLAIM_REF } from "./arguments.js";
+import { CLAIM_REF, CLAIM_REF_WORDS } from "./refs.js";
 
 export const ATTEMPTS_VERSION = "attempts/0.3";
 
@@ -141,7 +141,7 @@ export const EFFORT_MAX_MINUTES = 7 * 24 * 60;
 export interface AttemptV2Payload {
   protocol: "ecdysis/0.2";
   type: "check.attempt";
-  /** The claim attempted: "<paper>#C<n>" or "ext:…#C1". */
+  /** The claim attempted: ecd:… or ext:…. */
   claim: string;
   blocker: Blocker;
   /** How much of the source was read: full text, abstract, or none (the default). */
@@ -193,7 +193,7 @@ export function validateAttemptV2(p: unknown): Res<AttemptV2Payload> {
   if (!x || typeof x !== "object") return { ok: false, errors: ["payload: an object"] };
   if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
   if (x.type !== "check.attempt") errors.push('type: "check.attempt"');
-  if (typeof x.claim !== "string" || !CLAIM_REF.test(x.claim)) errors.push("claim: a claim ref on the record (ecd:…#C<n> or ext:…#C1)");
+  if (typeof x.claim !== "string" || !CLAIM_REF.test(x.claim)) errors.push(`claim: ${CLAIM_REF_WORDS}`);
   if (!(BLOCKERS as readonly unknown[]).includes(x.blocker)) errors.push(`blocker: ${BLOCKERS.join(", ")}`);
   // attempts/0.3: `read` and `looked` are optional. Missing, they do not refuse the attempt; they decide whether a blocker on
   // the authors' side counts (supported, below).
@@ -217,7 +217,7 @@ export function validateAttemptClearV2(p: unknown): Res<AttemptClearV2Payload> {
   if (!x || typeof x !== "object") return { ok: false, errors: ["payload: an object"] };
   if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
   if (x.type !== "attempt.clear") errors.push('type: "attempt.clear"');
-  if (typeof x.claim !== "string" || !CLAIM_REF.test(x.claim)) errors.push("claim: a claim ref on the record (ecd:…#C<n> or ext:…#C1)");
+  if (typeof x.claim !== "string" || !CLAIM_REF.test(x.claim)) errors.push(`claim: ${CLAIM_REF_WORDS}`);
   if (!(BLOCKERS as readonly unknown[]).includes(x.blocker)) errors.push(`blocker: ${BLOCKERS.join(", ")}`);
   text(x.how, "how", CLEAR_HOW.min, CLEAR_HOW.max, errors);
   agentOk(x.agent, errors);
@@ -262,6 +262,11 @@ export interface AttemptState {
   disowned: boolean;
   /** Filed by the claim's own operator: kept and shown, counted nowhere (Article 0.5). */
   own: boolean;
+  /**
+   * Declared by the claim's author with the claim itself (network/0.1, claim.publish `blockers`): a part of its own test it
+   * could not run. Own, so it presses nobody; one on the operator's side routes the claim to capability all the same.
+   */
+  declared?: boolean;
   /** For a blocker on the authors' side, whether it carries the evidence that makes it count (supported()); true otherwise. */
   supported: boolean;
   cleared: AttemptCleared | null;
@@ -305,6 +310,8 @@ export interface BlockerSummary {
   attempts: AttemptState[];
   /** What the attempters said would clear it, latest first, deduplicated. */
   unblockedBy: string[];
+  /** The claim's author declared this blocker when it published the claim (an operator-side one: it routes, presses nobody). */
+  declared: boolean;
 }
 
 export interface ClaimBlockers {
@@ -334,18 +341,21 @@ export function pressure(stakes: number, verifiedOperators: number): number {
  */
 export function summariseBlockers(claim: string, attempts: readonly AttemptState[], held: (id: string) => boolean): ClaimBlockers {
   // An attempt by the claim's own operator is shown on the claim's page and counted nowhere, not even as a blocker (Article 0.5).
-  const live = attempts.filter((a) => a.claim === claim && !a.cleared && !a.disowned && !a.own && !held(a.id)).sort((a, b) => a.seq - b.seq);
+  // The one exception routes and presses nobody: a blocker on the operator's side that the author declared with the claim (a
+  // part of its own test it could not run, such as the compute), so that an operator with the capability finds it.
+  const live = attempts.filter((a) => a.claim === claim && !a.cleared && !a.disowned && !held(a.id) && (!a.own || (a.declared === true && BLOCKER_SIDE[a.blocker] === "operator"))).sort((a, b) => a.seq - b.seq);
   const byBlocker = new Map<Blocker, AttemptState[]>();
   for (const a of live) byBlocker.set(a.blocker, [...(byBlocker.get(a.blocker) ?? []), a]);
   const blockers: BlockerSummary[] = [];
   for (const [blocker, list] of byBlocker) {
-    const counted = list.filter((a) => a.supported);
+    const independent = list.filter((a) => !a.own);
+    const counted = independent.filter((a) => a.supported);
     const verified = new Set(counted.filter((a) => a.tier === "verified").map((a) => a.operatorId));
     const others = new Set(counted.filter((a) => a.tier !== "verified").map((a) => a.operatorId));
-    const unsupported = new Set(list.filter((a) => !a.supported).map((a) => a.operatorId));
+    const unsupported = new Set(independent.filter((a) => !a.supported).map((a) => a.operatorId));
     const unblockedBy: string[] = [];
     for (const a of [...list].reverse()) if (!unblockedBy.includes(a.unblockedBy)) unblockedBy.push(a.unblockedBy);
-    blockers.push({ blocker, side: BLOCKER_SIDE[blocker], verifiedOperators: verified.size, otherOperators: others.size, unsupported: unsupported.size, attempts: list, unblockedBy });
+    blockers.push({ blocker, side: BLOCKER_SIDE[blocker], verifiedOperators: verified.size, otherOperators: others.size, unsupported: unsupported.size, attempts: list, unblockedBy, declared: list.some((a) => a.own) });
   }
   const rank = (b: BlockerSummary) => (b.side === "author" ? 0 : 1);
   blockers.sort((x, y) => rank(x) - rank(y) || y.verifiedOperators - x.verifiedOperators || y.otherOperators - x.otherOperators || x.attempts[0]!.seq - y.attempts[0]!.seq);

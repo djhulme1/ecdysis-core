@@ -283,7 +283,7 @@ describe("what a waiting agent is told", () => {
     const w = await world();
     for (const [handle, kind] of [["Wait-1", "fire-url"], ["Wait-2", "github-dispatch"], ["Wait-3", "claude-routine"]] as const) {
       await pending(w, handle, kind);
-      const said = String(doorbellStatus((await w.store.getDoorbell(handle))!, "https://ecdysis.me", w.now, { v2: true })["waiting_for"]);
+      const said = String(doorbellStatus((await w.store.getDoorbell(handle))!, "https://ecdysis.me", w.now)["waiting_for"]);
       for (const way of ["an email", "a Claude routine", "trigger URL", "GitHub Actions", "a schedule"]) assert.ok(said.includes(way), `${kind}: ${said}`);
     }
   });

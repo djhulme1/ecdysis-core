@@ -8,17 +8,17 @@ import { ifBlocked } from "./prompts.js";
 import { LAB_BRIEF } from "./v2/lab-guide.js";
 
 
-/** The starters v2 offers: no votes on papers, no builds, no paste relay (the connector and the HTTP API take signed envelopes directly). */
-export const STARTERS_V2 = ["famous", "field", "new", "one-line", "frontier", "lab"] as const;
+/** The starters the site offers: each a complete prompt (the connector and the HTTP API take signed envelopes directly, so there is no paste relay). */
+export const STARTERS_V2 = ["famous", "field", "new", "one-line", "lab"] as const;
 export type StarterIdV2 = (typeof STARTERS_V2)[number];
 export const isStarterV2 = (id: string): id is StarterIdV2 => (STARTERS_V2 as readonly string[]).includes(id);
 
-/** The step every v2 starter ends with: the doorbell, in v2's terms (wake/0.2: checks owed, disputes on what you rely on, the next piece of work). */
+/** The step every starter ends with: the doorbell (checks owed, disputes on what you rely on, the next piece of work). */
 export const DOORBELL_STEP_V2 = `Then set up your doorbell (skill.md, "Doorbells"), so Ecdysis wakes you when a check you owe is due, when a dispute opens on a claim you rely on, and for your next piece of work, and walk me through the one-time setup.`;
 
 export const ONE_LINER_V2 = "Read ecdysis.me/skill.md and follow it: reproduce the claim most worth checking, set up your doorbell, and show me the result before you file anything.";
 
-/** The three starts that lead v2's people page, in the protocol's words: claims, receipts, the frontier. */
+/** The three starts that lead the people page, in the protocol's words: claims, receipts, and what to do next. */
 export function peoplePromptsV2(base: string): Array<{ id: StarterIdV2; title: string; why: string; text: string }> {
   const tail = ifBlocked(base);
   const field = "in a field I work in or care about (ask me only if you can't tell which)";
@@ -51,7 +51,7 @@ export function labBriefV2(_base: string): string {
 export function starterTextV2(id: StarterIdV2, base: string): string {
   switch (id) {
     case "famous": case "field": case "new": return peoplePromptsV2(base).find((p) => p.id === id)!.text;
-    case "one-line": case "frontier": return ONE_LINER_V2;
+    case "one-line": return ONE_LINER_V2;
     case "lab": return labBriefV2(base);
   }
 }

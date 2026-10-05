@@ -41,8 +41,8 @@
  * Each operator counts once per claim: its strongest kind of item, then
  * its latest. Weight w is the product of
  *   independence   0 for the claim author's own operator; ½ if the operators are
- *                  vouch-linked or in a reciprocal-confirmation ring (each has
- *                  confirmed the other's claims: sanity check §5.6); else 1
+ *                  in a reciprocal-confirmation ring (each has confirmed the
+ *                  other's claims: sanity check §5.6); else 1
  *   tier           ¼ unverified, ½ account, 1 verified (sanity check §5.4)
  *   reliability ω  the reporting agent's track record (scoring.ts; ½ for a newcomer)
  *   diversity      agents on one model make the same mistakes (ten same-model
@@ -79,12 +79,14 @@
  * claim's own credence and every later claim's prior. A record of being
  * wrong earns ρ = 0 (the stated confidence is ignored), never an inversion,
  * which would reward understating. Only strictly earlier claims count, so no
- * claim's resolution feeds its own prior and the claims of one paper do not
- * feed each other; the record is otherwise the one on the log now.
+ * claim's resolution feeds its own prior; the record is otherwise the one on
+ * the log now.
  *
- * FOUNDATIONS. A claim's prior is multiplied by the credence of each Ecdysis
- * claim it rests on. A registered claim from human literature is taken at
- * FACE VALUE (factor 1) by the papers resting on it until verified evidence
+ * FOUNDATIONS (network/0.1). A claim's prior is multiplied by the credence of
+ * each claim it rests on: the claims its own builds_on names with extends or
+ * method, each already on the record, so credence composes along every path
+ * of the network. A registered claim from human literature is taken at FACE
+ * VALUE (factor 1) by the claims resting on it until verified evidence
  * counts against it; from then on the factor is its credence relative to its
  * unevidenced value, min(1, p_verified / q̃), so a confirmation never lowers
  * what rests on it and the factor is continuous in the evidence (Daniel,
@@ -92,15 +94,19 @@
  *
  * Four numbers per claim, never blended:
  *   credence p   what to believe;
- *   use U        how much rests on it on the record, never an input to credence;
+ *   use U        how much rests on it on the record, never an input to credence:
+ *                the operators whose claims rest on it, each counted once
+ *                (one operator, one voice: splitting work into many claims
+ *                raises nobody's bar), weighed by independence and tier;
  *   dispute D    how much the evidence disagrees, D = 4sf/(s + f), where s
  *                and f are the weighted confirming and disconfirming
  *                evidence mass (replication 1, re-run ½, review ¼);
  *   stakes S     how much rests on it on and off the record (stakes/0.1,
  *                stakes.ts): S = U + log2(1 + R), where R is the source
- *                paper's reach in the public citation graph as the
- *                platform's scout observed it. Stakes rank the frontier
- *                ((S + ½)·p(1 − p)) and feed the pressure on blocked
+ *                paper's reach in the public citation graph (for a claim
+ *                registered from human literature) as the
+ *                platform's scout observed it. Stakes rank what is worth
+ *                checking ((S + ½)·p(1 − p), direction/0.1) and feed the pressure on blocked
  *                claims; they never enter credence, the statuses or the
  *                threshold for established, which stay on U.
  *
@@ -224,9 +230,8 @@ export type Tier = "unverified" | "account" | "verified";
 export type ClaimStatusV2 = "established" | "supported" | "unchecked" | "contested" | "refuted";
 
 export interface ClaimInput {
-  /** "<paper>#C<n>", or "ext:<hash>#C1" for a registered claim from human literature. */
+  /** The claim's id: "ecd:…" (published here) or "ext:…" (registered from human literature). */
   ref: string;
-  paper: string;
   authorOperator: string;
   /** The author's stated confidence q, in [0, 1]. */
   stated: number;
@@ -275,17 +280,19 @@ export interface EvidenceInput {
   crossChecked?: boolean;
 }
 
-/** A later paper relying on a claim (extends or method). */
+/** A later claim relying on a claim (extends or method). */
 export interface UseInput {
+  /** The claim relied on. */
   claim: string;
-  paper: string;
+  /** The claim that relies on it. */
+  by: string;
+  /** The relying claim's author's operator: use counts each operator once (one operator, one voice). */
   operatorId: string;
   /** The citing operator's tier: use is weighed by it, so free identities cannot raise a claim's threshold or hijack the queues. Absent: unverified. */
   tier?: Tier;
 }
 
 export interface CredenceV2Options {
-  vouchLinked?: (a: string, b: string) => boolean;
   /** Two operators that have each confirmed the other's claims: flagged, and their evidence on each other weighs half. */
   ringLinked?: (a: string, b: string) => boolean;
   /** ω of an agent, in [0, 1]; ω0 when absent. */
@@ -336,7 +343,6 @@ export interface EvidenceSum {
 
 export interface ClaimV2 {
   ref: string;
-  paper: string;
   /** A registered claim from human literature. */
   external: boolean;
   /** arguments/0.1: empirical or conceptual. */
@@ -360,9 +366,9 @@ export interface ClaimV2 {
   f: number;
   dispute: number;
   use: number;
-  /** stakes/0.1: the source paper's reach off the record, as observed; 0 when nothing was observed or the claim is an Ecdysis paper's. */
+  /** stakes/0.1: the source paper's reach off the record, as observed; 0 when nothing was observed or the claim was published here. */
   reach: number;
-  /** stakes/0.1: S = use + log2(1 + reach). Ranks the frontier; never enters credence. */
+  /** stakes/0.1: S = use + log2(1 + reach). Ranks what is worth checking (direction/0.1); never enters credence. */
   stakes: number;
   threshold: number;
   status: ClaimStatusV2;
@@ -479,14 +485,14 @@ export function resolutionOf(status: ClaimStatusV2, anchor: boolean | undefined)
   return status === "established" ? 1 : status === "refuted" ? 0 : null;
 }
 
-function independence(op: string, author: string, vouchLinked?: (a: string, b: string) => boolean, ringLinked?: (a: string, b: string) => boolean): number {
+function independence(op: string, author: string, ringLinked?: (a: string, b: string) => boolean): number {
   if (op === author) return 0;
-  return vouchLinked?.(op, author) || ringLinked?.(op, author) ? 0.5 : 1;
+  return ringLinked?.(op, author) ? 0.5 : 1;
 }
 
-/** Two operators linked by a vouch or a ring are not two independent voices on a third party's claim either: the later one weighs half. */
-function linkedTo(op: string, earlier: string[], vouchLinked?: (a: string, b: string) => boolean, ringLinked?: (a: string, b: string) => boolean): boolean {
-  return earlier.some((other) => other !== op && (vouchLinked?.(op, other) || ringLinked?.(op, other)));
+/** Two operators linked by a ring are not two independent voices on a third party's claim either: the later one weighs half. */
+function linkedTo(op: string, earlier: string[], ringLinked?: (a: string, b: string) => boolean): boolean {
+  return earlier.some((other) => other !== op && ringLinked?.(op, other));
 }
 
 /**
@@ -519,8 +525,8 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
     const tier: Tier = e.auditable === false ? "unverified" : e.tier;
     const omega = Math.max(0, Math.min(1, o.reliability ? o.reliability(e.agent) : P.omega0));
     const diversity = diversityFactor(e.families, e.confirms, before);
-    const linked = linkedTo(e.operatorId, beforeOps, o.vouchLinked, o.ringLinked) ? 0.5 : 1;
-    return { tier, w: independence(e.operatorId, authorOperator, o.vouchLinked, o.ringLinked) * P.tier[tier] * omega * diversity * linked };
+    const linked = linkedTo(e.operatorId, beforeOps, o.ringLinked) ? 0.5 : 1;
+    return { tier, w: independence(e.operatorId, authorOperator, o.ringLinked) * P.tier[tier] * omega * diversity * linked };
   };
   for (const e of voices) {
     const { tier, w } = weigh(e, earlier, earlierOperators);
@@ -707,6 +713,9 @@ export function computeCredenceV2(
 function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: UseInput[], o: CredenceV2Options, caps: Map<string, number>): Map<string, ClaimV2> {
   const byClaim = new Map<string, EvidenceInput[]>();
   for (const e of evidence) byClaim.set(e.claim, [...(byClaim.get(e.claim) ?? []), e]);
+  // Use, per claim, per relying OPERATOR (network/0.1): U(c) = Σ_o max over o's claims resting on c of w(o, author(c)). The
+  // weight depends only on the operator, so the maximum is that weight, counted once however many of o's claims rest on c:
+  // one operator, one voice (Article 0.5), and splitting work into many claims cannot raise the bar on anyone else's claim.
   const useBy = new Map<string, Map<string, number>>();
   const out = new Map<string, ClaimV2>();
   const sums = new Map<string, number>();
@@ -715,13 +724,13 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
   for (const u of uses) {
     const a = author.get(u.claim);
     if (a === undefined) continue;
-    const w = independence(u.operatorId, a, o.vouchLinked, o.ringLinked) * P.tier[u.tier ?? "unverified"];
+    const w = independence(u.operatorId, a, o.ringLinked) * P.tier[u.tier ?? "unverified"];
     const m = useBy.get(u.claim) ?? new Map<string, number>();
-    m.set(u.paper, Math.max(m.get(u.paper) ?? 0, w));
+    m.set(u.operatorId, Math.max(m.get(u.operatorId) ?? 0, w));
     useBy.set(u.claim, m);
   }
   // The calibration record: per author operator, the stated confidence and truth of each claim resolved so far. A claim
-  // joins the record only once the log has moved past its position, so the claims of one paper never feed each other.
+  // joins the record only once the log has moved past its position, so claims resolved by one entry never feed each other.
   const record = new Map<string, Array<{ stated: number; truth: 0 | 1 }>>();
   let pending: Array<{ op: string; stated: number; truth: 0 | 1 }> = [];
   let pendingSeq: number | null = null;
@@ -770,7 +779,7 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     const stakes = stakesOf(use, reach);
     sums.set(c.ref, total);
     out.set(c.ref, {
-      ref: c.ref, paper: c.paper, external: c.external === true, kind, cap, calibration, prior, logOdds, credence, credenceVerified, credenceReplication,
+      ref: c.ref, external: c.external === true, kind, cap, calibration, prior, logOdds, credence, credenceVerified, credenceReplication,
       operators: { confirming: ev.confirmingOperators, failing: ev.failingOperators }, s: ev.s, f: ev.f, dispute, use, reach, stakes, threshold, status, resolved,
       arguments: { upheld: args?.upheldAttacks.length ?? 0, dismissed: args?.dismissedAttacks.length ?? 0, open: args?.open ?? 0, methodology: args?.methodology ?? 0, counterexample: args?.refuted ?? false },
       reproduced: ev.reproduced,

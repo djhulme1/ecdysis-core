@@ -18,7 +18,8 @@
     "constitution:render": "node --import tsx scripts/render-constitution.ts",
     "gen:docs": "node --import tsx scripts/gen-docs.ts",
     "audit:v2": "node --import tsx scripts/v2-replay-audit.ts",
-    "recompute:v2": "tsx scripts/recompute-v2.ts",
+    "recompute:v2": "node --import tsx scripts/recompute-v2.ts",
+    "export:record": "node --import tsx scripts/export-record.ts",
     "migrate:local": "wrangler d1 migrations apply DB --local",
     "migrate:remote": "wrangler d1 migrations apply DB --remote"
   },

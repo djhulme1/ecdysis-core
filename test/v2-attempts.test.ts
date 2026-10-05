@@ -28,6 +28,8 @@ import type { Bundle } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
+import { relies, signedClaim } from "./claims-kit.js";
+import { LogApi } from "../src/api/v2/log-api.js";
 
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 const body = (r: { body: Json }) => r.body as Record<string, Json>;
@@ -59,14 +61,11 @@ async function world() {
     const full: Json = declared({ ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
-  const paper = async (handle: string, claims: Array<{ text: string; confidence: number; test: string; kind?: string }>, builds_on: Json[] = [], title = "A measured constant of a family") => {
-    const r = await svc.publishPaper(await sign(handle, {
-      protocol: "ecdysis/0.2", type: "paper", title, field: "math",
-      abstract: "We measure a constant of a family of constructions on a panel we describe, and state the regime in which the value holds.\n\nEvery step is given in full.",
-      claims: claims as unknown as Json, builds_on,
-    }));
+  const claimOf = async (handle: string, c: { text: string; confidence: number; test: string; kind?: "empirical" | "conceptual" }, builds_on: Json[] = []) => {
+    const signed = await signedClaim({ handle, ...keys.get(handle)! }, { text: c.text, confidence: c.confidence, test: c.test, ...(c.kind ? { kind: c.kind } : {}), field: "math", builds_on, rationale: "We measure a constant of a family of constructions on a panel we describe, and state the regime in which the value holds; every step is given in full.", ts: ts() });
+    const r = await svc.publishClaim(signed.envelope);
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    return String(body(r)["id"]);
+    return signed.id;
   };
   const attempt = async (handle: string, claim: string, over: Record<string, Json> = {}, kp?: KeyPairB64) => svc.fileAttempt(await sign(handle, {
     protocol: "ecdysis/0.2", type: "check.attempt", claim, blocker: "data-unavailable", read: "full", looked: LOOKED_AT, detail: DETAIL, unblockedBy: UNBLOCK, ...over,
@@ -74,20 +73,21 @@ async function world() {
   const clear = async (handle: string, claim: string, over: Record<string, Json> = {}) => svc.clearAttempt(await sign(handle, {
     protocol: "ecdysis/0.2", type: "attempt.clear", claim, blocker: "data-unavailable", how: "The panel is now deposited at https://zenodo.org/records/0000000 under CC-BY, with the derivation script beside it.", ...over,
   }));
-  const get = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`), limiter, { v2: svc, pages }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
-  const page = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { headers: { accept: "text/html" } }), limiter, { v2: svc, pages }); return { status: r.status, html: await r.text() }; };
-  return { svc, v1, pages, agent, sign, paper, attempt, clear, get, page, keys, now, tick: (ms: number) => { clock.t += ms; }, logKey };
+  const logApi = new LogApi({ log, reader: logStore, signingKey: logKey.privateKey, now });
+  const get = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`), limiter, { v2: svc, pages, log: logApi }); return { status: r.status, body: (await r.json()) as Record<string, Json> }; };
+  const page = async (path: string) => { const r = await route(new Request(`https://api.ecdysis.me${path}`, { headers: { accept: "text/html" } }), limiter, { v2: svc, pages, log: logApi }); return { status: r.status, html: await r.text() }; };
+  return { svc, pages, agent, sign, claimOf, attempt, clear, get, page, keys, now, tick: (ms: number) => { clock.t += ms; }, logKey };
 }
 
 describe("attempts/0.3: the core", () => {
   it("validates payloads: eight blockers with a side, bounded texts, a claim ref, no zero-width characters; read and looked optional, and what decides whether an authors' blocker counts", () => {
-    const good = { protocol: "ecdysis/0.2", type: "check.attempt", claim: `ecd:${"a".repeat(16)}#C1`, blocker: "apparatus", read: "full", detail: DETAIL, unblockedBy: UNBLOCK, agent: { handle: "Ant", publicKey: "k".repeat(44) }, ts: "2026-10-04T09:00:00Z" };
+    const good = { protocol: "ecdysis/0.2", type: "check.attempt", claim: `ecd:${"a".repeat(16)}`, blocker: "apparatus", read: "full", detail: DETAIL, unblockedBy: UNBLOCK, agent: { handle: "Ant", publicKey: "k".repeat(44) }, ts: "2026-10-04T09:00:00Z" };
     assert.equal(validateAttemptV2(good).ok, true);
     assert.equal(BLOCKERS.length, 8);
     assert.deepEqual(AUTHOR_SIDE, ["data-unavailable", "code-unavailable", "underspecified"]);
     assert.deepEqual(OPERATOR_SIDE, ["source-restricted", "data-restricted", "artefact-unavailable", "apparatus", "compute"]);
     assert.equal(ATTEMPTS_VERSION, "attempts/0.3");
-    for (const bad of [{ blocker: "no-time" }, { read: "skimmed" }, { detail: "too short" }, { unblockedBy: "x" }, { claim: "ecd:nope#C1" }, { effortMinutes: 0 }, { detail: `${DETAIL}​` }, { looked: [] }, { looked: Array.from({ length: 9 }, (_, i) => `place number ${i} searched`) }, { looked: ["short"] }]) {
+    for (const bad of [{ blocker: "no-time" }, { read: "skimmed" }, { detail: "too short" }, { unblockedBy: "x" }, { claim: "ecd:nope" }, { effortMinutes: 0 }, { detail: `${DETAIL}​` }, { looked: [] }, { looked: Array.from({ length: 9 }, (_, i) => `place number ${i} searched`) }, { looked: ["short"] }]) {
       const r = validateAttemptV2({ ...good, ...bad });
       assert.equal(r.ok, false, JSON.stringify(bad));
     }
@@ -122,7 +122,7 @@ describe("attempts/0.3: the core", () => {
 
   it("the summary counts distinct verified operators per blocker, the authors' blockers first and alone in the pressure, the operator's as capability; shows others uncounted; drops cleared, disowned and withheld attempts", () => {
     const mk = (id: string, op: string, tier: AttemptState["tier"], blocker: AttemptState["blocker"], seq: number, over: Partial<AttemptState> = {}): AttemptState => ({
-      id, claim: "ecd:0000000000000000#C1", blocker, read: "full", looked: [], detail: DETAIL, unblockedBy: `clear ${id}`, effortMinutes: null, handle: `A${id}`, operatorId: op, tier, families: [], seq, ts: "2026-10-04T09:00:00Z", key: "k", disowned: false, own: false, supported: true, cleared: null, ...over,
+      id, claim: "ecd:0000000000000000", blocker, read: "full", looked: [], detail: DETAIL, unblockedBy: `clear ${id}`, effortMinutes: null, handle: `A${id}`, operatorId: op, tier, families: [], seq, ts: "2026-10-04T09:00:00Z", key: "k", disowned: false, own: false, supported: true, cleared: null, ...over,
     });
     const list = [
       mk("1", "op-a", "verified", "data-unavailable", 1), mk("2", "op-a", "verified", "data-unavailable", 2), // one operator twice: counts once
@@ -130,7 +130,7 @@ describe("attempts/0.3: the core", () => {
       mk("5", "op-d", "verified", "compute", 5), mk("6", "op-e", "verified", "compute", 6, { cleared: { by: "clear", id: "x", handle: "Z", how: "done", seq: 7, ts: "2026-10-04T10:00:00Z" } }),
       mk("7", "op-f", "verified", "apparatus", 8, { disowned: true }), mk("8", "op-g", "verified", "underspecified", 9),
     ];
-    const s = summariseBlockers("ecd:0000000000000000#C1", list, (id) => id === "8");
+    const s = summariseBlockers("ecd:0000000000000000", list, (id) => id === "8");
     assert.deepEqual(s.blockers.map((b) => [b.blocker, b.side, b.verifiedOperators, b.otherOperators, b.attempts.length]), [["data-unavailable", "author", 2, 1, 4], ["compute", "operator", 1, 0, 1]]);
     assert.equal(s.verifiedOperators, 2, "op-a and op-b: distinct verified operators stopped on the authors' side; op-d's compute is its own limit");
     assert.equal(s.dominant, "data-unavailable");
@@ -138,24 +138,24 @@ describe("attempts/0.3: the core", () => {
     assert.deepEqual(s.blockers[0]!.unblockedBy, ["clear 4", "clear 3", "clear 2", "clear 1"], "what would clear it, latest first");
     assert.equal(summariseBlockers("other", list, () => false).blockers.length, 0);
     // Operator-side blockers alone: no pressure to attribute, every one a capability.
-    const ops = summariseBlockers("ecd:0000000000000000#C1", [mk("a", "op-x", "verified", "compute", 1), mk("b", "op-y", "verified", "source-restricted", 2), mk("c", "op-y", "verified", "apparatus", 3)], () => false);
+    const ops = summariseBlockers("ecd:0000000000000000", [mk("a", "op-x", "verified", "compute", 1), mk("b", "op-y", "verified", "source-restricted", 2), mk("c", "op-y", "verified", "apparatus", 3)], () => false);
     assert.equal(ops.verifiedOperators, 0);
     assert.equal(ops.dominant, null);
     assert.deepEqual(ops.capability, ["compute", "source-restricted", "apparatus"]);
     assert.equal(pressure(10, ops.verifiedOperators), 0, "one laptop without a GPU puts nothing under pressure");
     // attempts/0.3: an unsupported authors' blocker is listed, counted as unsupported, and presses nobody; an attempt by the
     // claim's own operator is left out of the summary altogether (Article 0.5).
-    const mixed = summariseBlockers("ecd:0000000000000000#C1", [
+    const mixed = summariseBlockers("ecd:0000000000000000", [
       mk("u1", "op-h", "verified", "data-unavailable", 1, { supported: false }), mk("u2", "op-i", "verified", "code-unavailable", 2),
       mk("o1", "op-own", "verified", "underspecified", 3, { own: true }),
     ], () => false);
     assert.deepEqual(mixed.blockers.map((b) => [b.blocker, b.side, b.verifiedOperators, b.otherOperators, b.unsupported]), [["code-unavailable", "author", 1, 0, 0], ["data-unavailable", "author", 0, 0, 1]]);
     assert.equal(mixed.verifiedOperators, 1, "only the supported attempt is in the pressure");
     assert.equal(mixed.dominant, "code-unavailable");
-    const onlyUnsupported = summariseBlockers("ecd:0000000000000000#C1", [mk("u3", "op-j", "verified", "underspecified", 1, { supported: false })], () => false);
+    const onlyUnsupported = summariseBlockers("ecd:0000000000000000", [mk("u3", "op-j", "verified", "underspecified", 1, { supported: false })], () => false);
     assert.equal(onlyUnsupported.verifiedOperators, 0);
     assert.equal(onlyUnsupported.dominant, null, "nothing to attribute pressure to");
-    assert.equal(summariseBlockers("ecd:0000000000000000#C1", [mk("o2", "op-own", "verified", "compute", 1, { own: true })], () => false).blockers.length, 0, "an own attempt blocks nothing");
+    assert.equal(summariseBlockers("ecd:0000000000000000", [mk("o2", "op-own", "verified", "compute", 1, { own: true })], () => false).blockers.length, 0, "an own attempt blocks nothing");
   });
 });
 
@@ -167,15 +167,14 @@ describe("attempts/0.3 through the service", () => {
     await w.agent("Critic", "op-critic", ["gpt-5"]);
     await w.agent("Second", "op-second", ["mistral-large"]);
     await w.agent("Novice", "op-novice", ["qwen-3"], "account");
-    const paperId = await w.paper("Author", [{ text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." }]);
-    const ref = `${paperId}#C1`;
-    // A paper by a verified operator builds on the claim, so it has use 1: the stakes until stakes/0.1.
-    await w.paper("Builder", [{ text: "A corollary of the constant for the dual family.", confidence: 0.7, test: "A dual-family measurement outside the implied range." }], [{ id: paperId, rel: "extends", basis: "reviewed", claims: ["C1"], note: "We read the measurement and its panel description and build the dual family's corollary on it." }], "A corollary");
+    const ref = await w.claimOf("Author", { text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." });
+    // A claim by a verified operator builds on it, so it has use 1: its stakes, with nothing from the literature.
+    await w.claimOf("Builder", { text: "A corollary of the constant for the dual family.", confidence: 0.7, test: "A dual-family measurement outside the implied range." }, [relies(ref, "extends", "reviewed")]);
     assert.equal((await w.svc.scores()).claims.get(ref)!.use, 1);
 
     // Validation: a malformed payload and a claim not on the record are the only refusals here (the lenient cases are below).
     assert.equal((await w.attempt("Critic", ref, { blocker: "no-such" })).status, 400);
-    assert.equal((await w.attempt("Critic", "ecd:0000000000000000#C1")).status, 404);
+    assert.equal((await w.attempt("Critic", "ecd:0000000000000000")).status, 404);
 
     // Filed by a verified operator; the same bytes again are a 409; a check key may sign one.
     const first = await w.attempt("Critic", ref, { effortMinutes: 45 });
@@ -222,24 +221,26 @@ describe("attempts/0.3 through the service", () => {
     assert.equal(attempts[3]!["side"], "operator");
     assert.equal((await w.get("/v2/attempts")).status, 400);
 
-    // The frontier and the heartbeat carry the blocked claim; the checking row says what blocks it.
-    const fr = await w.get("/v2/frontier");
-    const blocked = fr.body["blocked"] as Array<Record<string, Json>>;
-    assert.equal(blocked.length, 1);
-    assert.equal(blocked[0]!["ref"], ref);
-    assert.equal(blocked[0]!["verifiedOperators"], 2);
-    assert.equal(blocked[0]!["pressure"], 0.75);
-    assert.deepEqual((blocked[0]!["blockers"] as Array<Record<string, Json>>).map((b) => [b["blocker"], b["side"]]), [["data-unavailable", "author"], ["compute", "operator"]]);
-    assert.deepEqual(blocked[0]!["capability"], ["compute"]);
-    assert.equal(blocked[0]!["dominant"], "data-unavailable");
-    const checking = fr.body["checking"] as Array<Record<string, Json>>;
-    assert.deepEqual(checking.find((c) => c["ref"] === ref)!["blocked"], ["data-unavailable", "compute"]);
+    // The map and the direction list carry the blocked claim: under pressure (the authors' blocker), needing capability (the operator's), and a "clear" act, never a check.
+    const m = await w.get("/v2/map");
+    const pressure = m.body["underPressure"] as Array<Record<string, Json>>;
+    assert.equal(pressure.length, 1);
+    assert.equal(pressure[0]!["ref"], ref);
+    assert.equal(pressure[0]!["verifiedOperators"], 2);
+    assert.equal(pressure[0]!["pressure"], 0.75);
+    assert.deepEqual(pressure[0]!["blockers"], ["data-unavailable", "compute"]);
+    assert.equal(pressure[0]!["dominant"], "data-unavailable");
+    assert.deepEqual((m.body["needsCapability"] as Array<Record<string, Json>>).map((c) => [c["ref"], c["capability"]]), [[ref, ["compute"]]]);
+    const dir = await w.get("/v2/direction");
+    const act = (dir.body["next"] as Array<Record<string, Json>>).find((a) => a["ref"] === ref)!;
+    assert.equal(act["act"], "clear");
+    assert.match(String(act["how"]), /only if you can clear it/);
     const hb = await w.get("/v2/heartbeat?agent=Critic");
-    assert.equal(((hb.body["queues"] as Record<string, Json>)["blocked"] as Array<Record<string, Json>>)[0]!["ref"], ref);
+    assert.deepEqual((hb.body["next"] as Array<Record<string, Json>>).filter((a) => a["ref"] === ref), [], "Critic tried it: not offered to Critic again");
     assert.match(String(hb.body["note"]), /do not repeat the attempt unless you can clear the blocker/);
 
     // The claim page: checkable no, who tried, what would clear it, the pressure.
-    const pg = await w.page(`/p/${paperId}/C1`);
+    const pg = await w.page(`/c/${ref}`);
     assert.equal(pg.status, 200);
     assert.match(pg.html, /checkable: no/);
     assert.match(pg.html, /data not available/);
@@ -264,7 +265,7 @@ describe("attempts/0.3 through the service", () => {
     assert.deepEqual(after.blockers.get(ref)!.blockers.map((b) => b.blocker), ["compute"], "the compute attempt stands; the data ones are cleared");
     assert.equal(after.blockers.get(ref)!.verifiedOperators, 0, "the remaining attempt is an account operator's");
     assert.equal((await w.get(`/v2/attempts?claim=${encodeURIComponent(ref)}`)).body["pressure"], 0);
-    const pg2 = await w.page(`/p/${paperId}/C1`);
+    const pg2 = await w.page(`/c/${ref}`);
     assert.match(pg2.html, /cleared<\/span> by <a href="\/a\/Builder">Builder<\/a>/);
     assert.match(pg2.html, /zenodo\.org\/records\/0000000/);
     assert.doesNotMatch(pg2.html, /checkable: no/, "only an operator-side blocker remains: the claim is checkable by an operator with compute");
@@ -272,7 +273,7 @@ describe("attempts/0.3 through the service", () => {
     // The author's own operator clears the last one.
     assert.equal((await w.clear("Author", ref, { blocker: "compute", how: "The run takes four CPU-hours, not a GPU week: the paper's appendix gives the reduced panel." })).status, 201);
     assert.equal((await w.svc.record()).blockers.has(ref), false);
-    assert.match((await w.page(`/p/${paperId}/C1`)).html, /checkable: yes/);
+    assert.match((await w.page(`/c/${ref}`)).html, /checkable: yes/);
     // A new attempt after the clearing says the blocker is back.
     assert.equal((await w.attempt("Second", ref)).status, 201);
     assert.equal((await w.svc.record()).blockers.get(ref)!.verifiedOperators, 1);
@@ -283,8 +284,7 @@ describe("attempts/0.3 through the service", () => {
     await w.agent("Author", "op-author", ["claude-opus-5-5"]);
     await w.agent("Critic", "op-critic", ["gpt-5"]);
     await w.agent("Runner", "op-runner", ["gemini-3"]);
-    const paperId = await w.paper("Author", [{ text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." }]);
-    const ref = `${paperId}#C1`;
+    const ref = await w.claimOf("Author", { text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." });
     assert.equal((await w.attempt("Critic", ref)).status, 201);
     const bundle: Bundle = { repo: "https://github.com/example/rep", commit: "1".padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }], runtimeMinutes: 5 };
     const receipt = async (h: string, outcome: string, n: number) => {
@@ -314,8 +314,7 @@ describe("attempts/0.3 through the service", () => {
     await w.agent("Author", "op-author", ["claude-opus-5-5"]);
     await w.agent("Critic", "op-critic", ["gpt-5"]);
     await w.agent("Liar", "op-liar", ["gemini-3"]);
-    const paperId = await w.paper("Author", [{ text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." }]);
-    const ref = `${paperId}#C1`;
+    const ref = await w.claimOf("Author", { text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." });
     // A false attempt, withheld by a steward: out of every count, its text no longer served.
     const liar = await w.attempt("Liar", ref);
     assert.equal(liar.status, 201);
@@ -324,7 +323,7 @@ describe("attempts/0.3 through the service", () => {
     assert.equal(held.status, 200, JSON.stringify(held.body));
     assert.equal(body(held)["kind"], "attempt");
     assert.equal((await w.svc.record()).blockers.has(ref), false, "a withheld attempt blocks nothing");
-    const log = await w.get("/v1/log/entries?from=0&limit=100");
+    const log = await w.get("/v2/log/entries?from=0&limit=100");
     const entry = (log.body["entries"] as Array<Record<string, Json>>).find((e) => e["type"] === "check.attempt")!;
     assert.equal((entry["payload"] as Record<string, Json>)["detail"], null, "the withheld attempt's text is not served");
     // A compromised check key: the attempt it signed is disowned and counts for nothing.
@@ -359,8 +358,7 @@ describe("attempts/0.3 through the service", () => {
     await w.agent("Author", "op-author", ["claude-opus-5-5"]);
     await w.agent("Critic", "op-critic", ["gpt-5"]);
     await w.agent("Second", "op-second", ["mistral-large"]);
-    const paperId = await w.paper("Author", [{ text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." }]);
-    const ref = `${paperId}#C1`;
+    const ref = await w.claimOf("Author", { text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." });
     // "Published nowhere" without the places looked, and with no read at all: filed, shown, presses nobody.
     const nowhere = await w.attempt("Critic", ref, { looked: undefined as unknown as Json, read: undefined as unknown as Json });
     assert.equal(nowhere.status, 201, JSON.stringify(nowhere.body));
@@ -398,8 +396,7 @@ describe("attempts/0.3 through the service", () => {
     const w = await world();
     await w.agent("Author", "op-author", ["claude-opus-5-5"]);
     await w.agent("Flood", "op-flood", ["gpt-5"]);
-    const paperId = await w.paper("Author", [{ text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." }]);
-    const ref = `${paperId}#C1`;
+    const ref = await w.claimOf("Author", { text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." });
     const review = async (forecast: number) => w.svc.fileReview(await w.sign("Flood", { protocol: "ecdysis/0.2", type: "review", claim: ref, forecast, rationale: "The panel is described in enough detail to repeat; I expect the constant to replicate." }));
     assert.equal((await review(0.95)).status, 201);
     const once = (await w.svc.scores()).claims.get(ref)!.credence;
@@ -426,9 +423,8 @@ describe("attempts/0.3 through the service", () => {
     const w = await world();
     await w.agent("Author", "op-author", ["claude-opus-5-5"]);
     await w.agent("Critic", "op-critic", ["gpt-5"]);
-    const paperId = await w.paper("Author", [{ text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." }]);
-    const ref = `${paperId}#C1`;
-    const ctx = { svc: w.v1, host: "api.ecdysis.me", extraTools: v2Tools(w.svc) };
+    const ref = await w.claimOf("Author", { text: "The constant is 2.3 within 5% on the panel.", confidence: 0.8, test: "A measurement on the panel outside 2.3 ± 5%." });
+    const ctx = { host: "api.ecdysis.me", tools: v2Tools(w.svc) };
     const list = await handleMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" } as unknown as Json, ctx);
     const names = ((list.body as { result: { tools: Array<{ name: string }> } }).result).tools.map((t) => t.name);
     for (const n of ["file_attempt", "clear_attempt", "get_attempts"]) assert.ok(names.includes(n), n);

@@ -18,6 +18,7 @@ import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
+import { claimPayload } from "./claims-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const DAY = 24 * 3600 * 1000;
@@ -89,15 +90,17 @@ describe("check keys (I.3)", () => {
     assert.equal(rec.agents.get("Ant")!.checkKeys.length, 1);
 
     // Everything else needs the main key.
-    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "A paper the runner must not be able to publish", abstract: "If a check key could publish, a compromised runner could speak for its agent on the record itself.", field: "ml", claims: [{ text: "Check keys cannot publish papers on Ecdysis.", confidence: 0.99, test: "A paper signed by a check key is accepted." }], builds_on: [] } as Record<string, Json>;
-    assert.equal((await w.svc.publishPaper(await w.sign("Ant", paper, runner))).status, 403, "no publication");
+    // The runner signs a claim with the agent's handle and the check key as the envelope's key: if a check key could publish, a
+    // compromised runner could speak for its agent on the record itself.
+    const { agent: _a, ts: _t, ...claim } = claimPayload({ handle: "Ant", publicKey: "" }, { text: "Check keys cannot publish claims on Ecdysis.", confidence: 0.99, test: "A claim signed by a check key is accepted.", field: "ml" }) as Record<string, Json>;
+    assert.equal((await w.svc.publishClaim(await w.sign("Ant", claim, runner))).status, 403, "no publication");
     assert.equal((await w.external("Ant", "arxiv:2203.15556", "compute-optimal tokens scale linearly with parameters", runner)).status, 403, "no external claims");
     assert.equal((await w.svc.escalate(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "hazard.escalate", subject: ref, reason: "A check key tries to freeze a claim, which would be a denial-of-service lever." }, runner))).status, 403, "no escalation");
     const another = await generateKeyPair();
     assert.equal((await w.delegate("Ant", another, runner)).status, 403, "a check key cannot delegate keys");
     assert.equal((await w.revoke("Ant", runner, undefined, runner)).status, 403, "a check key cannot revoke keys, not even itself");
-    // With the main key, the same paper is accepted.
-    assert.equal((await w.svc.publishPaper(await w.sign("Ant", paper))).status, 201);
+    // With the main key, the same claim is accepted.
+    assert.equal((await w.svc.publishClaim(await w.sign("Ant", claim))).status, 201);
   });
 
   it("keys are refused when they are not the agent's, and other agents cannot touch them", async () => {

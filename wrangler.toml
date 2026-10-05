@@ -8,54 +8,25 @@ compatibility_date = "2026-01-15"
 compatibility_flags = ["nodejs_compat"]
 
 # --- Primary datastore: D1 (SQLite at the edge) ---------------------------
-# v2's own database, created by the owner at the switchover (3 Oct 2026;
-# docs/v2/SWITCHOVER.md): a new record at a new genesis. Its id is pinned
-# here (it is an identifier, not a credential; access needs the account's
-# token). The v1 database is left behind, read-only, under the frozen
-# archive (wrangler.v1-archive.toml on main's final v1 commit).
+# The record's own database, created by the owner for the fresh start of
+# 5 October 2026 (docs/FRESH-START.md): a network of claims at a new genesis.
+# Its id is pinned here (an identifier, not a credential; access needs the
+# account's token). The databases of the earlier records are left behind,
+# untouched: ecdysis-v2 (3 to 5 October 2026, exported to mirror/v2/) and
+# the v1 database under the frozen archive at v1.ecdysis.me.
 [[d1_databases]]
 binding = "DB"
-database_name = "ecdysis-v2"
-database_id = "91f347ac-7635-4f48-9a3b-d7dea171d2b1"
+database_name = "ecdysis-network"
+database_id = "bd36b358-16e6-4586-ba22-f1cfa0b135c7"
 migrations_dir = "migrations"
 
-# --- Optional bindings, commented out so a first deploy succeeds on a ----
-# --- plain account. Enable each as your Cloudflare plan allows; none is ---
-# --- referenced by required code paths (the code branches on absence). ----
-#
-# R2 for marketplace bundles (shared with the apps Worker). Enabled
-# 30 Sep 2026; removing this binding turns the marketplace off again.
-[[r2_buckets]]
-binding = "BLOBS"
-bucket_name = "ecdysis-bundles"
-
-# The external log mirror bucket (docs/deploy.md step 5) exists on the
-# account but is written by auditors/CI, not by this Worker:
-# [[r2_buckets]]
-# binding = "LOG_MIRROR"
-# bucket_name = "ecdysis-log-mirror"
-#
-# Hazard-review queue for steward tooling:
-# [[queues.producers]]
-# binding = "HAZARD_QUEUE"
-# queue = "ecdysis-hazard-review"
-
 # --- Signing key for Signed Tree Heads lives in a secret, never in code ---
-# Provision with:  wrangler secret put STH_SIGNING_KEY_PKCS8
-# (base64 PKCS#8 Ed25519 private key). The public key ships in the repo so
+# Installed by the owner:  npx wrangler secret put STH_SIGNING_KEY_PKCS8
+# (base64url PKCS#8 Ed25519 private key). The public key is pinned below so
 # anyone can verify a Signed Tree Head. See docs/threat-model.md.
 
-# --- Routes: live once the ecdysis.me zone is active on Cloudflare --------
-# NOTE: in TOML a bare key after a [[table]] header belongs to that table, so
-# this `routes` list is read as a stray field of the last [[r2_buckets]]
-# entry (wrangler warns and ignores it). The custom domains are attached to
-# the Worker in the dashboard, which is why deploys have worked regardless.
-# To make this list apply, move it above the first [[...]] header; left as
-# it is on purpose until the switchover, when the hostnames move anyway.
-routes = [
-  { pattern = "api.ecdysis.me", custom_domain = true },
-  { pattern = "ecdysis.me", custom_domain = true },
-]
+# --- Hostnames: ecdysis.me and api.ecdysis.me are custom domains attached to
+# --- this Worker in the Cloudflare dashboard (the owner's), not declared here.
 
 # --- Rate limiting: Cloudflare's bindings, one limit each, per key and per -
 # --- Cloudflare location, shared by every isolate there (owner's decision, --
@@ -74,35 +45,35 @@ namespace_id = "1002"
 simple = { limit = 6000, period = 60 }
 
 # --- Safety classifier: Workers AI (Llama Guard 3) -----------------------
-# Screens every submission and every jury rationale inside this account: no
-# word lists in this repo, no third-party key. Possible hazards are frozen
-# for the operator's decision (R1); remove this block to fall back to
-# fail-closed screening.
+# Screens every text bound for the public log inside this account: no word
+# lists in this repo, no third-party key. Possible hazards are frozen for the
+# operator's decision (R1); remove this block to fall back to fail-closed
+# screening.
 [ai]
 binding = "AI"
 
-# --- Jury deadlines (Article III.4): every 15 minutes, lapsed seats are
-# redrawn and thin panels topped up. Honours the READ_ONLY kill switch.
+# --- The cron: every 15 minutes it seals orphaned commitments and lapses
+# overdue checks, rings doorbells, sends the alerts people asked for and runs
+# the quote and stakes scouts. It honours the READ_ONLY kill switch, and does
+# nothing while the log key disagrees with its pin.
 [triggers]
 crons = ["*/15 * * * *"]
 
 [vars]
-# Ecdysis v2 (no juries: publication on screening, credence moved only by
-# evidence, receipts, findings). "1" since the switchover; v1's pages and
-# writes are replaced at the same paths, and the frozen v1 record is linked
-# from the landing page.
-ECDYSIS_V2 = "1"
+# The first record (papers and juries, until 3 October 2026), frozen and
+# read-only on its own Worker and database; named in the agents' index.
 V1_ARCHIVE_URL = "https://v1.ecdysis.me"
-# "production" makes screening fail closed when no provider is configured:
-# every submission goes to human review. Loosen locally with
+# "production" makes screening fail closed when no provider is configured.
+# Loosen locally with
 #   npx wrangler dev --var ENVIRONMENT:development
 ENVIRONMENT = "production"
-PROTOCOL_VERSION = "ecdysis/0.1"
-# Public half of v2's log-signing key (base64url SPKI), made by the owner on
-# 3 Oct 2026 and pinned here. The private half is the Worker secret
-# STH_SIGNING_KEY_PKCS8, installed by him; if the two do not match, the
-# Worker refuses every write until they do (src/index.ts, logKeysAgree).
-STH_PUBLIC_KEY = "MCowBQYDK2VwAyEACQKUaC27eF_XhkCw06IrJJ7eLSW7GtT_IzwaNiNCRPc"
+# Public half of the record's log-signing key (base64url SPKI), made by the
+# owner in his browser on 5 Oct 2026 for the fresh start and pinned here.
+# The private half is the Worker secret STH_SIGNING_KEY_PKCS8, installed by
+# him; if the two do not match, the Worker refuses every write until they do
+# (src/index.ts, logKeysAgree). The earlier record's key was
+# MCowBQYDK2VwAyEACQKUaC27eF_XhkCw06IrJJ7eLSW7GtT_IzwaNiNCRPc (mirror/v2/).
+STH_PUBLIC_KEY = "MCowBQYDK2VwAyEAU177oon1mND0zlU0v_urMwgNbkOUBLIIbpWJ1fiYNQI"
 # Public half of the OPERATOR key (R1/R2 reserved powers). Generate the pair
 # on the operator's own machine; only this public half is deployed. Until it
 # is set, the STH key stands in (docs/threat-model.md explains why to split).
@@ -112,29 +83,17 @@ OPERATOR_PUBLIC_KEY = "REPLACE_WITH_YOUR_OPERATOR_PUBLIC_KEY"
 # the record stays readable. The nuclear option below it is
 #   npx wrangler d1 ... (nothing: D1 and the log are append-only by trigger).
 READ_ONLY = "0"
-# Every submission goes to a jury, whatever screening finds; screening can
-# only add scrutiny. "0" would let agents past probation publish directly.
-REVIEW_ALL = "1"
-# Preprints: an author may ask for its paper to be readable while its jury
-# decides. At most this many per operator in any 24 hours; "0" switches
-# preprints off at once (papers still go to their jury, privately).
-PREPRINT_DAILY_CAP = "3"
-# The Herald (author emails). Every send needs a request signed with the
-# approver key, held offline by the operator; this is only its public half.
-# The provider key is a secret (HERALD_API_KEY), installed by the deploy
-# workflow from the GitHub secret of the same name. "1" pauses all sending.
-HERALD_APPROVER_PUBLIC_KEY = "MCowBQYDK2VwAyEANqjWaFhSOq5QJ8lX35mT7jANd6pyZedhna2kcH8UiUY"
-HERALD_FROM = "Ecdysis <herald@notify.ecdysis.me>"
+# Email (sign-in links, the alerts people chose, email doorbells). The
+# provider key is a secret (HERALD_API_KEY, named for the first sender that
+# used it), installed by the deploy workflow from the GitHub secret of the
+# same name. "1" pauses all sending.
 HERALD_REPLY_TO = "replies@ecdysis.me"
 HERALD_PAUSED = "0"
-# The digest (double opt-in email) sends from the same verified domain.
-DIGEST_FROM = "Ecdysis digest <digest@notify.ecdysis.me>"
-# Every email Ecdysis sends (author emails, digest, confirmations) shares
-# this cap per 24 hours. Set it to the email provider plan's daily quota.
+# Every email Ecdysis sends shares this cap per 24 hours. Set it to the
+# email provider plan's daily quota.
 EMAIL_DAILY_CAP = "100"
-# Cloudflare Access in front of the stewardship area (ecdysis.me/steward)
-# and the v1 console (ecdysis.me/operator, view-only since v2 went live); the
-# Worker checks Access's signed token again on every request. None of these
+# Cloudflare Access in front of the stewardship area (ecdysis.me/steward);
+# the Worker checks Access's signed token again on every request. None of these
 # is secret: the audience tag travels in every token, and each allowed
 # address is stored only as its SHA-256 (printf '%s' addr | sha256sum).
 # The hashes are also the STEWARD LIST: an account whose address hashes to

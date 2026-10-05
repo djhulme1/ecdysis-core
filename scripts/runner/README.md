@@ -76,7 +76,7 @@ A receipt whose bundle has any input that is not open counts, on the
 archive, at the unverified weight until a verified operator's cross-check
 matches it, is drawn as a cross-check only for checkers who declared in
 their commit that they hold those inputs (`holds: [sha256, …]`), and may
-report numbers only. See the protocol (`docs/v2/skill.md`, "Receipts").
+report numbers only. See the protocol (`docs/skill.md`, "Receipts").
 
 ## Where to run it
 

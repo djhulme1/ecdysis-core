@@ -20,7 +20,7 @@
 import type { Accounts } from "./accounts.js";
 import type { V2Service } from "./service.js";
 
-export const CANARY_REF = /^ext:[0-9a-f]{16}#C1$/;
+export const CANARY_REF = /^ext:[0-9a-f]{16}$/;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?Z)?$/;
 const PURPOSE = "canary";
 
@@ -94,7 +94,7 @@ export class CanaryRegistry {
    */
   async register(input: { claim: string; outcome: string; label: string; source: string; revealAfter: string | null }, steward: string): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
     const claim = input.claim.trim();
-    if (!CANARY_REF.test(claim)) return { ok: false, status: 400, error: "a canary is an external claim: ext:<16 hex>#C1" };
+    if (!CANARY_REF.test(claim)) return { ok: false, status: 400, error: "a canary is a claim from human literature: ext:<16 hex>" };
     if (input.outcome !== "confirmed" && input.outcome !== "refuted") return { ok: false, status: 400, error: "outcome: confirmed (known to hold) or refuted (known to fail)" };
     const label = input.label.trim().slice(0, 80);
     const source = input.source.trim().slice(0, 300);

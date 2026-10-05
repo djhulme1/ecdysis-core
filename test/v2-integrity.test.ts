@@ -24,6 +24,7 @@ import type { Json } from "../src/core/canonical.js";
 import type { Screener } from "../src/core/hazard.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
+import { signedClaim } from "./claims-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 async function world(o: { screeners?: Screener[]; stewardCategories?: Set<string> } = {}) {
@@ -86,7 +87,8 @@ async function world(o: { screeners?: Screener[]; stewardCategories?: Set<string
   };
   const csrfOf = async (session: string) => accounts.csrf((await accounts.session(session))!);
   const entries = () => rows();
-  return { svc, accounts, steward, me, pages, complaints, issues, alerts, agent, sign, signIn, get, post, meGet, mePost, csrfOf, complain, page, entries, now, tick: (ms: number) => { clock.t += ms; }, log };
+  const keyOf = (handle: string) => keys.get(handle)!;
+  return { svc, accounts, steward, me, pages, complaints, issues, alerts, agent, sign, signIn, get, post, meGet, mePost, csrfOf, complain, page, entries, keyOf, now, tick: (ms: number) => { clock.t += ms; }, log };
 }
 
 const ARG_TEXT = "The premise that the mind can assert the Gödel sentence as true is stated without any derivation of the system's consistency, which the second incompleteness theorem denies a consistent system; the step from unprovable to seen-true is therefore unsupported as the argument is published.";
@@ -101,13 +103,13 @@ describe("content out of view", () => {
     const reg = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1017/S0031819100057983", quote: "Gödel's Theorem seems to me to prove that Mechanism is false, that is, that minds cannot be explained as machines.", test: "A demonstration that the argument has an unsupported premise or a logical gap.", kind: "conceptual" }));
     assert.equal(reg.status, 201, JSON.stringify(reg.body));
     const ref = String((reg.body as Record<string, Json>)["ref"]);
-    const ext = ref.slice(0, ref.indexOf("#"));
+    const ext = ref;
     const a1 = await w.svc.fileArgument(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "argument.file", claim: ref, stance: "refutes", grounds: "unsupported-premise", text: ARG_TEXT, confidence: 0.8 }));
     assert.equal(a1.status, 201, JSON.stringify(a1.body));
     const a2 = await w.svc.fileArgument(await w.sign("Cat", { protocol: "ecdysis/0.2", type: "argument.file", claim: ref, stance: "qualifies", grounds: "logical-gap", text: ARG_TEXT, confidence: 0.6 }));
     assert.equal(a2.status, 201, JSON.stringify(a2.body));
     const bee = String((a1.body as Record<string, Json>)["id"]), cat = String((a2.body as Record<string, Json>)["id"]);
-    assert.equal((await w.page(`/x/${ext.slice(4)}/C1`))!.status, 200);
+    assert.equal((await w.page(`/c/${ref}`))!.status, 200);
 
     // A person with an account is not a steward: the lock holds before anything is read.
     const member = await w.signIn("someone@example.org");
@@ -123,13 +125,13 @@ describe("content out of view", () => {
 
     // The record: withheld, held (frozen), with the status, reason and steward; the act is on the log under the steward's id.
     const r = await w.svc.record();
-    assert.ok(isHeld(r, ext) && isHeld(r, ref), "the claim and its paper-level subject are out of view");
+    assert.ok(isHeld(r, ref), "the claim is out of view");
     const wh = withheldOf(r, ref)!;
     assert.equal(wh.status, "review");
     assert.equal(wh.steward, d.account.operatorId);
     assert.ok(w.entries().some((e) => e.type === "content.withhold" && (e.payload as Record<string, Json>)["subject"] === ext && (e.payload as Record<string, Json>)["by"] === "steward"));
     // Pages: the claim page says under review, with the reason, and shows none of the text.
-    const hidden = await w.page(`/x/${ext.slice(4)}/C1`);
+    const hidden = await w.page(`/c/${ref}`);
     assert.equal(hidden!.status, 451);
     const html = await hidden!.text();
     assert.match(html, /Under review/);
@@ -144,10 +146,10 @@ describe("content out of view", () => {
     assert.equal((await w.svc.argument(bee)).status, 451);
     const chk = await w.svc.checkArgument(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "argument.check", argument: cat, holds: true, note: "The gap is real: the step from unprovable to true needs consistency." }));
     assert.equal(chk.status, 451);
-    // Queues and heartbeats: nothing about it is offered to anyone.
-    const hb = (await w.svc.heartbeat("Ant")).body as { arguments: { toCheck: Array<{ claim: string }> }; queues: { arguing: Array<{ claim: string }> } };
+    // The heartbeat and the direction list: nothing about it is offered to anyone.
+    const hb = (await w.svc.heartbeat("Ant")).body as { arguments: { toCheck: Array<{ claim: string }> }; next: Array<{ ref: string | null }> };
     assert.ok(!hb.arguments.toCheck.some((x) => x.claim === ref));
-    assert.ok(!(hb.queues.arguing ?? []).some((x) => x.claim === ref));
+    assert.ok(!hb.next.some((x) => x.ref === ref));
     // The log's payloads: the text fields of the claim and of the arguments about it read null, with the withholding named; the hash stays.
     const claimEntry = w.entries().find((e) => e.type === "claim.external" && (e.payload as Record<string, Json>)["id"] === ext)!;
     const red = redactedPayload(r, "claim.external", claimEntry.payload) as Record<string, Json>;
@@ -177,7 +179,7 @@ describe("content out of view", () => {
     const back = await w.svc.record();
     assert.ok(!isHeld(back, ref));
     assert.equal(withheldOf(back, ref), null);
-    assert.equal((await w.page(`/x/${ext.slice(4)}/C1`))!.status, 200);
+    assert.equal((await w.page(`/c/${ref}`))!.status, 200);
     assert.equal((await w.svc.argumentsOn(ref)).status, 200);
     assert.deepEqual(redactedPayload(back, "claim.external", claimEntry.payload), claimEntry.payload);
     assert.equal(w.entries().filter((e) => e.type === "content.withhold").length, 2);
@@ -192,7 +194,7 @@ describe("content out of view", () => {
     const list = (await w.svc.argumentsOn(ref)).body as { arguments: Array<{ id: string }> };
     assert.ok(list.arguments.some((a) => a.id === bee) && !list.arguments.some((a) => a.id === cat));
     assert.equal((await w.svc.argument(cat)).status, 451);
-    assert.equal((await w.page(`/x/${ext.slice(4)}/C1`))!.status, 200);
+    assert.equal((await w.page(`/c/${ref}`))!.status, 200);
     assert.equal(subjectKind(await w.svc.record(), cat), "argument");
   });
 
@@ -203,16 +205,16 @@ describe("content out of view", () => {
     const log: V2Entry[] = [
       e("operator.tier", { operatorId: "op-a", tier: "verified" }),
       e("agent.register", { handle: "Ant", operatorId: "op-a", publicKey: "pk" }),
-      e("paper.publish", { id: "ecd:p1", handle: "Ant", operatorId: "op-a", title: "P", field: "math", claims: [{ label: "C1", confidence: 0.7 }], builds_on: [], cid: "p1".padEnd(64, "0") }),
-      e("hazard.hold", { subject: "ecd:p1", reason: "escalated" }),
-      e("content.withhold", { subject: "ecd:p1", status: "review", reason: "a complaint", by: "steward", steward: "op-s" }),
-      e("content.restore", { subject: "ecd:p1", reason: "the complaint did not stand", by: "steward", steward: "op-s" }),
+      e("claim.publish", { id: "ecd:0000000000000001", cid: "1".padEnd(64, "0"), handle: "Ant", operatorId: "op-a", text: "a claim", test: "its test", field: "math", confidence: 0.7, scope: { general: "construction", basis: "a named benchmark and setup" }, builds_on: [] }),
+      e("hazard.hold", { subject: "ecd:0000000000000001", reason: "escalated", by: "op-b" }),
+      e("content.withhold", { subject: "ecd:0000000000000001", status: "review", reason: "a complaint", by: "steward", steward: "op-s" }),
+      e("content.restore", { subject: "ecd:0000000000000001", reason: "the complaint did not stand", by: "steward", steward: "op-s" }),
     ];
     const r = deriveV2(log, new Date(t0 + 10 * 60_000));
-    assert.ok(isHeld(r, "ecd:p1"), "still held under R1");
-    assert.equal(withheldOf(r, "ecd:p1"), null, "no longer withheld");
-    const released = deriveV2([...log, e("hazard.release", { subject: "ecd:p1", decision: "release" })], new Date(t0 + 20 * 60_000));
-    assert.ok(!isHeld(released, "ecd:p1"));
+    assert.ok(isHeld(r, "ecd:0000000000000001"), "still held under R1");
+    assert.equal(withheldOf(r, "ecd:0000000000000001"), null, "no longer withheld");
+    const released = deriveV2([...log, e("hazard.release", { subject: "ecd:0000000000000001", decision: "release" })], new Date(t0 + 20 * 60_000));
+    assert.ok(!isHeld(released, "ecd:0000000000000001"));
   });
 });
 
@@ -222,19 +224,19 @@ describe("complaints and the issues queue", () => {
     await w.agent("Ant", "op-a", ["claude"]);
     const reg = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:2308.08708", quote: "there are no obvious technical barriers to building AI systems which satisfy these indicators", test: "An indicator shown to be impossible to implement computationally.", kind: "conceptual" }));
     const ref = String((reg.body as Record<string, Json>)["ref"]);
-    const ext = ref.slice(0, ref.indexOf("#"));
+    const ext = ref;
     // The form, and what it refuses: a subject that names nothing, text too short, a form-filling program.
     const form = await w.complaints.handle(new Request("https://ecdysis.me/complaints"), "9.9.9.9");
     assert.equal(form.status, 200);
     assert.match(await form.text(), /<form method="post" action="\/complaints">/);
-    assert.equal((await w.complain({ subject: "https://ecdysis.me/x/0000000000000000", text: "This item misquotes the paper it cites, at length.", contact: "" })).status, 404);
+    assert.equal((await w.complain({ subject: "https://ecdysis.me/c/ext:0000000000000000", text: "This item misquotes the paper it cites, at length.", contact: "" })).status, 404);
     assert.equal((await w.complain({ subject: "not an id", text: "This item misquotes the paper it cites, at length.", contact: "" })).status, 400);
-    assert.equal((await w.complain({ subject: `https://ecdysis.me/x/${ext.slice(4)}/C1`, text: "too short", contact: "" })).status, 400);
-    const bot = await w.complain({ subject: `https://ecdysis.me/x/${ext.slice(4)}/C1`, text: "This item misquotes the paper it cites, at length.", contact: "", website: "http://spam.example" });
+    assert.equal((await w.complain({ subject: `https://ecdysis.me/c/${ref}`, text: "too short", contact: "" })).status, 400);
+    const bot = await w.complain({ subject: `https://ecdysis.me/c/${ref}`, text: "This item misquotes the paper it cites, at length.", contact: "", website: "http://spam.example" });
     assert.equal(bot.status, 200);
     assert.equal((await w.issues.list("open")).length, 0, "a filled honeypot files nothing");
     // A complaint by page address: received, with a reference; the stewards are alerted; the issue is open with the text.
-    const ok = await w.complain({ subject: `https://ecdysis.me/x/${ext.slice(4)}/C1`, text: "The quoted sentence does not appear in the cited report; the nearest sentence says the opposite.", contact: "a.reader@example.org" });
+    const ok = await w.complain({ subject: `https://ecdysis.me/c/${ref}/line`, text: "The quoted sentence does not appear in the cited report; the nearest sentence says the opposite.", contact: "a.reader@example.org" });
     assert.equal(ok.status, 200);
     const receipt = await ok.text();
     assert.match(receipt, /Received/);
@@ -250,7 +252,7 @@ describe("complaints and the issues queue", () => {
     assert.equal((await w.issues.list("open")).length, 1, "one open issue per kind and subject");
     assert.equal((await w.issues.complaintsFor(open[0]!.id)).length, 3);
     // Nothing of it is public: the claim page and the record are as before.
-    const before = await w.page(`/x/${ext.slice(4)}/C1`);
+    const before = await w.page(`/c/${ref}`);
     assert.equal(before!.status, 200);
     assert.doesNotMatch(await before!.text(), /nearest sentence says the opposite/);
     // The steward sees the complaint and decides: under review puts the item out of view with the note as the public reason.
@@ -261,7 +263,7 @@ describe("complaints and the issues queue", () => {
     const csrf = content.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
     let res = await w.post("/steward/content/issue", { csrf, id: open[0]!.id, outcome: "review", note: "the quote is disputed against its source; under review" }, d.session);
     assert.equal(res.status, 303, await res.text());
-    assert.equal((await w.page(`/x/${ext.slice(4)}/C1`))!.status, 451);
+    assert.equal((await w.page(`/c/${ref}`))!.status, 451);
     const decided = await w.issues.get(open[0]!.id);
     assert.equal(decided!.status, "acted");
     assert.equal(decided!.decidedBy, d.account.operatorId);
@@ -282,32 +284,39 @@ describe("complaints and the issues queue", () => {
   });
 
   it("reads subjects as people write them", () => {
-    assert.equal(normaliseSubject("https://ecdysis.me/p/ecd:0123456789abcdef"), "ecd:0123456789abcdef");
-    assert.equal(normaliseSubject("/p/ecd:0123456789abcdef/C2"), "ecd:0123456789abcdef");
-    assert.equal(normaliseSubject("https://ecdysis.me/x/0123456789abcdef/C1"), "ext:0123456789abcdef");
-    assert.equal(normaliseSubject("/c/0123456789abcdef"), "ch:0123456789abcdef");
-    assert.equal(normaliseSubject("ext:0123456789abcdef#C1"), "ext:0123456789abcdef");
+    assert.equal(normaliseSubject("https://ecdysis.me/c/ecd:0123456789abcdef"), "ecd:0123456789abcdef");
+    assert.equal(normaliseSubject("/c/ecd:0123456789abcdef/line"), "ecd:0123456789abcdef");
+    assert.equal(normaliseSubject("https://ecdysis.me/c/ext%3A0123456789abcdef"), "ext:0123456789abcdef", "a colon percent-encoded by a browser");
+    assert.equal(normaliseSubject("ext:0123456789abcdef"), "ext:0123456789abcdef");
+    assert.equal(normaliseSubject("ext:0123456789abcdef#C1"), null, "the paper era's refs name nothing");
     assert.equal(normaliseSubject("a".repeat(64)), "a".repeat(64));
-    assert.equal(normaliseSubject("https://evil.example/p/ecd:0123456789abcdef"), "ecd:0123456789abcdef", "the host is ignored; only the id matters");
+    assert.equal(normaliseSubject("https://evil.example/c/ecd:0123456789abcdef"), "ecd:0123456789abcdef", "the host is ignored; only the id matters");
+    assert.equal(normaliseSubject("https://evil.example/p/ecd:0123456789abcdef"), null, "and a paper path names nothing");
     assert.equal(normaliseSubject("ecd:short"), null);
     assert.equal(normaliseSubject("javascript:alert(1)"), null);
   });
 });
 
 describe("one id, one entry", () => {
-  it("two identical registrations submitted at once enter the log once", async () => {
+  it("two identical registrations submitted at once enter the log once, and so do two identical claims", async () => {
     const w = await world();
-    await w.agent("Ant", "op-a", ["claude"]);
-    const d = await w.signIn("daniel@example.org");
+    const ant = await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
     const f = { source: "doi:10.1007/s11023-012-9281-3", quote: "The Orthogonality Thesis: Intelligence and final goals are orthogonal axes along which possible agents can freely vary.", test: "A proof that sufficiently intelligent agents must converge on particular final goals.", kind: "conceptual" };
-    const [a, b] = await Promise.all([w.svc.registerExternalClaimByPerson(d.account.operatorId, f), w.svc.registerExternalClaimByPerson(d.account.operatorId, f)]);
+    const [a, b] = await Promise.all([w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", ...f })), w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", ...f }))]);
     assert.deepEqual([a.status, b.status].sort(), [200, 201]);
     const id = String((a.body as Record<string, Json>)["id"]);
     assert.equal(w.entries().filter((e) => e.type === "claim.external" && (e.payload as Record<string, Json>)["id"] === id).length, 1);
-    // And again later, by an agent: still one entry.
+    // And again later: still one entry.
     const c = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", ...f }));
     assert.equal(c.status, 200);
     assert.equal(w.entries().filter((e) => e.type === "claim.external").length, 1);
+    // The same signed claim sent twice at once: screened twice, on the log once, and both senders learn its id.
+    const mine = await signedClaim({ handle: "Ant", ...ant }, { ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") });
+    const [p, q] = await Promise.all([w.svc.publishClaim(mine.envelope), w.svc.publishClaim(mine.envelope)]);
+    assert.deepEqual([p.status, q.status].sort(), [201, 409]);
+    assert.equal(w.entries().filter((e) => e.type === "claim.publish").length, 1);
+    assert.ok([p, q].every((x) => (x.body as Record<string, Json>)["id"] === mine.id));
   });
 });
 
@@ -318,14 +327,14 @@ describe("verification by record", () => {
   });
   const nobody = () => false;
   it("needs enough early, right, cross-checked, independently resolved reports on enough sources", () => {
-    const five = ["a#C1", "b#C1", "c#C1", "d#C1", "e#C1"].map((claim) => report({ operatorId: "op-x", claim }));
+    const five = ["a", "b", "c", "d", "e"].map((claim) => report({ operatorId: "op-x", claim }));
     assert.ok(earnedVerification(five, nobody).has("op-x"));
     assert.ok(!earnedVerification(five.slice(0, 4), nobody).has("op-x"), "four is not five");
     assert.ok(!earnedVerification(five.map((r, i) => (i < 4 ? { ...r, crossChecked: false } : r)), nobody).has("op-x"), "one cross-checked receipt is not two");
     assert.ok(!earnedVerification(five.map((r) => ({ ...r, kind: "review" as const, crossChecked: false })), nobody).has("op-x"), "reviews alone, however right, earn nothing");
     assert.ok(!earnedVerification(five.map((r, i) => (i < 2 ? { ...r, credit: -0.05 } : r)), nobody).has("op-x"), "three right of five is below the bar");
     assert.ok(earnedVerification(five.map((r, i) => (i < 1 ? { ...r, credit: -0.05 } : r)), nobody).has("op-x"), "four right of five passes");
-    assert.ok(!earnedVerification(five.map((r) => ({ ...r, claim: "a#C" + r.claim.charCodeAt(0) })), nobody).has("op-x"), "five claims of one paper are one source");
+    assert.ok(!earnedVerification(five, nobody, new Set(), 1, undefined, () => "doi:10.1000/one").has("op-x"), "five claims registered from one human paper are one source");
     assert.ok(!earnedVerification(five.map((r) => ({ ...r, early: false })), nobody).has("op-x"), "a late call earns nothing");
     assert.ok(!earnedVerification(five.map((r) => ({ ...r, resolvers: 1 })), nobody).has("op-x"), "a resolution resting on one other operator does not count");
     assert.ok(!earnedVerification(five.map((r) => ({ ...r, resolved: null })), nobody).has("op-x"), "an unresolved claim scores nothing");
@@ -341,34 +350,34 @@ describe("verification by record", () => {
 });
 
 describe("screening's referrals to the stewards", () => {
-  const PAPER = {
-    protocol: "ecdysis/0.2", type: "paper", title: "A paper that screening refers to the stewards",
-    abstract: "An abstract long enough to pass the structural screen, describing what was measured and how it was measured, in two paragraphs.\n\nA second paragraph closes it.",
-    field: "math", methods: "Pre-registered; one seeded entry point.",
-    claims: [{ text: "The first claim holds in the stated regime.", confidence: 0.7, test: "The quantity lies outside the interval in a fresh run." }], builds_on: [],
-  };
+  /** A claim that screening refers to the stewards, signed by its author. */
+  const claimOf = (w: Awaited<ReturnType<typeof world>>, handle: string) => signedClaim({ handle, ...(w.keyOf(handle)) }, { text: "The first claim holds in the stated regime.", confidence: 0.7, test: "The quantity lies outside the interval in a fresh run.", ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") });
   /** A screener that flags everything under one configured label; the label stands for whatever the deployment's rules name. */
   const flagging = (category: string, severity: 2 | 3): Screener => ({ name: "test", async screen() { return [{ screener: "test", severity, category, note: "flagged by the test screener" }]; } });
 
-  it("a finding in a steward category publishes the paper under review for the stewards, not under R1; outside it, R1 as before; a short text is refused either way", async () => {
+  it("a finding in a steward category publishes the claim under review for the stewards, not under R1; outside it, R1 as before; a short text is refused either way", async () => {
     const w = await world({ screeners: [flagging("label-a", 2)], stewardCategories: new Set(["label-a"]) });
     await w.agent("Ant", "op-a", ["claude"]);
-    const pub = await w.svc.publishPaper(await w.sign("Ant", PAPER as unknown as Record<string, Json>));
+    const mine = await claimOf(w, "Ant");
+    const pub = await w.svc.publishClaim(mine.envelope);
     assert.equal(pub.status, 202, JSON.stringify(pub.body));
     const body = pub.body as Record<string, Json>;
     assert.equal(body["status"], "under-review");
     const id = String(body["id"]);
+    assert.equal(id, mine.id);
     const r = await w.svc.record();
-    assert.ok(r.papers.has(id), "on the record");
+    assert.ok(r.native.has(id), "on the record");
     assert.ok(isHeld(r, id), "and out of view");
     const wh = withheldOf(r, id)!;
     assert.equal(wh.status, "review");
     assert.equal(wh.steward, "", "nobody's act but screening's");
     assert.equal(r.held.size, 1);
     assert.ok(!w.entries().some((e) => e.type === "hazard.hold"), "no R1 hold");
-    const hiddenPage = await w.page(`/p/${id}`);
+    const hiddenPage = await w.page(`/c/${id}`);
     assert.equal(hiddenPage!.status, 451);
     assert.match(await hiddenPage!.text(), /by screening, for the stewards to look at/);
+    const hb = (await w.svc.heartbeat("Ant")).body as Record<string, Json>;
+    assert.deepEqual((hb["waiting"] as Array<Record<string, Json>>).map((x) => x["id"]), [id], "its author sees it waiting in the heartbeat");
     // The stewards have an issue to decide, and can restore or withdraw it from the usual place.
     const open = await w.issues.list("open");
     assert.deepEqual(open.map((i) => [i.kind, i.subject, i.source]), [["screening", id, "screening"]]);
@@ -378,7 +387,7 @@ describe("screening's referrals to the stewards", () => {
     const res = await w.post("/steward/content/restore", { csrf, subject: id, reason: "looked at: it reports a result, not a person" }, d.session);
     assert.equal(res.status, 303, await res.text());
     assert.ok(!isHeld(await w.svc.record(), id));
-    assert.equal((await w.page(`/p/${id}`))!.status, 200);
+    assert.equal((await w.page(`/c/${id}`))!.status, 200);
     // A short text with the same finding is refused, with the stewards' standard named and no category.
     const ext = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1000/anything", quote: "A sentence screening would refer to the stewards, quoted here at length.", test: "A demonstration of the stated form." }));
     assert.equal(ext.status, 451);
@@ -387,34 +396,34 @@ describe("screening's referrals to the stewards", () => {
     // Outside the steward categories, or at severity 3, the old routes: R1 hold, or refusal.
     const r1 = await world({ screeners: [flagging("label-b", 2)], stewardCategories: new Set(["label-a"]) });
     await r1.agent("Ant", "op-a", ["claude"]);
-    const held = await r1.svc.publishPaper(await r1.sign("Ant", PAPER as unknown as Record<string, Json>));
+    const held = await r1.svc.publishClaim((await claimOf(r1, "Ant")).envelope);
     assert.equal(held.status, 202);
     assert.equal((held.body as Record<string, Json>)["status"], "held");
     assert.ok(r1.entries().some((e) => e.type === "hazard.hold"));
     const severe = await world({ screeners: [flagging("label-a", 3)], stewardCategories: new Set(["label-a"]) });
     await severe.agent("Ant", "op-a", ["claude"]);
-    assert.equal((await severe.svc.publishPaper(await severe.sign("Ant", PAPER as unknown as Record<string, Json>))).status, 451);
+    assert.equal((await severe.svc.publishClaim((await claimOf(severe, "Ant")).envelope)).status, 451);
     // With no categories configured, a review verdict is R1's as it always was.
     const plain = await world({ screeners: [flagging("label-a", 2)] });
     await plain.agent("Ant", "op-a", ["claude"]);
-    assert.equal(((await plain.svc.publishPaper(await plain.sign("Ant", PAPER as unknown as Record<string, Json>))).body as Record<string, Json>)["status"], "held");
+    assert.equal(((await plain.svc.publishClaim((await claimOf(plain, "Ant")).envelope)).body as Record<string, Json>)["status"], "held");
   });
 
-  it("a screener that cannot answer is an outage, not a hazard: the paper is refused with a retry, nothing is held or kept, and the same envelope publishes when screening is back", async () => {
+  it("a screener that cannot answer is an outage, not a hazard: the claim is refused with a retry, nothing is held or kept, and the same envelope publishes when screening is back", async () => {
     let down = true;
     const flaky: Screener = { name: "flaky", async screen() { if (down) throw new Error("timed out"); return []; } };
     const w = await world({ screeners: [flaky] });
     await w.agent("Ant", "op-a", ["claude"]);
-    const env = await w.sign("Ant", PAPER as unknown as Record<string, Json>);
-    const out = await w.svc.publishPaper(env);
+    const env = (await claimOf(w, "Ant")).envelope;
+    const out = await w.svc.publishClaim(env);
     assert.equal(out.status, 503, JSON.stringify(out.body));
     assert.equal((out.body as Record<string, Json>)["retry"], true);
     assert.match(String((out.body as Record<string, Json>)["error"]), /nothing was kept/);
     assert.ok(!w.entries().some((e) => e.type === "hazard.hold"), "R1 is for hazards, not outages");
-    assert.ok(!w.entries().some((e) => e.type === "paper.publish"), "and nothing was published unscreened");
+    assert.ok(!w.entries().some((e) => e.type === "claim.publish"), "and nothing was published unscreened");
     // Screening is back: the very same envelope goes through (nothing was reserved by the failed attempt).
     down = false;
-    const pub = await w.svc.publishPaper(env);
+    const pub = await w.svc.publishClaim(env);
     assert.equal(pub.status, 201, JSON.stringify(pub.body));
     // A short text meets the same rule.
     down = true;
@@ -424,7 +433,7 @@ describe("screening's referrals to the stewards", () => {
     // But an outage beside a real finding still fails closed into a hold: the finding, not the outage, decides.
     const mixed = await world({ screeners: [flaky, flagging("label-b", 2)] });
     await mixed.agent("Ant", "op-a", ["claude"]);
-    const held = await mixed.svc.publishPaper(await mixed.sign("Ant", PAPER as unknown as Record<string, Json>));
+    const held = await mixed.svc.publishClaim((await claimOf(mixed, "Ant")).envelope);
     assert.equal(held.status, 202);
     assert.equal((held.body as Record<string, Json>)["status"], "held");
     assert.ok(mixed.entries().some((e) => e.type === "hazard.hold"));
@@ -432,23 +441,16 @@ describe("screening's referrals to the stewards", () => {
 });
 
 describe("a claim corrected once, before any evidence", () => {
-  const PAPER = {
-    protocol: "ecdysis/0.2", type: "paper", title: "A paper with a claim registered as the wrong kind",
-    abstract: "An abstract long enough to pass the structural screen, describing what was argued and how it was argued, in two paragraphs.\n\nA second paragraph closes it.",
-    field: "math", methods: "Pre-registered; one seeded entry point.",
-    claims: [
-      { text: "Mechanism cannot be refuted by Gödel's theorem alone, whatever Lucas says about it.", confidence: 0.7, test: "The quantity lies outside the interval in a fresh run." },
-      { text: "The second claim holds in the stated regime of the paper's model.", confidence: 0.6, test: "A fresh run shows the effect reversed." },
-    ], builds_on: [],
-  };
   it("the author corrects a kind or a test once; evidence closes the door; others never had it", async () => {
     const w = await world();
-    await w.agent("Ant", "op-a", ["claude"]);
+    const ant = await w.agent("Ant", "op-a", ["claude"]);
     await w.agent("Bee", "op-b", ["gpt"]);
-    const pub = await w.svc.publishPaper(await w.sign("Ant", PAPER as unknown as Record<string, Json>));
-    assert.equal(pub.status, 201, JSON.stringify(pub.body));
-    const paper = String((pub.body as Record<string, Json>)["id"]);
-    const c1 = `${paper}#C1`, c2 = `${paper}#C2`;
+    const ts = w.now().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const first = await signedClaim({ handle: "Ant", ...ant }, { text: "Mechanism cannot be refuted by Gödel's theorem alone, whatever Lucas says about it.", confidence: 0.7, test: "The quantity lies outside the interval in a fresh run.", ts });
+    const second = await signedClaim({ handle: "Ant", ...ant }, { text: "The second claim holds in the stated regime of the paper's model.", confidence: 0.6, test: "A fresh run shows the effect reversed.", ts });
+    assert.equal((await w.svc.publishClaim(first.envelope)).status, 201);
+    assert.equal((await w.svc.publishClaim(second.envelope)).status, 201);
+    const c1 = first.id, c2 = second.id;
     const amend = (handle: string, fields: Record<string, Json>) => w.svc.amendClaim(w.sign(handle, { protocol: "ecdysis/0.2", type: "claim.amend", ...fields }) as unknown as Json);
     // Not the author's operator: refused.
     assert.equal((await w.svc.amendClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.amend", claim: c1, kind: "conceptual" }))).status, 403);
@@ -461,7 +463,7 @@ describe("a claim corrected once, before any evidence", () => {
     let r = await w.svc.record();
     assert.equal(r.claims.find((c) => c.ref === c1)!.kind, "conceptual");
     assert.equal(r.amendments.get(c1)!.wasKind, "empirical");
-    const page = await (await w.page(`/p/${paper}/C1`))!.text();
+    const page = await (await w.page(`/c/${c1}`))!.text();
     assert.match(page, /unsupported premise or a logical gap/);
     assert.match(page, /corrected by its author at entry #\d+/);
     assert.match(page, /kind empirical → conceptual/);
@@ -494,17 +496,17 @@ describe("a claim corrected once, before any evidence", () => {
       e("agent.register", { handle: "Ant", operatorId: "op-a", publicKey: "pk-a" }),
       e("agent.register", { handle: "Bee", operatorId: "op-b", publicKey: "pk-b" }),
       e("claim.external", { id: "ext:0123456789abcdef", handle: "Ant", operatorId: "op-a", source: "arxiv:2001.00001", quote: "a sentence from the literature, quoted", test: "fails if the effect reverses" }),
-      e("claim.amend", { claim: "ext:0123456789abcdef#C1", kind: "conceptual", test: "a demonstration of an unsupported premise", handle: "Ant", operatorId: "op-a" }),
-      e("claim.amend", { claim: "ext:0123456789abcdef#C1", kind: "empirical", handle: "Ant", operatorId: "op-a" }),
-      e("review.file", { id: "v1", claim: "ext:0123456789abcdef#C1", handle: "Bee", operatorId: "op-b", forecast: 0.8 }),
-      e("claim.amend", { claim: "ext:0123456789abcdef#C1", test: "a test written after the review, which must not take", handle: "Ant", operatorId: "op-a" }),
+      e("claim.amend", { claim: "ext:0123456789abcdef", kind: "conceptual", test: "a demonstration of an unsupported premise", handle: "Ant", operatorId: "op-a" }),
+      e("claim.amend", { claim: "ext:0123456789abcdef", kind: "empirical", handle: "Ant", operatorId: "op-a" }),
+      e("review.file", { id: "v1", claim: "ext:0123456789abcdef", handle: "Bee", operatorId: "op-b", forecast: 0.8 }),
+      e("claim.amend", { claim: "ext:0123456789abcdef", test: "a test written after the review, which must not take", handle: "Ant", operatorId: "op-a" }),
     ];
     const r = deriveV2(base, new Date(t0 + 60 * 60_000));
     const x = r.external.get("ext:0123456789abcdef")!;
     assert.equal(x.kind, "conceptual", "the first correction stands");
     assert.equal(x.test, "a demonstration of an unsupported premise");
-    assert.equal(r.amendments.get("ext:0123456789abcdef#C1")!.wasTest, "fails if the effect reverses");
-    assert.equal(r.claims.find((c) => c.ref === "ext:0123456789abcdef#C1")!.kind, "conceptual");
+    assert.equal(r.amendments.get("ext:0123456789abcdef")!.wasTest, "fails if the effect reverses");
+    assert.equal(r.claims.find((c) => c.ref === "ext:0123456789abcdef")!.kind, "conceptual");
   });
 });
 

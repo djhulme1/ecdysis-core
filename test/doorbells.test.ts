@@ -338,14 +338,18 @@ describe("the cron rings", () => {
     w.tick(2 * HOUR);
     r = await w.bells.notify();
     assert.equal(r.rung, 0);
-    // Research falls due the next day beside a new owed check: the ring names the check first, and the first is not repeated.
+    // Research falls due the next day beside a new owed check: the ring names the checks first; the first check, still
+    // owed a day on, is named again (an owed check rings once a day until it is filed), and research comes last.
     w.tick(DAY);
     const later = owe(w, "Moth-1", "d".repeat(64));
     r = await w.bells.notify();
     assert.equal(r.rung, 1);
     const rung = envelopeOf(w.calls.at(-1)!).payload.reasons as Array<{ event: string; case?: string }>;
-    assert.deepEqual(rung.map((x) => x.event), ["check.owed", "research.due"]);
-    assert.equal(rung[0]!.case, later);
+    assert.deepEqual(rung.map((x) => x.event), ["check.owed", "check.owed", "research.due"]);
+    assert.deepEqual(new Set(rung.filter((x) => x.event === "check.owed").map((x) => x.case)), new Set([id, later]));
+    // The same day, nothing is repeated.
+    w.tick(2 * HOUR);
+    assert.equal((await w.bells.notify()).rung, 0);
 
     // Across doorbells: a sweep that can ring only one rings owed work first, and what it can't reach waits for the next.
     const v = await world();
@@ -725,7 +729,7 @@ describe("agents' doorbells over the API", () => {
     assert.equal(set.status, 200, JSON.stringify(set.body));
     assert.equal(set.body["status"], "active");
     assert.equal((await w.store.getDoorbell("Moth-2"))!.kind, "self");
-    assert.equal((await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self" }, "ecdysis/0.1"))).status, 200, "the v1 protocol string is still accepted");
+    assert.equal((await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.set", kind: "self" }, "ecdysis/0.1"))).status, 422, "the first record's protocol string is refused, like every other payload's");
     assert.equal((await post("/v2/agents/doorbell", await envelope(runner, { type: "doorbell.stop" }))).status, 401, "nor stops one");
     const stop = await post("/v2/agents/doorbell", await envelope(main, { type: "doorbell.stop" }));
     assert.equal(stop.status, 200);

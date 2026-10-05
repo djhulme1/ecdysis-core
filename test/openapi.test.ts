@@ -15,6 +15,7 @@ import { structuralScreener } from "../src/core/hazard.js";
 import { generateKeyPair } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
+import { LogApi } from "../src/api/v2/log-api.js";
 import { V2Governance } from "../src/api/v2/governance.js";
 import { IssueRegistry, MemoryIssueStore } from "../src/api/v2/issues.js";
 import { MemoryRateLimiter, route } from "../src/api/router.js";
@@ -34,9 +35,10 @@ async function world() {
   const pages = new PagesHandler(v2, { host: "api.ecdysis.me", logPublicKey: logKey.publicKey });
   const governance = new V2Governance({ v2, log, operatorPublicKey: null, now });
   const issues = new IssueRegistry({ store: new MemoryIssueStore(), v2, now });
+  const logApi = new LogApi({ log, reader: store, signingKey: logKey.privateKey, now });
   const limiter = new MemoryRateLimiter(100000);
   const req = async (method: string, path: string, body?: Json, headers: Record<string, string> = {}) => {
-    const r = await route(new Request(`https://api.ecdysis.me${path}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }), limiter, { v2, pages, governance, issues, sthPublicKey: logKey.publicKey });
+    const r = await route(new Request(`https://api.ecdysis.me${path}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }), limiter, { v2, pages, governance, issues, log: logApi, sthPublicKey: logKey.publicKey });
     return { status: r.status, text: await r.text(), headers: r.headers };
   };
   return { req };
@@ -88,7 +90,9 @@ describe("the OpenAPI document", () => {
 
   it("the index at GET / lists exactly the document's listed operations, in its order, with query hints", () => {
     const listed = endpointIndex();
-    assert.ok(listed.includes("GET /v2/frontier?limit="));
+    assert.ok(listed.includes("GET /v2/direction?limit="));
+    assert.ok(listed.includes("GET /v2/claims/:id"));
+    assert.ok(!listed.some((e) => /papers|frontier|challenges|vouch|graph/.test(e)), "nothing from the paper era");
     assert.ok(listed.includes("GET /v2/receipts/:hash"));
     assert.ok(listed.includes("POST /v2/checks"));
     assert.ok(!listed.some((e) => e.includes("/hazard/") || e.includes("/constitution/adopt") || e === "GET /" || e.includes("openapi")), "reserved powers and the index itself are unlisted");
@@ -103,9 +107,12 @@ describe("the OpenAPI document", () => {
     assert.deepEqual(index["endpoints"], endpointIndex(), "the live index is the document's list");
     assert.match(String(index["openapi"]), /openapi\.json/);
     for (const op of OPERATIONS) {
-      const path = op.path.replace(/\{(\w+)\}/g, (_, n: string) => String((op.params ?? []).find((p) => p.name === n)?.schema["pattern"] ?? "").includes("{64}") ? "0".repeat(64) : "0".repeat(16));
+      const path = op.path.replace(/\{(\w+)\}/g, (_, n: string) => {
+        const pattern = String((op.params ?? []).find((p) => p.name === n)?.schema["pattern"] ?? "");
+        return pattern.includes("{64}") ? "0".repeat(64) : pattern.includes("ecd") ? `ecd:${"0".repeat(16)}` : "0".repeat(16);
+      });
       if (op.method === "get") {
-        const query = (op.params ?? []).filter((p) => p.in === "query" && p.required).map((p) => `${p.name}=${p.name === "agent" ? "Nobody" : p.name === "claim" ? "ecd:0000000000000000%23C1" : "1"}`).join("&");
+        const query = (op.params ?? []).filter((p) => p.in === "query" && p.required).map((p) => `${p.name}=${p.name === "agent" ? "Nobody" : p.name === "claim" ? "ecd:0000000000000000" : "1"}`).join("&");
         const r = await w.req("GET", `${path}${query ? `?${query}` : ""}`, undefined, { accept: "application/json" });
         assert.ok(r.status !== 405 && !r.text.includes("no such v2 endpoint") && !r.text.includes("no such endpoint"), `${op.method.toUpperCase()} ${op.path}: ${r.status} ${r.text.slice(0, 120)}`);
         assert.ok([200, 400, 404].includes(r.status), `${op.path} answered ${r.status}`);
@@ -120,20 +127,22 @@ describe("the OpenAPI document", () => {
   it("the schemas state the validators' rules: a payload that breaks a documented constraint is refused for that field", async () => {
     const w = await world();
     const schemas = openApiSchemas();
-    // Paper: the document says 1 to 5 claims, title 3 to 200, abstract from 50; the service says the same, field by field.
-    const paper = schemas["PaperPublish"] as Record<string, Json>;
-    const claims = (paper["properties"] as Record<string, Record<string, Json>>)["claims"]!;
-    assert.deepEqual([claims["minItems"], claims["maxItems"]], [1, 5]);
-    const r = await w.req("POST", "/v2/papers", { payload: { protocol: "ecdysis/0.2", type: "paper", title: "ab", abstract: "short", field: "econ", claims: [], builds_on: [], agent: { handle: "Nobody", publicKey: "k".repeat(44) }, ts: "2026-10-04T15:00:00Z" }, signature: "x" });
+    // Claim: the document says text 10 to 300, test 10 to 600, rationale from 50; the service says the same, field by field.
+    const claim = schemas["ClaimPublish"] as Record<string, Json>;
+    const props = claim["properties"] as Record<string, Record<string, Json>>;
+    assert.deepEqual([props["text"]!["minLength"], props["text"]!["maxLength"]], [10, 300]);
+    assert.deepEqual([props["test"]!["minLength"], props["test"]!["maxLength"]], [10, 600]);
+    assert.deepEqual([props["rationale"]!["minLength"], props["rationale"]!["maxLength"]], [50, 8000]);
+    const r = await w.req("POST", "/v2/claims", { payload: { protocol: "ecdysis/0.2", type: "claim", text: "ab", test: "short", confidence: 0.5, field: "econ", rationale: "too short", builds_on: [], agent: { handle: "Nobody", publicKey: "k".repeat(44) }, ts: "2026-10-04T15:00:00Z" }, signature: "x" });
     assert.equal(r.status, 400);
     const detail = (JSON.parse(r.text) as { detail: string[] }).detail;
-    assert.ok(detail.some((d) => d.startsWith("title: 3 to 200")), JSON.stringify(detail));
-    assert.ok(detail.some((d) => d.startsWith("abstract: 50 to 4000")));
-    assert.ok(detail.some((d) => d.startsWith("claims: 1 to 5")));
+    assert.ok(detail.some((d) => d.startsWith("text: 10 to 300")), JSON.stringify(detail));
+    assert.ok(detail.some((d) => d.startsWith("test: 10 to 600")));
+    assert.ok(detail.some((d) => d.startsWith("rationale: 50 to 8000")));
     // Check commit: the document's bundle rules are the receipt validator's.
     const bundle = (schemas["Bundle"] as Record<string, Json>)["properties"] as Record<string, Record<string, Json>>;
     assert.equal(bundle["runtimeMinutes"]!["maximum"], 10080);
-    const c = await w.req("POST", "/v2/checks", { payload: { protocol: "ecdysis/0.2", type: "check.commit", target: "ext:0000000000000000#C1", kind: "replication", bundle: { repo: "ftp://x", commit: "zz", run: "", outputs: [], runtimeMinutes: 0 }, agent: { handle: "Nobody", publicKey: "k".repeat(44) }, ts: "2026-10-04T15:00:00Z" }, signature: "x" });
+    const c = await w.req("POST", "/v2/checks", { payload: { protocol: "ecdysis/0.2", type: "check.commit", target: "ext:0000000000000000", kind: "replication", bundle: { repo: "ftp://x", commit: "zz", run: "", outputs: [], runtimeMinutes: 0 }, agent: { handle: "Nobody", publicKey: "k".repeat(44) }, ts: "2026-10-04T15:00:00Z" }, signature: "x" });
     assert.equal(c.status, 400);
     const cd = (JSON.parse(c.text) as { detail: string[] }).detail;
     for (const f of ["bundle.repo", "bundle.commit", "bundle.run", "bundle.runtimeMinutes", "bundle.outputs"]) assert.ok(cd.some((d) => d.startsWith(f)), `${f} refused: ${JSON.stringify(cd)}`);

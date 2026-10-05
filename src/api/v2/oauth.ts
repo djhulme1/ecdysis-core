@@ -107,12 +107,14 @@ export interface Principal { accountId: string; operatorId: string; clientId: st
 
 const CLIENT_NAME = /^[\x20-\x7e]{1,80}$/;
 /**
- * What the archive will sign for a managed agent: content, and the agent's
- * vote. Never keys (a token-holder could otherwise mint itself a durable
- * check key, or retire the agent), never a vouch, an escalation or a
+ * What the archive will sign for a managed agent: content (its claims, the
+ * claims it registers from human literature, its receipts, reviews and
+ * attempts: an agent can always file an attempt, attempts/0.3), and the
+ * agent's vote. Never keys (a token-holder could otherwise mint itself a
+ * durable check key, or retire the agent), never an escalation or a
  * doorbell: those stay with the person, on their page, behind a sign-in.
  */
-export const MANAGED_SIGNS: ReadonlySet<string> = new Set(["paper", "claim.external", "check.commit", "check.result", "review", "governance.proposal", "governance.vote"]);
+export const MANAGED_SIGNS: ReadonlySet<string> = new Set(["claim", "claim.external", "check.commit", "check.result", "check.attempt", "review", "governance.proposal", "governance.vote"]);
 const TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
 
@@ -342,12 +344,12 @@ export class OAuth {
     return { status: 201, body: { ...(r.body as Record<string, Json>), note: "The archive holds this agent's key, sealed, and signs for it when you ask through a signed-in app. The record labels it managed. You can destroy the key from your page at any time; the agent is then retired." } };
   }
 
-  /** Sign a payload as one of the account's managed agents, if it is one: content and votes only, never keys, vouches or escalations. */
+  /** Sign a payload as one of the account's managed agents, if it is one: content and votes only, never keys or escalations. */
   async signAs(principal: Principal, payload: Json): Promise<{ ok: true; envelope: Json } | { ok: false; status: number; error: string }> {
     const p = payload as { type?: unknown; agent?: { handle?: unknown; publicKey?: unknown } } | null;
     const handle = typeof p?.agent?.handle === "string" ? p.agent.handle : "";
     if (!handle) return { ok: false, status: 400, error: "payload.agent.handle: which of your managed agents signs" };
-    if (typeof p?.type !== "string" || !MANAGED_SIGNS.has(p.type)) return { ok: false, status: 403, error: `the archive signs ${[...MANAGED_SIGNS].join(", ")} for a managed agent, not ${String(p?.type ?? "this")}: keys, vouches, escalations and doorbells stay with the person, on their page` };
+    if (typeof p?.type !== "string" || !MANAGED_SIGNS.has(p.type)) return { ok: false, status: 403, error: `the archive signs ${[...MANAGED_SIGNS].join(", ")} for a managed agent, not ${String(p?.type ?? "this")}: keys, escalations and doorbells stay with the person, on their page` };
     const k = await this.o.store.getManagedKey(handle);
     if (!k || k.accountId !== principal.accountId || k.destroyedAt) return { ok: false, status: 403, error: `${handle} is not a managed agent of your account (or its key was destroyed); self-custodied agents sign their own envelopes` };
     // Retired on the log by the person (a revocation from their page): as good as destroyed, and the seal goes now.

@@ -44,7 +44,7 @@ const mainOf = (html: string) => html.split('<main id="main">')[1]!.split("</mai
 const hrefsOf = (html: string) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]!);
 /** Words the positioning brief rules out. ("Decentralised" is allowed: the FAQ says plainly that Ecdysis is not.) */
 const BANNED = /revolutionary|game-changing|disrupt|supercharge|AI-powered|trustless|\bunlock/i;
-const LANDING = { host: "ecdysis.me", constitution: { version: "2.0.0", hash: "ab".repeat(32) }, logPublicKey: null, counts: { papers: 0, claims: 0, receipts: 0, agents: 0 }, latest: null };
+const LANDING = { host: "ecdysis.me", constitution: { version: "2.1.0", hash: "ab".repeat(32) }, logPublicKey: null, counts: { claims: 0, external: 0, receipts: 0, agents: 0 }, latest: null };
 
 describe("the explaining pages", () => {
   it("serves /faq and /compare script-free in the people half, and lists and counts them", async () => {
@@ -165,9 +165,10 @@ describe("the landing page's case", () => {
   });
 
   it("is right that a thousand copies count once", () => {
-    const claim: ClaimInput = { ref: "x#C1", paper: "x", authorOperator: "op-author", stated: 0.7, foundations: [], seq: 1 };
-    const one: EvidenceInput = { id: "e0", claim: "x#C1", kind: "replication", confirms: true, agent: "copy-0", operatorId: "op-farm", tier: "verified", families: ["claude"], seq: 2 };
+    const x = `ecd:${"1".repeat(16)}`;
+    const claim: ClaimInput = { ref: x, authorOperator: "op-author", stated: 0.7, foundations: [], seq: 1 };
+    const one: EvidenceInput = { id: "e0", claim: x, kind: "replication", confirms: true, agent: "copy-0", operatorId: "op-farm", tier: "verified", families: ["claude"], seq: 2 };
     const many = Array.from({ length: 1000 }, (_, k): EvidenceInput => ({ ...one, id: `e${k}`, agent: `copy-${k}`, seq: 2 + k }));
-    assert.equal(computeCredenceV2([claim], many, []).get("x#C1")!.credence, computeCredenceV2([claim], [one], []).get("x#C1")!.credence);
+    assert.equal(computeCredenceV2([claim], many, []).get(x)!.credence, computeCredenceV2([claim], [one], []).get(x)!.credence);
   });
 });

@@ -15,7 +15,7 @@ describe("transparency log", () => {
     const log = new TransparencyLog(store, fixedClock());
     const roots: string[] = [await log.root(0)];
     for (let i = 0; i < 17; i++) {
-      await log.append("paper.accept", { id: `p${i}` });
+      await log.append("claim.publish", { id: `ecd:${i.toString(16).padStart(16, "0")}` });
       roots.push(await log.root());
     }
     // Inclusion of every entry in the final tree.
@@ -44,7 +44,7 @@ describe("transparency log", () => {
   it("signs tree heads that verify with the public key only", async () => {
     const store = new MemoryStore();
     const log = new TransparencyLog(store, fixedClock());
-    await log.append("paper.accept", { id: "p0" });
+    await log.append("claim.publish", { id: "ecd:0000000000000000" });
     const kp = await generateKeyPair();
     const sth = await log.signedTreeHead(kp.privateKey);
     assert.equal(await TransparencyLog.verifySth(kp.publicKey, sth), true);
@@ -59,7 +59,7 @@ describe("transparency log", () => {
     const mk = async () => {
       const store = new MemoryStore();
       const log = new TransparencyLog(store, fixedClock());
-      for (let i = 0; i < 8; i++) await log.append("paper.accept", { id: `p${i}` });
+      for (let i = 0; i < 8; i++) await log.append("claim.publish", { id: `ecd:${i.toString(16).padStart(16, "0")}` });
       return { store, log };
     };
 

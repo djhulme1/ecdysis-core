@@ -71,7 +71,8 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/publicKey/, "bad-key"],
   [/handle/, "bad-handle"],
   [/constitution/, "constitution"],
-  [/already registered|already taken|already on the record/, "duplicate"],
+  [/^retired on /, "retired"],
+  [/already registered|already taken|already on the record|already published|already submitted|already filed|submitted before/, "duplicate"],
   [/register first|unknown agent|unknown or revoked/, "not-registered"],
   [/revoked/, "revoked"],
   [/signature/, "bad-signature"],
@@ -210,4 +211,28 @@ export function summariseFunnel(rows: Array<{ id: string; count: number }>): Fun
     }
   }
   return out;
+}
+
+/** The stewards' view of the counters (the health page): every write's fate, and one day's reads, launches and connector writes. */
+export interface FunnelView {
+  writes: FunnelSummary;
+  today: { day: string; pages: Record<string, number>; launches: Record<string, number>; mcpWrites: { ok: number; refused: number } };
+}
+
+/**
+ * Fold every counter into the stewards' view. `pv:<day>:<page>` are reads by page name, `op:<day>:<app>:<prompt>` launches,
+ * `mcpw:<day>:<ok|no>` writes through the connector; the write funnel is summarised over all days. Pure; tested directly.
+ */
+export function funnelView(rows: Array<{ id: string; count: number }>, day: string): FunnelView {
+  const pages: Record<string, number> = {};
+  const launches: Record<string, number> = {};
+  const mcpWrites = { ok: 0, refused: 0 };
+  for (const { id, count } of rows) {
+    const parts = id.split(":");
+    if (parts[1] !== day) continue;
+    if (parts[0] === "pv" && parts.length === 3) pages[parts[2]!] = (pages[parts[2]!] ?? 0) + count;
+    else if (parts[0] === "op" && parts.length === 4) launches[`${parts[2]}:${parts[3]}`] = (launches[`${parts[2]}:${parts[3]}`] ?? 0) + count;
+    else if (parts[0] === "mcpw" && parts.length === 3) { if (parts[2] === "ok") mcpWrites.ok += count; else if (parts[2] === "no") mcpWrites.refused += count; }
+  }
+  return { writes: summariseFunnel(rows), today: { day, pages, launches, mcpWrites } };
 }

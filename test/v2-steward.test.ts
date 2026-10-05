@@ -18,6 +18,7 @@ import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
+import { signedClaim } from "./claims-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 const MIN = 60 * 1000;
@@ -80,7 +81,7 @@ async function world() {
     return steward.handle(new Request(`https://ecdysis.me${path}`, { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${session}`, origin: "https://ecdysis.me" } }), path);
   };
   const idOf = (r: { body: Json }) => String((r.body as Record<string, Json>)["id"]);
-  return { svc, accounts, steward, canaries, canaryStore, audits, agent, sign, commit, result, bundle, signIn, get, post, idOf, tick: (ms: number) => { clock.t += ms; }, keys, log };
+  return { svc, accounts, steward, canaries, canaryStore, audits, agent, sign, ts, commit, result, bundle, signIn, get, post, idOf, tick: (ms: number) => { clock.t += ms; }, keys, log };
 }
 
 describe("the stewardship area", () => {
@@ -220,8 +221,8 @@ describe("the stewardship area", () => {
     assert.match(html, /No canaries registered/);
     const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
     // Refusals: not an external claim, not on the record, a bad outcome, a bad date.
-    assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: "ecd:2610.abcdef#C1", outcome: "confirmed", label: "x" }, d.session)).text(), /a canary is an external claim/);
-    assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: "ext:0000000000000000#C1", outcome: "confirmed", label: "x" }, d.session)).text(), /no such claim on the record/);
+    assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: "ecd:5e0b7d21a94c3f68", outcome: "confirmed", label: "x" }, d.session)).text(), /a canary is a claim from human literature/);
+    assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: "ext:0000000000000000", outcome: "confirmed", label: "x" }, d.session)).text(), /no such claim on the record/);
     assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: ref, outcome: "maybe", label: "x" }, d.session)).text(), /outcome: confirmed/);
     assert.match(await (await w.post("/steward/canaries/register", { csrf, claim: ref, outcome: "confirmed", label: "x", revealAfter: "soon" }, d.session)).text(), /reveal after: a date/);
     // Registered: the outcome is sealed in the store, opened only for the steward's page.
@@ -331,8 +332,8 @@ describe("the stewardship area", () => {
     assert.equal(res.status, 303, await res.text());
     assert.match(res.headers.get("location")!, /on%20the%20log/);
     // Publishing is refused with a reason that names the switch; everything else carries on.
-    const paper = { protocol: "ecdysis/0.2", type: "paper", title: "A paper during the pause", abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty.", field: "math", claims: [{ text: "The quantity lies in the stated interval in the stated regime.", confidence: 0.7, test: "A fresh run outside the interval." }], builds_on: [] };
-    const pub = await w.svc.publishPaper(await w.sign("Ant", paper as unknown as Record<string, Json>));
+    const during = await signedClaim({ handle: "Ant", ...w.keys.get("Ant")! }, { text: "A claim during the pause: the quantity lies in the stated interval in the stated regime.", ts: w.ts() });
+    const pub = await w.svc.publishClaim(during.envelope);
     assert.equal(pub.status, 503);
     assert.match(String((pub.body as Record<string, Json>)["error"]), /publishing is paused by the steward/);
     assert.equal((pub.body as Record<string, Json>)["setting"], "v2.publishing");
@@ -353,7 +354,7 @@ describe("the stewardship area", () => {
     assert.equal((await w.svc.audit()).filter((a) => a.type === "operator.setting").length, 1);
     res = await w.post("/steward/controls/set", { csrf, setting: "v2.publishing", value: "open" }, d.session);
     assert.equal(res.status, 303);
-    assert.equal((await w.svc.publishPaper(await w.sign("Ant", paper as unknown as Record<string, Json>))).status, 201);
+    assert.equal((await w.svc.publishClaim(during.envelope)).status, 201, "the same envelope, once the switch is open again");
     assert.equal(await w.svc.setting("v2.publishing"), "open");
     // Pausing checks refuses new commitments only: a result on a commitment already sealed is still taken, so nobody lapses for the pause.
     const ref = String((ext.body as Record<string, Json>)["ref"]);
@@ -394,61 +395,6 @@ describe("the stewardship area", () => {
     assert.match(html, /action="\/steward\/content\/withhold"/, "a steward may take an item out of view from here");
     assert.equal((await w.post("/steward/content/release", { csrf: "x" }, d.session)).status, 200, "no such act exists; the page shows a problem and nothing changes");
     assert.equal((await w.svc.holds()).filter((h) => h.open).length, 1);
-  });
-
-  it("content: a steward sees every archived brief and can withdraw one with a reason, which goes on the log and the audit trail under the steward's operator id; seeding is retired", async () => {
-    const w = await world();
-    await w.agent("Ant", "op-a", ["claude"]);
-    await w.agent("Bee", "op-b", ["gpt"]);
-    const pub = await w.svc.publishPaper(await w.sign("Ant", {
-      protocol: "ecdysis/0.2", type: "paper", title: "A paper with an archived brief",
-      abstract: "An abstract long enough to pass the structural screen, describing what was measured and how it was measured, in two paragraphs.\n\nA second paragraph closes it.",
-      field: "math", methods: "Pre-registered; one seeded entry point.",
-      claims: [{ text: "The first claim holds in the stated regime.", confidence: 0.7, test: "The quantity lies outside the interval in a fresh run." }], builds_on: [],
-    }));
-    assert.equal(pub.status, 201, JSON.stringify(pub.body));
-    const claim = `${w.idOf(pub)}#C1`;
-    const brief = "Recompute the headline number from the paper's public data with the stated weighting and report whether it survives; cpu-minutes, analysis only.";
-    // A brief Bee attached before the board was retired, as the log holds it.
-    const id = "ch:" + "b".repeat(16);
-    await w.log.append("challenge.propose", { id, claim, title: `A hostile brief <script>alert(1)</script>`, brief, scale: "cpu-minutes", handle: "Bee", operatorId: "op-b", proposer: "agent" });
-    assert.equal((await w.svc.record()).challenges.size, 1);
-    const d = await w.signIn("daniel@example.org");
-    let html = await (await w.get("/steward/content", d.session)).text();
-    assert.match(html, /<h2>Challenges<\/h2>/);
-    assert.match(html, /A hostile brief &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
-    assert.doesNotMatch(html, /<script>alert/);
-    assert.match(html, /agent Bee \(op-b\)/);
-    assert.match(html, /<form method="post" action="\/steward\/content\/challenge-withdraw">/);
-    assert.match(html, /The challenge board was retired on 5 October 2026/);
-    assert.doesNotMatch(html, /action="\/steward\/content\/challenge-seed/, "no seed form");
-    const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
-    let res = await w.post("/steward/content/challenge-withdraw", { csrf, id, reason: "short" }, d.session);
-    assert.equal(res.status, 200);
-    assert.match(await res.text(), /Couldn&#39;t withdraw: reason: 10 to 400 characters/);
-    assert.equal([...(await w.svc.record()).challenges.values()][0]!.withdrawn, null);
-    res = await w.post("/steward/content/challenge-withdraw", { csrf, id, reason: "The brief tries to instruct the agents that read it; the claim itself stands." }, d.session);
-    assert.equal(res.status, 303);
-    assert.match(res.headers.get("location")!, /^\/steward\/content\?ok=/);
-    const ch = [...(await w.svc.record()).challenges.values()][0]!;
-    assert.equal(ch.withdrawn?.by, "steward");
-    const steward = d.account.operatorId;
-    assert.ok((await w.svc.audit()).some((a) => a.type === "challenge.withdraw" && a.by === "steward" && a.steward === steward), "on the audit trail, by the steward's operator id");
-    html = await (await w.get("/steward/content", d.session)).text();
-    assert.match(html, /withdrawn<br><span class="small">by steward: The brief tries to instruct/);
-    assert.doesNotMatch(html, /action="\/steward\/content\/challenge-withdraw"/, "nothing left to withdraw");
-    assert.equal(((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]!.length, 0, "out of view");
-    // Seeding is retired: a stale form post (a cached page) writes nothing and says where direction comes from now.
-    const before = (await w.svc.logRows()).length;
-    for (const path of ["/steward/content/challenge-seed", "/steward/content/challenge-seed-many"]) {
-      res = await w.post(path, { csrf, claim: "", source: "doi:10.1000/position.1", quote: "Position 1: a thesis from the literature, quoted here in the words its authors used to state it.", test: "A counterexample of the stated form.", kind: "conceptual", title: "Founding challenge 1", brief, scale: "reasoning", wants: "argument", seeds: "[]" }, d.session);
-      const text = await res.text();
-      assert.equal(res.status, 200, text);
-      assert.match(text, /The challenge board was retired on 5 October 2026: direction now comes from the map/);
-    }
-    assert.equal((await w.svc.logRows()).length, before, "nothing written");
-    assert.equal((await w.svc.proposeChallengeBySteward(steward, { claim, title: "A seed through the service", brief, scale: "reasoning" })).status, 410);
-    assert.equal((await w.svc.logRows()).length, before, "nothing written through the service either");
   });
 });
 

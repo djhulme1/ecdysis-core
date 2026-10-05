@@ -94,8 +94,8 @@ export interface ScoredReport {
 
 /**
  * Verification by record (4 October 2026, Daniel: "verified by some function
- * of credence"). An operator that no steward has verified and nobody has
- * vouched for earns the verified tier from what the record shows it did:
+ * of credence"). An operator that no steward has verified earns the verified
+ * tier from what the record shows it did:
  * reports filed EARLY (before any verified replication by another operator
  * on the claim), on claims that then RESOLVED on the replications of at
  * least two verified operators other than itself (the leave-one-operator-out
@@ -113,7 +113,7 @@ export const EARNING_PARAMS = {
   reports: 5,
   /** Of which cross-checked receipts. */
   receipts: 2,
-  /** Distinct papers or sources the qualifying reports' claims come from. */
+  /** Distinct sources the qualifying reports' claims come from: a human paper for claims registered from it, else the claim itself. */
   sources: 3,
   /** Share of qualifying reports that must be right. */
   right: 0.75,
@@ -135,7 +135,7 @@ export interface EarnedVerification {
  * The operators that earn verification from these scored reports, given who
  * is verified already. Pure; one pass over the reports.
  */
-export function earnedVerification(reports: ScoredReport[], verified: (operatorId: string) => boolean, voidedOperators: Set<string> = new Set(), round = 1, params = EARNING_PARAMS): Map<string, EarnedVerification> {
+export function earnedVerification(reports: ScoredReport[], verified: (operatorId: string) => boolean, voidedOperators: Set<string> = new Set(), round = 1, params = EARNING_PARAMS, sourceOf: (claim: string) => string = (c) => c): Map<string, EarnedVerification> {
   const byOperator = new Map<string, ScoredReport[]>();
   for (const r of reports) {
     if (!r.operatorId || verified(r.operatorId) || voidedOperators.has(r.operatorId)) continue;
@@ -146,7 +146,7 @@ export function earnedVerification(reports: ScoredReport[], verified: (operatorI
   for (const [operatorId, rs] of byOperator) {
     const right = rs.filter((r) => r.credit > 0).length;
     const receipts = rs.filter((r) => r.kind === "replication" && r.crossChecked === true).length;
-    const sources = new Set(rs.map((r) => r.claim.slice(0, r.claim.indexOf("#") > 0 ? r.claim.indexOf("#") : undefined))).size;
+    const sources = new Set(rs.map((r) => sourceOf(r.claim))).size;
     if (rs.length >= params.reports && receipts >= params.receipts && sources >= params.sources && right >= params.right * rs.length) {
       earned.set(operatorId, { operatorId, reports: rs.length, right, receipts, sources, round });
     }
@@ -163,7 +163,6 @@ export interface TrackRecord {
 }
 
 export interface TrackOptions {
-  vouchLinked?: (a: string, b: string) => boolean;
   ringLinked?: (a: string, b: string) => boolean;
   /** Agents under a fabrication finding in force: their evidence weighs nothing and their ω is 0. */
   fabricators?: Set<string>;
@@ -237,7 +236,7 @@ export function scoreTrackRecord(
   o: TrackOptions = {},
 ): TrackRecord {
   const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent) || !!o.voidedOperators?.has(e.operatorId);
-  const opts = { vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided };
+  const opts = { ringLinked: o.ringLinked, voided };
   const byClaim = new Map<string, EvidenceInput[]>();
   for (const e of evidence) byClaim.set(e.claim, [...(byClaim.get(e.claim) ?? []), e]);
   const reports: ScoredReport[] = [];
@@ -301,10 +300,10 @@ export function computeV2(
   o: TrackOptions = {},
 ): { claims: Map<string, ClaimV2>; track: TrackRecord } {
   const voided = (e: EvidenceInput) => !!o.fabricators?.has(e.agent) || !!o.voidedOperators?.has(e.operatorId);
-  const neutral = computeCredenceV2(claims, evidence, uses, { vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided, anchors: o.anchors, arguments: o.arguments });
+  const neutral = computeCredenceV2(claims, evidence, uses, { ringLinked: o.ringLinked, voided, anchors: o.anchors, arguments: o.arguments });
   const track = scoreTrackRecord(claims, evidence, neutral, o);
   const weighed = computeCredenceV2(claims, evidence, uses, {
-    vouchLinked: o.vouchLinked, ringLinked: o.ringLinked, voided, anchors: o.anchors, arguments: o.arguments,
+    ringLinked: o.ringLinked, voided, anchors: o.anchors, arguments: o.arguments,
     reliability: (a) => track.reliability.get(a) ?? 0.5,
   });
   return { claims: weighed, track };

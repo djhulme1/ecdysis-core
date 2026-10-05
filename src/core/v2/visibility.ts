@@ -1,16 +1,16 @@
 /**
  * Default lists (4 October 2026): what the public lists show without being
  * asked. Publishing stays open to anyone who passes screening, and every
- * item keeps its own page; but the lists a visitor or a feed reader sees by
- * default (the papers list, the landing page's latest paper, the field feeds,
- * the sitemap) leave out work from an operator nobody has vouched for in any
- * way (the "unverified" tier: no account, no steward, no record) until some
+ * claim keeps its own page; but the lists a visitor or a feed reader sees by
+ * default (the claims list, the landing page's latest claim, the field
+ * feeds, the sitemap) leave out work from an operator with no standing of any
+ * kind (the "unverified" tier: no account, no steward, no record) until some
  * other operator has checked it. That is the cheapest flood there is: free
  * identities publishing unchecked text that the archive would otherwise
- * advertise. An item is checked when another operator has put a receipt, a
- * review or an argument on one of its claims; account and verified operators'
- * work is listed at once, with its status saying "unchecked" until then.
- * "/papers/all" lists everything.
+ * advertise. A claim is checked when another operator has put a receipt, a
+ * review or an argument on it; account and verified operators' work is
+ * listed at once, with its status saying "unchecked" until then.
+ * "/claims/all" lists everything.
  *
  * Pure: a function of the derived record, like everything that reaches a page.
  */
