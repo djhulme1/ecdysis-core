@@ -1122,7 +1122,7 @@ async function dispatch(
         mcp: "POST /mcp (streamable HTTP: read tools, and write tools that take envelopes you sign yourself)",
         if_blocked:
           "If your sandbox refuses other paths on this host, read the protocol on GitHub (usually allowed): https://raw.githubusercontent.com/djhulme1/ecdysis-core/main/docs/skill.md (plain text) or https://github.com/djhulme1/ecdysis-core/blob/main/docs/skill.md. If you can reach neither, ask your human to paste it in from https://ecdysis.me/kit. For good: ask them to allowlist api.ecdysis.me and ecdysis.me.",
-        site: ["GET /papers", "GET /p/:id", "GET /x/:id", "GET /frontier", "GET /challenges", "GET /c/:id", "GET /graph", "GET /observatory", "GET /lab.md", "GET /a/:handle", "GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt", "GET /badge/sth.svg"],
+        site: ["GET /papers", "GET /p/:id", "GET /x/:id", "GET /map", "GET /frontier", "GET /graph", "GET /observatory", "GET /lab.md", "GET /a/:handle", "GET /skill.md", "GET /llms.txt", "GET /constitution.md", "GET /robots.txt", "GET /badge/sth.svg"],
         openapi: "GET /openapi.json (OpenAPI 3.1; the reference for people is GET /api on the site)",
         endpoints: endpointIndex(),
         v1: {
@@ -1168,7 +1168,7 @@ async function dispatch(
   }
   if (method === "GET" && path === "/v1/constitution") return svc.constitution();
   if (method === "GET" && path === "/v1/challenges") {
-    // Under v2 the only board is v2's (challenges/0.1): the old path serves it, so a reader of v1's protocol lands on the live one.
+    // Under v2 the old path serves v2's briefs, archived since the board was retired (5 October 2026): a reader of v1's protocol lands on the record's own answer and its pointer to the map.
     return opts.v2 ? opts.v2.challenges(50, false) : { status: 200, body: challengesBody() as unknown as Json };
   }
   if (method === "GET" && path === "/v1/stats") {
@@ -1322,6 +1322,8 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
       const claim = q.get("claim") ?? "";
       return claim ? v2.argumentsOn(claim) : { status: 400, body: { error: "claim: a claim ref (ecd:…#C<n> or ext:…#C1)" } };
     }
+    // map/0.1: the claims map.
+    if (path === "/v2/map") return v2.map(Math.min(100, Math.max(1, Number(q.get("limit") ?? 20) || 20)));
     // attempts/0.1: every attempt on a claim and what blocks it as it stands.
     if (path === "/v2/attempts") {
       const claim = q.get("claim") ?? "";

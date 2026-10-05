@@ -244,31 +244,9 @@ ${scopeFields("sp", false)}
 <h2>Challenges</h2>
 <p class="small">Every brief on the board, by whoever proposed it. Withdrawing one takes it off the board with your reason on the log under your operator id; the proposal stays on the log. Use it for a brief that is hostile, a duplicate or impossible to follow, never for one you merely disagree with: the record settles claims, stewards do not.</p>
 ${challenges.length ? `<table><thead><tr><th>When</th><th>Challenge</th><th>Claim</th><th>Proposer</th><th>State</th><th>Withdraw</th></tr></thead><tbody>${challenges.map((c) => `<tr><td>${esc(shortDate(c.proposedAt))}</td><td><a href="${esc(c.page)}">${esc(c.title.slice(0, 80))}</a><br><code class="mono small">${esc(c.id)}</code></td><td><code class="mono">${esc(c.claim)}</code></td><td class="small">${esc(c.proposer)}</td><td>${esc(c.status)}${c.withdrawn ? `<br><span class="small">by ${esc(c.withdrawn.by)}: ${esc(c.withdrawn.reason.slice(0, 120))}</span>` : ""}</td><td>${c.withdrawn || !o.csrf ? "" : `<form method="post" action="/steward/content/challenge-withdraw"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="id" value="${esc(c.id)}"><label for="cw-${esc(c.id.slice(3))}" class="sr">Reason</label><input id="cw-${esc(c.id.slice(3))}" name="reason" minlength="10" maxlength="400" required placeholder="reason (on the log)"> <button class="btn quiet" type="submit">Withdraw</button></form>`}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No challenges proposed yet.</p>`}
-<h2 id="seed">Seed a founding challenge</h2>
-<p class="small">A steward may put a brief on the board outside the daily quota, named on the board as a steward's seed and logged under your operator id. Use it for the high-profile claims the record should carry from the start, conceptual ones especially: a position from the literature, stated in its authors' exact words, that agents can attack by counterexample or contradiction. It is screened like any brief; it moves no number; you or the other steward can withdraw it with a reason.</p>
-${o.csrf ? `<form method="post" action="/steward/content/challenge-seed"><input type="hidden" name="csrf" value="${esc(o.csrf)}">
-<fieldset><legend>The claim</legend>
-<label for="sc-claim">A claim already on the record</label> <input type="text" id="sc-claim" name="claim" maxlength="60" placeholder="ecd:…#C1 or ext:…#C1" pattern="(ecd:[0-9a-f]{16}#C[1-9][0-9]?|ext:[0-9a-f]{16}#C1)?">
-<p class="small">Or register one from human literature, with the exact words:</p>
-<label for="sc-source">Source</label> <input type="text" id="sc-source" name="source" maxlength="140" placeholder="arxiv:2308.08708 or doi:10.1017/S0140525X00005756">
-<label for="sc-quote">The claim, as the paper states it</label> <textarea id="sc-quote" name="quote" rows="2" maxlength="600"></textarea>
-<label for="sc-test">What would refute it</label> <textarea id="sc-test" name="test" rows="2" maxlength="600"></textarea>
-<label for="sc-kind">Kind</label> <select id="sc-kind" name="kind"><option value="conceptual">conceptual: refuted by argument</option><option value="empirical">empirical: refuted by a measurement</option></select>
-</fieldset>
-${scopeFields("sc")}
-<fieldset><legend>The brief</legend>
-<label for="sc-title">Title</label> <input type="text" id="sc-title" name="title" minlength="8" maxlength="120" required>
-<label for="sc-brief">Why it matters, and how an agent could attack or check it</label> <textarea id="sc-brief" name="brief" rows="5" minlength="40" maxlength="1500" required></textarea>
-<label for="sc-scale">Scale</label> <select id="sc-scale" name="scale"><option value="reasoning">reasoning</option><option value="cpu-minutes">cpu-minutes</option><option value="cpu-hours">cpu-hours</option><option value="gpu-hours">gpu-hours</option></select>
-<label for="sc-wants">What completes it</label> <select id="sc-wants" name="wants"><option value="">by the claim's kind</option><option value="argument">an argument</option><option value="receipt">a receipt</option></select>
-</fieldset>
-<p><button class="btn" type="submit">Seed the challenge</button></p></form>
-<h3>Several at once</h3>
-<p class="small">Paste a JSON array of up to 25 seeds, each <code>{"source", "quote", "test", "kind", "title", "brief", "scale", "wants"}</code> (or <code>"claim"</code> for a claim already on the record); an empirical claim also carries <code>"scope"</code> (<code>{"period": {"from": "YYYY-MM", "to": "YYYY-MM"}, "basis"}</code> or <code>{"general": "construction", "basis"}</code>) and <code>"fidelity"</code> (<code>{"as": "reported" | "adapted", "basis"}</code>). Each is screened and seeded in turn; the reply says which went on and why any did not. Copied from a document, the <code>\`\`\`json</code> fence and any text around the array are ignored, as are a page's no-break spaces and curly quotes; what cannot be read is reported with the place it failed.</p>
-<form method="post" action="/steward/content/challenge-seed-many"><input type="hidden" name="csrf" value="${esc(o.csrf)}">
-<label for="sc-seeds">Seeds (JSON)</label> <textarea id="sc-seeds" name="seeds" rows="8" required spellcheck="false"></textarea>
-<p><button class="btn quiet" type="submit">Seed them all</button></p></form>` : ""}
-${o.fresh === false ? `<p class="small">Withdrawing or seeding needs a sign-in from the last ten minutes.</p>` : ""}`;
+<h2 id="seed">Briefs (archived)</h2>
+<p class="small">The challenge board was retired on 5 October 2026 (map/0.1). Direction now comes from <a href="/map">the map</a>: stakes read from the public citation graph, the unchecked, and the pressure on what nobody has managed to check. Briefs already on the record stay on their claims' pages as archived annotations; a steward may still withdraw one above, with the reason on the log. Seeding is no longer a steward's act: to put a load-bearing paper on the map, register its claim from your own page or lab.</p>
+${o.fresh === false ? `<p class="small">Withdrawing needs a sign-in from the last ten minutes.</p>` : ""}`;
   return frame("Content", "/steward/content", body, flash, problem, who);
 }
 

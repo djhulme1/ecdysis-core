@@ -45,6 +45,8 @@ export interface Observed {
   venueCitedness: number | null;
   year: number | null;
   field: string | null;
+  /** OpenAlex's id for the field (the number after /fields/), so the field's own totals can be fetched for the map. */
+  fieldId: string | null;
 }
 
 export interface StakesScoutOptions {
@@ -68,10 +70,13 @@ export class StakesScout {
     this.pause = o.pause ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
-  /** Observe up to `limit` sources due for it: never observed first, then the stalest. */
-  async run(limit = 5): Promise<{ observed: number; unresolved: number; errors: number }> {
+  /**
+   * Observe up to `limit` sources due for it (never observed first, then the stalest), then any field those sources sit in
+   * whose totals are missing or a month old: the map's denominator (map/0.1).
+   */
+  async run(limit = 5): Promise<{ observed: number; unresolved: number; errors: number; fields: number }> {
     const r = await this.o.v2.record();
-    const out = { observed: 0, unresolved: 0, errors: 0 };
+    const out = { observed: 0, unresolved: 0, errors: 0, fields: 0 };
     const cutoff = this.now().getTime() - REFRESH_MS;
     const sources = new Map<string, string>(); // lower-cased → as registered
     for (const [id, x] of r.external) if (!r.held.has(id) && x.source) sources.set(x.source.toLowerCase(), x.source);
@@ -94,11 +99,39 @@ export class StakesScout {
       const o = got.observed;
       await this.o.log.append("source.observed", {
         source: s.key, provider: o.provider, work: o.work, citedBy: o.citedBy,
-        ...(o.venueCitedness !== null ? { venueCitedness: round3(o.venueCitedness) } : {}), ...(o.year !== null ? { year: o.year } : {}), ...(o.field ? { field: o.field } : {}),
+        ...(o.venueCitedness !== null ? { venueCitedness: round3(o.venueCitedness) } : {}), ...(o.year !== null ? { year: o.year } : {}), ...(o.field ? { field: o.field } : {}), ...(o.fieldId ? { fieldId: o.fieldId } : {}),
       });
       out.observed++;
     }
+    // The fields: each OpenAlex field any observed source sits in, totals a month old or missing. One request each.
+    const after = await this.o.v2.record();
+    const fieldIds = new Map<string, string>(); // fieldId → field name
+    for (const obs of after.observations.values()) if (obs.fieldId && obs.field && obs.provider === "openalex") fieldIds.set(obs.fieldId, obs.field);
+    for (const [fieldId, field] of [...fieldIds.entries()].sort()) {
+      const last = after.fieldObservations.get(field)?.observedAt ?? null;
+      if (last !== null && Date.parse(last) >= cutoff) continue;
+      if (!first) await this.pause(PAUSE_MS);
+      first = false;
+      const got = await this.observeField(fieldId);
+      if (!got) { out.errors++; continue; }
+      await this.o.log.append("field.observed", { field: got.field || field, fieldId, works: got.works, citedBy: got.citedBy });
+      out.fields++;
+    }
     return out;
+  }
+
+  /** A field's totals in OpenAlex: works and citations to them. Null on any failure (left for the next run). */
+  async observeField(fieldId: string): Promise<{ field: string; works: number; citedBy: number } | null> {
+    try {
+      const mailto = encodeURIComponent(this.o.contact ?? "replies@ecdysis.me");
+      const res = await this.fetchImpl(`https://api.openalex.org/fields/${encodeURIComponent(fieldId)}?mailto=${mailto}`, { headers: { "user-agent": this.ua(), accept: "application/json" } });
+      if (!res.ok) return null;
+      const f = (await res.json().catch(() => null)) as { display_name?: string; works_count?: number; cited_by_count?: number } | null;
+      if (!f || typeof f.works_count !== "number" || typeof f.cited_by_count !== "number") return null;
+      return { field: typeof f.display_name === "string" ? f.display_name.trim() : "", works: Math.max(0, Math.floor(f.works_count)), citedBy: Math.max(0, Math.floor(f.cited_by_count)) };
+    } catch {
+      return null;
+    }
   }
 
   /** One source: OpenAlex, then Semantic Scholar. Never throws. */
@@ -133,6 +166,8 @@ export class StakesScout {
     const citedBy = typeof w.cited_by_count === "number" && Number.isFinite(w.cited_by_count) ? Math.max(0, Math.floor(w.cited_by_count)) : 0;
     const year = typeof w.publication_year === "number" && Number.isFinite(w.publication_year) ? w.publication_year : null;
     const field = w.primary_topic?.field?.display_name?.trim() || null;
+    const fieldUrl = w.primary_topic?.field?.id;
+    const fieldId = typeof fieldUrl === "string" ? (fieldUrl.match(/fields\/(\d+)$/)?.[1] ?? null) : null;
     let venueCitedness: number | null = null;
     const venue = w.primary_location?.source?.id;
     if (withVenue && typeof venue === "string" && /openalex\.org\/S\d+$/i.test(venue)) {
@@ -145,7 +180,7 @@ export class StakesScout {
       }
     }
     const work = typeof w.id === "string" ? w.id.replace(/^https?:\/\/openalex\.org\//i, "") : null;
-    return { status: "observed", observed: { provider: "openalex", work, citedBy, venueCitedness, year, field } };
+    return { status: "observed", observed: { provider: "openalex", work, citedBy, venueCitedness, year, field, fieldId } };
   }
 
   private async semanticScholar(paperId: string): Promise<{ status: "observed"; observed: Observed } | { status: "unresolved"; detail: string } | { status: "error"; detail: string }> {
@@ -157,7 +192,7 @@ export class StakesScout {
     const citedBy = typeof p.citationCount === "number" && Number.isFinite(p.citationCount) ? Math.max(0, Math.floor(p.citationCount)) : 0;
     const year = typeof p.year === "number" && Number.isFinite(p.year) ? p.year : null;
     const field = Array.isArray(p.s2FieldsOfStudy) ? (p.s2FieldsOfStudy.find((f) => typeof f?.category === "string")?.category ?? null) : null;
-    return { status: "observed", observed: { provider: "semanticscholar", work: typeof p.paperId === "string" ? p.paperId : null, citedBy, venueCitedness: null, year, field } };
+    return { status: "observed", observed: { provider: "semanticscholar", work: typeof p.paperId === "string" ? p.paperId : null, citedBy, venueCitedness: null, year, field, fieldId: null } };
   }
 }
 
@@ -165,7 +200,7 @@ interface OpenAlexWork {
   id?: string;
   cited_by_count?: number;
   publication_year?: number;
-  primary_topic?: { display_name?: string; field?: { display_name?: string } } | null;
+  primary_topic?: { display_name?: string; field?: { id?: string; display_name?: string } } | null;
   primary_location?: { source?: { id?: string; display_name?: string } | null } | null;
 }
 interface S2Paper {

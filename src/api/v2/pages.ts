@@ -9,11 +9,11 @@ import type { V2Governance } from "./governance.js";
 import type { Accounts } from "./accounts.js";
 import { V2Feeds } from "./feed.js";
 import { agentBadge, agentShare, bibtex, challengeShare, citation, claimBadge, claimShare, missingBadge, paperBadge, paperShare, shareIntent, shareLinks, type SharePlatform } from "./promote.js";
-import { CHALLENGE_NOTES } from "../../core/v2/challenges.js";
 import { isHeld, scopeAt, withheldOf, type CheckState } from "../../core/v2/flow.js";
 import { periodWords, testsWords } from "../../core/v2/kinds.js";
 import { inDefaultLists } from "../../core/v2/visibility.js";
 import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
+import { mapPageV2 } from "../../web/v2/map.js";
 import { pressure } from "../../core/v2/attempts.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
@@ -30,7 +30,7 @@ import { mcpUrlFor } from "../../web/launch.js";
 import { RAW_PROTOCOL_URL_V2 } from "../../web/prompts.js";
 import { escapeXml } from "../site.js";
 import { ARTICLES, CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.js";
-import { agentPageV2, challengePageV2, challengesPageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, withheldPageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2, type RobustnessRowV2 } from "../../web/v2/pages.js";
+import { agentPageV2, challengePageV2, claimHref, claimPageV2, frontierPageV2, frozenPageV2, governancePageV2, graphPageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, papersPageV2, paperPageV2, profilePageV2, withheldPageV2, type ChallengeRowV2, type GovernanceViewV2, type AgentViewV2, type ClaimViewV2, type FrontierViewV2, type GraphViewV2, type ObservatoryViewV2, type PaperViewV2, type ProfileViewV2, type RobustnessRowV2 } from "../../web/v2/pages.js";
 import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
 import type { V2Record } from "../../core/v2/flow.js";
 
@@ -81,7 +81,7 @@ export const V1_ONLY_PREFIXES: ReadonlyArray<string> = ["/pp/", "/claim/"];
 
 /** The v2 site's pages for the sitemap; paper pages are appended from the record. */
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
-  "/", "/people", "/connect", "/lab", "/agents", "/papers", "/graph", "/frontier", "/challenges", "/observatory", "/governance", "/privacy",
+  "/", "/people", "/connect", "/lab", "/agents", "/papers", "/graph", "/map", "/frontier", "/observatory", "/governance", "/privacy",
   "/faq", "/compare", "/api",
   "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/subscribe", "/kit",
 ];
@@ -217,13 +217,9 @@ export class PagesHandler {
       const w = withheldOf(r, subject);
       return w ? withheldPageV2({ what, status: w.status, reason: w.reason, since: w.ts, steward: w.steward, seq: w.seq }) : frozenPageV2(what);
     };
-    if (path === "/frontier") return html(200, frontierPageV2({ ...((await this.v2.frontier(25)).body as unknown as FrontierViewV2), challenges: (await this.challengeRows(50, false)).filter((c) => c.status === "open" || c.status === "underway").slice(0, 5) }));
-    if (path === "/challenges") {
-      const all = await this.challengeRows(200, true);
-      const counts = { open: 0, underway: 0, settled: 0, withdrawn: 0 };
-      for (const c of all) if (c.status in counts) counts[c.status as keyof typeof counts] += 1;
-      return html(200, challengesPageV2({ board: all.filter((c) => c.status !== "withdrawn"), counts, notes: CHALLENGE_NOTES }));
-    }
+    if (path === "/frontier") return html(200, frontierPageV2((await this.v2.frontier(25)).body as unknown as FrontierViewV2));
+    // The challenge board was retired on 5 October 2026 (map/0.1): its address goes to the map; the briefs stay on their claims' pages.
+    if (path === "/challenges") return new Response(null, { status: 301, headers: { location: "/map", "cache-control": "public, max-age=3600" } });
     const cm = path.match(CHALLENGE);
     if (cm) {
       const gone = await hidden(`ch:${cm[1]}`, "challenge");
@@ -231,6 +227,7 @@ export class PagesHandler {
       const v = await this.challengeView(cm[1]!, `https://${site}`);
       return v ? html(200, challengePageV2(v)) : html(404, missingPageV2("challenge"));
     }
+    if (path === "/map") { const r = await this.v2.record(); return html(200, mapPageV2({ ...(await this.v2.mapView(25)), computedFrom: r.head })); }
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
     if (path === "/graph") return html(200, graphPageV2(await this.graph()));
     if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL_V2 }));
@@ -330,6 +327,7 @@ export class PagesHandler {
       scores: p.claims.map((ref) => (isHeld(r, ref) ? null : s.claims.get(ref) ?? null)),
       outOfView: p.claims.map((ref) => (isHeld(r, ref) ? hiddenNote(r, ref) : null)),
       amended: p.claims.map((ref) => { const am = r.amendments.get(ref); return am ? { seq: am.seq, at: am.ts, test: am.test ?? null } : null; }),
+      blocked: p.claims.map((ref) => r.blockers.get(ref)?.blockers.map((b) => b.blocker) ?? null),
       receipts: [...r.checks.values()].filter((c) => refs.has(c.target) && c.stage !== "committed" && !isHeld(r, c.id)).sort((a, b) => a.seq - b.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, agent: c.handle, families: c.families, stage: c.stage, disowned: c.disowned, tests: testsWords(c), counted: c.replicationTest })),
       reviews: r.evidence.filter((e) => e.kind === "review" && refs.has(e.claim)).map((e) => ({ claim: e.claim, agent: e.agent, forecast: r.forecasts.get(`${e.claim}|${e.agent}`) ?? 0.5 })),
       citedBy: [...r.papers.values()].filter((q) => q.id !== id && !isHeld(r, q.id) && r.uses.some((u) => u.paper === q.id && refs.has(u.claim))).map((q) => ({ paper: q.id, title: q.title, agent: q.handle, rel: "relies on", claims: r.uses.filter((u) => u.paper === q.id && refs.has(u.claim)).map((u) => u.claim.split("#")[1]!) })),
@@ -398,7 +396,11 @@ export class PagesHandler {
     // stakes/0.1: what the scout observed about the source, for the stakes line.
     const obs = source ? r.observations.get(source.toLowerCase()) ?? null : null;
     const observed = obs ? { provider: obs.provider, citedBy: obs.citedBy, venueCitedness: obs.venueCitedness, year: obs.year, field: obs.field, observedAt: obs.observedAt, unresolved: obs.unresolved } : null;
-    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, scope, registrant, robustness, usedBy, promote, arguments: args, attempts, blocked, observed, computedFrom: r.head };
+    // Briefs attached before the challenge board was retired (5 October 2026): archived on the claim's page, each as the service's entry describes it; frozen ones are left out.
+    const onBoard = ((await this.v2.challenges(200, true)).body as { challenges: Array<{ id: string; claim: string; title: string; status: string; proposedAt: string; proposer: { kind: string; handle?: string; operatorId: string }; withdrawn: unknown }> }).challenges;
+    const briefs = onBoard.filter((c) => c.claim === ref).map((c) => ({ id: c.id, title: c.title, status: c.status, at: c.proposedAt, withdrawn: c.withdrawn !== null, by: c.proposer.kind === "agent" ? `by ${c.proposer.handle}` : c.proposer.kind === "steward" ? "seeded by a steward" : "by a person" }));
+
+    return { ref, paper: paperId, paperTitle, text, test, stated: claim.stated, author, source, amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, scope, registrant, robustness, usedBy, promote, arguments: args, attempts, blocked, observed, briefs, computedFrom: r.head };
   }
 
   private async agent(handle: string): Promise<AgentViewV2 | null> {
@@ -426,16 +428,9 @@ export class PagesHandler {
       receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed" && !isHeld(r, c.id)).sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, tests: testsWords(c), counted: c.replicationTest })),
       reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle).map((e) => ({ claim: e.claim, forecast: r.forecasts.get(`${e.claim}|${handle}`) ?? 0.5 })),
       findings: r.findings.filter((f) => f.oddAgent === handle).map((f) => ({ id: f.id, verdict: f.verdict, inForce: f.inForce, reversed: f.reversed, decidedAt: f.decidedAt })),
+      attempts: [...r.attempts.values()].filter((x) => x.handle === handle && !r.held.has(x.id) && !isHeld(r, x.claim)).sort((x, y) => y.seq - x.seq).map((x) => ({ claim: x.claim, blocker: x.blocker, filedAt: x.ts, cleared: x.cleared !== null, disowned: x.disowned })),
+      clears: r.clears.filter((x) => x.handle === handle && !isHeld(r, x.claim)).sort((x, y) => y.seq - x.seq).map((x) => ({ claim: x.claim, blocker: x.blocker, at: x.ts })),
     };
-  }
-
-  /** The board's rows for the pages, with each claim's words read from the record. */
-  private async challengeRows(limit: number, all: boolean): Promise<ChallengeRowV2[]> {
-    const body = (await this.v2.challenges(limit, all)).body as { challenges: Array<Omit<ChallengeRowV2, "claimText">> };
-    const r = await this.v2.record();
-    const rows: ChallengeRowV2[] = [];
-    for (const c of body.challenges) rows.push({ ...c, claimText: (await this.claimWords(r, c.claim)).text || null });
-    return rows;
   }
 
   /** A claim's text and test, and its source or paper title, from the record. */
@@ -576,7 +571,22 @@ export class PagesHandler {
     const medianSettleHours = settleHours.length ? settleHours[Math.floor(settleHours.length / 2)]! : null;
     const declared = receipts.filter((c) => c.families.length > 0).length;
     const shown = all.filter((c) => !isHeld(r, c.ref));
+    // attempts/0.1 and stakes/0.1: the tried-and-blocked part of the record, and the pressure on it.
+    const attemptsInForce = [...r.attempts.values()].filter((a) => !a.disowned && !r.held.has(a.id));
+    const byBlocker: Record<string, number> = {};
+    let blockedStakes = 0, pressureTotal = 0;
+    for (const b of r.blockers.values()) {
+      if (isHeld(r, b.claim)) continue;
+      const st = s.claims.get(b.claim)?.stakes ?? 0;
+      blockedStakes += st;
+      pressureTotal += pressure(st, b.verifiedOperators);
+      for (const x of b.blockers) byBlocker[x.blocker] = (byBlocker[x.blocker] ?? 0) + 1;
+    }
+    const totalStakes = shown.reduce((acc, c) => acc + c.stakes, 0);
     return {
+      attempts: attemptsInForce.length, attemptsCleared: attemptsInForce.filter((a) => a.cleared).length,
+      blockedClaims: [...r.blockers.values()].filter((b) => !isHeld(r, b.claim)).length, blockedStakes, pressureTotal, byBlocker,
+      stakesTotal: totalStakes, stakesOffRecord: shown.reduce((acc, c) => acc + (c.stakes - c.use), 0),
       now: new Date().toISOString(),
       credences: shown.map((c) => c.credence),
       receiptResults: receipts.filter((c) => !isHeld(r, c.id)).map((c) => c.resultedAt ?? "").filter(Boolean),
@@ -619,14 +629,14 @@ export class PagesHandler {
   private graphOf(r: V2Record, s: ScoresV2): { nodes: GraphNode[]; edges: GraphEdge[]; omitted: number } {
     const all = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
     const gen = generations(all);
-    const chosen = [...all].sort((a, b) => b.use - a.use || (gen.get(a.ref) ?? 0) - (gen.get(b.ref) ?? 0) || a.ref.localeCompare(b.ref)).slice(0, GRAPH_MAX_NODES);
+    const chosen = [...all].sort((a, b) => b.stakes - a.stakes || b.use - a.use || (gen.get(a.ref) ?? 0) - (gen.get(b.ref) ?? 0) || a.ref.localeCompare(b.ref)).slice(0, GRAPH_MAX_NODES);
     const ids = new Set(chosen.map((c) => c.ref));
     const label = (ref: string, paper: string, external: boolean) => {
       const name = external ? r.external.get(paper)?.quote ?? paper : r.papers.get(paper)?.title ?? paper;
       const short = name.length > 22 ? `${name.slice(0, 21).trimEnd()}…` : name;
       return `${external ? "Human: " : ""}${short} · ${ref.split("#")[1] ?? ""}`;
     };
-    const nodes: GraphNode[] = chosen.map((c) => ({ id: c.ref, label: label(c.ref, c.paper, c.external), external: c.external, status: c.status, use: c.use, credence: c.credence, gen: gen.get(c.ref) ?? 0, href: claimHref(c.ref), paper: c.paper }));
+    const nodes: GraphNode[] = chosen.map((c) => ({ id: c.ref, label: label(c.ref, c.paper, c.external), external: c.external, status: c.status, use: c.use, stakes: c.stakes, credence: c.credence, gen: gen.get(c.ref) ?? 0, href: claimHref(c.ref), paper: c.paper, ...(r.blockers.has(c.ref) ? { blocked: r.blockers.get(c.ref)!.blockers.map((b) => b.blocker) } : {}) }));
     const edges: GraphEdge[] = chosen.flatMap((c) => c.foundations.filter((f) => ids.has(f.ref)).map((f) => ({ from: c.ref, to: f.ref })));
     return { nodes, edges, omitted: all.length - chosen.length };
   }
