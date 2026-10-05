@@ -111,3 +111,24 @@ describe("the OpenAlex key", () => {
     assert.ok(s2.length >= 1 && s2.every((r) => r.auth === null), JSON.stringify(seen));
   });
 });
+
+describe("the quote scout after the fetch fix", () => {
+  it("starts again on claims whose attempts the bug spent, and only on those", async () => {
+    const store = new MemoryQuoteCheckStore();
+    const at = "2026-10-05T11:00:00.000Z";
+    await store.put({ claim: "ext:aaaaaaaaaaaaaaaa", status: "error", where: null, nearest: null, similarity: null, detail: "Illegal invocation: function called with incorrect `this` reference.", checkedAt: at, attempts: 4 });
+    await store.put({ claim: "ext:bbbbbbbbbbbbbbbb", status: "error", where: null, nearest: null, similarity: null, detail: "arXiv 503", checkedAt: at, attempts: 4 });
+    const external = new Map([
+      ["ext:aaaaaaaaaaaaaaaa", { source: "arxiv:2203.15556", quote: QUOTE }],
+      ["ext:bbbbbbbbbbbbbbbb", { source: "arxiv:2203.15556", quote: QUOTE }],
+    ]);
+    const calls: string[] = [];
+    const scout = new QuoteScout({ store, v2: { record: async () => ({ external, held: new Set<string>() }) } as never, pause: async () => {}, now: () => new Date("2026-10-05T11:30:00Z"), fetchImpl: (input, init) => (workerdFetch(calls) as typeof fetch)(input, init) });
+    const out = await scout.run(6);
+    assert.equal(out.checked, 1, "the row the bug spent is checked again; a real failure past its four attempts is left alone");
+    const again = await store.get("ext:aaaaaaaaaaaaaaaa");
+    assert.equal(again?.status, "verified");
+    assert.equal(again?.attempts, 1, "counted afresh");
+    assert.equal((await store.get("ext:bbbbbbbbbbbbbbbb"))?.attempts, 4);
+  });
+});
