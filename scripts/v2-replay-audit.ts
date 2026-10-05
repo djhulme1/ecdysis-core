@@ -27,7 +27,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "audit");
 const BASELINE = join(ROOT, "v2-baseline.json");
 
 export interface V2Outputs {
-  /** claim ref → "credence · verified-only · status · use · dispute" */
+  /** claim ref → "credence · verified-only · status · use · dispute · stakes" (stakes/0.1: equal to use until a source is observed) */
   claims: Record<string, string>;
   /** agent → reliability (6 decimals) */
   reliability: Record<string, string>;
@@ -352,7 +352,7 @@ export function scoreScripted(): V2Outputs {
   const asOf = new Date(Date.UTC(2026, 10, 1));
   const { record: r, scores: s, verifiedByRecord, rounds } = resolveV2(log, asOf);
   const claims: Record<string, string> = {};
-  for (const [ref, c] of [...s.claims.entries()].sort()) claims[ref] = `${r6(c.credence)} · ${r6(c.credenceVerified)} · ${c.status} · use ${r6(c.use)} · dispute ${r6(c.dispute)}${c.kind === "conceptual" ? " · conceptual" : ""}${c.cap !== null ? ` · cap ${r6(c.cap)}` : ""}${c.arguments.methodology ? ` · methodology ${c.arguments.methodology}` : ""}`;
+  for (const [ref, c] of [...s.claims.entries()].sort()) claims[ref] = `${r6(c.credence)} · ${r6(c.credenceVerified)} · ${c.status} · use ${r6(c.use)} · dispute ${r6(c.dispute)} · stakes ${r6(c.stakes)}${c.kind === "conceptual" ? " · conceptual" : ""}${c.cap !== null ? ` · cap ${r6(c.cap)}` : ""}${c.arguments.methodology ? ` · methodology ${c.arguments.methodology}` : ""}`;
   const reliability: Record<string, string> = {};
   for (const [agent, w] of [...s.track.reliability.entries()].sort()) reliability[agent] = r6(w);
   const tiers: Record<string, string> = {};

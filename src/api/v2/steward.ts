@@ -44,59 +44,10 @@ export interface HealthSource {
 }
 
 const MAX_FORM = 8 * 1024;
-/** The bulk seed form carries up to 25 briefs of 1500 characters with their quotes and tests, URL-encoded: it has its own ceiling. */
-const MAX_SEED_FORM = 96 * 1024;
 const SESSION_COOKIE = "ecd_s";
 
 export function isStewardPath(path: string): boolean {
   return /^\/steward(\/|$)/.test(path);
-}
-
-/**
- * Reads the seeds a steward pasted into the bulk form, as a phone or a
- * document viewer may have handed them over: a byte-order mark, a Markdown
- * code fence, prose before or after the array, a viewer's line numbers,
- * no-break and zero-width spaces from a rendered page, typographic quotes in
- * place of straight ones. Each repair is tried only after the text fails to
- * parse without it, and the first reading that parses wins, so a clean paste
- * is read exactly as written (curly quotes inside a quoted sentence are the
- * authors' words and stay). When nothing parses, the problem names the JSON
- * engine's reason for the paste as it stood and how many characters arrived,
- * so a paste cut short shows up as one.
- */
-export function readSeedPaste(raw: string): { seeds: unknown[] } | { problem: string } {
-  const text = raw.replace(/^\uFEFF/, "").trim();
-  if (!text) return { problem: "Couldn't read the seeds: the box was empty. Paste a JSON array of {source, quote, test, kind, title, brief, scale, wants}." };
-  const attempts: string[] = [];
-  const add = (t: string) => { if (t && !attempts.includes(t)) attempts.push(t); };
-  const widen = (repair: (t: string) => string) => { for (const t of [...attempts]) add(repair(t)); };
-  // As pasted, minus a leading ```json line and a trailing ``` line.
-  const unfenced = text.replace(/^```[A-Za-z]*[ \t]*\r?\n?/, "").replace(/\r?\n?[ \t]*```$/, "").trim();
-  add(unfenced);
-  // The outermost array alone: anything before the first [ or after the last ] is a document's prose, not a seed.
-  const open = unfenced.indexOf("["), close = unfenced.lastIndexOf("]");
-  if (open >= 0 && close > open) add(unfenced.slice(open, close + 1));
-  // A code viewer's line numbers, when every line carries one (a JSON line never begins with a digit).
-  widen((t) => t.split(/\r?\n/).every((l) => !l.trim() || /^\s*\d+(\s|$)/.test(l)) ? t.replace(/^\s*\d+(\s|$)/gm, "") : t);
-  // A rendered page's spacing: no-break spaces for indentation, zero-width and soft-hyphen characters in the text.
-  widen((t) => t.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ").replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, ""));
-  // Typographic double quotes where JSON wants straight ones (a keyboard's smart punctuation, a word processor): first only
-  // where a string delimiter can stand (after [ { , : or before : , } ]), which leaves a quotation inside a sentence alone;
-  // then everywhere, for a paste with no quotations inside.
-  const curly = /[\u201C\u201D\u201E\u201F\u301D\u301E]/g;
-  widen((t) => t.replace(/([[{,:]\s*)[\u201C\u201D\u201E\u201F\u301D\u301E]/g, '$1"').replace(/[\u201C\u201D\u201E\u201F\u301D\u301E](\s*[:,}\]])/g, '"$1'));
-  widen((t) => t.replace(curly, '"'));
-  let why: string | null = null;
-  for (const t of attempts) {
-    try {
-      const v: unknown = JSON.parse(t);
-      return { seeds: Array.isArray(v) ? v : [v] };
-    } catch (e) {
-      why ??= (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 200);
-    }
-  }
-  const cut = /end of JSON input|Unterminated string/i.test(why ?? "") ? ` The text ends before the array closes, so the paste may have been cut short: ${text.length.toLocaleString("en-GB")} characters arrived.` : "";
-  return { problem: `Couldn't read the seeds as JSON (${why ?? "not JSON"}).${cut} Paste the whole array of {source, quote, test, kind, title, brief, scale, wants}; a code fence or text around it is ignored.` };
 }
 
 export class StewardHandler {
@@ -131,9 +82,8 @@ export class StewardHandler {
     if (method !== "POST") return this.page(path, signed, url, flash, null);
 
     const len = Number(req.headers.get("content-length") ?? "0");
-    const maxForm = path === "/steward/content/challenge-seed-many" ? MAX_SEED_FORM : MAX_FORM;
-    const text = len > maxForm ? "" : await req.text();
-    if (len > maxForm || text.length > maxForm) return this.html(413, refusedPage("That form was too large."));
+    const text = len > MAX_FORM ? "" : await req.text();
+    if (len > MAX_FORM || text.length > MAX_FORM) return this.html(413, refusedPage("That form was too large."));
     const f = new URLSearchParams(text);
     if (!(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.page("/steward", signed, url, null, "That form had expired. Please try again.");
     // A full audit only reads, so it runs in read-only mode and needs no step-up; every other act is a change.
@@ -174,34 +124,9 @@ export class StewardHandler {
         if (r.status !== 200) return this.page("/steward/controls", signed, url, null, `Couldn't change the switch: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`);
         return this.redirect(`/steward/controls?ok=${encodeURIComponent((r.body as Record<string, unknown>)["changed"] ? `${key} is now ${value}; the change is on the log.` : `${key} was already ${value}.`)}`);
       }
-      case "/steward/content/challenge-seed": {
-        // A founding challenge, seeded by this steward under their operator id: screened like any brief, outside the daily quota.
-        const sf = scopeFormValues((n) => f.get(n));
-        const r = await this.o.v2.proposeChallengeBySteward(steward, { claim: f.get("claim") ?? "", source: f.get("source") ?? "", quote: f.get("quote") ?? "", test: f.get("test") ?? "", kind: f.get("kind") ?? "", scope: scopeFromForm(sf.scope), fidelity: fidelityFromForm(sf.fidelity), title: f.get("title") ?? "", brief: f.get("brief") ?? "", scale: f.get("scale") ?? "", wants: f.get("wants") ?? "" });
-        if (r.status !== 201) {
-          const b = r.body as Record<string, unknown>;
-          const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[];
-          return this.page("/steward/content", signed, url, null, `Couldn't seed the challenge: ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}.`);
-        }
-        return this.redirect(`/steward/content?ok=${encodeURIComponent("Founding challenge seeded. It is on the board under your operator id, named as a steward's seed.")}`);
-      }
-      case "/steward/content/challenge-seed-many": {
-        // Several founding challenges in one act: a JSON array pasted into the form, each seeded as above; the reply says which went on.
-        const read = readSeedPaste(f.get("seeds") ?? "");
-        if ("problem" in read) return this.page("/steward/content", signed, url, null, read.problem);
-        const seeds = read.seeds;
-        if (seeds.length === 0 || seeds.length > 25) return this.page("/steward/content", signed, url, null, `Couldn't read the seeds: a JSON array of 1 to 25 objects (${seeds.length} arrived).`);
-        const outcomes: string[] = [];
-        let seeded = 0;
-        for (const [i, raw] of seeds.entries()) {
-          const x = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-          const r = await this.o.v2.proposeChallengeBySteward(steward, { claim: typeof x["claim"] === "string" ? x["claim"] : "", source: x["source"] ?? "", quote: x["quote"] ?? "", test: x["test"] ?? "", kind: x["kind"] ?? "", scope: x["scope"], fidelity: x["fidelity"], data: x["data"], title: x["title"] ?? "", brief: x["brief"] ?? "", scale: x["scale"] ?? "", wants: x["wants"] ?? "" });
-          const b = r.body as Record<string, unknown>;
-          if (r.status === 201) { seeded++; outcomes.push(`${i + 1}: seeded ${String(b["id"])}`); }
-          else { const why = (Array.isArray(b["detail"]) ? b["detail"] : Array.isArray(b["findings"]) ? b["findings"] : []) as string[]; outcomes.push(`${i + 1}: ${r.status} ${String(b["error"] ?? "")}${why.length ? ` (${why.join("; ")})` : ""}`); }
-        }
-        const summary = `${seeded} of ${seeds.length} seeded. ${outcomes.join(" · ")}`;
-        return seeded === seeds.length ? this.redirect(`/steward/content?ok=${encodeURIComponent(summary.slice(0, 1500))}`) : this.page("/steward/content", signed, url, seeded ? summary.slice(0, 1500) : null, seeded ? null : summary.slice(0, 1500));
+      case "/steward/content/challenge-seed": case "/steward/content/challenge-seed-many": {
+        // The challenge board was retired on 5 October 2026 (map/0.1): seeding is gone, and a stale form answers with where to go.
+        return this.page("/steward/content", signed, url, null, "The challenge board was retired on 5 October 2026: direction now comes from the map (/map). To put a load-bearing paper on the map, register its claim from your own page or lab; the briefs already on the record stay on their claims' pages.");
       }
       case "/steward/content/scope": {
         // scope/0.1: what a claim from human literature registered before scopes existed covers, declared once under this

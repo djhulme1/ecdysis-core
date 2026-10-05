@@ -90,12 +90,19 @@
  * what rests on it and the factor is continuous in the evidence (Daniel,
  * 3 Oct: registering a human claim must cost the dependant nothing).
  *
- * Three numbers per claim, never blended:
+ * Four numbers per claim, never blended:
  *   credence p   what to believe;
- *   use U        how much rests on it, never an input to credence;
+ *   use U        how much rests on it on the record, never an input to credence;
  *   dispute D    how much the evidence disagrees, D = 4sf/(s + f), where s
  *                and f are the weighted confirming and disconfirming
- *                evidence mass (replication 1, re-run ½, review ¼).
+ *                evidence mass (replication 1, re-run ½, review ¼);
+ *   stakes S     how much rests on it on and off the record (stakes/0.1,
+ *                stakes.ts): S = U + log2(1 + R), where R is the source
+ *                paper's reach in the public citation graph as the
+ *                platform's scout observed it. Stakes rank the frontier
+ *                ((S + ½)·p(1 − p)) and feed the pressure on blocked
+ *                claims; they never enter credence, the statuses or the
+ *                threshold for established, which stay on U.
  *
  * D is zero when the evidence agrees or there is none, equals s + f when it
  * splits evenly, and tends to 4f for a lone dissenter f against any number
@@ -142,6 +149,7 @@
 
 import { ARGUMENT_PARAMS, type ClaimArgumentsInput, type ClaimKind } from "./arguments.js";
 import { scopesOverlap, type ClaimScope } from "./kinds.js";
+import { stakesOf } from "./stakes.js";
 
 export const CREDENCE_V2_VERSION = "credence/0.4";
 
@@ -236,6 +244,8 @@ export interface ClaimInput {
   scope?: ClaimScope | null;
   /** A claim from human literature: the operator that registered it, and so wrote its test. Its evidence counts, but not towards the two operators a resolution needs. */
   registrant?: string;
+  /** stakes/0.1: the source paper's reach off the record (citations, or a young paper's venue expectation), from the scout's observation. Absent: 0. */
+  reach?: number;
 }
 
 export interface EvidenceInput {
@@ -350,6 +360,10 @@ export interface ClaimV2 {
   f: number;
   dispute: number;
   use: number;
+  /** stakes/0.1: the source paper's reach off the record, as observed; 0 when nothing was observed or the claim is an Ecdysis paper's. */
+  reach: number;
+  /** stakes/0.1: S = use + log2(1 + reach). Ranks the frontier; never enters credence. */
+  stakes: number;
   threshold: number;
   status: ClaimStatusV2;
   /** The claim's resolution at the bar for zero use (a revealed canary's truth first): 1 established, 0 refuted, null not yet. What the author's calibration record and the track record are judged against. */
@@ -752,15 +766,18 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     const resolved = resolutionOf(statusAt(thresholdOf(0)), o.anchors?.get(c.ref));
     if (resolved !== null && c.calibration === undefined && c.authorOperator) pending.push({ op: c.authorOperator, stated: c.stated, truth: resolved });
     const dispute = disputeOf(ev.s, ev.f);
+    const reach = Math.max(0, c.reach ?? 0);
+    const stakes = stakesOf(use, reach);
     sums.set(c.ref, total);
     out.set(c.ref, {
       ref: c.ref, paper: c.paper, external: c.external === true, kind, cap, calibration, prior, logOdds, credence, credenceVerified, credenceReplication,
-      operators: { confirming: ev.confirmingOperators, failing: ev.failingOperators }, s: ev.s, f: ev.f, dispute, use, threshold, status, resolved,
+      operators: { confirming: ev.confirmingOperators, failing: ev.failingOperators }, s: ev.s, f: ev.f, dispute, use, reach, stakes, threshold, status, resolved,
       arguments: { upheld: args?.upheldAttacks.length ?? 0, dismissed: args?.dismissedAttacks.length ?? 0, open: args?.open ?? 0, methodology: args?.methodology ?? 0, counterexample: args?.refuted ?? false },
       reproduced: ev.reproduced,
       families: [...ev.confirmingFamilies].filter((x) => x !== "?").sort(),
-      valueOfChecking: (use + 0.5) * credence * (1 - credence),
-      disputePriority: (use + 0.5) * dispute,
+      // stakes/0.1: the queues rank by what rests on a claim on and off the record; the statuses and the threshold stay on use.
+      valueOfChecking: (stakes + 0.5) * credence * (1 - credence),
+      disputePriority: (stakes + 0.5) * dispute,
       foundations: found.map((x) => ({ ref: x.ref, credence: x.credence, status: x.status, factor: foundationFactor(x) })),
       disputedFoundation: found.some((x) => x.status === "contested"),
       lift: [],

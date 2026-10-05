@@ -11,7 +11,7 @@ import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { Accounts, MemoryAccountStore } from "../src/api/v2/accounts.js";
-import { StewardHandler, readSeedPaste } from "../src/api/v2/steward.js";
+import { StewardHandler } from "../src/api/v2/steward.js";
 import { CanaryRegistry, MemoryCanaryStore } from "../src/api/v2/canaries.js";
 import { sha256Hex } from "../src/api/access.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
@@ -323,7 +323,7 @@ describe("the stewardship area", () => {
     let html = await (await w.get("/steward/controls", d.session)).text();
     assert.match(html, /<code class="mono">v2\.publishing<\/code>/);
     assert.match(html, /never \(default\)/);
-    assert.equal((html.match(/<span class="status sound">open<\/span>/g) ?? []).length, 10, "ten switches, all open");
+    assert.equal((html.match(/<span class="status sound">open<\/span>/g) ?? []).length, 9, "nine switches, all open");
     const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
     assert.match(await (await w.post("/steward/controls/set", { csrf, setting: "v2.nonsense", value: "paused" }, d.session)).text(), /no such switch/);
     assert.match(await (await w.post("/steward/controls/set", { csrf, setting: "v2.publishing", value: "closed" }, d.session)).text(), /is one of: open, paused/);
@@ -396,12 +396,12 @@ describe("the stewardship area", () => {
     assert.equal((await w.svc.holds()).filter((h) => h.open).length, 1);
   });
 
-  it("content: a steward sees every challenge and can withdraw one with a reason, which goes on the log and the audit trail under the steward's operator id", async () => {
+  it("content: a steward sees every archived brief and can withdraw one with a reason, which goes on the log and the audit trail under the steward's operator id; seeding is retired", async () => {
     const w = await world();
     await w.agent("Ant", "op-a", ["claude"]);
     await w.agent("Bee", "op-b", ["gpt"]);
     const pub = await w.svc.publishPaper(await w.sign("Ant", {
-      protocol: "ecdysis/0.2", type: "paper", title: "A paper to challenge",
+      protocol: "ecdysis/0.2", type: "paper", title: "A paper with an archived brief",
       abstract: "An abstract long enough to pass the structural screen, describing what was measured and how it was measured, in two paragraphs.\n\nA second paragraph closes it.",
       field: "math", methods: "Pre-registered; one seeded entry point.",
       claims: [{ text: "The first claim holds in the stated regime.", confidence: 0.7, test: "The quantity lies outside the interval in a fresh run." }], builds_on: [],
@@ -409,9 +409,10 @@ describe("the stewardship area", () => {
     assert.equal(pub.status, 201, JSON.stringify(pub.body));
     const claim = `${w.idOf(pub)}#C1`;
     const brief = "Recompute the headline number from the paper's public data with the stated weighting and report whether it survives; cpu-minutes, analysis only.";
-    const proposed = await w.svc.proposeChallenge(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "challenge.propose", claim, title: `A hostile brief <script>alert(1)</script>`, brief, scale: "cpu-minutes" }));
-    assert.equal(proposed.status, 201, JSON.stringify(proposed.body));
-    const id = w.idOf(proposed);
+    // A brief Bee attached before the board was retired, as the log holds it.
+    const id = "ch:" + "b".repeat(16);
+    await w.log.append("challenge.propose", { id, claim, title: `A hostile brief <script>alert(1)</script>`, brief, scale: "cpu-minutes", handle: "Bee", operatorId: "op-b", proposer: "agent" });
+    assert.equal((await w.svc.record()).challenges.size, 1);
     const d = await w.signIn("daniel@example.org");
     let html = await (await w.get("/steward/content", d.session)).text();
     assert.match(html, /<h2>Challenges<\/h2>/);
@@ -419,6 +420,8 @@ describe("the stewardship area", () => {
     assert.doesNotMatch(html, /<script>alert/);
     assert.match(html, /agent Bee \(op-b\)/);
     assert.match(html, /<form method="post" action="\/steward\/content\/challenge-withdraw">/);
+    assert.match(html, /The challenge board was retired on 5 October 2026/);
+    assert.doesNotMatch(html, /action="\/steward\/content\/challenge-seed/, "no seed form");
     const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
     let res = await w.post("/steward/content/challenge-withdraw", { csrf, id, reason: "short" }, d.session);
     assert.equal(res.status, 200);
@@ -434,88 +437,18 @@ describe("the stewardship area", () => {
     html = await (await w.get("/steward/content", d.session)).text();
     assert.match(html, /withdrawn<br><span class="small">by steward: The brief tries to instruct/);
     assert.doesNotMatch(html, /action="\/steward\/content\/challenge-withdraw"/, "nothing left to withdraw");
-    assert.equal((await w.svc.challenges()).body && ((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]!.length, 0, "off the board");
-    // Seeding a founding challenge from the same page: a conceptual claim from the literature, registered and briefed in one act,
-    // outside the daily quota (four in a row where a person would stop at three), named on the board as a steward's seed.
-    assert.match(html, /<form method="post" action="\/steward\/content\/challenge-seed">/);
-    for (let i = 0; i < 4; i++) {
-      res = await w.post("/steward/content/challenge-seed", {
-        csrf, claim: "", source: `doi:10.1000/position.${i}`, quote: `Position ${i}: a thesis from the literature, quoted here in the words its authors used to state it.`, test: "A counterexample of the stated form, or an established claim on the record that entails its negation.", kind: "conceptual",
-        title: `Founding challenge ${i}`, brief: "This position is widely cited and rarely attacked. An agent can test it by looking for an instance that satisfies its premises and violates its conclusion, or for an established claim it is incompatible with, and filing the argument with the checkable part stated.", scale: "reasoning", wants: "",
-      }, d.session);
-      assert.equal(res.status, 303, await res.text());
-      assert.match(res.headers.get("location")!, /Founding\+challenge\+seeded|Founding%20challenge%20seeded/);
+    assert.equal(((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]!.length, 0, "out of view");
+    // Seeding is retired: a stale form post (a cached page) writes nothing and says where direction comes from now.
+    const before = (await w.svc.logRows()).length;
+    for (const path of ["/steward/content/challenge-seed", "/steward/content/challenge-seed-many"]) {
+      res = await w.post(path, { csrf, claim: "", source: "doi:10.1000/position.1", quote: "Position 1: a thesis from the literature, quoted here in the words its authors used to state it.", test: "A counterexample of the stated form.", kind: "conceptual", title: "Founding challenge 1", brief, scale: "reasoning", wants: "argument", seeds: "[]" }, d.session);
+      const text = await res.text();
+      assert.equal(res.status, 200, text);
+      assert.match(text, /The challenge board was retired on 5 October 2026: direction now comes from the map/);
     }
-    const seeded = ((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]! as Array<Record<string, Json>>;
-    assert.equal(seeded.length, 4);
-    for (const c of seeded) { assert.equal((c["proposer"] as Record<string, Json>)["kind"], "steward"); assert.equal(c["wants"], "argument"); assert.equal(c["claimKind"], "conceptual"); }
-    html = await (await w.get("/steward/content", d.session)).text();
-    assert.match(html, /steward op_[0-9a-f]+ \(founding\)/);
-    assert.ok((await w.svc.audit()).some((a) => a.type === "challenge.propose"), "seeds are on the audit trail");
-    const noClaim = await w.post("/steward/content/challenge-seed", { csrf, claim: "", source: "", quote: "", test: "", kind: "conceptual", title: "Nothing named", brief: "A brief that names no claim and registers none, which the form must refuse with the reason shown.", scale: "reasoning", wants: "" }, d.session);
-    assert.equal(noClaim.status, 200);
-    assert.match(await noClaim.text(), /Couldn&#39;t seed the challenge/);
-    // Several at once: a JSON array; each is seeded in turn and the reply says which went on.
-    const many = [5, 6].map((i) => ({ source: `doi:10.1000/position.${i}`, quote: `Position ${i}: a thesis from the literature, quoted here in the words its authors used to state it.`, test: "A counterexample of the stated form, or an established claim on the record that entails its negation.", kind: "conceptual", title: `Founding challenge ${i}`, brief: "This position is widely cited and rarely attacked. An agent can test it by looking for an instance that satisfies its premises and violates its conclusion, or for an established claim it is incompatible with, and filing the argument with the checkable part stated.", scale: "reasoning", wants: "" }));
-    res = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: JSON.stringify(many) }, d.session);
-    assert.equal(res.status, 303, await res.text());
-    assert.match(decodeURIComponent(res.headers.get("location")!), /2 of 2 seeded/);
-    assert.equal((((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]!).length, 6);
-    const bad = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: "not json" }, d.session);
-    assert.match(await bad.text(), /Couldn&#39;t read the seeds as JSON \(/);
-    // A paste from a document viewer or a phone: the Markdown fence, the prose around the array, the viewer's no-break
-    // spaces and the keyboard's curly quotes are all read through; the seeds go on exactly as a clean paste would.
-    const seven = { ...many[0]!, source: "doi:10.1000/position.7", title: "Founding challenge 7" };
-    const mangled = `## The JSON to paste\n\n\`\`\`json\n${JSON.stringify([seven], null, 1).replace(/\n /g, "\n\u00A0").replace(/"source"/, "\u201Csource\u201D")}\n\`\`\`\n\n## Candidates not included\n\n- Sutton: a blog post.`;
-    res = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: mangled }, d.session);
-    assert.equal(res.status, 303, await res.text());
-    assert.match(decodeURIComponent(res.headers.get("location")!), /1 of 1 seeded/);
-    const onBoard = ((await w.svc.challenges()).body as Record<string, Json[]>)["challenges"]! as Array<Record<string, Json>>;
-    assert.equal(onBoard.length, 7);
-    assert.ok(onBoard.some((c) => c["title"] === "Founding challenge 7"), "the mangled paste seeded the same challenge a clean one would");
-    // A paste cut short is named as one, with the count of characters that arrived, so the steward knows what went wrong.
-    const cut = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: JSON.stringify(many).slice(0, 300) }, d.session);
-    assert.match(await cut.text(), /Couldn&#39;t read the seeds as JSON \(.*\)\. The text ends before the array closes, so the paste may have been cut short: 300 characters arrived\./);
-    // Curly quotes inside a quoted sentence are content, not delimiters: a clean paste carrying them is read as written.
-    const curlyInside = { ...many[0]!, source: "doi:10.1000/position.8", title: "Founding challenge 8", quote: "Position 8: the species reaches a \u201Cposthuman\u201D stage, as the authors put it in the words they used." };
-    res = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: JSON.stringify([curlyInside]) }, d.session);
-    assert.equal(res.status, 303, await res.text());
-    assert.match(decodeURIComponent(res.headers.get("location")!), /1 of 1 seeded/);
-    const mixed = await w.post("/steward/content/challenge-seed-many", { csrf, seeds: JSON.stringify([many[0], { title: "no claim at all", brief: "A seed that names nothing, which must be reported as refused while the rest are seeded as usual.", scale: "reasoning" }]) }, d.session);
-    assert.equal(mixed.status, 200, "not every seed went on, so the page shows the outcomes");
-    assert.match(await mixed.text(), /0 of 2 seeded|1 of 2 seeded/);
-  });
-});
-
-describe("reading a pasted seed set", () => {
-  it("reads a clean array as written, wraps a lone object, and names an empty box", () => {
-    const clean = readSeedPaste('[{"title":"A"},{"title":"B"}]');
-    assert.deepEqual("seeds" in clean ? clean.seeds : null, [{ title: "A" }, { title: "B" }]);
-    const lone = readSeedPaste('{"title":"A"}');
-    assert.deepEqual("seeds" in lone ? lone.seeds : null, [{ title: "A" }]);
-    const empty = readSeedPaste("  \n ");
-    assert.match("problem" in empty ? empty.problem : "", /the box was empty/);
-  });
-  it("repairs only what fails as pasted, in order, and reports the first failure when nothing parses", () => {
-    // Byte-order mark, Windows line ends and a fence with a language tag.
-    const fenced = readSeedPaste("\uFEFF```json\r\n[{\"title\":\"A\"}]\r\n```");
-    assert.deepEqual("seeds" in fenced ? fenced.seeds : null, [{ title: "A" }]);
-    // Curly quotes inside a value survive when the paste parses as it stands (they are the authors' words).
-    const inner = readSeedPaste('[{"quote":"a \u201Cposthuman\u201D stage"}]');
-    assert.deepEqual("seeds" in inner ? inner.seeds : null, [{ quote: "a \u201Cposthuman\u201D stage" }]);
-    // Smart punctuation on every quote parses once the quotes are straightened; the brackets' prose is ignored.
-    const smart = readSeedPaste("Here it is:\n[{\u201Ctitle\u201D: \u201CA\u201D}]\nThat is all.");
-    assert.deepEqual("seeds" in smart ? smart.seeds : null, [{ title: "A" }]);
-    // Smart punctuation on every quote with a quotation inside a value: the delimiters are straightened, the quotation stays.
-    const nested = readSeedPaste("[{\u201Cquote\u201D: \u201Creaching a \u201Cposthuman\u201D stage, as they put it\u201D}]");
-    assert.deepEqual("seeds" in nested ? nested.seeds : null, [{ quote: "reaching a \u201Cposthuman\u201D stage, as they put it" }]);
-    // A code viewer's line numbers on every line are stripped; a digit at the start of a value's line is not touched because values never start lines.
-    const numbered = readSeedPaste("1 [\n2  {\n3   \"title\": \"A\"\n4  }\n5 ]");
-    assert.deepEqual("seeds" in numbered ? numbered.seeds : null, [{ title: "A" }]);
-    // Nothing parses: the report carries the engine's reason for the text as it stood, not for a repaired version.
-    const broken = readSeedPaste("[{\"title\": }]");
-    assert.match("problem" in broken ? broken.problem : "", /^Couldn't read the seeds as JSON \(.+\)\. Paste the whole array/);
-    assert.doesNotMatch("problem" in broken ? broken.problem : "", /cut short/);
+    assert.equal((await w.svc.logRows()).length, before, "nothing written");
+    assert.equal((await w.svc.proposeChallengeBySteward(steward, { claim, title: "A seed through the service", brief, scale: "reasoning" })).status, 410);
+    assert.equal((await w.svc.logRows()).length, before, "nothing written through the service either");
   });
 });
 

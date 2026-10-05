@@ -50,9 +50,9 @@ describe("figures", () => {
 
   it("the knowledge graph is deterministic, squares human literature, crosses refuted claims, links drawn claims and tables them all", () => {
     const nodes: GraphNode[] = [
-      { id: "ext:1#C1", label: `Human: ${HOSTILE}`, external: true, status: "refuted", use: 2, credence: 0.1, gen: 0, href: "/x/1/C1", paper: "ext:1" },
+      { id: "ext:1#C1", label: `Human: ${HOSTILE}`, external: true, status: "refuted", use: 2, stakes: 13.28, credence: 0.1, gen: 0, href: "/x/1/C1", paper: "ext:1" },
       { id: "ecd:2610.a#C1", label: "A · C1", external: false, status: "established", use: 4, credence: 0.9, gen: 1, href: "/p/ecd:2610.a/C1", paper: "ecd:2610.a" },
-      { id: "ecd:2610.b#C1", label: "B · C1", external: false, status: "unchecked", use: 0, credence: 0.5, gen: 2, paper: "ecd:2610.b" },
+      { id: "ecd:2610.b#C1", label: "B · C1", external: false, status: "unchecked", use: 0, credence: 0.5, gen: 2, paper: "ecd:2610.b", blocked: ["data-unavailable"] },
     ];
     const edges = [{ from: "ecd:2610.a#C1", to: "ext:1#C1" }, { from: "ecd:2610.b#C1", to: "ecd:2610.a#C1" }, { from: "ecd:2610.b#C1", to: "missing#C1" }];
     const a = claimGraph({ id: "g", nodes, edges, omitted: 5 });
@@ -66,7 +66,11 @@ describe("figures", () => {
     assert.doesNotMatch(a, /<img|\)>/);
     assert.match(a, /Human: &lt;img src=x onerror=alert\(1\)&gt;/);
     assert.match(a, /Every claim drawn, as a table \(5 more are not drawn\)/);
-    assert.match(a, /<td>B · C1<\/td><td>○ unchecked<\/td><td>0\.50<\/td><td>0<\/td><td>A · C1, missing#C1<\/td>/, "a foundation not drawn is still named in the table");
+    assert.match(a, /<td>B · C1<\/td><td>○ unchecked<\/td><td>⊘ data-unavailable<\/td><td>0\.50<\/td><td>0<\/td><td>0\.0<\/td><td>A · C1, missing#C1<\/td>/, "a foundation not drawn is still named in the table; a blocked claim says so and what blocks it");
+    assert.match(a, /<td>✕ refuted<\/td><td>yes<\/td><td>0\.10<\/td><td>2<\/td><td>13\.3<\/td>/, "stakes are a column of their own, beside use");
+    assert.match(a, /<text [^>]*class="lbl x" aria-hidden="true">⊘<\/text>/, "a blocked claim is marked ⊘ in the drawing");
+    assert.match(a, /⊘ blocked \(tried, not checkable\)/, "and the legend says what the mark means");
+    assert.match(a, /size: stakes/, "the legend says what size means");
     assert.match(a, /<desc id="g-d">3 claims and 2 dependencies/);
     assert.match(a, /<div class="scroll"><svg viewBox="0 0 760 /, "the drawing scrolls sideways on a phone instead of shrinking its words");
     assert.match(claimGraph({ id: "z", nodes: [], edges: [] }), /No claims on the record yet/);

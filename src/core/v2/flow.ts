@@ -38,6 +38,8 @@
  *   submission.withdraw {subject, by, handle, reason}               the author withdraws its submission while screening holds it (4 Oct 2026)
  *   check.attempt      {id, claim, blocker, detail, unblockedBy, effortMinutes?, handle, operatorId, models?, key?}  attempts/0.1: tried, could not check, and why
  *   attempt.clear      {id, claim, blocker, how, handle, operatorId}   the blocker is gone: every earlier attempt with it on the claim is cleared
+ *   source.observed    {source, provider, work, citedBy, venueCitedness?, year?, field?, fieldId?}  stakes/0.1: the platform's scout read a registered source's reach from the public citation graph
+ *   field.observed     {field, fieldId, works, citedBy}                 map/0.1: the scout read a field's totals in the citation graph, the map's denominator
  *
  * Paper claims and external claims may carry kind: "conceptual" (arguments/0.1); absent means empirical.
  *
@@ -115,6 +117,7 @@ import { CHALLENGE_SCALES, CHALLENGE_WANTS, type ChallengeScale, type ChallengeS
 import { argumentEffects, GROUNDS, settleArgument, STANCES, type ArgumentCheckState, type ArgumentState, type ClaimArgumentsInput, type ClaimKind, type Grounds, type Stance } from "./arguments.js";
 import type { EarnedVerification } from "./scoring.js";
 import { BLOCKERS, summariseBlockers, type AttemptState, type Blocker, type ClaimBlockers, type ClearState } from "./attempts.js";
+import { parseFieldObservation, parseObservation, reachOf, type FieldObservation, type SourceObservation } from "./stakes.js";
 
 export type V2EntryType =
   | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
@@ -124,7 +127,8 @@ export type V2EntryType =
   | "argument.file" | "argument.check" | "argument.answer"
   | "content.withhold" | "content.restore" | "claim.amend" | "submission.withdraw"
   | "check.attempt" | "attempt.clear"
-  | "claim.scope" | "check.describe";
+  | "claim.scope" | "check.describe"
+  | "source.observed" | "field.observed";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
@@ -135,6 +139,7 @@ export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
   "content.withhold", "content.restore", "claim.amend", "submission.withdraw",
   "check.attempt", "attempt.clear",
   "claim.scope", "check.describe",
+  "source.observed", "field.observed",
 ];
 
 export interface V2Entry {
@@ -381,6 +386,10 @@ export interface V2Record {
   clears: ClearState[];
   /** What blocks each claim as it stands: uncleared attempts in force, by blocker, with the independent verified operators behind them. Claims with none are absent. */
   blockers: Map<string, ClaimBlockers>;
+  /** stakes/0.1: the latest observation of each registered source's reach (source.observed), by source, lower-cased. */
+  observations: Map<string, SourceObservation>;
+  /** map/0.1: the latest observation of each field's totals in the citation graph (field.observed), by field name. */
+  fieldObservations: Map<string, FieldObservation>;
   /**
    * The constitution in force, adopted on this log by the founder under
    * reserved power R2 (the first constitution.adopt entry; genesis). Null
@@ -495,6 +504,8 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const scopes = new Map<string, ScopeState[]>();
   /** A data of record as the log carries it: the files with a usable hash. */
   const dataFiles = (v: unknown): DataFile[] => normaliseData(v);
+  const observations = new Map<string, SourceObservation>();
+  const fieldObservations = new Map<string, FieldObservation>();
   const syncHeld = (subject: string) => { if (hazardHeld.has(subject) || withheld.has(subject)) held.add(subject); else held.delete(subject); };
   let constitution: V2Record["constitution"] = null;
   let head: V2Record["head"] = null;
@@ -868,6 +879,17 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         });
         break;
       }
+      case "source.observed": {
+        // stakes/0.1: the platform's observation of a source's reach; the latest per source stands. A malformed entry changes nothing.
+        const obs = parseObservation(p, e.seq, e.ts);
+        if (obs) observations.set(obs.source, obs);
+        break;
+      }
+      case "field.observed": {
+        const obs = parseFieldObservation(p, e.seq, e.ts);
+        if (obs) fieldObservations.set(obs.field, obs);
+        break;
+      }
       case "attempt.clear": {
         // The blocker is gone: every attempt with it on the claim filed before this entry is cleared by it. Who may say so is the service's rule.
         const id = str(p["id"]);
@@ -1021,6 +1043,15 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     if (summary.blockers.length) blockers.set(ref, summary);
   }
 
+  // stakes/0.1: a registered claim's reach off the record is its source's, as last observed; the claims of one source share it.
+  // An Ecdysis paper's claims have no source in the citation graph yet, so their reach is 0 and their stakes are their use.
+  for (const c of claims) {
+    if (!c.external) continue;
+    const src = external.get(c.paper)?.source.toLowerCase();
+    const obs = src ? observations.get(src) : undefined;
+    if (obs) c.reach = reachOf(obs, now);
+  }
+
   const evidence: EvidenceInput[] = [];
   const receiptsByClaim = new Map<string, Array<{ id: string; operatorId: string; seq: number; requires: string[] }>>();
   for (const c of [...checks.values()].sort((a, b) => a.seq - b.seq)) {
@@ -1060,5 +1091,5 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
   const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, withdrawn, screeningHolds: screeningHeld, scopes, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim, attempts, attemptsByClaim, clears, blockers };
+  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, withdrawn, screeningHolds: screeningHeld, scopes, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim, attempts, attemptsByClaim, clears, blockers, observations, fieldObservations };
 }
