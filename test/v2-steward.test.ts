@@ -323,7 +323,7 @@ describe("the stewardship area", () => {
     let html = await (await w.get("/steward/controls", d.session)).text();
     assert.match(html, /<code class="mono">v2\.publishing<\/code>/);
     assert.match(html, /never \(default\)/);
-    assert.equal((html.match(/<span class="status sound">open<\/span>/g) ?? []).length, 9, "nine switches, all open");
+    assert.equal((html.match(/<span class="status sound">open<\/span>/g) ?? []).length, 8, "eight switches, all open: attempts can no longer be paused (attempts/0.3)");
     const csrf = html.match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
     assert.match(await (await w.post("/steward/controls/set", { csrf, setting: "v2.nonsense", value: "paused" }, d.session)).text(), /no such switch/);
     assert.match(await (await w.post("/steward/controls/set", { csrf, setting: "v2.publishing", value: "closed" }, d.session)).text(), /is one of: open, paused/);

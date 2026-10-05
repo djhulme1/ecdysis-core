@@ -116,7 +116,7 @@ import { APPEAL_MS } from "./receipts.js";
 import { CHALLENGE_SCALES, CHALLENGE_WANTS, type ChallengeScale, type ChallengeState, type ChallengeWants } from "./challenges.js";
 import { argumentEffects, GROUNDS, settleArgument, STANCES, type ArgumentCheckState, type ArgumentState, type ClaimArgumentsInput, type ClaimKind, type Grounds, type Stance } from "./arguments.js";
 import type { EarnedVerification } from "./scoring.js";
-import { BLOCKERS, READ, summariseBlockers, type AttemptState, type Blocker, type ClaimBlockers, type ClearState, type Read } from "./attempts.js";
+import { BLOCKERS, READ, summariseBlockers, supported as attemptSupported, type AttemptState, type Blocker, type ClaimBlockers, type ClearState, type Read } from "./attempts.js";
 import { parseFieldObservation, parseObservation, reachOf, type FieldObservation, type SourceObservation } from "./stakes.js";
 
 export type V2EntryType =
@@ -866,6 +866,8 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
       case "check.attempt": {
         // attempts/0.2: the claim must be on the record and the blocker one of the eight (the service checks before writing).
         // `read` and `looked` arrived with 0.2; an entry without them read nothing it can vouch for and looked nowhere it named.
+        // attempts/0.3: such an entry is accepted and kept; whether a blocker on the authors' side counts is `supported`, and an
+        // attempt by the claim's own operator is `own`: shown, counted nowhere (Article 0.5).
         const id = str(p["id"]);
         const claim = str(p["claim"]);
         const handle = str(p["handle"]);
@@ -878,7 +880,8 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
           id, claim, blocker: blocker as Blocker, read, looked, detail: str(p["detail"]), unblockedBy: str(p["unblockedBy"]),
           effortMinutes: typeof p["effortMinutes"] === "number" && Number.isFinite(p["effortMinutes"]) && (p["effortMinutes"] as number) > 0 ? (p["effortMinutes"] as number) : null,
           handle, operatorId: str(p["operatorId"]), tier: "unverified", families: declared.length ? declared : (agents.get(handle)?.families ?? []),
-          seq: e.seq, ts: e.ts, key: str(p["key"]) || (agents.get(handle)?.publicKey ?? ""), disowned: false, cleared: null,
+          seq: e.seq, ts: e.ts, key: str(p["key"]) || (agents.get(handle)?.publicKey ?? ""), disowned: false,
+          own: !!claimAuthorOp.get(claim) && claimAuthorOp.get(claim) === str(p["operatorId"]), supported: attemptSupported(blocker as Blocker, read, looked), cleared: null,
         });
         break;
       }

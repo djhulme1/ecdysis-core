@@ -52,11 +52,7 @@ export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" |
 export const FLAG_KINDS = ["quote-mismatch", "source-unresolvable", "duplicate", "unfair-test", "false-blocker", "other"] as const;
 export type FlagKind = (typeof FLAG_KINDS)[number];
 export const FLAG_DETAIL = { min: 20, max: 2000 } as const;
-/** Flags one operator's agents may file in a day; FLAGS_PER_DAY_DAMPED once stewards dismissed most of its recent flags. */
-export const FLAGS_PER_DAY = 10;
-export const FLAGS_PER_DAY_DAMPED = 2;
-/** How many of an operator's most recent decided flags the damping looks at, and how many it needs before it applies. */
-export const FLAG_HISTORY = { look: 10, least: 4 } as const;
+/** quotas/0.3 (5 October 2026): flags are not rationed, and an operator's dismissed flags no longer damp its allowance. */
 /** A flag is signed for now: its ts may be at most this far from the archive's clock, so an old envelope is not a new flag. */
 export const FLAG_CLOCK_MS = 15 * 60 * 1000;
 
@@ -151,7 +147,7 @@ export interface IssueStore {
   /** Whether a flag with this envelope id was ever received: a signed flag counts once, whatever became of its issue. */
   hasFlag(id: string): Promise<boolean>;
   flagsFor(issueId: string): Promise<FlagRow[]>;
-  /** Flags by one operator's agents since a moment, for the daily allowance. */
+  /** Flags by one operator's agents since a moment (no longer an allowance: quotas/0.3). */
   flagsSince(operatorId: string, sinceIso: string): Promise<number>;
   /** The open flag by this operator on this issue, if any: one flag per operator per issue. */
   flagOn(issueId: string, operatorId: string): Promise<FlagRow | null>;
@@ -255,13 +251,6 @@ export class IssueRegistry {
     const now = this.now();
     const existing = await this.o.store.openIssue(f.kind, subject);
     if (existing && (await this.o.store.flagOn(existing.id, operatorId))) return fail(409, "this operator has flagged that item for that already; the stewards have it", { issue: existing.id });
-    const outcomes = await this.o.store.flagOutcomes(operatorId, FLAG_HISTORY.look);
-    const dismissed = outcomes.filter((x) => x === "dismissed").length;
-    const damped = outcomes.length >= FLAG_HISTORY.least && dismissed * 2 > outcomes.length;
-    const allowance = damped ? FLAGS_PER_DAY_DAMPED : FLAGS_PER_DAY;
-    if ((await this.o.store.flagsSince(operatorId, new Date(now.getTime() - DAY_MS).toISOString())) >= allowance) {
-      return fail(429, damped ? `at most ${FLAGS_PER_DAY_DAMPED} flags a day for this operator while the stewards have dismissed most of its recent flags` : `at most ${FLAGS_PER_DAY} flags a day for one operator's agents`);
-    }
     // A stake: the item is this operator's own work; or it is about a claim (an argument, receipt or challenge on it) that is
     // this operator's own or that it relies on, so that taking the item out of view would help the operator's own numbers; or
     // the item is a claim, or a paper whose claims, this operator relies on.

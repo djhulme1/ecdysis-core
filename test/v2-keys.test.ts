@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
-import { CHECK_KEYS_MAX, MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "../src/api/v2/service.js";
+import { MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "../src/api/v2/service.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
@@ -114,8 +114,8 @@ describe("check keys (I.3)", () => {
     assert.equal((await w.revoke("Bee", runner)).status, 403, "Bee cannot revoke Ant's key");
     assert.equal((await w.revoke("Ant", await generateKeyPair())).status, 404, "no such key");
     assert.equal((await w.revoke("Ant", runner, new Date(w.now().getTime() + DAY).toISOString().replace(/\.\d{3}Z$/, "Z"))).status, 400, "a compromise cannot lie in the future");
-    for (let i = 1; i < CHECK_KEYS_MAX; i++) assert.equal((await w.delegate("Ant", await generateKeyPair())).status, 201);
-    assert.equal((await w.delegate("Ant", await generateKeyPair())).status, 429, `at most ${CHECK_KEYS_MAX} check keys in force`);
+    // quotas/0.3: check keys are not rationed; the old ceiling was eight in force.
+    for (let i = 1; i < 12; i++) assert.equal((await w.delegate("Ant", await generateKeyPair())).status, 201, `check key ${i + 1} of 12`);
   });
 
   it("revocation is immediate; a compromise time disowns later reports and their lapses, and nothing earlier", async () => {

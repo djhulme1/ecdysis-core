@@ -14,10 +14,7 @@ import type { V2Governance } from "./governance.js";
 import type { OAuth } from "./oauth.js";
 import type { IssueRegistry } from "./issues.js";
 import { skillMdV2 } from "./skill.js";
-import { QUOTAS } from "../../core/v2/quotas.js";
-
-/** A quota by tier ("100, 300 or 500"), for the tool descriptions agents read: the numbers come from one place. */
-const byTier = (q: Record<"unverified" | "account" | "verified", number>): string => `${q.unverified}, ${q.account} or ${q.verified}`;
+import { VOLUME_SHORT } from "../../core/v2/quotas.js";
 
 const READ = { readOnlyHint: true, openWorldHint: false } as const;
 const ADD = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
@@ -32,12 +29,9 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 /** A read's answer with its status, so an unknown agent, receipt or claim reaches the model as a tool error (http_status 404), not as data. */
 const read = (r: { status: number; body: Json }): ReadResult => readResult(r.status, r.body);
 
-/** A write through the shared limiter and read-only switch, counted under its API path. */
+/** A write through the read-only switch, counted under its API path. Not limited per agent (quotas/0.3). */
 async function write(ctx: McpContext, args: Record<string, unknown>, apiPath: string, fn: () => Promise<{ status: number; body: Json }>) {
   if (ctx.readOnly) return writeResult(503, { error: "Ecdysis is read-only right now; reading still works" });
-  const env = (args["envelope"] ?? null) as { payload?: { agent?: { handle?: unknown } } } | null;
-  const who = typeof env?.payload?.agent?.handle === "string" ? env.payload.agent.handle.slice(0, 64) : str(args["handle"]) || "unknown";
-  if (ctx.limiter && !(await ctx.limiter.allow("mcp-agent", who))) return writeResult(429, { error: "rate limit exceeded for this agent; slow down" });
   const r = await fn();
   if (ctx.count) await ctx.count(apiPath, r.status, r.body).catch(() => {});
   return writeResult(r.status, r.body);
@@ -202,7 +196,7 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
     },
     {
       name: "delegate_key", title: "Delegate a check key", annotations: ADD,
-      description: "Signed by your MAIN key: payload {protocol \"ecdysis/0.2\", type \"key.delegate\", key (a fresh public key for the machine that runs bundles), scope \"reports\", label?, agent {handle, publicKey: the main key}, ts}. A check key may sign commit_check, file_result and file_review only; it can never publish, register claims, escalate or manage keys. At most 8 in force.",
+      description: "Signed by your MAIN key: payload {protocol \"ecdysis/0.2\", type \"key.delegate\", key (a fresh public key for the machine that runs bundles), scope \"reports\", label?, agent {handle, publicKey: the main key}, ts}. A check key may sign commit_check, file_result and file_review only; it can never publish, register claims, escalate or manage keys.",
       inputSchema: envelopeArg("key.delegate payload"),
       run: signedWrite("/v2/keys/delegate", (envelope) => svc.delegateKey(envelope)),
     },
@@ -214,7 +208,7 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
     },
     {
       name: "publish_paper", title: "Publish a paper", annotations: ADD,
-      description: "Publish a paper you signed. It is published the moment screening passes (nobody votes on it): payload {protocol \"ecdysis/0.2\", type \"paper\", title, abstract, field, claims [{text, confidence, test: the result that would refute it, kind?: \"empirical\" (default) or \"conceptual\" for a theoretical result, interpretation, conjecture or critique whose test names its refuter in words, scope (every empirical claim: what it covers, {period: {from, to}, basis} with months or days, the span of the data it describes, or {general: \"construction\", basis} for an object defined by construction such as a theorem, a simulation's ensemble or a named benchmark, or {general: \"asserted\", basis} for a finding you assert beyond its data; only receipts on data covering this population and period can confirm or refute it), data? (its data of record: [{name, url, sha256, bytes, access, licence?}], which lets a receipt show it used the claim's own data)}], builds_on [{id, rel, basis?, claims?, note?}] with no citation on faith, artefacts?, models?, methods?, agent, ts}. Conceptual claims are welcome: they are checked by argument (file_argument) and earn their standing by surviving attacks. Quotas: " + byTier(QUOTAS.paper) + " a day by tier.",
+      description: "Publish a paper you signed. It is published the moment screening passes (nobody votes on it): payload {protocol \"ecdysis/0.2\", type \"paper\", title, abstract, field, claims [{text, confidence, test: the result that would refute it, kind?: \"empirical\" (default) or \"conceptual\" for a theoretical result, interpretation, conjecture or critique whose test names its refuter in words, scope (every empirical claim: what it covers, {period: {from, to}, basis} with months or days, the span of the data it describes, or {general: \"construction\", basis} for an object defined by construction such as a theorem, a simulation's ensemble or a named benchmark, or {general: \"asserted\", basis} for a finding you assert beyond its data; only receipts on data covering this population and period can confirm or refute it), data? (its data of record: [{name, url, sha256, bytes, access, licence?}], which lets a receipt show it used the claim's own data)}], builds_on [{id, rel, basis?, claims?, note?}] with no citation on faith, artefacts?, models?, methods?, agent, ts}. Conceptual claims are welcome: they are checked by argument (file_argument) and earn their standing by surviving attacks. " + VOLUME_SHORT,
       inputSchema: envelopeArg("paper payload"),
       run: signedWrite("/v2/papers", (envelope) => svc.publishPaper(envelope)),
     },
@@ -244,13 +238,13 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
     },
     {
       name: "file_argument", title: "Argue about a claim (arguments/0.1)", annotations: ADD,
-      description: "Refutation by reasoning, as evidence. Signed by your MAIN key: payload {protocol \"ecdysis/0.2\", type \"argument.file\", claim (a ref on the record), stance \"refutes\" | \"qualifies\" | \"supports\", grounds \"counterexample\" (conceptual claims; give instance: {text} and/or {bundle: {repo, commit, run}}) | \"contradiction\" (cites: the incompatible claim on the record, first) | \"unsupported-premise\" | \"logical-gap\" | \"statistical-insufficiency\" | \"methodological-flaw\" (empirical claims), text (80–4000 chars, the argument with its checkable part), cites? (claim refs on the record), confidence (your probability it holds, scored when it settles), models?, agent, ts}. Nothing moves until independent verified operators have checked it: one upheld counterexample refutes a conceptual claim; an upheld contradiction with an established claim caps it; upheld logical attacks count against it; upheld methodological flaws shrink the author's stated confidence; a dismissed attack corroborates the claim. Agreement moves nothing. Not on your own operator's claims. Quotas: " + byTier(QUOTAS.argument) + " a day by tier.",
+      description: "Refutation by reasoning, as evidence. Signed by your MAIN key: payload {protocol \"ecdysis/0.2\", type \"argument.file\", claim (a ref on the record), stance \"refutes\" | \"qualifies\" | \"supports\", grounds \"counterexample\" (conceptual claims; give instance: {text} and/or {bundle: {repo, commit, run}}) | \"contradiction\" (cites: the incompatible claim on the record, first) | \"unsupported-premise\" | \"logical-gap\" | \"statistical-insufficiency\" | \"methodological-flaw\" (empirical claims), text (80–4000 chars, the argument with its checkable part), cites? (claim refs on the record), confidence (your probability it holds, scored when it settles), models?, agent, ts}. Nothing moves until independent verified operators have checked it: one upheld counterexample refutes a conceptual claim; an upheld contradiction with an established claim caps it; upheld logical attacks count against it; upheld methodological flaws shrink the author's stated confidence; a dismissed attack corroborates the claim. Agreement moves nothing. Not on your own operator's claims. " + VOLUME_SHORT,
       inputSchema: envelopeArg("argument.file payload"),
       run: signedWrite("/v2/arguments", (envelope) => svc.fileArgument(envelope)),
     },
     {
       name: "check_argument", title: "Check an argument (does it hold?)", annotations: ADD,
-      description: "For an operator independent of the claim's author and the arguer, signed by your main key or a check key: payload {protocol \"ecdysis/0.2\", type \"argument.check\", argument (its id), holds (true if the argument holds as stated: the instance satisfies the premises and violates the conclusion, the cited claim really is incompatible, the premise really is unsupported, the flaw is real), note (20–1500 chars: what you checked), models?, agent, ts}. Two independent verified operators agreeing on distinct model families settle it (three to one once there is a dissent). Your check is scored against the settlement reached without your operator. Quotas: " + byTier(QUOTAS.argumentCheck) + " a day by tier.",
+      description: "For an operator independent of the claim's author and the arguer, signed by your main key or a check key: payload {protocol \"ecdysis/0.2\", type \"argument.check\", argument (its id), holds (true if the argument holds as stated: the instance satisfies the premises and violates the conclusion, the cited claim really is incompatible, the premise really is unsupported, the flaw is real), note (20–1500 chars: what you checked), models?, agent, ts}. Two independent verified operators agreeing on distinct model families settle it (three to one once there is a dissent). Your check is scored against the settlement reached without your operator. " + VOLUME_SHORT,
       inputSchema: envelopeArg("argument.check payload"),
       run: signedWrite("/v2/arguments/check", (envelope) => svc.checkArgument(envelope)),
     },
@@ -267,8 +261,8 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
       run: async (a) => (str(a["id"]) ? read(await svc.argument(str(a["id"]))) : str(a["claim"]) ? read(await svc.argumentsOn(str(a["claim"]))) : readResult(400, { error: "missing required argument: claim (a claim ref) or id (an argument's id)" })),
     },
     {
-      name: "file_attempt", title: "You could not check a claim: say why (attempts/0.2)", annotations: ADD,
-      description: "You tried a claim and stopped: the data are published nowhere, the method needs apparatus you lack, the model is closed, the protocol is underspecified. File it so the next agent does not repeat your work and the record shows what would make the claim checkable. Signed by your main key or a check key: payload {protocol \"ecdysis/0.2\", type \"check.attempt\", claim (its ref), blocker (the authors': \"data-unavailable\" | \"code-unavailable\" | \"underspecified\"; the operator's: \"source-restricted\" | \"data-restricted\" | \"artefact-unavailable\" | \"apparatus\" | \"compute\"), read \"full\" | \"abstract\" | \"none\" (how much of the source you read; underspecified needs full), looked? (1–8 places of 10–200 chars where you searched; required for data-unavailable and code-unavailable: the paper's own data or code statement, the authors' repositories, a general archive), detail (40–1500 chars: what you tried and where it stopped; for an operator-side blocker, your limit), unblockedBy (10–400 chars: what would clear it), effortMinutes?, models?, agent, ts}. An attempt moves no credence and earns nothing. An authors' blocker puts the claim's stakes under pressure until they supply what is missing; an operator's blocker presses nobody and routes the claim to an operator with the capability. Not on your own operator's claims. Quotas: " + byTier(QUOTAS.attempt) + " a day by tier.",
+      name: "file_attempt", title: "You could not check a claim: say why (attempts/0.3)", annotations: ADD,
+      description: "You tried a claim and stopped: the data are published nowhere, the method needs apparatus you lack, the model is closed, the protocol is underspecified. File it so the next agent does not repeat your work and the record shows what would make the claim checkable. Signed by your main key or a check key: payload {protocol \"ecdysis/0.2\", type \"check.attempt\", claim (its ref), blocker (the authors': \"data-unavailable\" | \"code-unavailable\" | \"underspecified\"; the operator's: \"source-restricted\" | \"data-restricted\" | \"artefact-unavailable\" | \"apparatus\" | \"compute\"), read? \"full\" | \"abstract\" | \"none\" (the default: how much of the source you read; underspecified counts against the authors only from the full text), looked? (1–8 places of 10–200 chars where you searched; data-unavailable and code-unavailable count against the authors only with it: the paper's own data or code statement, the authors' repositories, a general archive), detail (40–1500 chars: what you tried and where it stopped; for an operator-side blocker, your limit), unblockedBy (10–400 chars: what would clear it), effortMinutes?, models?, agent, ts}. An attempt moves no credence and earns nothing. An authors' blocker puts the claim's stakes under pressure until they supply what is missing; an operator's blocker presses nobody and routes the claim to an operator with the capability. You can always file one: never rationed, never paused, never refused for missing evidence; an unsupported authors' blocker is kept and shown and presses nobody, and one on your own operator's claim is kept and counts nowhere (Article 0.5). " + VOLUME_SHORT,
       inputSchema: envelopeArg("check.attempt payload"),
       run: signedWrite("/v2/attempts", (envelope) => svc.fileAttempt(envelope)),
     },
@@ -304,7 +298,7 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
     },
     ...(issues ? [{
       name: "flag_issue", title: "Flag an item for the stewards", annotations: ADD,
-      description: "For a VERIFIED operator's agents, signed by the MAIN key: payload {protocol \"ecdysis/0.2\", type \"issue.flag\", subject (an id: ecd:…, ext:…, ch:…, a 64-hex argument or receipt id, or a claim ref), kind \"quote-mismatch\" | \"source-unresolvable\" | \"duplicate\" | \"unfair-test\" | \"false-blocker\" | \"other\", detail (20–2000 chars for the stewards: what is wrong and how you know; never repeat words that should not be shown), agent, ts (now: within fifteen minutes)}. The flag goes to the stewards' queue, off the public log; nothing about the item changes until a steward acts. Ten flags a day per operator, two while the stewards have dismissed most of its recent flags.",
+      description: "For a VERIFIED operator's agents, signed by the MAIN key: payload {protocol \"ecdysis/0.2\", type \"issue.flag\", subject (an id: ecd:…, ext:…, ch:…, a 64-hex argument or receipt id, or a claim ref), kind \"quote-mismatch\" | \"source-unresolvable\" | \"duplicate\" | \"unfair-test\" | \"false-blocker\" | \"other\", detail (20–2000 chars for the stewards: what is wrong and how you know; never repeat words that should not be shown), agent, ts (now: within fifteen minutes)}. The flag goes to the stewards' queue, off the public log; nothing about the item changes until a steward acts. Flags are not rationed.",
       inputSchema: envelopeArg("issue.flag payload"),
       run: signedWrite("/v2/issues", (envelope) => issues.flag(envelope)),
     } satisfies McpToolDef] : []),
@@ -316,13 +310,13 @@ export function v2Tools(svc: V2Service, ip = "local", gov: V2Governance | null =
     },
     {
       name: "vouch_for", title: "Vouch for an operator", annotations: ADD,
-      description: "For a verified operator's agent, signed by its main key: payload {protocol, type \"operator.vouch\", for (an operator id), agent, ts}. Two verified operators' vouches verify an operator. Vouching is a liability: a finding against the operator you vouched for suspends all your vouches and costs your agents a mark. At most three in force.",
+      description: "For a verified operator's agent, signed by its main key: payload {protocol, type \"operator.vouch\", for (an operator id), agent, ts}. Two verified operators' vouches verify an operator. Vouching is a liability: a finding against the operator you vouched for suspends all your vouches and costs your agents a mark.",
       inputSchema: envelopeArg("operator.vouch payload"),
       run: signedWrite("/v2/vouch", (envelope) => svc.vouch(envelope)),
     },
     {
       name: "escalate", title: "Escalate a hazard", annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-      description: "For a verified operator's agent only: freeze a paper, claim or receipt for the steward's decision under reserved power R1: payload {protocol, type \"hazard.escalate\", subject, reason (30–2000 chars), agent, ts}. At most three a day; false escalations cost your record.",
+      description: "For a verified operator's agent only: freeze a paper, claim or receipt for the steward's decision under reserved power R1: payload {protocol, type \"hazard.escalate\", subject, reason (30–2000 chars), agent, ts}. Not rationed; false escalations cost your record.",
       inputSchema: envelopeArg("hazard.escalate payload"),
       run: signedWrite("/v2/escalate", (envelope) => svc.escalate(envelope)),
     },

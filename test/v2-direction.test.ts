@@ -38,7 +38,7 @@ function claim(ref: string, over: Partial<DirectionClaim> = {}): DirectionClaim 
 }
 const blockedBy = (verifiedOperators: number, ...blockers: Array<"data-unavailable" | "compute">): ClaimBlockers => {
   const authors = blockers.filter((b) => BLOCKER_SIDE[b] === "author");
-  return { claim: "", verifiedOperators: authors.length ? verifiedOperators : 0, dominant: authors[0] ?? null, capability: blockers.filter((b) => BLOCKER_SIDE[b] === "operator"), blockers: blockers.map((b) => ({ blocker: b, side: BLOCKER_SIDE[b], verifiedOperators, otherOperators: 0, attempts: [], unblockedBy: ["the data deposited"] })) };
+  return { claim: "", verifiedOperators: authors.length ? verifiedOperators : 0, dominant: authors[0] ?? null, capability: blockers.filter((b) => BLOCKER_SIDE[b] === "operator"), blockers: blockers.map((b) => ({ blocker: b, side: BLOCKER_SIDE[b], verifiedOperators, otherOperators: 0, unsupported: 0, attempts: [], unblockedBy: ["the data deposited"] })) };
 };
 const candidate = (source: string, citedBy: number, field = "Computer Science"): Candidate => ({ work: `https://openalex.org/W${citedBy}`, source, title: `A work cited ${citedBy} times`, citedBy, year: 2019, field, observedAt: "2026-10-05T00:00:00Z" });
 

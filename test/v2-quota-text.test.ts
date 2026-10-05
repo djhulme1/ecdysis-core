@@ -1,11 +1,9 @@
 /**
- * Every quota an agent reads about comes from src/core/v2/quotas.ts. When the
- * allowances were raised a hundredfold (#40), the skill text's summary line
- * and the lab guide moved with them, but four tool descriptions and two
- * sentences deeper in the skill still said "1, 3 or 5 a day" and "3, 10 or
- * 30": agents read those words and plan their day by them. This test pins
- * each agent-facing quota sentence to the constants and refuses the old
- * figures anywhere in the text agents are served.
+ * No quota survives in the text agents read (quotas/0.3, 5 October 2026: the owner removed every cap on what an agent
+ * files). This file used to pin each quota sentence to the constants after #40 raised them a hundredfold, because agents
+ * plan their day by those words; now it pins the opposite: the skill, every tool description, the lab guide and the API
+ * description say nothing is rationed, in the core's own words, and no figure of a daily allowance is left anywhere an
+ * agent would read it.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -17,12 +15,18 @@ import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { v2Tools } from "../src/api/v2/tools.js";
 import { skillMdV2 } from "../src/api/v2/skill.js";
 import { LAB_GUIDE_MD } from "../src/web/v2/lab-guide.js";
-import { QUOTAS, type Quotas } from "../src/core/v2/quotas.js";
+import { MCP_PER_ADDRESS_PER_MINUTE, PER_ADDRESS_PER_MINUTE, VOLUME_POLICY, VOLUME_SHORT } from "../src/core/v2/quotas.js";
+import { BUCKET_LIMITS } from "../src/api/router.js";
+import { openApiDocument } from "../src/api/openapi.js";
 import type { Json } from "../src/core/canonical.js";
+import { readFileSync } from "node:fs";
 
-const byTier = (q: Quotas[keyof Quotas]) => `${q.unverified}, ${q.account} or ${q.verified}`;
-/** The figures the text carried before #40, in the shapes they were written. A verified operator's 500 is not "5". */
-const STALE = /\b1, 3 or 5\b|\b3, 10 or 30\b|\bten a day\b|\b(?:5|10|30) a day by tier\b/;
+/**
+ * Any figure of a daily allowance, in the shapes the text used to carry ("100 papers a day", "100/300/500", "1, 3 or 5 a
+ * day", "ten a day", "Quotas:"). The doorbell's "at most 8 a day" is not one: it limits what Ecdysis sends a person, not
+ * what an agent files.
+ */
+const RATIONED = /\b\d+ (?:papers?|claims?|reviews?|arguments?|attempts?|checks?|flags?|escalations?|vouch(?:es)?) a day\b|\b\d+\/\d+\/\d+\b|\b\d+, \d+ or \d+ a day\b|\bten (?:flags )?a day\b|\bthree (?:times )?a day\b|(?<!No )\bquotas?:|daily allowance|quota by tier|a day by tier/i;
 
 async function tools() {
   const store = new MemoryStore();
@@ -33,32 +37,40 @@ async function tools() {
   return v2Tools(svc);
 }
 
-describe("quota figures in the text agents read", () => {
-  it("the skill text states the argument, check and attempt quotas from QUOTAS, and no longer rations challenges", () => {
+describe("no quotas in the text agents read (quotas/0.3)", () => {
+  it("the skill says nothing is rationed, attempts are always open, and the throttle's numbers are the router's", () => {
     const md = skillMdV2("api.ecdysis.me");
-    assert.match(md, new RegExp(`arguments\\s+${byTier(QUOTAS.argument)} a day by tier; checks ${byTier(QUOTAS.argumentCheck)}\\.`));
-    assert.match(md, new RegExp(`attempts ${QUOTAS.attempt.unverified}/${QUOTAS.attempt.account}/${QUOTAS.attempt.verified}\\.`));
-    assert.doesNotMatch(md, /challenges? \d+\/\d+\/\d+|limited to \d+, \d+ or \d+ a day/, "the retired board has no quota line");
-    assert.doesNotMatch(md, STALE);
+    assert.ok(md.includes(VOLUME_POLICY), "the core's sentence");
+    assert.match(md, /Attempts in particular are never refused for volume, never\npaused and never refused for missing evidence/);
+    assert.match(md, new RegExp(`more than ${PER_ADDRESS_PER_MINUTE} requests in a minute \\(${MCP_PER_ADDRESS_PER_MINUTE.toLocaleString("en-GB")} through\\nthe connector\\)`));
+    assert.doesNotMatch(md, RATIONED);
   });
 
-  it("the tool descriptions state the paper, attempt, argument and check quotas from QUOTAS", async () => {
+  it("every tool description says it is not rationed where it once stated a quota, and none carries a figure", async () => {
     const defs = await tools();
     const desc = (name: string) => {
       const t = defs.find((d) => d.name === name);
       assert.ok(t, `tool ${name}`);
       return t.description;
     };
-    assert.match(desc("publish_paper"), new RegExp(`Quotas: ${byTier(QUOTAS.paper)} a day by tier\\.`));
-    assert.match(desc("file_attempt"), new RegExp(`Quotas: ${byTier(QUOTAS.attempt)} a day by tier\\.`));
-    assert.ok(!defs.some((d) => d.name === "propose_challenge"), "the retired board has no proposing tool");
-    assert.match(desc("file_argument"), new RegExp(`Quotas: ${byTier(QUOTAS.argument)} a day by tier\\.`));
-    assert.match(desc("check_argument"), new RegExp(`Quotas: ${byTier(QUOTAS.argumentCheck)} a day by tier\\.`));
-    for (const t of defs) assert.doesNotMatch(t.description, STALE, `${t.name} carries a pre-#40 quota figure`);
+    for (const name of ["publish_paper", "file_attempt", "file_argument", "check_argument"]) assert.ok(desc(name).endsWith(VOLUME_SHORT), name);
+    assert.match(desc("file_attempt"), /You can always file one: never rationed, never paused, never refused for missing evidence/);
+    assert.match(desc("escalate"), /Not rationed; false escalations cost your record\./);
+    for (const t of defs) assert.doesNotMatch(t.description, RATIONED, `${t.name} carries a quota`);
   });
 
-  it("the lab guide's review quota is the account tier's", () => {
-    assert.match(LAB_GUIDE_MD, new RegExp(`The quota is ${QUOTAS.review.account} a day with an account\\.`));
-    assert.doesNotMatch(LAB_GUIDE_MD, STALE);
+  it("the lab guide and the API description carry no quota either", () => {
+    assert.ok(LAB_GUIDE_MD.includes(VOLUME_POLICY));
+    assert.doesNotMatch(LAB_GUIDE_MD, RATIONED);
+    const api = JSON.stringify(openApiDocument({ api: "https://api.ecdysis.me", site: "https://ecdysis.me" }));
+    assert.doesNotMatch(api, /quota|a day per operator/i);
+  });
+
+  it("the throttle in wrangler.toml is the core's, and there is no per-agent ceiling any more", () => {
+    assert.deepEqual(BUCKET_LIMITS, { mcp: MCP_PER_ADDRESS_PER_MINUTE });
+    const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+    assert.match(toml, new RegExp(`name = "RL_KEY"\\nnamespace_id = "1001"\\nsimple = \\{ limit = ${PER_ADDRESS_PER_MINUTE}, period = 60 \\}`));
+    assert.match(toml, new RegExp(`name = "RL_MCP"\\nnamespace_id = "1002"\\nsimple = \\{ limit = ${MCP_PER_ADDRESS_PER_MINUTE}, period = 60 \\}`));
+    assert.doesNotMatch(toml, /RL_AGENT/);
   });
 });

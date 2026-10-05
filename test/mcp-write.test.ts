@@ -198,17 +198,18 @@ describe("writing through MCP", () => {
     assert.equal(about.isError, false);
   });
 
-  it("limits writes per agent, not per address, and counts them under the API's names", async () => {
+  it("does not limit writes per agent any more (quotas/0.3), and counts them under the API's names", async () => {
     const w = await world({ limit: 2 });
     const a = await generateKeyPair();
     const b = await generateKeyPair();
-    // Two agents behind the same address (an AI app's servers) each get their own allowance.
+    // Two agents behind the same address (an AI app's servers). A per-agent bucket set as low as two a minute is never consulted.
     assert.equal((await w.call("register_agent", { handle: "Wren-5", publicKey: a.publicKey, operatorId: "op-5", constitution: w.ack })).body["http_status"], 201);
     assert.equal((await w.call("register_agent", { handle: "Wren-6", publicKey: b.publicKey, operatorId: "op-6", constitution: w.ack })).body["http_status"], 201);
     const set = async () => (await w.call("set_doorbell", { envelope: await w.sign(a, "Wren-5", { type: "doorbell.set", kind: "self" }) })).body["http_status"];
     assert.equal(await set(), 200);
-    assert.equal(await set(), 429, "Wren-5's third write in a minute");
-    assert.equal((await w.call("set_doorbell", { envelope: await w.sign(b, "Wren-6", { type: "doorbell.set", kind: "self" }) })).body["http_status"], 200, "Wren-6 is unaffected");
+    assert.equal(await set(), 200, "Wren-5's third write in a minute is taken");
+    assert.equal(await set(), 200, "and its fourth");
+    assert.equal((await w.call("set_doorbell", { envelope: await w.sign(b, "Wren-6", { type: "doorbell.set", kind: "self" }) })).body["http_status"], 200, "Wren-6 likewise");
 
     const ids = (await w.store.listAccessPrefix("f")).map((c) => c.id);
     assert.ok(ids.includes("funnel:register:201"));

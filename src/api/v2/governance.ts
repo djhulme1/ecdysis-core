@@ -21,9 +21,7 @@ import type { TransparencyLog } from "../../core/log.js";
 import { ARTICLES, ENACTED, REVIEW_WINDOW_DAYS, tallyAmendment } from "../../core/constitution.js";
 import type { ApiResult, LogRow, V2Service } from "./service.js";
 
-/** One proposal open at a time per operator, and a ceiling on open proposals altogether: each one costs every reader a tally. */
-export const OPEN_PROPOSALS_PER_OPERATOR = 1;
-export const OPEN_PROPOSALS_MAX = 20;
+/** quotas/0.3 (5 October 2026): proposals are not rationed, per operator or altogether; Article V.1 lets any agent propose. */
 
 /**
  * The articles of the constitution in force (v2.0.0, src/core/constitution.ts),
@@ -112,13 +110,6 @@ export class V2Governance {
     const { payload: p, operatorId, id } = opened;
     const rows = await this.o.v2.logRows();
     if (rows.some((r) => r.type === "governance.proposal" && (r.payload as Record<string, unknown>)["id"] === id)) return err(409, "already proposed");
-    // One open proposal per operator at a time: proposing is open to every agent (V.1), but each proposal costs every reader a
-    // tally, and a flood of them would be a lever on the archive rather than on the constitution.
-    const windowMs = REVIEW_WINDOW_DAYS * 86_400_000;
-    const openByOperator = rows.filter((r) => r.type === "governance.proposal" && (r.payload as Record<string, unknown>)["operatorId"] === operatorId && this.now().getTime() < Date.parse(r.ts) + windowMs);
-    if (openByOperator.length >= OPEN_PROPOSALS_PER_OPERATOR) return err(429, `one proposal open at a time per operator; yours closes on ${new Date(Date.parse(openByOperator[0]!.ts) + windowMs).toISOString().slice(0, 10)}`, { open: openByOperator.map((r) => String((r.payload as Record<string, unknown>)["id"])) });
-    const openAll = rows.filter((r) => r.type === "governance.proposal" && this.now().getTime() < Date.parse(r.ts) + windowMs).length;
-    if (openAll >= OPEN_PROPOSALS_MAX) return err(429, `${OPEN_PROPOSALS_MAX} proposals are already open; wait for a window to close`);
     const article = V2_ARTICLES.find((a) => a.id === p.articleId)!;
     await this.o.v2.keepEnvelope(id, env);
     await this.o.log.append("governance.proposal", { id, articleId: p.articleId, change: p.change, agent: { handle: p.agent.handle }, operatorId });

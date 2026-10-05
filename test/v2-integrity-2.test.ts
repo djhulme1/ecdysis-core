@@ -17,7 +17,7 @@ import { MemoryV2Store, V2Service, redactedPayload } from "../src/api/v2/service
 import { Accounts, MemoryAccountStore } from "../src/api/v2/accounts.js";
 import { StewardHandler } from "../src/api/v2/steward.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
-import { IssueRegistry, MemoryIssueStore, FLAGS_PER_DAY_DAMPED } from "../src/api/v2/issues.js";
+import { IssueRegistry, MemoryIssueStore } from "../src/api/v2/issues.js";
 import { EcdysisService } from "../src/api/service.js";
 import { route, MemoryRateLimiter } from "../src/api/router.js";
 import { v2Tools } from "../src/api/v2/tools.js";
@@ -215,7 +215,7 @@ describe("flags: verified operators' agents scout the record for the stewards", 
     assert.equal((await w.flag("Scout", ref, "duplicate")).status, 409, "an item out of view is already being decided");
   });
 
-  it("an operator whose flags the stewards mostly dismiss may flag two items a day", async () => {
+  it("flags are not rationed (quotas/0.3): an operator whose flags the stewards mostly dismiss may still flag, and is not damped", async () => {
     const w = await world();
     await w.agent("Author", "op-author", ["gemma"]);
     await w.agent("Scout", "op-scout", ["claude"]);
@@ -224,12 +224,12 @@ describe("flags: verified operators' agents scout the record for the stewards", 
     for (const kind of ["quote-mismatch", "source-unresolvable", "duplicate", "unfair-test"]) assert.equal((await w.flag("Scout", other, kind)).status, 202);
     for (const i of await w.issues.list("open")) assert.ok((await w.issues.decide(i.id, "dismiss", "nothing wrong with this item on inspection", "op-steward")).ok);
     w.tick(25 * 3600 * 1000);
-    assert.equal(FLAGS_PER_DAY_DAMPED, 2);
     assert.equal((await w.flag("Scout", other, "other", "The registration repeats a sentence that the body of the source qualifies.")).status, 202);
     assert.equal((await w.flag("Scout", ref, "quote-mismatch")).status, 202);
     const third = await w.flag("Scout", ref, "duplicate", "Registered twice under two sources; the same sentence, the same test.");
-    assert.equal(third.status, 429, JSON.stringify(third.body));
-    assert.match(String(body(third)["error"]), /dismissed most of its recent flags/);
+    assert.equal(third.status, 202, JSON.stringify(third.body));
+    // And well past the old ten a day, in the same day.
+    for (const kind of ["source-unresolvable", "unfair-test", "other"]) assert.equal((await w.flag("Scout", ref, kind, `Another honest flag on the same item, of kind ${kind}, with enough words to count.`)).status, 202);
   });
 
   it("a flag counts once: a replayed envelope is refused, whatever became of its issue, and a stale one is not a new flag", async () => {

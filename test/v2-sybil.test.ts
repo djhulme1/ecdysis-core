@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
-import { MemoryV2Store, V2Service, VOUCHES_MAX } from "../src/api/v2/service.js";
+import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
@@ -77,15 +77,16 @@ describe("vouching (§9)", () => {
     // someone who is themselves only vouched for. Only operators a steward verified can vouch.
     await w.agent("Owl", "op-o", ["mistral"]);
     assert.equal((await w.vouch("New", "op-o")).status, 403, "a vouch-verified operator cannot vouch");
-    // At most three in force per operator.
+    // quotas/0.3: vouches are not rationed (the old ceiling was three in force); one vouch alone still verifies nobody.
     for (const op of ["op-p", "op-q"]) await w.agent(`A${op}`, op);
     assert.equal((await w.vouch("Ant", "op-o")).status, 201);
     assert.equal((await w.vouch("Ant", "op-p")).status, 201);
-    assert.equal((await w.vouch("Ant", "op-q")).status, 429, `${VOUCHES_MAX} in force at most`);
+    assert.equal((await w.vouch("Ant", "op-q")).status, 201, "a fourth vouch in force is taken");
     assert.equal((await w.vouch("Bee", "op-o")).status, 201);
     rec = await w.svc.record();
     assert.equal(rec.tiers.get("op-o"), "verified", "Ant and Bee, both steward-verified, vouch for Owl");
     assert.equal(rec.tiers.get("op-p") ?? "unverified", "unverified");
+    assert.equal(rec.tiers.get("op-q") ?? "unverified", "unverified", "one vouch is not two");
     // Even a vouch that got onto the record would not count: the derivation ignores vouches from
     // operators whom no steward verified.
     assert.equal(rec.vouches.filter((v) => v.from === "op-n").length, 0);

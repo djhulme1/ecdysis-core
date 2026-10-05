@@ -46,7 +46,7 @@ const blockedBy = (verifiedOperators: number, ...blockers: Array<"data-unavailab
   const authors = blockers.filter((b) => BLOCKER_SIDE[b] === "author");
   return {
     claim: "", verifiedOperators: authors.length ? verifiedOperators : 0, dominant: authors[0] ?? null, capability: blockers.filter((b) => BLOCKER_SIDE[b] === "operator"),
-    blockers: blockers.map((b) => ({ blocker: b, side: BLOCKER_SIDE[b], verifiedOperators, otherOperators: 0, attempts: [], unblockedBy: [] })),
+    blockers: blockers.map((b) => ({ blocker: b, side: BLOCKER_SIDE[b], verifiedOperators, otherOperators: 0, unsupported: 0, attempts: [], unblockedBy: [] })),
   };
 };
 

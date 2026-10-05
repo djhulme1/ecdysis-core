@@ -34,7 +34,6 @@ export const CODE_TTL_MS = 10 * 60 * 1000;
 export const ACCESS_TTL_MS = 60 * 60 * 1000;
 export const REFRESH_TTL_MS = 30 * 24 * 3600 * 1000;
 export const CLIENTS_PER_HOUR_PER_IP = 20;
-export const MANAGED_AGENTS_MAX = 5;
 export const SCOPE = "agent";
 
 export interface ClientRow { id: string; name: string; redirectUris: string[]; createdAt: string }
@@ -336,8 +335,6 @@ export class OAuth {
   async createManagedAgent(account: { id: string; operatorId: string }, handle: string, models: string[] = []): Promise<ApiResult> {
     if (!this.o.accounts.enabled()) return { status: 503, body: { error: "accounts aren't open yet" } };
     if (!HANDLE.test(handle)) return { status: 400, body: { error: "handle must be 2-40 chars: letters, digits, hyphens" } };
-    const mine = (await this.o.store.listManagedKeys(account.id)).filter((k) => !k.destroyedAt);
-    if (mine.length >= MANAGED_AGENTS_MAX) return { status: 429, body: { error: `at most ${MANAGED_AGENTS_MAX} managed agents per account; destroy one first` } };
     const kp = await generateKeyPair();
     const r = await this.o.v2.registerManagedAgent(account.operatorId, handle, kp.publicKey, models);
     if (r.status !== 201) return r;

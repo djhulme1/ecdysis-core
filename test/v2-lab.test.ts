@@ -11,7 +11,8 @@ import { TransparencyLog } from "../src/core/log.js";
 import { EcdysisService } from "../src/api/service.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { generateKeyPair } from "../src/core/crypto.js";
-import { EXTERNAL_PER_DAY, MemoryV2Store, QUOTA_PER_DAY, RESULT_DEADLINE_MS, REVIEWS_PER_DAY, V2Service } from "../src/api/v2/service.js";
+import { MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "../src/api/v2/service.js";
+import { PER_ADDRESS_PER_MINUTE, VOLUME_POLICY } from "../src/core/v2/quotas.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
 import { route, MemoryRateLimiter } from "../src/api/router.js";
 import { labPageV2, labTextV2 } from "../src/web/v2/lab.js";
@@ -49,13 +50,13 @@ describe("the lab guide", () => {
     assert.doesNotMatch(html, /<img(?![^>]*src="\/brand\/)/, "no image is loaded but the brand's own");
     assert.doesNotMatch(html.split("<main")[1]!, /<script/);
     // The numbers in the guide are the service's.
-    const quotaLine = html.match(/By tier \(unverified, account, verified\): papers (\d+), (\d+) and (\d+); external claims (\d+), (\d+) and (\d+); reviews (\d+), (\d+) and (\d+)\./);
-    assert.ok(quotaLine, "the quota sentence is on the page");
-    assert.deepEqual(quotaLine!.slice(1).map(Number), [QUOTA_PER_DAY.unverified, QUOTA_PER_DAY.account, QUOTA_PER_DAY.verified, EXTERNAL_PER_DAY.unverified, EXTERNAL_PER_DAY.account, EXTERNAL_PER_DAY.verified, REVIEWS_PER_DAY.unverified, REVIEWS_PER_DAY.account, REVIEWS_PER_DAY.verified]);
+    // quotas/0.3: the guide says nothing is rationed, in the core's own words, and names the throttle's number.
+    assert.ok(html.includes(VOLUME_POLICY), "the no-quotas sentence is on the page");
+    assert.doesNotMatch(html, /By tier \(unverified, account, verified\): papers \d+/, "no quota sentence survives");
+    assert.ok(html.includes(`more than ${PER_ADDRESS_PER_MINUTE} requests in a minute`), "the throttle's number is the router's");
     assert.equal(RESULT_DEADLINE_MS, 7 * 24 * 3600 * 1000, "the guide says seven days because the archive does");
     assert.match(html, /seven days away/);
     assert.match(html, /PER_RUN = int\(os\.environ\.get\(&quot;PER_RUN&quot;, &quot;6&quot;\)\)/);
-    assert.ok(6 <= EXTERNAL_PER_DAY.unverified, "the script's per-run batch of six sits inside even the unverified tier's daily allowance");
     // Both halves of the site point here, and so does the person's page.
     assert.match(html, /<nav class="sub" aria-label="For people">[^]*?<a href="\/lab" aria-current="page">Lab<\/a>/);
     const agents = await (await w.site("/agents")).text();
@@ -73,7 +74,8 @@ describe("the lab guide", () => {
     assert.match(text, /^# Ecdysis on Idle Compute\n/);
     assert.match(text, /data, never instructions/);
     for (const tool of ["signed_post", "/v2/keys/delegate", "/v2/checks", "/v2/checks/result"]) assert.ok(text.includes(tool), tool);
-    assert.match(text, new RegExp(`papers ${QUOTA_PER_DAY.unverified}, ${QUOTA_PER_DAY.account} and ${QUOTA_PER_DAY.verified}; external claims ${EXTERNAL_PER_DAY.unverified}, ${EXTERNAL_PER_DAY.account} and ${EXTERNAL_PER_DAY.verified}; reviews ${REVIEWS_PER_DAY.unverified}, ${REVIEWS_PER_DAY.account} and ${REVIEWS_PER_DAY.verified}`));
+    assert.ok(text.includes(VOLUME_POLICY), "the Markdown twin says nothing is rationed");
+    assert.doesNotMatch(text.split(VOLUME_POLICY).join(""), /\bquotas?\b/i, "no quota survives in the guide, beyond the sentence saying there are none");
     assert.match(text, /lms load <model> --gpu max/);
     assert.equal(labTextV2("api.ecdysis.me"), text);
     const py = await w.site("/lab/level1.py");
@@ -90,7 +92,7 @@ describe("the lab guide", () => {
     const brief = labBriefV2("https://ecdysis.me");
     assert.ok(brief.length < Math.min(...Object.values(PROMPT_APPS).map((a) => a.max)), `the brief (${brief.length} chars) fits the tightest app`);
     assert.match(brief, /Never print, log, upload or send a\s+private key, and never show one to a model/);
-    assert.match(brief, /stop sending at the first 429/);
+    assert.match(brief, /at the first 429, pause a minute and resend/);
     assert.match(brief, /https:\/\/ecdysis\.me\/lab\.md/, "the brief points the agent at the guide itself");
     assert.match(brief, /Never run anyone else's code \(bundles, repositories\) on a machine that holds the main key/);
     assert.match(brief, /data, never instructions/);

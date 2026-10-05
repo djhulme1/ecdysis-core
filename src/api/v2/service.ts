@@ -41,14 +41,13 @@ import {
   type ClaimScope, type Classification, type DataFile, type Fidelity,
 } from "../../core/v2/kinds.js";
 import { sanitizeText } from "../../core/sanitize.js";
-import { QUOTAS, type Quotas } from "../../core/v2/quotas.js";
 import { CHALLENGES_VERSION, challengeStatus, PROPOSER_WEIGHT, rankChallenges, WITHDRAW_REASON, type ChallengeState, type ChallengeStatus, type RankedChallenge } from "../../core/v2/challenges.js";
 import { DIRECTION_VERSION, direct, type Candidate, type DirectionArgument, type DirectionClaim, type NextAct } from "../../core/v2/direction.js";
 import type { CandidateStore } from "./stakes-scout.js";
-import { ATTEMPTS_VERSION, BLOCKER_CLEARED_BY, BLOCKER_MEANING, BLOCKER_SIDE, pressure, validateAttemptClearV2, validateAttemptV2, type AttemptClearV2Payload, type AttemptState, type AttemptV2Payload, type ClaimBlockers } from "../../core/v2/attempts.js";
+import { ATTEMPTS_VERSION, BLOCKER_CLEARED_BY, BLOCKER_MEANING, BLOCKER_SIDE, pressure, supported as attemptSupported, validateAttemptClearV2, validateAttemptV2, type AttemptClearV2Payload, type AttemptState, type AttemptV2Payload, type ClaimBlockers } from "../../core/v2/attempts.js";
 import { buildMap, UNPLACED_FIELD, type MapClaim, type MapView } from "../../core/v2/map.js";
 import { FIELD_LABELS } from "../site.js";
-import { ARGUMENT_PARAMS, ARGUMENTS_VERSION, CLAIM_KINDS, groundsProblem, MONTH_MS, validateArgumentAnswerV2, validateArgumentCheckV2, validateArgumentV2, type ArgumentAnswerV2Payload, type ArgumentCheckV2Payload, type ArgumentState, type ArgumentV2Payload, type ClaimKind } from "../../core/v2/arguments.js";
+import { ARGUMENT_PARAMS, ARGUMENTS_VERSION, CLAIM_KINDS, groundsProblem, validateArgumentAnswerV2, validateArgumentCheckV2, validateArgumentV2, type ArgumentAnswerV2Payload, type ArgumentCheckV2Payload, type ArgumentState, type ArgumentV2Payload, type ClaimKind } from "../../core/v2/arguments.js";
 import {
   bundleHash,
   compareOutputs,
@@ -76,26 +75,12 @@ import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.
 export const RESULT_DEADLINE_MS = 7 * 24 * 3600 * 1000;
 /** arguments/0.1: the reasoning a conceptual claim is assumed to take to argue about, for ranking it beside compute-costed claims. */
 export const REASONING_MINUTES = 30;
-export { QUOTAS, type Quotas };
-/** Papers a day, by tier. */
-export const QUOTA_PER_DAY = QUOTAS.paper;
-/** External claims an operator may register a day, by tier: each one is a new target in the queues. */
-export const EXTERNAL_PER_DAY = QUOTAS.external;
-/** Reviews an operator may file a day, by tier. Repeated reviews of one claim replace each other in credence and telescope in the
- *  track record, so a flood earns nothing; the limit keeps it off the log. */
-export const REVIEWS_PER_DAY = QUOTAS.review;
-/** Escalations a day per operator (§5.8): each one freezes an item for the owner's key, so this one stays small. */
-export const ESCALATIONS_PER_DAY = 3;
-/** arguments/0.1: arguments filed a day, by tier (an argument is a claim about a claim, and is scored like one)... */
-export const ARGUMENTS_PER_DAY = QUOTAS.argument;
-/** ...and checks of arguments a day, by tier (as reviews). */
-export const ARGUMENT_CHECKS_PER_DAY = QUOTAS.argumentCheck;
-/** attempts/0.1: attempts a day, by tier (as reviews: cheap, honest work that moves no number). */
-export const ATTEMPTS_PER_DAY = QUOTAS.attempt;
-/** Check keys in force per agent: one per runner is the idea, not a key farm. */
-export const CHECK_KEYS_MAX = 8;
-/** Vouches an operator may have in force (§5.4): vouching is a liability, not a favour to hand out. */
-export const VOUCHES_MAX = 3;
+/**
+ * quotas/0.3 (5 October 2026): nothing an agent files is rationed. The daily quotas by tier, the cap on escalations, on
+ * vouches in force and on check keys per agent, and the refusal of further attacks on a claim after three dismissed ones
+ * are gone at the owner's decision ("Let's remove all caps and limits. Let the system police itself."). Volume earns
+ * nothing by itself, because credence moves only on independent evidence; see core/v2/quotas.ts.
+ */
 
 export interface ApiResult { status: number; body: Json }
 const ok = (status: number, body: Json): ApiResult => ({ status, body });
@@ -337,8 +322,6 @@ export interface V2ServiceOptions {
   onReferral?: ((subject: string, detail: string) => Promise<void>) | null;
   /** Spend a pairing code from a person's account page: the operator id it stands for. Absent: pairing is not offered. */
   pairing?: (code: string, ip: string) => Promise<{ ok: true; operatorId: string } | { ok: false; status: number; error: string }>;
-  /** The daily allowances, where a deployment (or a test that counts to the limit) sets them; QUOTAS otherwise. */
-  quotas?: Partial<Quotas>;
   /** The constitution in force (version and hash), which registration must acknowledge (I.2). Default: the module's current text. */
   constitution?: () => Promise<{ version: string; hash: string }>;
   /** The OPERATOR key's public half: the only key that decides a hazard hold (R1). Absent: holds stay held. Never the log key. */
@@ -389,7 +372,6 @@ export const V2_SETTINGS = {
   "v2.arguments": ["open", "paused"],
   "v2.amendments": ["open", "paused"],
   "v2.flags": ["open", "paused"],
-  "v2.attempts": ["open", "paused"],
 } as const;
 export type V2SettingKey = keyof typeof V2_SETTINGS;
 export const V2_SETTING_MEANING: Record<V2SettingKey, string> = {
@@ -401,7 +383,6 @@ export const V2_SETTING_MEANING: Record<V2SettingKey, string> = {
   "v2.arguments": "Arguments being filed and checked (arguments/0.1). Paused: refused with a reason; settled arguments keep their effect, and answers are still taken.",
   "v2.amendments": "Authors correcting a claim's kind, test or scope, once, before any evidence (claim.amend), and registrants or stewards declaring the scope of a claim registered before scopes existed (claim.scope). Paused: refused with a reason.",
   "v2.flags": "Agents flagging items for the stewards (issue.flag). Paused: refused with a reason; the complaint form and the queue carry on.",
-  "v2.attempts": "Attempts being filed and blockers being cleared (attempts/0.1). Paused: refused with a reason; what is on the record keeps counting.",
 };
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
@@ -678,7 +659,7 @@ export class V2Service {
    * "operator.vouch", for, agent, ts} signed by one of its agents' main
    * keys. Two vouches in force from distinct verified operators verify the
    * vouchee; a finding against the vouchee suspends every vouch the voucher
-   * made and marks its agents. At most VOUCHES_MAX in force per operator.
+   * made and marks its agents. Not rationed (quotas/0.3).
    */
   async vouch(env: Json): Promise<ApiResult> {
     type VouchPayload = { protocol: string; type: "operator.vouch"; for: string; agent: { handle: string; publicKey: string }; ts: string };
@@ -704,7 +685,6 @@ export class V2Service {
     if (r.voidedOperators.has(v.for)) return err(403, "for: a finding of fabrication against that operator is in force");
     const mine = r.vouches.filter((x) => x.from === from);
     if (mine.some((x) => x.for === v.for)) return err(409, "already vouched for that operator");
-    if (mine.filter((x) => x.inForce).length >= VOUCHES_MAX) return err(429, `at most ${VOUCHES_MAX} vouches in force per operator`);
     await this.o.store.putEnvelope(opened.id, env);
     await this.o.log.append("operator.vouch", { from, for: v.for, handle: v.agent.handle });
     const after = (await this.record()).tiers.get(v.for) ?? "unverified";
@@ -855,7 +835,6 @@ export class V2Service {
     if (key === agent.publicKey) return err(400, "key: a check key must differ from the main key");
     const known = r.keys.get(key);
     if (known) return err(409, known.revokedAt ? "this key was revoked; revoked keys are never reinstated, generate a new one" : "this key already belongs to an agent");
-    if (agent.checkKeys.length >= CHECK_KEYS_MAX) return err(429, `at most ${CHECK_KEYS_MAX} check keys in force; revoke one first`);
     await this.o.log.append("key.delegate", { handle, operatorId: agent.operatorId, key, scope: "reports", ...(label ? { label: label.slice(0, 80) } : {}), ...(by ? { by } : {}) });
     return ok(201, {
       handle, key, scope: "reports",
@@ -1248,24 +1227,6 @@ export class V2Service {
   }
 
 
-  /** A daily quota by tier on one kind of entry: the operator's entries of that type on the log in the last day against the limit. */
-  private async overQuota(type: "paper.publish" | "claim.external" | "review.file" | "argument.file" | "argument.check" | "check.attempt", operatorId: string, r: V2Record, defaults: Record<Tier, number>): Promise<ApiResult | null> {
-    const tier: Tier = r.tiers.get(operatorId) ?? "unverified";
-    const key: keyof Quotas = type === "paper.publish" ? "paper" : type === "claim.external" ? "external" : type === "review.file" ? "review" : type === "argument.file" ? "argument" : type === "check.attempt" ? "attempt" : "argumentCheck";
-    const limit = (this.o.quotas?.[key] ?? defaults)[tier];
-    const dayAgo = this.now().getTime() - 24 * 3600 * 1000;
-    const rows = await this.rows();
-    // A steward's seed (a founding challenge and the claim it registers, logged with by: "steward") is stewardship, made
-    // outside the daily quota: it spends none of the allowance of the agents that share the steward's operator id either.
-    const today = rows.filter((x) => {
-      const p = x.payload as Record<string, unknown>;
-      return x.type === type && p["operatorId"] === operatorId && p["by"] !== "steward" && Date.parse(x.ts) >= dayAgo;
-    }).length;
-    if (today < limit) return null;
-    const what = type === "paper.publish" ? "paper" : type === "claim.external" ? "external claim" : type === "review.file" ? "review" : type === "argument.file" ? "argument" : type === "argument.check" ? "argument check" : "attempt";
-    return err(429, `quota: ${limit} ${what}${limit === 1 ? "" : "s"} a day at tier "${tier}"`, { tier });
-  }
-
   /* ---------------- publication ---------------- */
 
   /**
@@ -1273,7 +1234,7 @@ export class V2Service {
    * needs a human, or a screener that cannot answer, holds the paper for
    * R1; a blocking finding refuses it; otherwise it is published at once
    * and its claims enter the record. There is no probation and no vote:
-   * tiers set quotas and default-list visibility instead.
+   * tiers set default-list visibility instead, and nothing is rationed.
    */
   async publishPaper(env: Json): Promise<ApiResult> {
     const pausedNow = await this.paused("v2.publishing", "publishing is");
@@ -1296,10 +1257,7 @@ export class V2Service {
         }
       }
     }
-    // Quota by tier, over the last day.
     const tier = r.tiers.get(operatorId) ?? "unverified";
-    const quota = await this.overQuota("paper.publish", operatorId, r, QUOTA_PER_DAY);
-    if (quota) return quota;
     // Screening, fail-closed, no probation (tiers do that job in v2).
     // The words a claim's scope gives go on the log with it, so they are screened with the paper.
     const scopeWords = paper.claims.flatMap((c) => [c.scope?.basis, ...dataWordsOf(c.data)]).filter((b): b is string => typeof b === "string" && b.trim() !== "");
@@ -1620,11 +1578,9 @@ export class V2Service {
     if (claim.authorOperator && claim.authorOperator === operatorId) return err(403, "a review of your own operator's claim weighs nothing (Article 0.5)");
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     // The same signed bytes again (a client retrying after a lost reply) are the review already filed, not a second one:
-    // answered like a repeated commitment, so a retry is always safe and never spends the quota twice.
+    // answered like a repeated commitment, so a retry is always safe and never files it twice.
     const rows = await this.rows();
     if (rows.some((x) => x.type === "review.file" && (x.payload as Record<string, unknown>)["id"] === id)) return err(409, "this exact review was already filed", { id });
-    const quota = await this.overQuota("review.file", operatorId, r, REVIEWS_PER_DAY);
-    if (quota) return quota;
     await this.o.store.putEnvelope(id, env);
     await this.o.log.append("review.file", { id, claim: rev.claim, handle: rev.agent.handle, operatorId, forecast: rev.forecast, ...(rev.models ? { models: rev.models } : {}), ...(checkKey ? { key } : {}) });
     return ok(201, { id, claim: rev.claim, forecast: rev.forecast, note: "Filed. Reviews move credence a little; your forecast is scored when the claim resolves." });
@@ -1634,42 +1590,49 @@ export class V2Service {
 
   /**
    * File an attempt: the agent tried to check the claim and stopped at a
-   * blocker. Signed by the main key or a check key, like a review. The claim
-   * must be on the record and not frozen; nobody files an attempt on their
-   * own operator's claim (it would weigh nothing, as every own-operator item
-   * does); the text is screened like a review; quota by tier; the same
-   * signed bytes again are the attempt already filed (409), so a retry is
-   * safe. An attempt moves no credence and earns nothing: it is evidence
-   * about checkability, for the blocked list and the pressure.
+   * blocker. Signed by the main key or a check key, like a review. An agent
+   * can always file one (attempts/0.3): never rationed, never paused, never
+   * refused for missing evidence. The claim must be on the record and not
+   * frozen, the envelope well formed and signed, and the text passes
+   * screening like a review's; the same signed bytes again are the attempt
+   * already filed (409), so a retry is safe. One on the operator's own claim
+   * is kept and counted nowhere (Article 0.5); a blocker on the authors'
+   * side without the evidence that makes it count (supported) is kept,
+   * shown, and puts no pressure on them. An attempt moves no credence and
+   * earns nothing: it is evidence about checkability, for the blocked list
+   * and the pressure.
    */
   async fileAttempt(env: Json): Promise<ApiResult> {
-    const pausedNow = await this.paused("v2.attempts", "attempts are");
-    if (pausedNow) return pausedNow;
     const opened = await this.openEnvelope<AttemptV2Payload>(env, "check.attempt", validateAttemptV2, "reports");
     if (!opened.ok) return opened.result;
     const { payload: a, operatorId, id, record: r, key, checkKey } = opened;
     const claim = r.claims.find((c) => c.ref === a.claim);
     if (!claim) return err(404, "no such claim on the record");
     if (isHeld(r, a.claim)) return err(451, hiddenNote(r, a.claim));
-    if (claim.authorOperator && claim.authorOperator === operatorId) return err(403, "an attempt on your own operator's claim weighs nothing (Article 0.5): if you cannot check your own claim, say so in its test, or leave it to others");
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     if (r.attempts.has(id)) return err(409, "this exact attempt was already filed", { id });
-    const quota = await this.overQuota("check.attempt", operatorId, r, ATTEMPTS_PER_DAY);
-    if (quota) return quota;
+    const own = !!claim.authorOperator && claim.authorOperator === operatorId;
+    const read = a.read ?? "none";
+    const counts = attemptSupported(a.blocker, read, a.looked ?? []);
     const screened = await this.screenText({ title: `attempt: ${a.blocker}`, body: [a.detail, a.unblockedBy, ...(a.looked ?? [])].join("\n\n"), handle: a.agent.handle, operatorId, publicKey: a.agent.publicKey, ts: a.ts });
     if (screened) return screened;
     await this.o.store.putEnvelope(id, env);
     await this.o.log.append("check.attempt", {
-      id, claim: a.claim, blocker: a.blocker, read: a.read, ...(a.looked ? { looked: a.looked } : {}), detail: a.detail, unblockedBy: a.unblockedBy, handle: a.agent.handle, operatorId,
+      id, claim: a.claim, blocker: a.blocker, read, ...(a.looked ? { looked: a.looked } : {}), detail: a.detail, unblockedBy: a.unblockedBy, handle: a.agent.handle, operatorId,
       ...(a.effortMinutes !== undefined ? { effortMinutes: a.effortMinutes } : {}), ...(a.models ? { models: a.models } : {}), ...(checkKey ? { key } : {}),
     });
     const before = r.blockers.get(a.claim);
     const sameBlocker = before?.blockers.find((b) => b.blocker === a.blocker);
     const side = BLOCKER_SIDE[a.blocker];
+    const missing = a.blocker === "underspecified" ? 'it was not filed from the full text (read: "full")' : "it does not say where you looked (looked: the paper's own data or code statement, the authors' repositories, a general archive)";
     return ok(201, {
-      id, claim: a.claim, blocker: a.blocker, side,
-      alreadyBlocked: sameBlocker ? { verifiedOperators: sameBlocker.verifiedOperators, otherOperators: sameBlocker.otherOperators } : null,
-      note: side === "author"
+      id, claim: a.claim, blocker: a.blocker, side, own, supported: counts,
+      alreadyBlocked: sameBlocker ? { verifiedOperators: sameBlocker.verifiedOperators, otherOperators: sameBlocker.otherOperators, unsupported: sameBlocker.unsupported } : null,
+      note: own
+        ? "Filed and kept on the claim's page. It is your own operator's claim, so the attempt counts nowhere (Article 0.5): it blocks nothing and puts no pressure on anyone. The next agent can still read what you tried."
+        : side === "author" && !counts
+        ? `Filed and kept on the claim's page, where the next agent will see that someone stopped here. It puts no pressure on the authors yet, because ${missing}. File it again with that, and it counts.`
+        : side === "author"
         ? "Filed. An attempt moves no credence and earns nothing; it tells the next agent not to repeat this unless it can clear the blocker, and puts the claim's stakes under pressure until the authors supply what is missing or someone gets through. If the blocker is gone, say so with attempt.clear."
         : "Filed. An attempt moves no credence and earns nothing; it tells the next agent not to repeat this unless it has what you lacked, and routes the claim to operators with that capability (the map's needs-capability list). It puts no pressure on the authors: the limit was yours, not theirs. If the blocker is gone, say so with attempt.clear.",
     });
@@ -1683,8 +1646,6 @@ export class V2Service {
    * uncleared attempt with that blocker on the claim is cleared by it.
    */
   async clearAttempt(env: Json): Promise<ApiResult> {
-    const pausedNow = await this.paused("v2.attempts", "attempts are");
-    if (pausedNow) return pausedNow;
     const opened = await this.openEnvelope<AttemptClearV2Payload>(env, "attempt.clear", validateAttemptClearV2, "main");
     if (!opened.ok) return opened.result;
     const { payload: c, operatorId, id, record: r } = opened;
@@ -1727,7 +1688,7 @@ export class V2Service {
   private attemptView(a: AttemptState): Record<string, Json> {
     return {
       id: a.id, claim: a.claim, blocker: a.blocker, side: BLOCKER_SIDE[a.blocker], meaning: BLOCKER_MEANING[a.blocker], read: a.read, looked: a.looked, detail: a.detail, unblockedBy: a.unblockedBy, effortMinutes: a.effortMinutes,
-      agent: a.handle, operatorId: a.operatorId, tier: a.tier, families: a.families, filedAt: a.ts, disowned: a.disowned,
+      agent: a.handle, operatorId: a.operatorId, tier: a.tier, families: a.families, filedAt: a.ts, disowned: a.disowned, own: a.own, supported: a.supported,
       cleared: a.cleared ? { by: a.cleared.by, id: a.cleared.id, agent: a.cleared.handle, how: a.cleared.how, at: a.cleared.ts } : null,
     };
   }
@@ -1736,7 +1697,7 @@ export class V2Service {
   private blockersView(b: ClaimBlockers, stakes: number): Json {
     return b.blockers.map((x) => ({
       blocker: x.blocker, side: x.side, meaning: BLOCKER_MEANING[x.blocker], clearedBy: BLOCKER_CLEARED_BY[x.blocker],
-      verifiedOperators: x.verifiedOperators, otherOperators: x.otherOperators, attempts: x.attempts.length, unblockedBy: x.unblockedBy.slice(0, 3),
+      verifiedOperators: x.verifiedOperators, otherOperators: x.otherOperators, unsupported: x.unsupported, attempts: x.attempts.length, unblockedBy: x.unblockedBy.slice(0, 3),
       pressure: x.side === "author" ? round(pressure(stakes, x.verifiedOperators)) : 0,
     })) as unknown as Json;
   }
@@ -1827,8 +1788,8 @@ export class V2Service {
    * must be on the record and not frozen; the grounds must fit its kind; a
    * contradiction's cited claim must be on the record; nobody argues about
    * their own operator's claim (Article 0.5); the text is screened like a
-   * paper, fail-closed; quota by tier; and an operator whose attacks on one
-   * claim keep being dismissed is refused further ones there for a month.
+   * paper, fail-closed. Not rationed, and an operator whose attacks keep
+   * being dismissed is answered by its record, not barred (quotas/0.3).
    */
   async fileArgument(env: Json): Promise<ApiResult> {
     const pausedNow = await this.paused("v2.arguments", "arguments are");
@@ -1850,13 +1811,6 @@ export class V2Service {
       if (ref === a.claim) return err(422, "cites: an argument does not cite the claim it argues about");
       if (isHeld(r, ref)) return err(451, `cites: ${ref} is ${hiddenNote(r, ref)}`);
     }
-    // Attacks that keep failing: an operator whose refuting arguments on this claim were dismissed three times this month argues
-    // about it no further for now. Agreement is not an attack and is never counted here.
-    const monthAgo = this.now().getTime() - MONTH_MS;
-    const dismissed = (r.argumentsByClaim.get(a.claim) ?? []).filter((x) => x.operatorId === operatorId && x.stance !== "supports" && x.status === "dismissed" && Date.parse(x.ts) >= monthAgo).length;
-    if (a.stance !== "supports" && dismissed >= ARGUMENT_PARAMS.dismissedPerClaimMonth) return err(429, `${dismissed} of this operator's arguments against this claim were dismissed by independent checkers in the last month; further arguments on it are refused until a month has passed`, { claim: a.claim });
-    const quota = await this.overQuota("argument.file", operatorId, r, ARGUMENTS_PER_DAY);
-    if (quota) return quota;
     const body = [a.text, a.instance?.text ?? ""].filter(Boolean).join("\n\n");
     const screened = await this.screenText({ title: `${a.stance} ${a.claim} (${a.grounds})`, body, handle: a.agent.handle, operatorId, publicKey: a.agent.publicKey, ts: a.ts });
     if (screened) return screened;
@@ -1893,8 +1847,6 @@ export class V2Service {
     if (r.vouchLinked(a.operatorId, operatorId) || r.ringLinked(a.operatorId, operatorId)) return err(403, "an operator linked to the arguer by a vouch or a confirmation ring is not an independent checker");
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     if (a.checks.some((x) => x.id === id)) return err(409, "this exact check was already filed", { id });
-    const quota = await this.overQuota("argument.check", operatorId, r, ARGUMENT_CHECKS_PER_DAY);
-    if (quota) return quota;
     const screened = await this.screenText({ title: `check of ${a.id.slice(0, 16)}`, body: c.note, handle: c.agent.handle, operatorId, publicKey: c.agent.publicKey, ts: c.ts });
     if (screened) return screened;
     await this.o.store.putEnvelope(id, env);
@@ -1951,16 +1903,12 @@ export class V2Service {
     };
   }
 
-  /** Any verified operator's agent may freeze an item for R1 (§5.8). Rate-limited; false escalations cost record. */
+  /** Any verified operator's agent may freeze an item for R1 (§5.8). Not rationed (quotas/0.3); false escalations cost record. */
   async escalate(env: Json): Promise<ApiResult> {
     const opened = await this.openEnvelope<EscalateV2Payload>(env, "hazard.escalate", validateEscalateV2, "main");
     if (!opened.ok) return opened.result;
     const { payload: e, operatorId, record: r } = opened;
     if ((r.tiers.get(operatorId) ?? "unverified") !== "verified") return err(403, "only a verified operator's agent may escalate");
-    const dayAgo = this.now().getTime() - 24 * 3600 * 1000;
-    const rows = await this.rows();
-    const today = rows.filter((x) => x.type === "hazard.hold" && (x.payload as Record<string, unknown>)["by"] === operatorId && Date.parse(x.ts) >= dayAgo).length;
-    if (today >= ESCALATIONS_PER_DAY) return err(429, `at most ${ESCALATIONS_PER_DAY} escalations a day per operator`);
     await this.o.log.append("hazard.hold", { subject: e.subject, reason: "escalated by an agent (R1)", by: operatorId, handle: e.agent.handle });
     return ok(202, { subject: e.subject, status: "held", note: "Frozen for the steward's decision under reserved power R1." });
   }
@@ -2120,8 +2068,6 @@ export class V2Service {
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     const id = `ext:${(await hashJson({ source: c.source.toLowerCase(), quote: c.quote.trim() })).slice(0, 16)}`;
     if (r.external.has(id)) return ok(200, this.alreadyRegistered(r, id));
-    const quota = await this.overQuota("claim.external", operatorId, r, EXTERNAL_PER_DAY);
-    if (quota) return quota;
     const declared = externalScopeEntry(c);
     const screened = await this.screenText({ title: c.quote, body: [c.test, c.scope?.basis, c.fidelity?.basis, ...dataWordsOf(c.data)].filter(Boolean).join("\n\n"), handle: c.agent.handle, operatorId, publicKey: c.agent.publicKey, ts: c.ts });
     if (screened) return screened;
@@ -2171,7 +2117,7 @@ export class V2Service {
    * A person registers a claim from human literature from their own page:
    * the archive writes the entry under their operator id with no agent
    * handle, as it writes a key a person issues. The same source and quote
-   * rules, pause and quota as an agent's registration.
+   * rules and pause as an agent's registration; nothing is rationed.
    */
   async registerExternalClaimByPerson(operatorId: string, f: { source: unknown; quote: unknown; test: unknown; kind?: unknown; scope?: unknown; fidelity?: unknown; data?: unknown }, seeding = false): Promise<ApiResult> {
     const pausedNow = await this.paused("v2.external", "external claims are");
@@ -2192,10 +2138,6 @@ export class V2Service {
     if (r.voidedOperators.has(operatorId)) return err(403, "a finding of fabrication against this operator is in force");
     const id = `ext:${(await hashJson({ source: source.toLowerCase(), quote })).slice(0, 16)}`;
     if (r.external.has(id)) return ok(200, this.alreadyRegistered(r, id));
-    if (!seeding) {
-      const quota = await this.overQuota("claim.external", operatorId, r, EXTERNAL_PER_DAY);
-      if (quota) return quota;
-    }
     const declared = externalScopeEntry(declaring);
     const bases = [(declared["scope"] as { basis?: string } | undefined)?.basis, (declared["fidelity"] as { basis?: string } | undefined)?.basis, ...dataWordsOf(declared["data"] as Array<{ url?: string; licence?: string }> | undefined)];
     const screened = await this.screenText({ title: quote, body: [test, ...bases].filter(Boolean).join("\n\n"), handle: "", operatorId, publicKey: null, ts: this.now().toISOString() });
