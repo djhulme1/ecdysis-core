@@ -79,6 +79,12 @@ export interface StakesScoutOptions {
   contact?: string;
   /** direction/0.1: where the fields' most-cited works are kept for the registration queue. Absent: none are read. */
   candidates?: CandidateStore;
+  /**
+   * An OpenAlex API key (free, per account). Without one, every request counts against a daily budget OpenAlex shares among
+   * everyone behind the same IP address, which a Worker's shared egress exhausts: the field totals and the field lists then
+   * answer 429. Sent as a bearer header, never in a URL, so it appears in no log and no observation.
+   */
+  apiKey?: string | null;
 }
 
 export class StakesScout {
@@ -165,7 +171,7 @@ export class StakesScout {
     try {
       const mailto = encodeURIComponent(this.o.contact ?? "replies@ecdysis.me");
       const url = `https://api.openalex.org/works?filter=primary_topic.field.id:${encodeURIComponent(fieldId)},type:article&sort=cited_by_count:desc&per-page=${CANDIDATES_PER_FIELD}&select=id,doi,title,cited_by_count,publication_year,ids&mailto=${mailto}`;
-      const res = await this.fetchImpl(url, { headers: { "user-agent": this.ua(), accept: "application/json" } });
+      const res = await this.fetchImpl(url, { headers: this.openAlexHeaders() });
       if (!res.ok) return null;
       const body = (await res.json().catch(() => null)) as { results?: Array<{ id?: string; doi?: string | null; title?: string | null; cited_by_count?: number; publication_year?: number | null; ids?: Record<string, string> }> } | null;
       if (!body || !Array.isArray(body.results)) return null;
@@ -186,7 +192,7 @@ export class StakesScout {
   async observeField(fieldId: string): Promise<{ field: string; works: number; citedBy: number } | null> {
     try {
       const mailto = encodeURIComponent(this.o.contact ?? "replies@ecdysis.me");
-      const res = await this.fetchImpl(`https://api.openalex.org/fields/${encodeURIComponent(fieldId)}?mailto=${mailto}`, { headers: { "user-agent": this.ua(), accept: "application/json" } });
+      const res = await this.fetchImpl(`https://api.openalex.org/fields/${encodeURIComponent(fieldId)}?mailto=${mailto}`, { headers: this.openAlexHeaders() });
       if (!res.ok) return null;
       const f = (await res.json().catch(() => null)) as { display_name?: string; works_count?: number; cited_by_count?: number } | null;
       if (!f || typeof f.works_count !== "number" || typeof f.cited_by_count !== "number") return null;
@@ -214,13 +220,19 @@ export class StakesScout {
     }
   }
 
+  /** Headers for OpenAlex: the user agent it asks for, and the account's key when one is configured. */
+  private openAlexHeaders(): Record<string, string> {
+    const key = this.o.apiKey?.trim();
+    return { "user-agent": this.ua(), accept: "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) };
+  }
+
   private ua(): string {
     return `ecdysis-stakes-scout/0.1 (https://ecdysis.me; mailto:${this.o.contact ?? "replies@ecdysis.me"})`;
   }
 
   private async openAlex(doi: string, withVenue: boolean): Promise<{ status: "observed"; observed: Observed } | { status: "unresolved"; detail: string } | { status: "error"; detail: string }> {
     const mailto = encodeURIComponent(this.o.contact ?? "replies@ecdysis.me");
-    const res = await this.fetchImpl(`https://api.openalex.org/works/doi:${encodeURIComponent(doi)}?mailto=${mailto}`, { headers: { "user-agent": this.ua(), accept: "application/json" } });
+    const res = await this.fetchImpl(`https://api.openalex.org/works/doi:${encodeURIComponent(doi)}?mailto=${mailto}`, { headers: this.openAlexHeaders() });
     if (res.status === 404) return { status: "unresolved", detail: "OpenAlex knows no such work" };
     if (!res.ok) return { status: "error", detail: `OpenAlex ${res.status}` };
     const w = (await res.json().catch(() => null)) as OpenAlexWork | null;
@@ -234,7 +246,7 @@ export class StakesScout {
     const venue = w.primary_location?.source?.id;
     if (withVenue && typeof venue === "string" && /openalex\.org\/S\d+$/i.test(venue)) {
       const sid = venue.slice(venue.lastIndexOf("/") + 1);
-      const sres = await this.fetchImpl(`https://api.openalex.org/sources/${encodeURIComponent(sid)}?mailto=${mailto}`, { headers: { "user-agent": this.ua(), accept: "application/json" } });
+      const sres = await this.fetchImpl(`https://api.openalex.org/sources/${encodeURIComponent(sid)}?mailto=${mailto}`, { headers: this.openAlexHeaders() });
       if (sres.ok) {
         const src = (await sres.json().catch(() => null)) as { summary_stats?: Record<string, unknown> } | null;
         const v = src?.summary_stats?.["2yr_mean_citedness"];

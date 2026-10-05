@@ -75,3 +75,39 @@ describe("the registration candidates on the deployment", () => {
     assert.ok(rows.has("direction:candidates"), "under the key the reference names");
   });
 });
+
+describe("the OpenAlex key", () => {
+  it("goes to OpenAlex alone, as a bearer header, never in a URL; without one nothing is sent", async () => {
+    const seen: Array<{ url: string; auth: string | null }> = [];
+    const capture: typeof fetch = async (input, init) => {
+      const url = String(input);
+      const h = new Headers(init?.headers);
+      seen.push({ url, auth: h.get("authorization") });
+      if (url.startsWith("https://api.openalex.org/works/doi:")) return new Response(JSON.stringify({ id: "https://openalex.org/W1", cited_by_count: 5, publication_year: 2010, primary_topic: { field: { id: "https://openalex.org/fields/17", display_name: "Computer Science" } } }), { status: 200 });
+      if (url.startsWith("https://api.openalex.org/fields/")) return new Response(JSON.stringify({ display_name: "Computer Science", works_count: 1000, cited_by_count: 50000 }), { status: 200 });
+      return new Response("{}", { status: 404 });
+    };
+    const secret = "oa-test-key-0123456789";
+    const withKey = new StakesScout({ v2: {} as never, log: {} as never, pause: async () => {}, fetchImpl: capture, apiKey: secret }) as unknown as { observe(s: string): Promise<{ status: string }>; observeField(id: string): Promise<unknown> };
+    assert.equal((await withKey.observe("doi:10.1000/xyz")).status, "observed");
+    assert.ok(await withKey.observeField("17"));
+    assert.ok(seen.length >= 2 && seen.every((r) => r.auth === `Bearer ${secret}`), JSON.stringify(seen));
+    assert.ok(seen.every((r) => !r.url.includes(secret)), "never in a URL");
+    seen.length = 0;
+    const without = new StakesScout({ v2: {} as never, log: {} as never, pause: async () => {}, fetchImpl: capture }) as unknown as { observe(s: string): Promise<{ status: string }> };
+    assert.equal((await without.observe("doi:10.1000/xyz")).status, "observed");
+    assert.ok(seen.every((r) => r.auth === null));
+    // Semantic Scholar, the fallback, never sees it.
+    seen.length = 0;
+    const fallback: typeof fetch = async (input, init) => {
+      const url = String(input);
+      seen.push({ url, auth: new Headers(init?.headers).get("authorization") });
+      if (url.startsWith("https://api.openalex.org/")) return new Response("{}", { status: 404 });
+      return new Response(JSON.stringify({ paperId: "p1", citationCount: 3, year: 2020, s2FieldsOfStudy: [{ category: "Computer Science" }] }), { status: 200 });
+    };
+    const viaS2 = new StakesScout({ v2: {} as never, log: {} as never, pause: async () => {}, fetchImpl: fallback, apiKey: secret }) as unknown as { observe(s: string): Promise<{ status: string }> };
+    await viaS2.observe("arxiv:2203.15556");
+    const s2 = seen.filter((r) => r.url.startsWith("https://api.semanticscholar.org/"));
+    assert.ok(s2.length >= 1 && s2.every((r) => r.auth === null), JSON.stringify(seen));
+  });
+});
