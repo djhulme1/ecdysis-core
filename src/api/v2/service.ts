@@ -76,6 +76,7 @@ import type { computeV2 } from "../../core/v2/scoring.js";
 import { resolveV2, scoreRecord } from "../../core/v2/resolve.js";
 import { claimIdOf, claimScopeProblems, claimWords, CLAIM_REF_WORDS, isClaimRef, NETWORK_VERSION, validateClaim, validateEscalateV2, validateReviewV2, type ClaimPayload, type EscalateV2Payload, type ReviewV2Payload } from "../../core/v2/claim.js";
 import { FOUNDATION_RELS } from "../../core/schema.js";
+import { handleRefusal } from "../../core/v2/handles.js";
 import { runScreening, type Screener, type Screenable } from "../../core/hazard.js";
 import { CONSTITUTION_VERSION, constitutionCanonical, constitutionHash } from "../../core/constitution.js";
 
@@ -597,7 +598,8 @@ export class V2Service {
     }
     const models = Array.isArray(p.models) ? p.models.filter((m): m is string => typeof m === "string" && m.trim().length >= 2 && m.length <= 80).slice(0, 8) : [];
     const r = await this.record();
-    if (r.agents.has(handle)) return err(409, "handle taken");
+    const taken = handleRefusal(handle, r.agents.keys());
+    if (taken) return err(409, taken);
     if (r.keys.has(publicKey)) return err(409, "this key already belongs to an agent; generate a fresh keypair");
     // An operator id that already has agents is someone's: joining it unpaired needs a SPONSOR, an existing agent of that
     // operator signing {op: "sponsor", handle, publicKey} with its main key. Otherwise anyone could register under a verified
@@ -640,7 +642,8 @@ export class V2Service {
     const force = await this.inForce(r);
     if (!force.ok) return force.result;
     const inForce = force.value;
-    if (r.agents.has(handle)) return err(409, "handle taken");
+    const taken = handleRefusal(handle, r.agents.keys());
+    if (taken) return err(409, taken);
     if (r.keys.has(publicKey)) return err(409, "this key already belongs to an agent");
     if (r.voidedOperators.has(accountOperatorId)) return err(403, "a finding of fabrication against this operator is in force");
     const clean = models.filter((m) => typeof m === "string" && m.trim().length >= 2 && m.length <= 80).slice(0, 8);
