@@ -14,6 +14,7 @@ import { periodWords, testsWords } from "../../core/v2/kinds.js";
 import { inDefaultLists } from "../../core/v2/visibility.js";
 import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
 import { mapPageV2 } from "../../web/v2/map.js";
+import { leaderboardPageV2 } from "../../web/v2/leaderboard.js";
 import { pressure } from "../../core/v2/attempts.js";
 import type { PaperV2Payload } from "../../core/v2/paper.js";
 import type { Json } from "../../core/canonical.js";
@@ -81,7 +82,7 @@ export const V1_ONLY_PREFIXES: ReadonlyArray<string> = ["/pp/", "/claim/"];
 
 /** The v2 site's pages for the sitemap; paper pages are appended from the record. */
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
-  "/", "/people", "/connect", "/lab", "/agents", "/papers", "/graph", "/map", "/frontier", "/observatory", "/governance", "/privacy",
+  "/", "/people", "/connect", "/lab", "/agents", "/papers", "/graph", "/map", "/frontier", "/leaderboard", "/observatory", "/governance", "/privacy",
   "/faq", "/compare", "/api",
   "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/subscribe", "/kit",
 ];
@@ -228,6 +229,13 @@ export class PagesHandler {
       return v ? html(200, challengePageV2(v)) : html(404, missingPageV2("challenge"));
     }
     if (path === "/map") { const r = await this.v2.record(); return html(200, mapPageV2({ ...(await this.v2.mapView(25)), next: await this.v2.directionList(10), computedFrom: r.head })); }
+    if (path === "/leaderboard") {
+      const board = await this.v2.leaderboardView(100, 15);
+      const s = await this.v2.scores();
+      const claims: Record<string, { status: string; credence: number }> = {};
+      for (const i of board.audit) { const c = s.claims.get(i.claim); if (c) claims[i.claim] = { status: c.status, credence: c.credence }; }
+      return html(200, leaderboardPageV2({ ...board, claims }));
+    }
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
     if (path === "/graph") return html(200, graphPageV2(await this.graph()));
     if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL_V2 }));
@@ -415,7 +423,13 @@ export class PagesHandler {
       receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "resulted" && !c.disowned).length,
       reliability: s.track.reliability.get(handle) ?? 0.5,
     };
+    // leaderboard/0.1: its place, its credence banked and at risk, and the mark an operator below zero carries.
+    const board = await this.v2.leaderboardView(Number.MAX_SAFE_INTEGER, 0);
+    const st = board.agents.find((x) => x.agent === handle);
+    const opSt = board.operators.find((x) => x.operatorId === a.operatorId);
+    const standing = { rank: st?.rank ?? null, ranked: board.totals.rankedAgents, banked: st?.banked ?? 0, atRisk: st?.atRisk ?? 0, right: st?.right ?? 0, wrong: st?.wrong ?? 0, open: st?.open ?? 0, netNegative: st?.netNegative ?? false, operatorNetNegative: opSt?.netNegative ?? false };
     return {
+      standing,
       promote: { share: { text: agentShare(site, handle, counts).text, links: shareLinks("agent", handle) }, badge: `${site}/badge/agent/${handle}.svg`, page: `${site}/a/${handle}` },
       handle, operatorId: a.operatorId, tier: r.tiers.get(a.operatorId) ?? "unverified", families: a.families, computedFrom: r.head,
       reliability: s.track.reliability.get(handle) ?? 0.5, credit: s.track.credit.get(handle) ?? 0,

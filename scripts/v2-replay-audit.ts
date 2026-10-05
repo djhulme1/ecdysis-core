@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { V2Entry } from "../src/core/v2/flow.js";
 import { resolveV2 } from "../src/core/v2/resolve.js";
+import { buildLeaderboard, leaderboardInputOf } from "../src/core/v2/leaderboard.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "audit");
 const BASELINE = join(ROOT, "v2-baseline.json");
@@ -37,6 +38,8 @@ export interface V2Outputs {
   findings: Record<string, string>;
   /** other derived facts: voided operators, rings, lapses, disowned receipts, held items */
   facts: Record<string, string>;
+  /** leaderboard/0.1: each agent's and operator's rank, credence banked and at risk, right/wrong/open; the claims offered for audit, in order */
+  leaderboard?: Record<string, string>;
 }
 
 const r6 = (x: number) => x.toFixed(6);
@@ -383,12 +386,20 @@ export function scoreScripted(): V2Outputs {
     // credence/0.4: where an empirical claim's status reads a different number from its verified credence (replication tests alone).
     statusReads: [...s.claims.values()].filter((c) => c.kind !== "conceptual" && Math.abs(c.credenceReplication - c.credenceVerified) > 1e-6).sort((a, b) => a.ref.localeCompare(b.ref)).map((c) => `${c.ref}:${r6(c.credenceReplication)}`).join(";") || "none",
   };
-  return { claims, reliability, tiers, findings, facts };
+  // leaderboard/0.1: a reading of the track record, pinned so that a change to how standing is counted shows in the diff.
+  const board = buildLeaderboard(leaderboardInputOf(r, s, Number.MAX_SAFE_INTEGER, 10));
+  const standing = (x: { rank: number | null; banked: number; atRisk: number; right: number; wrong: number; open: number; netNegative: boolean; voided: boolean }) =>
+    `${x.rank ?? "-"} · banked ${r6(x.banked)} · at risk ${r6(x.atRisk)} · ${x.right}/${x.wrong}/${x.open}${x.netNegative ? " · net negative" : ""}${x.voided ? " · voided" : ""}`;
+  const leaderboard: Record<string, string> = {};
+  for (const a of [...board.agents].sort((x, y) => x.agent.localeCompare(y.agent))) leaderboard[`agent ${a.agent}`] = standing(a);
+  for (const o of [...board.operators].sort((x, y) => x.operatorId.localeCompare(y.operatorId))) leaderboard[`operator ${o.operatorId}`] = standing(o);
+  leaderboard["audit"] = board.audit.map((i) => `${i.claim}:${r6(i.weight)}`).join(";") || "none";
+  return { claims, reliability, tiers, findings, facts, leaderboard };
 }
 
 export function differencesV2(was: V2Outputs, now: V2Outputs): string[] {
   const out: string[] = [];
-  for (const section of ["claims", "reliability", "tiers", "findings", "facts"] as const) {
+  for (const section of ["claims", "reliability", "tiers", "findings", "facts", "leaderboard"] as const) {
     const a = was[section] ?? {};
     const b = now[section] ?? {};
     for (const k of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) {

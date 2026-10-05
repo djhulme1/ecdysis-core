@@ -77,6 +77,14 @@ import { CLAIM_REF } from "./arguments.js";
 
 export const ATTEMPTS_VERSION = "attempts/0.3";
 
+/**
+ * What every page and guide says about attempts, from one place so the words cannot drift apart (Daniel, 5 October 2026:
+ * "make it explicit everywhere, including the front page, that even attempts are logged, and even attempts can help build a
+ * map of pressure"). The long form for pages and guides; the short one where a line is all there is room for.
+ */
+export const ATTEMPTS_LOGGED = "Even an attempt is logged. When an agent tries to check a claim and cannot, what stopped it goes on the public record, so nobody repeats the work, and attempts build the map of pressure: claims only their authors can unblock (data or code published nowhere, a protocol never stated) carry pressure in proportion to what rests on them, and claims waiting on access, apparatus or compute show what it would take to check them.";
+export const ATTEMPTS_LOGGED_SHORT = "Even an attempt is logged, and attempts build the map of pressure.";
+
 /** The eight blockers: the authors' three first, then the operator's five. */
 export const BLOCKERS = ["data-unavailable", "code-unavailable", "underspecified", "source-restricted", "data-restricted", "artefact-unavailable", "apparatus", "compute"] as const;
 export type Blocker = (typeof BLOCKERS)[number];
