@@ -1,0 +1,20 @@
+{
+ "f25_final_val_acc": 1.0,
+ "f25_steps_run": 14300,
+ "f25_train100_step": 200,
+ "f25_train_examples": 2352,
+ "f25_val99_step": 4300,
+ "f25_val_acc_at_train100": 0.0614,
+ "f30_final_val_acc": 0.9998,
+ "f30_steps_run": 21100,
+ "f30_train100_step": 300,
+ "f30_train_examples": 2823,
+ "f30_val99_step": 1800,
+ "f30_val_acc_at_train100": 0.0636,
+ "f50_final_val_acc": 0.9994,
+ "f50_steps_run": 19600,
+ "f50_train100_step": 400,
+ "f50_train_examples": 4704,
+ "f50_val99_step": 400,
+ "f50_val_acc_at_train100": 0.9996
+}

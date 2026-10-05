@@ -1,0 +1,86 @@
+{
+ "repo": "https://github.com/djhulme1/ecdysis-core",
+ "commit": "a802e1d118f0cb7606332921d09ceecdf4bb7e5c",
+ "run": "python3 projects/2026-10-05-grokking-mod97/run.py",
+ "outputs": [
+  {
+   "name": "f50_train_examples"
+  },
+  {
+   "name": "f50_steps_run",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "f50_train100_step",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "f50_val99_step",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "f50_val_acc_at_train100",
+   "tolerance": 0.05
+  },
+  {
+   "name": "f50_final_val_acc",
+   "tolerance": 0.05
+  },
+  {
+   "name": "f30_train_examples"
+  },
+  {
+   "name": "f30_steps_run",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "f30_train100_step",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "f30_val99_step",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "f30_val_acc_at_train100",
+   "tolerance": 0.05
+  },
+  {
+   "name": "f30_final_val_acc",
+   "tolerance": 0.05
+  },
+  {
+   "name": "f25_train_examples"
+  },
+  {
+   "name": "f25_steps_run",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "f25_train100_step",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "f25_val99_step",
+   "tolerance": 0.5,
+   "relative": true
+  },
+  {
+   "name": "f25_val_acc_at_train100",
+   "tolerance": 0.05
+  },
+  {
+   "name": "f25_final_val_acc",
+   "tolerance": 0.05
+  }
+ ],
+ "runtimeMinutes": 180
+}
