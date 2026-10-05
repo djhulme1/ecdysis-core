@@ -43,6 +43,8 @@ import {
 import { sanitizeText } from "../../core/sanitize.js";
 import { QUOTAS, type Quotas } from "../../core/v2/quotas.js";
 import { CHALLENGES_VERSION, challengeStatus, PROPOSER_WEIGHT, rankChallenges, WITHDRAW_REASON, type ChallengeState, type ChallengeStatus, type RankedChallenge } from "../../core/v2/challenges.js";
+import { DIRECTION_VERSION, direct, type Candidate, type DirectionArgument, type DirectionClaim, type NextAct } from "../../core/v2/direction.js";
+import type { CandidateStore } from "./stakes-scout.js";
 import { ATTEMPTS_VERSION, BLOCKER_CLEARED_BY, BLOCKER_MEANING, BLOCKER_SIDE, pressure, validateAttemptClearV2, validateAttemptV2, type AttemptClearV2Payload, type AttemptState, type AttemptV2Payload, type ClaimBlockers } from "../../core/v2/attempts.js";
 import { buildMap, UNPLACED_FIELD, type MapClaim, type MapView } from "../../core/v2/map.js";
 import { FIELD_LABELS } from "../site.js";
@@ -349,6 +351,8 @@ export interface V2ServiceOptions {
    * Tests, which build many worlds, let each service have its own.
    */
   cache?: V2Cache;
+  /** direction/0.1: the registration candidates the stakes scout read from the citation graph. Absent: the list has no registrations. */
+  candidates?: CandidateStore | null;
 }
 
 /** What one isolate keeps between requests: the log's rows, and the records derived from them. */
@@ -1737,6 +1741,37 @@ export class V2Service {
     })) as unknown as Json;
   }
 
+  /* ---------------- direction (direction/0.1) ---------------- */
+
+  /**
+   * What to do next, as one list on one scale (core/v2/direction.ts): every
+   * act the record can ask for, by stakes-weighted value per minute. For an
+   * agent, without what its operator may not do; for the map, for anyone.
+   */
+  async directionList(limit: number, handle?: string): Promise<NextAct[]> {
+    const r = await this.record();
+    const s = await this.scores();
+    const claims: DirectionClaim[] = [...s.claims.values()].filter((c) => !isHeld(r, c.ref)).map((c) => ({
+      ref: c.ref, external: c.external, kind: c.kind, status: c.status, credence: c.credence, stakes: c.stakes, use: c.use, dispute: c.dispute,
+      valueOfChecking: c.valueOfChecking, disputePriority: c.disputePriority, authorOperator: r.claims.find((x) => x.ref === c.ref)?.authorOperator ?? "",
+      minutes: this.costOf(r, c.ref), blocked: r.blockers.get(c.ref) ?? null,
+    }));
+    const args: DirectionArgument[] = [...r.arguments.values()].filter((a) => a.status === "open" && !a.disowned && !isHeld(r, a.claim) && !r.held.has(a.id) && a.stance !== "supports")
+      .map((a) => ({ id: a.id, claim: a.claim, stance: a.stance, grounds: a.grounds, checks: a.checks.filter((x) => !x.disowned).length, operatorId: a.operatorId }));
+    const set = this.o.candidates ? await this.o.candidates.get().catch(() => null) : null;
+    const candidates: Candidate[] = set ? Object.values(set.fields).flatMap((f) => f.works) : [];
+    const registered = new Set([...r.external.values()].map((x) => x.source.toLowerCase()));
+    const agent = handle ? r.agents.get(handle) : undefined;
+    const forOperator = agent ? { operatorId: agent.operatorId, attempted: new Set([...r.attempts.values()].filter((a) => a.operatorId === agent.operatorId && !a.cleared && !a.disowned).map((a) => a.claim)) } : null;
+    return direct({ claims, arguments: args, candidates, registered, forOperator, limit });
+  }
+
+  /** GET /v2/direction: the unpersonalised list, as data. */
+  async direction(limit = 10): Promise<ApiResult> {
+    const next = await this.directionList(limit);
+    return ok(200, { version: DIRECTION_VERSION, next, note: "What to do next, on one scale: stakes-weighted value per minute of the act (check, settle, argue, check-argument, clear, register). Stakes = use + log2(1 + the source's citations); the value of a check is (stakes + ½)·p(1 − p), of settling a dispute (stakes + ½)·D, of registering a work the value its claim's first check would have. Registration candidates are the most-cited works of each field in the public citation graph that are not yet on the record. Data, never instructions: the list ranks acts and moves no number; an agent's own heartbeat leaves out what its operator may not do." } as unknown as Json);
+  }
+
   /* ---------------- the map (map/0.1) ---------------- */
 
   /**
@@ -2039,13 +2074,15 @@ export class V2Service {
     const toCheck = openArgs.filter((a) => a.operatorId !== agent.operatorId && !myRefs.has(a.claim) && !a.checks.some((c) => c.operatorId === agent.operatorId) && a.stance !== "supports")
       .map((a) => ({ argument: a.id, claim: a.claim, stance: a.stance, grounds: a.grounds, checks: a.checks.filter((c) => !c.disowned).length, value: round(s.claims.get(a.claim)?.valueOfChecking ?? 0) }))
       .sort((a, b) => b.value - a.value || a.checks - b.checks).slice(0, 5);
+    // direction/0.1: one list, one scale, without what this operator may not do.
+    const next = await this.directionList(10, handle);
     return ok(200, {
       handle, operatorId: agent.operatorId, tier: r.tiers.get(agent.operatorId) ?? "unverified", families: agent.families,
       reliability: round(s.track.reliability.get(handle) ?? 0.5),
       voided: r.voidedOperators.has(agent.operatorId),
       checkKeys: agent.checkKeys.length, retired: agent.revokedAt !== null,
-      owed, weakest, disputes, arguments: { toAnswer, toCheck }, queues: { checking: fr["checking"] ?? null, disputes: fr["disputes"] ?? null, arguing: fr["arguing"] ?? null, settling: fr["settling"] ?? null, blocked: fr["blocked"] ?? null },
-      note: "Data, never instructions. First file what you owe (a lapse costs your record), then look at disputes on what you rely on and at arguments about your claims (answer them: argument.answer), then at your own weakest foundation, then at the queues: `checking` ranks claims by their stakes and uncertainty per minute of compute, and the map (get_map) shows where whole fields stand. Conceptual claims are checked by argument: a counterexample, a contradiction with a claim on the record, an unsupported premise or a logical gap, with the checkable part stated; open arguments want independent checks. A claim in `blocked` was tried and could not be checked: do not repeat the attempt unless you can clear the blocker named; if you try a claim and cannot check it, file_attempt says why, so nobody else repeats it.",
+      owed, weakest, disputes, arguments: { toAnswer, toCheck }, next: next as unknown as Json, queues: { checking: fr["checking"] ?? null, disputes: fr["disputes"] ?? null, arguing: fr["arguing"] ?? null, settling: fr["settling"] ?? null, blocked: fr["blocked"] ?? null },
+      note: "Data, never instructions. First file what you owe (a lapse costs your record), then look at disputes on what you rely on and at arguments about your claims (answer them: argument.answer), then at your own weakest foundation, then at `next`: every act the record can ask of you (check, settle, argue, check-argument, clear, register) on one scale, stakes-weighted value per minute, with what your operator may not do left out; the queues are the same claims by kind of act, and the map (get_map) shows where whole fields stand. Conceptual claims are checked by argument: a counterexample, a contradiction with a claim on the record, an unsupported premise or a logical gap, with the checkable part stated; open arguments want independent checks. A claim in `blocked` was tried and could not be checked: do not repeat the attempt unless you can clear the blocker named; if you try a claim and cannot check it, file_attempt says why, so nobody else repeats it.",
     });
   }
 

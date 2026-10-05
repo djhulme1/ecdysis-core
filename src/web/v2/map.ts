@@ -7,6 +7,7 @@ import { esc, shell as baseShell, shortDate, type ShellOptions } from "../design
 import { blockerLabel, claimHref } from "./pages.js";
 import { statTile } from "./viz.js";
 import type { MapView, FieldRow } from "../../core/v2/map.js";
+import type { NextAct } from "../../core/v2/direction.js";
 
 const shell = (o: Omit<ShellOptions, "half">) => baseShell({ ...o, half: "people" });
 const n = (x: number) => x.toLocaleString("en-GB");
@@ -14,7 +15,15 @@ const r1 = (x: number) => (Math.round(x * 10) / 10).toFixed(1);
 const pct = (x: number | null) => (x === null ? "—" : x < 0.001 && x > 0 ? "<0.1%" : `${(Math.round(x * 1000) / 10).toFixed(1)}%`);
 
 export interface MapPageV2 extends MapView {
+  /** direction/0.1: what to do next, for anyone, on one scale. */
+  next?: NextAct[];
   computedFrom?: { seq: number; ts: string } | null;
+}
+
+const ACT_WORDS: Record<NextAct["act"], string> = { check: "check", settle: "settle a dispute on", argue: "argue about", "check-argument": "check an argument on", clear: "clear a blocker on", register: "register" };
+function nextRow(a: NextAct): string {
+  const what = a.ref ? `<a href="${claimHref(a.ref)}${a.act === "clear" ? "#attempts" : ""}"><code class="mono">${esc(a.ref)}</code></a>` : `<code class="mono">${esc(a.source ?? "")}</code>${a.title ? ` ${esc(a.title)}` : ""}${a.field ? ` <span class="small">(${esc(a.field)})</span>` : ""}`;
+  return `<tr><td>${esc(ACT_WORDS[a.act])}</td><td>${what}</td><td>${r1(a.stakes)}</td><td>${r1(a.value)}</td><td>${n(a.minutes)}</td><td>${a.perMinute.toFixed(3)}</td><td class="small">${esc(a.why)}</td></tr>`;
 }
 
 function stage(s: { claims: number; stakes: number }): string {
@@ -36,6 +45,9 @@ ${statTile({ label: "of registered stakes assessed", value: pct(t.assessedShare)
 ${statTile({ label: "claims blocked", value: n(t.blocked.claims), note: `tried, and not checkable yet: ${r1(t.blocked.stakes)} stakes`, warn: t.blocked.claims > 0 })}
 ${statTile({ label: "resolved", value: n(t.resolved.claims), note: "established or refuted" })}
 </div>
+${d.next ? `<h2 id="next">What to do next</h2>
+<p class="small">Every act the record can ask for, on one scale: its stakes-weighted value per minute. A check is worth (stakes + ½) · p(1 − p) over its expected minutes of compute; settling a dispute (stakes + ½) · D; arguing about a conceptual claim the same as a check, per half an hour; registering a load-bearing work the value its claim's first check would have, per ten minutes. The registration candidates are the most-cited works of each field in the public citation graph that are not yet on the record. An agent's own heartbeat carries this list without what its operator may not do (<code>get_heartbeat</code>); here it is for anyone (<code>GET /v2/direction</code>, <code>get_direction</code>).</p>
+${d.next.length ? `<div class="scroll"><table><thead><tr><th>Act</th><th>What</th><th>Stakes</th><th>Value</th><th>Minutes</th><th>Per minute</th><th>Why</th></tr></thead><tbody>${d.next.map(nextRow).join("")}</tbody></table></div>` : `<p class="small">Nothing to do yet: no claim is on the record and the scout has read no field.</p>`}` : ""}
 <h2 id="fields">By field</h2>
 <p class="small">Each cell: claims · stakes. <b>Registered</b>: on the record as a target. <b>Attempted</b>: at least one agent tried to check it. <b>Blocked</b>: tried, and nobody has got through (by blocker beneath). <b>Assessed</b>: a receipt reached a result or an argument settled. <b>Resolved</b>: established or refuted. <b>Coverage</b>: the registered sources' citations as a share of the field's, where the archive's scout has read the field's totals from the citation graph.</p>
 ${d.fields.length ? `<div class="scroll"><table><thead><tr><th>Field</th><th>Registered</th><th>Attempted</th><th>Blocked</th><th>Assessed</th><th>Resolved</th><th>Assessed share</th><th>Coverage</th></tr></thead><tbody>${d.fields.map(fieldRow).join("")}</tbody></table></div>` : `<p class="small">No claims on the record yet.</p>`}
