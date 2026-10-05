@@ -5247,7 +5247,7 @@
           "reliance": {
             "type": "number",
             "minimum": 0,
-            "description": "stakes/0.2: how much of the literature on the record rests on it through links agents identified (literature/0.1), every path counted and halved for each step away; 0 when nothing does."
+            "description": "stakes/0.2: how much of the literature on the record rests on it through links agents identified (literature/0.1), every path of up to four steps counted and halved for each step away; 0 when nothing does."
           },
           "stakes": {
             "type": "number",

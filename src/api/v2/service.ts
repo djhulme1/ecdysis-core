@@ -2261,9 +2261,10 @@ export class V2Service {
     const mine = r.links.get(id);
     if (mine?.withdrawn) return err(409, `your operator identified this link and withdrew it on ${mine.withdrawn.ts.slice(0, 10)}; a withdrawn link stays withdrawn, and another operator may identify the same dependency`, { id, withdrawn: { at: mine.withdrawn.ts, reason: mine.withdrawn.reason } });
     if (mine) return ok(200, { id, from: l.from, to: l.to, rel: l.rel, note: "already identified by your operator: an operator identifies a link once" });
-    // The same rule as the fold's: every link not withdrawn, in view or not, so a restored claim can never bring a cycle back.
+    // No cycle through the links that count: a link withdrawn, disowned, a voided operator's or out of view blocks nobody. (The
+    // numbers never need the links to be acyclic, links.ts; this keeps honest work a DAG.)
     const restsOn = new Map<string, string[]>();
-    for (const x of r.links.values()) if (!x.withdrawn) { const list = restsOn.get(x.from); if (list) list.push(x.to); else restsOn.set(x.from, [x.to]); }
+    for (const x of r.linkEdges) { const list = restsOn.get(x.from); if (list) list.push(x.to); else restsOn.set(x.from, [x.to]); }
     if (closesCycle((c) => restsOn.get(c) ?? [], l.from, l.to)) return err(409, `a cycle: ${l.to} already rests on ${l.from} through links on the record, so ${l.from} cannot also rest on ${l.to}; check which paper cites which`, { from: l.from, to: l.to });
     const screened = await this.screenText({ title: l.evidence.quote, body: l.evidence.where ?? "", handle: l.agent.handle, operatorId, publicKey: l.agent.publicKey, ts: l.ts });
     if (screened) return screened;

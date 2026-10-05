@@ -54,12 +54,13 @@
  * Identified links (literature/0.1; links.ts). A claim from human literature
  * names nothing it rests on; an agent reading the citing paper identifies a
  * dependency, with the paper's own sentence as evidence. Links join claims
- * from human literature only, stay a DAG (a link that would close a cycle
- * through the links in force is dropped), are withdrawn but never edited,
- * and move no credence: they feed RELIANCE, which enters stakes and so ranks
- * what is worth checking. Links that are withdrawn, disowned, identified by
- * a voided operator or out of view (the link, or either claim) count for
- * nothing.
+ * from human literature only, are withdrawn but never edited (a withdrawal
+ * signed after its key's declared compromise is void), and move no credence:
+ * they feed RELIANCE, which enters stakes and so ranks what is worth
+ * checking. Links that are withdrawn, disowned, identified by a voided
+ * operator or out of view (the link, or either claim) count for nothing. The
+ * service refuses a link that would close a cycle; the fold checks none,
+ * because reliance counts bounded paths and needs no order.
  *
  * Scope and kinds (scope/0.1, kinds/0.1; kinds.ts). A claim's scope says what
  * it covers (a period, or general); a receipt's design says what it tests. A
@@ -129,7 +130,7 @@ import { argumentEffects, GROUNDS, settleArgument, STANCES, type ArgumentCheckSt
 import type { EarnedVerification } from "./scoring.js";
 import { BLOCKERS, READ, summariseBlockers, supported as attemptSupported, type AttemptState, type Blocker, type ClaimBlockers, type ClearState, type Read } from "./attempts.js";
 import { parseFieldObservation, parseObservation, reachOf, type FieldObservation, type SourceObservation } from "./stakes.js";
-import { closesCycle, LINK_ID, LINK_RELS, linkEdgesOf, relianceOf, type LinkEdge, type LinkRel, type LinkState } from "./links.js";
+import { LINK_ID, LINK_RELS, linkEdgesOf, relianceOf, type LinkEdge, type LinkRel, type LinkState } from "./links.js";
 
 export type V2EntryType =
   | "constitution.adopt" | "operator.tier" | "agent.register" | "key.delegate" | "key.revoke"
@@ -526,9 +527,8 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const observations = new Map<string, SourceObservation>();
   const fieldObservations = new Map<string, FieldObservation>();
   const links = new Map<string, LinkState>();
-  /** The links not withdrawn, as claim → (claim it rests on → how many links join them): what a new link must not close a cycle with. */
-  const linked = new Map<string, Map<string, number>>();
-  const linkedTo = (claim: string): Iterable<string> => linked.get(claim)?.keys() ?? [];
+  /** Withdrawals, in log order: applied once compromises are known, so one signed by a stolen key is void. */
+  const unlinks: Array<{ link: string; operatorId: string; handle: string; reason: string; seq: number; ts: string }> = [];
   const syncHeld = (subject: string) => { if (hazardHeld.has(subject) || withheld.has(subject)) held.add(subject); else held.delete(subject); };
   let constitution: V2Record["constitution"] = null;
   let head: V2Record["head"] = null;
@@ -645,35 +645,27 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
       }
       case "claim.link": {
         // literature/0.1: a dependency between two claims from human literature, both already on the record, identified by an
-        // agent from the citing paper's own words. One operator identifies a link once (its id hashes the operator in), the first
-        // entry for an id stands, and a withdrawn link stays withdrawn. A link that would close a cycle through the links not
-        // withdrawn is dropped, so the links stay a DAG whatever is later withheld or restored (the service refuses it first).
+        // agent from the citing paper's own words. One operator identifies a link once (its id hashes the operator in), and the
+        // first entry for an id stands, so a withdrawn link stays withdrawn. No cycle check here: the service refuses one before
+        // writing, and nothing derived from links needs an order among them (links.ts).
         const id = str(p["id"]);
         const from = str(p["from"]);
         const to = str(p["to"]);
         const rel = str(p["rel"]);
         const handle = str(p["handle"]);
         if (!LINK_ID.test(id) || links.has(id) || !external.has(from) || !external.has(to) || from === to || !(LINK_RELS as readonly string[]).includes(rel) || !handle) break;
-        if (closesCycle(linkedTo, from, to)) break;
         const declared = modelFamilies(p["models"] as string[] | undefined);
         links.set(id, {
           id, from, to, rel: rel as LinkRel, quote: str(p["quote"]), where: str(p["where"]) || null, handle, operatorId: str(p["operatorId"]),
           families: declared.length ? declared : (agents.get(handle)?.families ?? []), seq: e.seq, ts: e.ts,
           key: agents.get(handle)?.publicKey ?? "", tier: "unverified", disowned: false, withdrawn: null,
         });
-        const out = linked.get(from) ?? new Map<string, number>();
-        out.set(to, (out.get(to) ?? 0) + 1);
-        linked.set(from, out);
         break;
       }
       case "claim.unlink": {
-        // Withdrawn by an agent of the operator that identified it (the service checks; a hostile entry from anyone else changes nothing).
-        const l = links.get(str(p["link"]));
-        if (!l || l.withdrawn || str(p["operatorId"]) !== l.operatorId) break;
-        l.withdrawn = { seq: e.seq, ts: e.ts, reason: str(p["reason"]), handle: str(p["handle"]) };
-        const out = linked.get(l.from);
-        const left = (out?.get(l.to) ?? 1) - 1;
-        if (out && left > 0) out.set(l.to, left); else out?.delete(l.to);
+        // Kept for after the fold, when compromises are known: a withdrawal counts only from the identifying operator, signed by a
+        // key in force (the service checks the operator before writing; a hostile entry from anyone else changes nothing).
+        unlinks.push({ link: str(p["link"]), operatorId: str(p["operatorId"]), handle: str(p["handle"]), reason: str(p["reason"]), seq: e.seq, ts: e.ts });
         break;
       }
       case "check.commit": {
@@ -1064,6 +1056,14 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   for (const l of links.values()) {
     l.tier = tierOf(l.operatorId);
     l.disowned = disownedAt(l.key, l.ts);
+  }
+  // The first withdrawal of each link by its own operator, signed by its agent's main key before any declared compromise, stands;
+  // one a thief signed after the compromise is void, as a report it signed would be, so declaring the compromise restores the link.
+  for (const u of unlinks) {
+    const l = links.get(u.link);
+    if (!l || l.withdrawn || u.seq < l.seq || u.operatorId !== l.operatorId || agents.get(u.handle)?.operatorId !== l.operatorId) continue;
+    if (disownedAt(agents.get(u.handle)?.publicKey ?? "", u.ts)) continue;
+    l.withdrawn = { seq: u.seq, ts: u.ts, reason: u.reason, handle: u.handle };
   }
   const linkEdges = linkEdgesOf(links.values(), { held: (subject) => held.has(subject), voided: (op) => voidedOperators.has(op) });
   const reliance = relianceOf(linkEdges);

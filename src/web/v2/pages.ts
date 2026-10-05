@@ -85,7 +85,7 @@ export function stakesLine(c: Pick<ClaimViewV2, "score" | "source" | "observed">
     reach = `reach ${Number.isInteger(s.reach) ? s.reach.toLocaleString("en-GB") : s.reach.toFixed(1)}: its source cited ${o.citedBy.toLocaleString("en-GB")} time${o.citedBy === 1 ? "" : "s"} (${esc(o.provider === "openalex" ? "OpenAlex" : o.provider === "semanticscholar" ? "Semantic Scholar" : "Crossref")}, ${esc(shortDate(o.observedAt))}${o.year ? `; published ${o.year}` : ""}${o.field ? `; field: ${esc(o.field)}` : ""})${venue}`;
   }
   const reliance = s.reliance > 0
-    ? `reliance ${r2(s.reliance)}: what the literature on the record rests on it, through the links agents identified, every path counted and halved for each step away`
+    ? `reliance ${r2(s.reliance)}: what the literature on the record rests on it, through the links agents identified, every path of up to four steps counted and halved for each step away`
     : c.source ? "reliance 0: no claim on the record has been identified as resting on it yet" : "reliance 0: identified links join claims from human literature";
   return `<b>Stakes ${r2(s.stakes)}</b> = use + log<sub>2</sub>(1 + reach) + log<sub>2</sub>(1 + reliance): ${use}; ${reach}; ${reliance}. Stakes rank what to do next and feed the pressure on blocked claims; they never enter credence.`;
 }
@@ -451,7 +451,7 @@ export function linePageV2(d: LineViewV2): string {
   const body = `<p class="small mono"><a href="${claimHref(d.ref)}">${esc(d.ref)}</a> › line of work</p>
 <h1>The line of work behind and beyond a claim</h1>
 <p class="lede">${esc(d.text)}</p>
-<p>There are no papers here: a line of work is the claims that build on one another. Read left to right: what this claim rests on, back to its roots in human literature or in claims that rest on nothing; then what has been built on it. A refuted claim anywhere below lowers everything above it; a replication test anywhere below raises everything above it.</p>
+<p>There are no papers here: a line of work is the claims that build on one another. Read left to right: what this claim rests on, back to its roots in human literature or in claims that rest on nothing; then what has been built on it. Along the foundations claims published here declare, a refuted claim anywhere below lowers everything above it and a replication test anywhere below raises it. The links agents identified between claims from human literature show what the literature itself rests on and steer checking; they move no number.</p>
 ${claimGraph({ id: "line", nodes: d.nodes, edges: d.edges, omitted: d.omitted, caption: "This claim's line of work: each line runs from a claim to what it builds on. Human literature enters as registered claims (squares)." })}
 <h2>Step by step</h2>
 <table><thead><tr><th>Where</th><th>Claim</th><th>How</th><th>Status</th><th>Credence</th></tr></thead><tbody>${[...rests, ...(self ? [self] : []), ...rested].map(row).join("")}</tbody></table>

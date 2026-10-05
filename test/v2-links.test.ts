@@ -20,7 +20,7 @@ import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.j
 import { structuralScreener } from "../src/core/hazard.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { route, MemoryRateLimiter } from "../src/api/router.js";
-import { PagesHandler } from "../src/api/v2/pages.js";
+import { generations, PagesHandler } from "../src/api/v2/pages.js";
 import { LogApi } from "../src/api/v2/log-api.js";
 import { MANAGED_SIGNS } from "../src/api/v2/oauth.js";
 import { IssueRegistry, MemoryIssueStore, normaliseSubject } from "../src/api/v2/issues.js";
@@ -85,7 +85,12 @@ describe("literature/0.1: the core", () => {
     const relations = relianceOf([edge(B, A), edge(B, A, { rel: "method" }), edge(C, A, { rel: "replicates" }), edge(D, A, { rel: "refutes" })]);
     assert.equal(relations.get(A), 1, "two relations between one pair count once; replicates and refutes are evidence, not reliance");
     assert.equal(relianceOf([edge(A, A)]).size, 0, "a self-link (never on the log) counts for nothing");
-    assert.equal(relianceOf([edge(A, B), edge(B, A)]).size, 0, "a cycle (never on the log) leaves its claims at 0 instead of looping");
+    const cycle = relianceOf([edge(A, B), edge(B, A)]);
+    assert.equal(cycle.get(A), 1.875, "a cycle (which the service refuses) neither loops nor blows up: each walk round it counts for at most four steps");
+    assert.equal(cycle.get(B), 1.875);
+    const ten = Array.from({ length: 10 }, (_, i) => edge(`ext:${(i + 1).toString(16).padStart(16, "0")}`, `ext:${i.toString(16).padStart(16, "0")}`));
+    assert.equal(relianceOf(ten).get(`ext:${"0".repeat(16)}`), 1 + 1 / 2 + 1 / 4 + 1 / 8, "a chain counts four steps: a fifth would add at most a sixteenth a path");
+    assert.equal(RELIANCE_PARAMS.depth, 4);
     assert.equal(STAKES_VERSION, "stakes/0.2");
     assert.equal(stakesOf(2, 1023, 3), 2 + 10 + 2, "S = U + log2(1 + R) + log2(1 + N)");
     assert.equal(stakesOf(2, 1023), 12, "and with no reliance, stakes/0.1's number exactly");
@@ -98,6 +103,18 @@ describe("literature/0.1: the core", () => {
     assert.equal(relianceOf(accounts).get(T), RELIANCE_PARAMS.otherCap, "ten of them would be 5: what no verified operator identified adds at most 3");
     assert.equal(relianceOf([...accounts, edge(B, T), edge(C, T)]).get(T), 2 + RELIANCE_PARAMS.otherCap, "verified dependencies count in full, beside the capped rest");
     assert.equal(relianceOf([edge(B, T, { weight: 0.5, verified: false }), edge(B, T)]).get(T), 1, "corroborated by a verified operator: the pair weighs 1, once");
+  });
+
+  it("bounds what a dense tangle of links can make of a claim, finitely, however many paths it has", () => {
+    // Twenty layers four wide, each claim resting on all four below it: 1,048,576 paths from the top to the root.
+    const layer = (k: number, i: number) => `ext:${(k * 16 + i).toString(16).padStart(16, "0")}`;
+    const dense: LinkEdge[] = [];
+    for (let k = 1; k < 20; k++) for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) dense.push(edge(layer(k, i), layer(k - 1, j)));
+    const n = relianceOf(dense);
+    const root = n.get(layer(0, 0))!;
+    assert.equal(root, 4 + 16 / 2 + 64 / 4 + 256 / 8, "four steps of paths at most: 4 + 8 + 16 + 32");
+    assert.ok([...n.values()].every((x) => Number.isFinite(x) && x <= 60));
+    assert.ok(stakesOf(0, 0, root) < Math.log2(1 + 1_000_000), "less than a million citations would add");
   });
 
   it("the queue attack fails: a free identity filing a thousand links moves a claim's stakes by at most two, and a verified line outranks it", () => {
@@ -166,7 +183,6 @@ describe("literature/0.1: the fold", () => {
     l.link("lnk:0000000000000003", "ecd:0000000000000001", A);          // a claim published here names its own edges
     l.link("lnk:0000000000000004", X("f"), A);                         // not on the record
     l.link("lnk:0000000000000005", A, A);                              // a self-link
-    l.link("lnk:0000000000000006", A, C);                              // closes a cycle: C rests on A through B
     l.link("lnk:0000000000000001", D, A);                              // an id already on the log: the first stands
     l.link("lnk:000000000000000g", D, A);                              // not an id
     l.link("lnk:0000000000000007", D, A, "Ant", "op-v", "background"); // a mention is not a link
@@ -178,6 +194,30 @@ describe("literature/0.1: the fold", () => {
     assert.equal(r.claims.find((c) => c.ref === A)!.reliance, 1.5);
     assert.equal(r.claims.find((c) => c.ref === B)!.reliance, 1);
     assert.equal(r.claims.find((c) => c.ref === C)!.reliance, undefined);
+    // A link closing a cycle, which the service refuses, may still reach the log (two requests at once): kept, and harmless.
+    l.link("lnk:0000000000000009", A, C, "Wasp", "op-w");
+    const cyc = deriveV2(l.out, asOf);
+    assert.ok(cyc.links.has("lnk:0000000000000009"));
+    for (const ref of [A, B, C]) {
+      const n = cyc.claims.find((c) => c.ref === ref)!.reliance!;
+      assert.ok(Number.isFinite(n) && n > 0 && n < 4, `${ref}: ${n}`);
+    }
+  });
+
+  it("derives a long chain of links in time linear in it, whatever the order the links were filed in", () => {
+    const l = log();
+    const n = 20_000;
+    const id = (i: number) => `ext:${(0x100000 + i).toString(16).padStart(16, "0")}`;
+    for (let i = 0; i < n; i++) l.push("claim.external", { id: id(i), handle: "Hen", operatorId: "op-u", source: `doi:10.1000/c${i}`, quote: `claim ${i}`, test: "fails", scope: GENERAL, fidelity: REPORTED });
+    // Newest link first, then oldest: the order that made a check per entry quadratic.
+    for (let i = n - 1; i > 0; i -= 2) l.link(`lnk:${i.toString(16).padStart(16, "0")}`, id(i), id(i - 1), "Hen", "op-u");
+    for (let i = 2; i < n; i += 2) l.link(`lnk:${i.toString(16).padStart(16, "0")}`, id(i), id(i - 1), "Hen", "op-u");
+    const t0 = Date.now();
+    const r = deriveV2(l.out, asOf);
+    const ms = Date.now() - t0;
+    assert.equal(r.linkEdges.length, n - 1);
+    assert.ok(ms < 5000, `derived ${n} claims and ${n - 1} links in ${ms} ms`);
+    assert.equal(r.claims.find((c) => c.ref === id(0))!.reliance, 0.28564453125, "an unverified identity's chain weighs a quarter a step, four steps deep: ¼(1 + ½·¼(1 + ½·¼(1 + ½·¼)))");
   });
 
   it("lets only the identifying operator withdraw a link; a withdrawn link stays withdrawn, and stops counting and blocking", () => {
@@ -188,13 +228,27 @@ describe("literature/0.1: the fold", () => {
     assert.equal(r.links.get("lnk:0000000000000001")!.withdrawn, null, "another operator's withdrawal changes nothing");
     l.push("claim.unlink", { link: "lnk:0000000000000001", reason: "the citing sentence was about another paper", handle: "Ann", operatorId: "op-v" });
     l.link("lnk:0000000000000001", B, A);                              // filed again: a withdrawn link stays withdrawn
-    l.link("lnk:0000000000000002", A, B);                              // the other way round no longer closes a cycle
+    l.link("lnk:0000000000000002", A, B);                              // the other way round, now the first is withdrawn
     r = deriveV2(l.out, asOf);
     assert.equal(r.links.get("lnk:0000000000000001")!.withdrawn?.handle, "Ann", "any agent of the identifying operator may withdraw it");
     assert.match(r.links.get("lnk:0000000000000001")!.withdrawn!.reason, /another paper/);
     assert.deepEqual(r.linkEdges.map((e) => [e.from, e.to]), [[A, B]]);
     assert.equal(r.claims.find((c) => c.ref === A)!.reliance, undefined, "the withdrawn link steers nothing");
     assert.equal(r.claims.find((c) => c.ref === B)!.reliance, 1);
+  });
+
+  it("voids a withdrawal signed after its key's declared compromise, so a thief cannot erase an operator's links", () => {
+    const l = log();
+    l.link("lnk:0000000000000001", B, A, "Wasp", "op-w");
+    l.push("claim.unlink", { link: "lnk:0000000000000001", reason: "withdrawn by whoever holds the key now", handle: "Wasp", operatorId: "op-w" });
+    let r = deriveV2(l.out, asOf);
+    assert.ok(r.links.get("lnk:0000000000000001")!.withdrawn, "a withdrawal by the key in force stands");
+    // Wasp's operator declares the main key compromised from just after the link was filed: the withdrawal was the thief's.
+    l.push("key.revoke", { handle: "Wasp", operatorId: "op-w", key: "pk-Wasp", compromisedAt: new Date(Date.parse(r.links.get("lnk:0000000000000001")!.ts) + 30_000).toISOString(), by: "operator" });
+    r = deriveV2(l.out, asOf);
+    assert.equal(r.links.get("lnk:0000000000000001")!.withdrawn, null, "void: the link is back in force");
+    assert.equal(r.links.get("lnk:0000000000000001")!.disowned, false, "the link itself was filed before the compromise");
+    assert.equal(r.claims.find((c) => c.ref === A)!.reliance, 1);
   });
 
   it("weighs a link by its operator's tier now, so a verification later counts the earlier links in full; an unverified one's count capped", () => {
@@ -231,7 +285,7 @@ describe("literature/0.1: the fold", () => {
     assert.equal(r.claims.find((c) => c.ref === A)!.reliance, 1, "a disowned link counts for nothing");
   });
 
-  it("over thousands of random logs of links, withdrawals and holds, keeps the links a DAG, reliance finite, and every credence as it is without them", () => {
+  it("over thousands of random logs of links, withdrawals and holds (cycles included), keeps reliance finite and every credence as it is without them", () => {
     let s = 2026;
     const next = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
     const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(next() * xs.length)]!;
@@ -252,15 +306,9 @@ describe("literature/0.1: the fold", () => {
         else l.push("content.restore", { subject: pick([...ids, A, B, C]), reason: "restored after a look", by: "steward", steward: "op-steward" });
       }
       const r = deriveV2(l.out, asOf);
-      // Every link the record keeps joins two distinct claims from human literature, and those not withdrawn form a DAG.
-      const live = [...r.links.values()].filter((x) => !x.withdrawn);
+      // Every link the record keeps joins two distinct claims from human literature; those that count are in force and in view.
       for (const x of r.links.values()) assert.ok(r.external.has(x.from) && r.external.has(x.to) && x.from !== x.to, `trial ${trial}: ${x.id}`);
-      const into = new Map<string, number>();
-      for (const x of live) into.set(x.to, (into.get(x.to) ?? 0) + 1);
-      const ready = [...new Set(live.flatMap((x) => [x.from, x.to]))].filter((c) => !into.get(c));
-      let seen = 0;
-      while (ready.length) { const c = ready.pop()!; seen++; for (const x of live) if (x.from === c) { const left = into.get(x.to)! - 1; into.set(x.to, left); if (left === 0) ready.push(x.to); } }
-      assert.equal(seen, new Set(live.flatMap((x) => [x.from, x.to])).size, `trial ${trial}: the links not withdrawn are acyclic`);
+      for (const e of r.linkEdges) for (const b of e.by) assert.ok(!r.links.get(b.id)!.withdrawn && !r.held.has(b.id) && !r.held.has(e.from) && !r.held.has(e.to), `trial ${trial}: ${b.id} counts`);
       edges += r.linkEdges.length;
       const scored = resolveV2(l.out, asOf).scores;
       const plain = resolveV2(l.out.filter((e) => e.type !== "claim.link" && e.type !== "claim.unlink"), asOf).scores;
@@ -342,7 +390,7 @@ async function world() {
     const b = (await r.json()) as { result: { content: Array<{ text: string }>; isError?: boolean } };
     return { isError: !!b.result.isError, body: JSON.parse(b.result.content[0]!.text) as Record<string, Json> };
   };
-  return { svc, keys, agent, sign, register, linkPayload, link, unlink, get, post, page, mcp, now, tick: (ms: number) => { clock.t += ms; } };
+  return { svc, log, keys, agent, sign, register, linkPayload, link, unlink, get, post, page, mcp, now, tick: (ms: number) => { clock.t += ms; } };
 }
 
 describe("literature/0.1 through the service, the API, the connector and the pages", () => {
@@ -528,6 +576,49 @@ describe("literature/0.1 through the service, the API, the connector and the pag
     // Withdrawing through the connector.
     const unl = await w.mcp("unlink_claim", { envelope: await w.sign("Exuvia", { protocol: "ecdysis/0.2", type: "claim.unlink", link: String((ok.body["linked"] as Array<{ id: string }>)[0]!.id), reason: "Kirkpatrick and Selman measure the threshold; they do not take Cheeseman's method." }) });
     assert.equal(unl.body["http_status"], 200, JSON.stringify(unl.body));
+  });
+
+  it("a link that counts for nothing blocks nobody: a withheld or disowned link never keeps the true one out", async () => {
+    const w = await world();
+    await w.agent("Exuvia", "op-lab");
+    await w.agent("Gull", "op-gull", { tier: null });
+    const a = await w.register("Exuvia", "doi:10.1000/monasson.1999", "the order of the phase transition explains the typical-case complexity of random satisfiability");
+    const b = await w.register("Exuvia", "doi:10.1000/mezard.2002b", "the survey propagation algorithm finds solutions of random 3-SAT near the threshold");
+    // A free identity files the dependency the wrong way round, to keep the true one out.
+    const junk = String(body(await w.link("Gull", a, b, "refutes"))["id"]);
+    const refused = await w.link("Exuvia", b, a);
+    assert.equal(refused.status, 409, "while it counts, it closes a cycle");
+    assert.equal((await w.svc.withholdContent(junk, "withdrawn", "the citing sentence is invented", "op-steward")).status, 200);
+    const filed = await w.link("Exuvia", b, a);
+    assert.equal(filed.status, 201, "withheld, it counts for nothing and blocks nothing");
+    assert.equal((await w.svc.scores()).claims.get(a)!.reliance, 1);
+  });
+
+  it("a cycle that slips past the check, by two requests at once, breaks no page and no number", async () => {
+    const w = await world();
+    await w.agent("Exuvia", "op-lab");
+    await w.agent("Imago", "op-imago");
+    const a = await w.register("Exuvia", "doi:10.1000/race.a", "the first finding of a pair that cite each other");
+    const b = await w.register("Exuvia", "doi:10.1000/race.b", "the second finding of a pair that cite each other");
+    assert.equal((await w.link("Exuvia", b, a)).status, 201);
+    // The other way round, as a request that passed the check at the same moment would have logged it.
+    await w.log.append("claim.link", { id: "lnk:00000000000000ff", from: a, to: b, rel: "extends", basis: "identified", quote: QUOTE, handle: "Imago", operatorId: "op-imago" });
+    const s = await w.svc.scores();
+    for (const ref of [a, b]) assert.ok(Number.isFinite(s.claims.get(ref)!.reliance) && s.claims.get(ref)!.reliance > 0 && s.claims.get(ref)!.reliance < 2);
+    for (const path of ["/claims", "/claims/all", `/c/${a}`, `/c/${a}/line`, `/c/${b}/line`, "/map", "/observatory"]) assert.equal((await w.page(path)).status, 200, path);
+    assert.equal((await w.get("/v2/links/lnk:00000000000000ff")).status, 200);
+  });
+
+  it("draws a chain of any length without recursion", () => {
+    const n = 20_000;
+    const ref = (i: number) => `ext:${i.toString(16).padStart(16, "0")}`;
+    const claims = Array.from({ length: n }, (_, i) => ({ ref: ref(i), external: true, foundations: [] as Array<{ ref: string }> }));
+    const identified = new Map(Array.from({ length: n - 1 }, (_, i) => [ref(i + 1), [ref(i)]] as [string, string[]]));
+    const gen = generations(claims, identified);
+    assert.equal(gen.get(ref(n - 1)), n - 1);
+    assert.equal(gen.get(ref(0)), 0);
+    const looped = generations(claims.slice(0, 3), new Map([[ref(0), [ref(2)]], [ref(1), [ref(0)]], [ref(2), [ref(1)]]]));
+    assert.deepEqual([...looped.values()].every((g) => Number.isFinite(g)), true, "a cycle is cut, not followed");
   });
 
   it("a verified operator's agent can flag someone else's link for the stewards, and the withdrawal reason is screened like any short text", async () => {

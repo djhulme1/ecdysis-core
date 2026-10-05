@@ -29,20 +29,27 @@
  * identifying the same link CORROBORATES it, under an id of its own. A link
  * is withdrawn, never edited, by an agent of the operator that identified it
  * (claim.unlink, with the reason, on the log), and a withdrawn link stays
- * withdrawn. The links stay a DAG: one whose `to` already rests on its
- * `from` through links in force would close a cycle and is refused (by the
- * service before writing, and by the fold for any entry that got past it).
+ * withdrawn; a withdrawal signed by a key after its declared compromise is
+ * void, as a report would be. The service refuses a link that would close a
+ * cycle through the links that count, so honest links form a DAG, and a
+ * link that counts for nothing (withdrawn, disowned, a voided operator's,
+ * out of view) blocks nobody. The numbers never rely on it: the fold checks
+ * no cycles (a check per entry would cost time an attacker could square),
+ * and reliance counts at most DEPTH steps, so a cycle that slipped in, by a
+ * race or a hostile entry, neither loops nor blows up.
  *
  * What a link does is steer, and nothing else. RELIANCE N(c) is how much of
  * the literature rests on a claim through identified dependencies, through
- * every path, halved for each step away and weighed by who identified each
- * step:
+ * every path of up to DEPTH steps, halved for each step away and weighed by
+ * who identified each step:
  *
- *   N(c) = Σ over the claims d resting on c of  w(d, c) · (1 + ½ · N(d))
+ *   N_k(c) = Σ over the claims d resting on c of  w(d, c) · (1 + ½ · N_(k−1)(d)),   N_0 = 0,   N = N_DEPTH
  *
  * where w(d, c) is the tier weight (verified 1, account ½, unverified ¼, as
  * use is weighed) of the best operator in force that identified a dependency
- * of d on c. Dependencies that no verified operator has identified count at
+ * of d on c. Four steps hold nearly all of a line's weight (a fifth would add
+ * at most a sixteenth a path) and bound how far a dense tangle of links can
+ * inflate a number. Dependencies that no verified operator has identified count at
  * their weight and, all together, never add more than OTHER_CAP to a claim's
  * reliance: a free identity filing a thousand links moves the queues by at
  * most two units of stakes, the way everything from operators who are not
@@ -78,6 +85,8 @@ export const UNLINK_REASON = { min: 10, max: 300 } as const;
 export const RELIANCE_PARAMS = {
   /** Each step away from a claim counts for this share of the step before it. */
   decay: 0.5,
+  /** Paths of at most this many steps count. */
+  depth: 4,
   /** Dependencies no verified operator has identified add, all together, at most this much to a claim's reliance. */
   otherCap: 3,
 } as const;
@@ -252,63 +261,44 @@ export function linkEdgesOf(links: Iterable<LinkState>, o: { held: (subject: str
 }
 
 /**
- * Reliance of every claim with something resting on it through identified dependencies (extends, method): N(c) = Σ_{d resting
- * on c} w(d, c)·(1 + decay·N(d)), counting a pair (d, c) once with its best weight whatever relations join them. Computed
- * twice: once over the dependencies a verified operator identified (weight 1), once over all of them (at their weights); the
- * difference, what only operators who are not verified identified, adds at most otherCap. Claims nothing rests on are absent.
- * Dependants are taken before what they rest on (Kahn's order), so the computation is linear in the links and never recurses;
- * a cycle, which the fold never lets in, would leave its claims at 0.
+ * Reliance of every claim with something resting on it through identified dependencies (extends, method), over paths of at
+ * most `depth` steps: N_k(c) = Σ_{d resting on c} w(d, c)·(1 + decay·N_(k−1)(d)), counting a pair (d, c) once with its best
+ * weight whatever relations join them. Computed twice: once over the dependencies a verified operator identified (weight 1),
+ * once over all of them (at their weights); the difference, what only operators who are not verified identified, adds at most
+ * otherCap. `depth` passes over the dependencies, so the work is linear in the links, needs no order among them, and a cycle
+ * (refused by the service, harmless here) counts each walk round it at most `depth` steps. Claims nothing rests on are absent.
  */
-export function relianceOf(edges: readonly LinkEdge[], params: { decay?: number; otherCap?: number } = {}): Map<string, number> {
+export function relianceOf(edges: readonly LinkEdge[], params: { decay?: number; otherCap?: number; depth?: number } = {}): Map<string, number> {
   const decay = params.decay ?? RELIANCE_PARAMS.decay;
   const cap = params.otherCap ?? RELIANCE_PARAMS.otherCap;
-  const all = new Map<string, Map<string, number>>();
-  const verified = new Map<string, Map<string, number>>();
-  const put = (m: Map<string, Map<string, number>>, from: string, to: string, w: number) => {
-    const into = m.get(to) ?? new Map<string, number>();
-    into.set(from, Math.max(into.get(from) ?? 0, w));
-    m.set(to, into);
-  };
+  const depth = Math.max(1, Math.floor(params.depth ?? RELIANCE_PARAMS.depth));
+  // One weight per (d, c) pair: the best, whatever the relation; verified pairs apart.
+  const all = new Map<string, { from: string; to: string; w: number }>();
+  const verified = new Map<string, { from: string; to: string; w: number }>();
   for (const e of edges) {
-    if (!RESTS_ON.has(e.rel) || e.from === e.to || !(e.weight > 0)) continue;
-    put(all, e.from, e.to, e.weight);
-    if (e.verified) put(verified, e.from, e.to, 1);
+    if (!RESTS_ON.has(e.rel) || e.from === e.to || !(e.weight > 0) || !Number.isFinite(e.weight)) continue;
+    const key = `${e.from}|${e.to}`;
+    const was = all.get(key);
+    if (!was || e.weight > was.w) all.set(key, { from: e.from, to: e.to, w: e.weight });
+    if (e.verified) verified.set(key, { from: e.from, to: e.to, w: 1 });
   }
-  const pass = (into: Map<string, Map<string, number>>): Map<string, number> => {
-    // into: c → (d → w) for every d resting on c. Kahn: a claim is ready once every claim resting on it is done.
-    const restsOn = new Map<string, string[]>();
-    const waiting = new Map<string, number>();
-    const nodes = new Set<string>();
-    for (const [c, ds] of into) {
-      nodes.add(c);
-      waiting.set(c, (waiting.get(c) ?? 0) + ds.size);
-      for (const d of ds.keys()) {
-        nodes.add(d);
-        const list = restsOn.get(d);
-        if (list) list.push(c); else restsOn.set(d, [c]);
-      }
-    }
-    const n = new Map<string, number>();
-    const ready = [...nodes].filter((x) => !(waiting.get(x) ?? 0)).sort();
-    while (ready.length) {
-      const d = ready.pop()!;
-      for (const c of restsOn.get(d) ?? []) {
-        const w = into.get(c)!.get(d)!;
-        n.set(c, (n.get(c) ?? 0) + w * (1 + decay * (n.get(d) ?? 0)));
-        const left = (waiting.get(c) ?? 0) - 1;
-        waiting.set(c, left);
-        if (left === 0) ready.push(c);
-      }
+  const pass = (pairs: Iterable<{ from: string; to: string; w: number }>): Map<string, number> => {
+    const list = [...pairs];
+    let n = new Map<string, number>();
+    for (let k = 0; k < depth; k++) {
+      const next = new Map<string, number>();
+      for (const { from, to, w } of list) next.set(to, (next.get(to) ?? 0) + w * (1 + decay * (n.get(from) ?? 0)));
+      n = next;
     }
     return n;
   };
-  const nAll = pass(all);
-  const nVerified = pass(verified);
+  const nAll = pass(all.values());
+  const nVerified = pass(verified.values());
   const out = new Map<string, number>();
   for (const [c, x] of nAll) {
     const v = nVerified.get(c) ?? 0;
     const total = v + Math.min(cap, Math.max(0, x - v));
-    if (total > 0) out.set(c, total);
+    if (total > 0 && Number.isFinite(total)) out.set(c, total);
   }
   return out;
 }

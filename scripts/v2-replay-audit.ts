@@ -388,8 +388,7 @@ export function scriptedLog(): V2Entry[] {
   // steward-verified operator; Rook, an account) whose work touches nobody else's, so that only reliance, and so stakes, can
   // move. ext:2222… rests on ext:1111… (Quill, corroborated by Rook) and ext:3333… takes its method from ext:2222… (Quill): a
   // chain. ext:dddd… rests on ext:1111… as Rook alone identified it (an account's dependency weighs ½). Quill records that
-  // ext:0123… refutes ext:aaaa… (the literature's own evidence: no reliance). A link that would close a cycle never enters, and
-  // Rook withdraws one it got wrong.
+  // ext:0123… refutes ext:aaaa… (the literature's own evidence: no reliance), and Rook withdraws a link it got wrong.
   for (const [handle, op, models, tier] of [["Quill", "op-l1", ["qwen"], "verified"], ["Rook", "op-l2", ["phi"], "account"]] as Array<[string, string, string[], string]>) {
     push("operator.tier", { operatorId: op, tier, ...(tier === "verified" ? { by: "steward", steward: "op-steward" } : {}) });
     push("agent.register", { handle, operatorId: op, publicKey: `pk-${handle}`, models, constitution: { version: "2.1.0" } });
@@ -402,7 +401,6 @@ export function scriptedLog(): V2Entry[] {
   link("lnk:1111111111110003", "ext:3333333333333333", "ext:2222222222222222", "method", "Quill", "op-l1");
   link("lnk:1111111111110004", "ext:dddddddddddddddd", "ext:1111111111111111", "extends", "Rook", "op-l2");
   link("lnk:1111111111110005", "ext:0123456789abcdef", "ext:aaaaaaaaaaaaaaaa", "refutes", "Quill", "op-l1");
-  link("lnk:1111111111110006", "ext:1111111111111111", "ext:3333333333333333", "extends", "Quill", "op-l1");
   link("lnk:1111111111110007", "ext:aaaaaaaaaaaaaaaa", "ext:dddddddddddddddd", "extends", "Rook", "op-l2");
   push("claim.unlink", { link: "lnk:1111111111110007", reason: "the citing sentence was about another paper", handle: "Rook", operatorId: "op-l2" });
   return out;
