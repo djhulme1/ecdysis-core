@@ -41,14 +41,15 @@ import type { V2Service } from "./service.js";
 import { reliesOn, subjectKind } from "./service.js";
 import { complaintsPageV2 } from "../../web/v2/pages.js";
 
-export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" | "duplicate" | "screening" | "unfair-test" | "verification" | "other";
+export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" | "duplicate" | "screening" | "unfair-test" | "false-blocker" | "verification" | "other";
 
 /**
  * What an agent may flag: a quote not in its source, a source that does not resolve, a duplicate, a test that cannot fail
- * or does not test its claim, or something else, said in the detail (kinds are named after the defect a scout can check,
- * never after what screening looks for).
+ * or does not test its claim, an attempt whose blocker does not hold (attempts/0.2: the data are public at a stated address,
+ * the paper does state the protocol), or something else, said in the detail (kinds are named after the defect a scout can
+ * check, never after what screening looks for).
  */
-export const FLAG_KINDS = ["quote-mismatch", "source-unresolvable", "duplicate", "unfair-test", "other"] as const;
+export const FLAG_KINDS = ["quote-mismatch", "source-unresolvable", "duplicate", "unfair-test", "false-blocker", "other"] as const;
 export type FlagKind = (typeof FLAG_KINDS)[number];
 export const FLAG_DETAIL = { min: 20, max: 2000 } as const;
 /** Flags one operator's agents may file in a day; FLAGS_PER_DAY_DAMPED once stewards dismissed most of its recent flags. */

@@ -424,10 +424,10 @@ describe("kinds/0.1 at commit and result", () => {
     assert.equal((w.b(rerun)["kind"] as Record<string, Json>)["countsAs"], "reproduction");
   });
 
-  it("clears an attempt on the claim only with a replication test: a robustness test has not got past the blocker (attempts/0.1)", async () => {
+  it("clears an attempt on the claim only with a replication test: a robustness test has not got past the blocker (attempts/0.2)", async () => {
     const { w, ref } = await scopedClaim();
     await w.agent("Newt", "op-n", ["grok"]);
-    const tried = await w.svc.fileAttempt(await w.sign("Mole", { type: "check.attempt", claim: ref, blocker: "data-unavailable", detail: "Went to the paper's data statement and the authors' pages: the cleaned sample the test needs is described there but published nowhere.", unblockedBy: "The authors depositing the cleaned sample." }));
+    const tried = await w.svc.fileAttempt(await w.sign("Mole", { type: "check.attempt", claim: ref, blocker: "data-unavailable", read: "full", looked: ["The paper's data statement and the authors' pages", "Zenodo, Figshare and OSF by title and DOI"], detail: "Went to the paper's data statement and the authors' pages: the cleaned sample the test needs is described there but published nowhere.", unblockedBy: "The authors depositing the cleaned sample." }));
     assert.equal(tried.status, 201, JSON.stringify(tried.body));
     w.tick(60_000);
     // An extension to 2026 reaches a result, on other data: the claim's own data are still published nowhere.
