@@ -13,14 +13,19 @@
  *   blocker → assessed (a receipt that reached a result, or a settled
  *   argument) → resolved (established or refuted).
  *
- * Three lists fall out, each recomputable by anyone from the same log:
- *   the unchecked     highest stakes, no evidence, no attempt: where effort
- *                     should go;
- *   under pressure    highest pressure (stakes × (1 − 2^−n) over verified
- *                     operators who tried and could not): where authors,
- *                     funders and journals should look;
- *   cleared           blockers removed recently, by whom: where the record
- *                     is already changing behaviour.
+ * Four lists fall out, each recomputable by anyone from the same log:
+ *   the unchecked      highest stakes, no evidence, no attempt: where effort
+ *                      should go;
+ *   under pressure     highest pressure (stakes × (1 − 2^−n) over verified
+ *                      operators stopped by something only the authors can
+ *                      supply): where authors, funders and journals should
+ *                      look;
+ *   needs capability   blocked on the operator's side (a paywall, restricted
+ *                      data, a closed artefact, apparatus, compute), highest
+ *                      stakes first: where laboratories, sponsors and
+ *                      operators with access can help; no pressure on anyone;
+ *   cleared            blockers removed recently, by whom: where the record
+ *                      is already changing behaviour.
  *
  * A field is the source paper's field in the citation graph (OpenAlex's 26
  * fields, as the stakes scout observed it), or for an Ecdysis paper its
@@ -89,6 +94,8 @@ export interface MapView {
   totals: Omit<FieldRow, "field" | "denominator" | "coverage">;
   unchecked: Array<{ ref: string; field: string; stakes: number; reach: number; use: number; credence: number; status: string; external: boolean }>;
   underPressure: Array<{ ref: string; field: string; stakes: number; pressure: number; verifiedOperators: number; blockers: Blocker[]; dominant: Blocker | null }>;
+  /** Claims blocked on the operator's side: what an operator would need (`capability`), and how many have tried. */
+  needsCapability: Array<{ ref: string; field: string; stakes: number; capability: Blocker[]; verifiedOperators: number; otherOperators: number; unblockedBy: string | null }>;
   cleared: Array<{ ref: string; field: string; blocker: Blocker; by: string; how: string | null; at: string; stakes: number }>;
 }
 
@@ -144,11 +151,19 @@ export function buildMap(claims: readonly MapClaim[], cleared: readonly ClearedI
   const unchecked = claims.filter((c) => !c.assessed && !c.attempted && !c.resolved && !c.blocked)
     .sort((a, b) => b.stakes - a.stakes || a.ref.localeCompare(b.ref)).slice(0, limit)
     .map((c) => ({ ref: c.ref, field: c.field, stakes: r4(c.stakes), reach: c.reach, use: r4(c.use), credence: r4(c.credence), status: c.status, external: c.external }));
-  const underPressure = claims.filter((c) => c.blocked)
+  // Under pressure: the authors' blockers only (attempts/0.2); every blocker in force is listed, the pressure counts the authors'.
+  const underPressure = claims.filter((c) => c.blocked && c.blocked.dominant !== null)
     .map((c) => ({ ref: c.ref, field: c.field, stakes: r4(c.stakes), pressure: r4(pressure(c.stakes, c.blocked!.verifiedOperators)), verifiedOperators: c.blocked!.verifiedOperators, blockers: c.blocked!.blockers.map((b) => b.blocker), dominant: c.blocked!.dominant }))
     .sort((a, b) => b.pressure - a.pressure || b.verifiedOperators - a.verifiedOperators || b.stakes - a.stakes || a.ref.localeCompare(b.ref)).slice(0, limit);
+  // Needs capability: the operator's blockers, highest stakes first; the operators counted are those stopped on that side.
+  const needsCapability = claims.filter((c) => c.blocked && c.blocked.capability.length > 0)
+    .map((c) => {
+      const ops = c.blocked!.blockers.filter((b) => b.side === "operator");
+      return { ref: c.ref, field: c.field, stakes: r4(c.stakes), capability: c.blocked!.capability, verifiedOperators: Math.max(0, ...ops.map((b) => b.verifiedOperators)), otherOperators: Math.max(0, ...ops.map((b) => b.otherOperators)), unblockedBy: ops[0]?.unblockedBy[0] ?? null };
+    })
+    .sort((a, b) => b.stakes - a.stakes || b.verifiedOperators - a.verifiedOperators || a.ref.localeCompare(b.ref)).slice(0, limit);
   const byRef = new Map(claims.map((c) => [c.ref, c] as const));
   const clearedOut = [...cleared].sort((a, b) => b.seq - a.seq).slice(0, limit)
     .map((x) => ({ ref: x.ref, field: byRef.get(x.ref)?.field ?? UNPLACED_FIELD, blocker: x.blocker, by: x.by, how: x.how, at: x.at, stakes: r4(byRef.get(x.ref)?.stakes ?? 0) }));
-  return { version: MAP_VERSION, fields, totals: totalsOut, unchecked, underPressure, cleared: clearedOut };
+  return { version: MAP_VERSION, fields, totals: totalsOut, unchecked, underPressure, needsCapability, cleared: clearedOut };
 }

@@ -227,7 +227,7 @@ export class PagesHandler {
       const v = await this.challengeView(cm[1]!, `https://${site}`);
       return v ? html(200, challengePageV2(v)) : html(404, missingPageV2("challenge"));
     }
-    if (path === "/map") { const r = await this.v2.record(); return html(200, mapPageV2({ ...(await this.v2.mapView(25)), computedFrom: r.head })); }
+    if (path === "/map") { const r = await this.v2.record(); return html(200, mapPageV2({ ...(await this.v2.mapView(25)), next: await this.v2.directionList(10), computedFrom: r.head })); }
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
     if (path === "/graph") return html(200, graphPageV2(await this.graph()));
     if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL_V2 }));
@@ -388,7 +388,7 @@ export class PagesHandler {
     }));
     // attempts/0.1: every attempt on the claim (cleared ones as history), and what blocks it as it stands; frozen ones are left out.
     const attempts = (r.attemptsByClaim.get(ref) ?? []).filter((a) => !r.held.has(a.id)).map((a) => ({
-      id: a.id, blocker: a.blocker, detail: a.detail, unblockedBy: a.unblockedBy, effortMinutes: a.effortMinutes, agent: a.handle, tier: a.tier, filedAt: a.ts, disowned: a.disowned,
+      id: a.id, blocker: a.blocker, read: a.read, looked: a.looked, detail: a.detail, unblockedBy: a.unblockedBy, effortMinutes: a.effortMinutes, agent: a.handle, tier: a.tier, filedAt: a.ts, disowned: a.disowned,
       cleared: a.cleared ? { by: a.cleared.by, agent: a.cleared.handle, how: a.cleared.how, at: a.cleared.ts } : null,
     }));
     const bl = r.blockers.get(ref);

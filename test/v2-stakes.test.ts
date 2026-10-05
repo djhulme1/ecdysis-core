@@ -152,7 +152,7 @@ describe("stakes/0.1: the scout and the surfaces", () => {
     const graph = fakeGraph();
     const scout = new StakesScout({ v2: w.svc, log: w.log, fetchImpl: graph.fetchImpl, now: w.now, pause: async () => {} });
     const run = await scout.run(10);
-    assert.deepEqual(run, { observed: 3, unresolved: 1, errors: 1, fields: 1 });
+    assert.deepEqual(run, { observed: 3, unresolved: 1, errors: 1, fields: 1, candidates: 0 }, "no candidates store here: none read");
     const r = await w.svc.record();
     assert.equal(r.observations.size, 4, "three observed, one unresolved, the erroring one not logged");
     assert.equal(r.observations.get("arxiv:2203.15556")!.fieldId, "17");
@@ -169,7 +169,7 @@ describe("stakes/0.1: the scout and the surfaces", () => {
     // The second run asks only about the erroring source: the others were observed within the month.
     const n = graph.calls.length;
     const again = await scout.run(10);
-    assert.deepEqual(again, { observed: 0, unresolved: 0, errors: 1, fields: 0 });
+    assert.deepEqual(again, { observed: 0, unresolved: 0, errors: 1, fields: 0, candidates: 0 });
     assert.equal(graph.calls.length - n, 1, "one request, for the one source still due; the field's totals are a month good");
     // A month on, every source is due again.
     w.tick(31 * 24 * 3600 * 1000);

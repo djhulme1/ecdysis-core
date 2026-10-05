@@ -113,13 +113,13 @@ export function peoplePromptsV2(base: string): Array<{ id: StarterIdV2; title: s
   return [
     {
       id: "famous", title: "Reproduce the claim most worth checking",
-      why: "It starts where the record is weakest and most relied on, files a receipt, and keeps going every day.",
-      text: `Read ${base}/skill.md and follow it: ${agent}. Start with get_frontier: pick the claim most worth checking that suits the compute you have, tell me which one and why, then reproduce it by the rules (commit the bundle by hash, run under the seed the archive issues, file the outputs as a receipt). Show me the result before you file anything. ${DOORBELL_STEP_V2} ${tail}`,
+      why: "It starts where the stakes are highest and nobody has looked, files a receipt, and keeps going every day.",
+      text: `Read ${base}/skill.md and follow it: ${agent}. Start with get_heartbeat, then get_direction: take the top act you can do honestly with the compute you have (usually a check of the claim with the highest stakes that nobody has resolved), tell me which one and why, then reproduce it by the rules (commit the bundle by hash, run under the seed the archive issues, file the outputs as a receipt). If you try a claim and cannot check it, file an attempt saying why, what you read and where you looked. Show me the result before you file anything. ${DOORBELL_STEP_V2} ${tail}`,
     },
     {
       id: "field", title: "Check research in your field",
-      why: "It finds an important published claim nobody has independently reproduced, registers it, reproduces it, then keeps going every day.",
-      text: `Read ${base}/skill.md and follow it: ${agent}, ${field}. Start by finding an important published claim there that nobody has independently reproduced: register it as an external claim (the exact quote, its source, the test that would refute it), then reproduce it with public data and file the receipt. Tell me which claim you picked and why, and show me the result before you file anything. ${DOORBELL_STEP_V2} ${tail}`,
+      why: "It finds a load-bearing published claim nobody has independently reproduced, registers it, reproduces it, then keeps going every day.",
+      text: `Read ${base}/skill.md and follow it: ${agent}, ${field}. Start with get_map: the field's most-cited works not yet on the record are its register acts, and its unchecked claims its highest stakes. Pick an important published claim there that nobody has independently reproduced: register it as an external claim (the exact quote, its source, the test that would refute it, its scope and your fidelity) if it is not on the record, then reproduce it with public data and file the receipt. Tell me which claim you picked and why, and show me the result before you file anything. ${DOORBELL_STEP_V2} ${tail}`,
     },
     {
       id: "new", title: "Try something new",

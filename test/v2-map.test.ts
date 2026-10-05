@@ -25,7 +25,7 @@ import { handleMcp } from "../src/api/mcp.js";
 import { v2Tools } from "../src/api/v2/tools.js";
 import { buildMap, MAP_VERSION, UNPLACED_FIELD, type MapClaim } from "../src/core/v2/map.js";
 import type { FieldObservation } from "../src/core/v2/stakes.js";
-import type { ClaimBlockers } from "../src/core/v2/attempts.js";
+import { BLOCKER_SIDE, type ClaimBlockers } from "../src/core/v2/attempts.js";
 import type { Bundle } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
@@ -41,10 +41,14 @@ function claim(ref: string, field: string, stakes: number, over: Partial<MapClai
   const external = ref.startsWith("ext:");
   return { ref, paper: ref.split("#")[0]!, external, field, source: external ? `doi:10.1/${ref.slice(4, 8)}` : null, stakes, reach: 0, use: stakes, credence: 0.5, status: "unchecked", attempted: false, blocked: null, assessed: false, resolved: false, attempts: 0, ...over };
 }
-const blockedBy = (verifiedOperators: number, ...blockers: Array<"data-unavailable" | "compute">): ClaimBlockers => ({
-  claim: "", verifiedOperators, dominant: blockers[0] ?? null,
-  blockers: blockers.map((b) => ({ blocker: b, verifiedOperators, otherOperators: 0, attempts: [], unblockedBy: [] })),
-});
+/** A claim's blockers as the record summarises them (attempts/0.2): the authors' carry the pressure's n, the operator's are its capability. */
+const blockedBy = (verifiedOperators: number, ...blockers: Array<"data-unavailable" | "compute">): ClaimBlockers => {
+  const authors = blockers.filter((b) => BLOCKER_SIDE[b] === "author");
+  return {
+    claim: "", verifiedOperators: authors.length ? verifiedOperators : 0, dominant: authors[0] ?? null, capability: blockers.filter((b) => BLOCKER_SIDE[b] === "operator"),
+    blockers: blockers.map((b) => ({ blocker: b, side: BLOCKER_SIDE[b], verifiedOperators, otherOperators: 0, attempts: [], unblockedBy: [] })),
+  };
+};
 
 describe("map/0.1: the core", () => {
   const cs: MapClaim[] = [
@@ -94,11 +98,16 @@ describe("map/0.1: the core", () => {
     assert.deepEqual(m.unchecked.map((c) => c.ref), ["ext:aaaaaaaaaaaaaaaa#C1", "ecd:eeeeeeeeeeeeeeee#C1"], "nothing filed, by stakes; attempted, assessed, blocked and resolved claims are not unchecked");
     assert.deepEqual(m.unchecked[0], { ref: "ext:aaaaaaaaaaaaaaaa#C1", field: "Computer Science", stakes: 11, reach: 2047, use: 0, credence: 0.5, status: "unchecked", external: true });
     assert.deepEqual(m.underPressure.map((c) => [c.ref, c.pressure, c.verifiedOperators]), [["ext:bbbbbbbbbbbbbbbb#C1", 3, 1], ["ext:ffffffffffffffff#C1", 1.5, 2]], "pressure = stakes × (1 − 2^−n): 6 × ½, 2 × ¾");
-    assert.deepEqual(m.underPressure[1]!.blockers, ["compute", "data-unavailable"]);
-    assert.equal(m.underPressure[1]!.dominant, "compute");
+    assert.deepEqual(m.underPressure[1]!.blockers, ["compute", "data-unavailable"], "every blocker in force is listed");
+    assert.equal(m.underPressure[1]!.dominant, "data-unavailable", "the pressure is attributed to the authors' blocker, never to the operator's");
+    assert.deepEqual(m.needsCapability.map((c) => [c.ref, c.capability, c.verifiedOperators]), [["ext:ffffffffffffffff#C1", ["compute"], 2]], "the operator's blockers, by stakes: where a sponsor or an operator with the hardware can help");
+    const opsOnly = buildMap([claim("ext:1111111111111111#C1", "Physics", 9, { attempted: true, blocked: blockedBy(1, "compute"), attempts: 1 })], [], fields, citations);
+    assert.deepEqual(opsOnly.underPressure, [], "a claim blocked only on the operator's side presses nobody");
+    assert.deepEqual(opsOnly.needsCapability.map((c) => c.ref), ["ext:1111111111111111#C1"]);
+    assert.deepEqual(opsOnly.totals.blocked, { claims: 1, stakes: 9, byBlocker: { compute: { claims: 1, stakes: 9 } } }, "it is still blocked in the funnel");
     assert.deepEqual(m.cleared.map((c) => [c.ref, c.by, c.field, c.stakes]), [["ext:zzzzzzzzzzzzzzzz#C1", "Ant", UNPLACED_FIELD, 0], ["ext:cccccccccccccccc#C1", "a receipt", "Computer Science", 4]], "newest first; a clearing on a claim no longer scored is placed nowhere, with no stakes");
     const one = buildMap(cs, cleared, fields, citations, 1);
-    assert.equal(one.unchecked.length, 1); assert.equal(one.underPressure.length, 1); assert.equal(one.cleared.length, 1);
+    assert.equal(one.unchecked.length, 1); assert.equal(one.underPressure.length, 1); assert.equal(one.needsCapability.length, 1); assert.equal(one.cleared.length, 1);
     const over = buildMap(cs, [], fields, new Map([["doi:10.1/aaaa", 10 ** 12]]));
     assert.equal(over.fields[0]!.coverage, 1, "more citations than the field's total (a stale denominator) reads as full coverage, never more");
   });
@@ -111,7 +120,7 @@ describe("map/0.1: the core", () => {
     assert.deepEqual(e.fields, []);
     assert.deepEqual(e.totals.registered, { claims: 0, stakes: 0 });
     assert.equal(e.totals.assessedShare, null);
-    assert.deepEqual([e.unchecked, e.underPressure, e.cleared], [[], [], []]);
+    assert.deepEqual([e.unchecked, e.underPressure, e.needsCapability, e.cleared], [[], [], [], []]);
   });
 });
 
@@ -156,7 +165,7 @@ async function world() {
   /** What the stakes scout would have logged: platform entries, never an agent's. */
   const observed = (source: string, citedBy: number, field: string | null, fieldId: string | null) => log.append("source.observed", { source: source.toLowerCase(), provider: "openalex", work: "https://openalex.org/W1", citedBy, ...(field ? { field } : {}), ...(fieldId ? { fieldId } : {}) });
   const fieldObserved = (field: string, fieldId: string, works: number, citedBy: number) => log.append("field.observed", { field, fieldId, works, citedBy });
-  const attempt = async (handle: string, claim: string, over: Record<string, Json> = {}) => svc.fileAttempt(await sign(handle, { protocol: "ecdysis/0.2", type: "check.attempt", claim, blocker: "data-unavailable", detail: DETAIL, unblockedBy: UNBLOCK, ...over }));
+  const attempt = async (handle: string, claim: string, over: Record<string, Json> = {}) => svc.fileAttempt(await sign(handle, { protocol: "ecdysis/0.2", type: "check.attempt", claim, blocker: "data-unavailable", read: "full", looked: ["The paper's data statement and its links", "The authors' GitHub organisation", "Zenodo, Figshare and OSF by title and DOI"], detail: DETAIL, unblockedBy: UNBLOCK, ...over }));
   const clear = async (handle: string, claim: string) => svc.clearAttempt(await sign(handle, { protocol: "ecdysis/0.2", type: "attempt.clear", claim, blocker: "data-unavailable", how: "The panel is now deposited at https://zenodo.org/records/0000000 under CC-BY, with the derivation script beside it." }));
   const bundle = (n: number): Bundle => ({ repo: "https://github.com/example/rep", commit: n.toString(16).padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }], runtimeMinutes: 5 });
   const check = async (handle: string, target: string, n: number, outcome: "confirmed" | "failed" | "inconclusive") => {
@@ -276,6 +285,12 @@ describe("map/0.1 through the service, the API and the pages", () => {
     await w.observed("doi:10.1000/panel", 63, "Computer Science", "17");
     assert.equal((await w.attempt("Bee", panel)).status, 201);
     assert.equal((await w.attempt("Bee", math, { blocker: "compute", detail: "The stated run needs eight GPUs for a week; the claim's own bundle declares 10,080 minutes and nothing smaller is stated.", unblockedBy: "A smaller instance of the same family stated in the protocol, or a grant of compute." })).status, 201);
+    // The map splits the two: the panel claim (data published nowhere) is under pressure; the paper's claim (compute) needs capability and presses nobody.
+    const m = body(await w.svc.map());
+    assert.deepEqual((m["underPressure"] as Array<Record<string, Json>>).map((c) => c["ref"]), [panel]);
+    assert.deepEqual((m["needsCapability"] as Array<Record<string, Json>>).map((c) => [c["ref"], c["capability"], c["verifiedOperators"]]), [[math, ["compute"], 1]]);
+    const mapPage = await w.page("/map");
+    assert.match(mapPage.html, new RegExp(`<h2 id="capability">Needs capability</h2>[\\s\\S]*${math.replace(/[.#]/g, "\\$&")}[\\s\\S]*<td>compute</td><td>1 verified</td>`));
     // The observatory: tiles for stakes, attempts, blocked claims and pressure.
     const obs = await w.page("/observatory");
     assert.equal(obs.status, 200);

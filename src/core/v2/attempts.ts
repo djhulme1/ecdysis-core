@@ -1,7 +1,7 @@
 /**
- * Attempts (attempts/0.1): the record of trying to check a claim and being
- * unable to (Ecdysis v2; design: claude/ecdysis-claims-map-design.md,
- * Daniel, 4 October 2026).
+ * Attempts (attempts/0.2): the record of trying to check a claim and being
+ * unable to (Ecdysis v2; design: claude/ecdysis-claims-map-design.md §2–§4,
+ * Daniel, 4 October 2026, revised after the ZBook lab's history was read).
  *
  * An assessment used to exist on the record only once it reached a result:
  * a receipt (confirmed, failed or inconclusive), a review, an argument. The
@@ -10,10 +10,11 @@
  * the paper does not pin the protocol down — left nothing behind, and the
  * next agent repeated it. An ATTEMPT is that work, signed and logged:
  *
- *   check.attempt   on a claim: the BLOCKER (one of seven, fixed, so the map
- *                   can count them), what was tried and where it stopped,
- *                   and what would clear it. Signed by the main key or a
- *                   check key, like a review.
+ *   check.attempt   on a claim: the BLOCKER (one of eight, fixed, so the map
+ *                   can count them), how much of the source was READ, where
+ *                   the operator LOOKED, what was tried and where it
+ *                   stopped, and what would clear it. Signed by the main key
+ *                   or a check key, like a review.
  *   attempt.clear   a statement that a blocker on a claim is gone (the data
  *                   are at …), by the claim's own operator, a verified
  *                   operator or a steward: every attempt with that blocker
@@ -25,6 +26,25 @@
  *                   itself. A steward may withhold a false attempt
  *                   (content.withhold), which takes it out of every count.
  *
+ * Blockers have a SIDE. Three are the authors': only they can supply what
+ * is missing (data published nowhere, code never released, a protocol the
+ * paper does not state), and only these carry pressure. Five are the
+ * operator's: the claim is checkable by an operator with the access, the
+ * hardware, the artefact or the people, and the attempt routes it there
+ * (the map's "needs capability" lists). One laptop without a GPU must not
+ * put a routine claim under pressure; a paper whose data are nowhere must.
+ *
+ * Every blocker is checkable by the next agent, so the attempt says what it
+ * read and where it looked: `read` is required; `underspecified` is refused
+ * unless the full text was read (a protocol missing from an abstract or
+ * from text whose equations were lost in conversion is the operator's
+ * failure, not the paper's); `data-unavailable` and `code-unavailable` are
+ * refused without `looked`, the places searched (the paper's own data or
+ * code statement, the authors' repositories, a general archive), because
+ * "not in the archives this operator can search" is not "published
+ * nowhere". A false blocker is one link away from being flagged
+ * (false-blocker) and withheld.
+ *
  * What an attempt is NOT: evidence about the claim's truth. It moves no
  * credence, sets no status, earns no reliability and costs none, so nobody
  * is paid to fake one and nothing is lost by filing one honestly. It is
@@ -32,12 +52,12 @@
  *
  *   the blocked list   what agents should not repeat unless they can clear
  *                      the blocker (the heartbeat and the frontier show it);
- *   pressure           stakes applied to what nobody has managed to check:
+ *   pressure           stakes applied to what only the authors can unblock:
  *                      P = S · (1 − 2^−n) over n distinct VERIFIED operators
- *                      holding uncleared attempts (others' attempts shown,
- *                      not counted). One attempt puts half the stakes under
- *                      pressure; each further independent one halves what
- *                      remains. Until stakes/0.1 lands, S is the claim's use.
+ *                      holding uncleared AUTHOR-side attempts (others'
+ *                      attempts shown, not counted). One attempt puts half
+ *                      the stakes under pressure; each further independent
+ *                      one halves what remains.
  *
  * An attempt on one's own operator's claim weighs nothing, as every other
  * own-operator item does; the service refuses it. Pure: no runtime
@@ -48,32 +68,52 @@
 import type { Tier } from "./credence.js";
 import { CLAIM_REF } from "./arguments.js";
 
-export const ATTEMPTS_VERSION = "attempts/0.1";
+export const ATTEMPTS_VERSION = "attempts/0.2";
 
-export const BLOCKERS = ["data-unavailable", "data-restricted", "code-unavailable", "artefact-unavailable", "apparatus", "compute", "underspecified"] as const;
+/** The eight blockers: the authors' three first, then the operator's five. */
+export const BLOCKERS = ["data-unavailable", "code-unavailable", "underspecified", "source-restricted", "data-restricted", "artefact-unavailable", "apparatus", "compute"] as const;
 export type Blocker = (typeof BLOCKERS)[number];
+export type BlockerSide = "author" | "operator";
+
+/** Whose blocker it is: the authors', which only they can clear and which alone carries pressure; or the operator's, which routes the claim to one with the capability. */
+export const BLOCKER_SIDE: Record<Blocker, BlockerSide> = {
+  "data-unavailable": "author", "code-unavailable": "author", underspecified: "author",
+  "source-restricted": "operator", "data-restricted": "operator", "artefact-unavailable": "operator", apparatus: "operator", compute: "operator",
+};
+export const AUTHOR_SIDE: readonly Blocker[] = BLOCKERS.filter((b) => BLOCKER_SIDE[b] === "author");
+export const OPERATOR_SIDE: readonly Blocker[] = BLOCKERS.filter((b) => BLOCKER_SIDE[b] === "operator");
 
 /** What each blocker means, in the words the pages and the skill use. */
 export const BLOCKER_MEANING: Record<Blocker, string> = {
   "data-unavailable": "the data the test needs are published nowhere",
-  "data-restricted": "the data exist under access terms the operator lacks",
   "code-unavailable": "the method cannot be reproduced without the authors' code",
+  underspecified: "the paper does not pin the protocol down enough to run it",
+  "source-restricted": "the operator could not read the paper's full text (a paywall or a bot check) and found no lawful open copy",
+  "data-restricted": "the data exist under access terms the operator lacks",
   "artefact-unavailable": "a closed or withdrawn model, software version or reagent",
   apparatus: "a physical experiment, instrument or human participants",
   compute: "beyond the operator's compute at the stated scale",
-  underspecified: "the paper does not pin the protocol down enough to run it",
 };
 
 /** Who or what typically clears each blocker. */
 export const BLOCKER_CLEARED_BY: Record<Blocker, string> = {
   "data-unavailable": "the authors releasing the data, or pointing to where they are",
-  "data-restricted": "an operator who holds access",
   "code-unavailable": "the authors releasing the code",
+  underspecified: "the authors' answer, or a registered correction of the claim",
+  "source-restricted": "an operator with access, or the authors depositing their accepted manuscript",
+  "data-restricted": "an operator who holds access",
   "artefact-unavailable": "an operator who holds the artefact; otherwise never, which is itself worth knowing",
   apparatus: "a human laboratory",
-  compute: "a compute donor or sponsor",
-  underspecified: "the author's answer, or a registered correction of the claim",
+  compute: "a compute donor or sponsor, or any operator with the hardware",
 };
+
+/** How much of the source the operator read before filing: the full text, the abstract alone, or nothing it could reach. */
+export const READ = ["full", "abstract", "none"] as const;
+export type Read = (typeof READ)[number];
+/** Where the operator looked for what it says is missing: 1 to 8 places of 10 to 200 characters. Required for the two "published nowhere" blockers. */
+export const LOOKED = { min: 1, max: 8, itemMin: 10, itemMax: 200 } as const;
+/** The blockers that need `looked`: "published nowhere" is a claim about the archives, so the attempt says which it searched. */
+export const NEEDS_LOOKED: readonly Blocker[] = ["data-unavailable", "code-unavailable"];
 
 export const ATTEMPT_DETAIL = { min: 40, max: 1500 } as const;
 export const UNBLOCKED_BY = { min: 10, max: 400 } as const;
@@ -89,6 +129,10 @@ export interface AttemptV2Payload {
   /** The claim attempted: "<paper>#C<n>" or "ext:…#C1". */
   claim: string;
   blocker: Blocker;
+  /** How much of the source was read: full text, abstract, or none. */
+  read: Read;
+  /** Where the operator looked for what it says is missing. Required for data-unavailable and code-unavailable. */
+  looked?: string[];
   /** What was tried and where it stopped: data to every reader. */
   detail: string;
   /** What would clear the blocker. */
@@ -136,6 +180,12 @@ export function validateAttemptV2(p: unknown): Res<AttemptV2Payload> {
   if (x.type !== "check.attempt") errors.push('type: "check.attempt"');
   if (typeof x.claim !== "string" || !CLAIM_REF.test(x.claim)) errors.push("claim: a claim ref on the record (ecd:…#C<n> or ext:…#C1)");
   if (!(BLOCKERS as readonly unknown[]).includes(x.blocker)) errors.push(`blocker: ${BLOCKERS.join(", ")}`);
+  if (!(READ as readonly unknown[]).includes(x.read)) errors.push(`read: ${READ.join(", ")}: how much of the source you read before filing`);
+  if (x.blocker === "underspecified" && x.read !== "full") errors.push('underspecified: only from the full text (read: "full"); a protocol missing from an abstract, or from text whose equations were lost in conversion, is the operator\'s failure, not the paper\'s');
+  if (x.looked !== undefined) {
+    if (!Array.isArray(x.looked) || x.looked.length < LOOKED.min || x.looked.length > LOOKED.max) errors.push(`looked: ${LOOKED.min} to ${LOOKED.max} places of ${LOOKED.itemMin} to ${LOOKED.itemMax} characters`);
+    else for (const [i, l] of x.looked.entries()) text(l, `looked[${i}]`, LOOKED.itemMin, LOOKED.itemMax, errors);
+  } else if ((NEEDS_LOOKED as readonly unknown[]).includes(x.blocker)) errors.push(`looked: required for ${x.blocker}: the places you searched (the paper's own data or code statement and links, the authors' repositories, a general archive such as Zenodo, Figshare, OSF or Dryad); "not in the archives this operator can search" is not "published nowhere"`);
   text(x.detail, "detail", ATTEMPT_DETAIL.min, ATTEMPT_DETAIL.max, errors);
   text(x.unblockedBy, "unblockedBy", UNBLOCKED_BY.min, UNBLOCKED_BY.max, errors);
   if (x.effortMinutes !== undefined && !(typeof x.effortMinutes === "number" && Number.isFinite(x.effortMinutes) && x.effortMinutes > 0 && x.effortMinutes <= EFFORT_MAX_MINUTES)) errors.push(`effortMinutes: optional; 0 < m ≤ ${EFFORT_MAX_MINUTES}`);
@@ -176,6 +226,10 @@ export interface AttemptState {
   id: string;
   claim: string;
   blocker: Blocker;
+  /** How much of the source was read (attempts/0.2; an attempt from before it has "none"). */
+  read: Read;
+  /** Where the operator looked, as filed. */
+  looked: string[];
   detail: string;
   unblockedBy: string;
   effortMinutes: number | null;
@@ -208,7 +262,9 @@ export interface ClearState {
 /** One blocker on a claim, as it stands: the attempts in force behind it and how many independent operators they come from. */
 export interface BlockerSummary {
   blocker: Blocker;
-  /** Distinct verified operators with an uncleared attempt here: the ones pressure counts. */
+  /** Whose blocker it is: the authors' carry pressure; the operator's route the claim to capability. */
+  side: BlockerSide;
+  /** Distinct verified operators with an uncleared attempt here: the ones pressure counts, when the blocker is the authors'. */
   verifiedOperators: number;
   /** Distinct operators of other tiers with an uncleared attempt here: shown, not counted. */
   otherOperators: number;
@@ -220,17 +276,19 @@ export interface BlockerSummary {
 
 export interface ClaimBlockers {
   claim: string;
-  /** Blockers with at least one uncleared attempt in force, most independent operators first. */
+  /** Blockers with at least one uncleared attempt in force, the authors' before the operator's, then most independent operators first. */
   blockers: BlockerSummary[];
-  /** Distinct verified operators across all uncleared attempts on the claim: n in the pressure formula. */
+  /** Distinct verified operators across the uncleared AUTHOR-side attempts on the claim: n in the pressure formula. */
   verifiedOperators: number;
-  /** The blocker with the most independent operators behind it (ties: the earliest). */
+  /** The author-side blocker with the most independent operators behind it (ties: the earliest), to which the pressure is attributed; null when every blocker in force is the operator's. */
   dominant: Blocker | null;
+  /** The operator-side blockers in force, most independent operators first: what an operator would need to take the claim. */
+  capability: Blocker[];
 }
 
 /**
- * Pressure: stakes applied to what nobody has managed to check. P = S · (1 − 2^−n) over n distinct verified operators with
- * uncleared attempts. Zero with no stakes or no attempts; never above the stakes.
+ * Pressure: stakes applied to what only the authors can unblock. P = S · (1 − 2^−n) over n distinct verified operators with
+ * uncleared author-side attempts. Zero with no stakes or no such attempts; never above the stakes.
  */
 export function pressure(stakes: number, verifiedOperators: number): number {
   if (!(stakes > 0) || !(verifiedOperators > 0)) return 0;
@@ -251,9 +309,13 @@ export function summariseBlockers(claim: string, attempts: readonly AttemptState
     const others = new Set(list.filter((a) => a.tier !== "verified").map((a) => a.operatorId));
     const unblockedBy: string[] = [];
     for (const a of [...list].reverse()) if (!unblockedBy.includes(a.unblockedBy)) unblockedBy.push(a.unblockedBy);
-    blockers.push({ blocker, verifiedOperators: verified.size, otherOperators: others.size, attempts: list, unblockedBy });
+    blockers.push({ blocker, side: BLOCKER_SIDE[blocker], verifiedOperators: verified.size, otherOperators: others.size, attempts: list, unblockedBy });
   }
-  blockers.sort((x, y) => y.verifiedOperators - x.verifiedOperators || y.otherOperators - x.otherOperators || x.attempts[0]!.seq - y.attempts[0]!.seq);
-  const verifiedAll = new Set(live.filter((a) => a.tier === "verified").map((a) => a.operatorId));
-  return { claim, blockers, verifiedOperators: verifiedAll.size, dominant: blockers[0]?.blocker ?? null };
+  const rank = (b: BlockerSummary) => (b.side === "author" ? 0 : 1);
+  blockers.sort((x, y) => rank(x) - rank(y) || y.verifiedOperators - x.verifiedOperators || y.otherOperators - x.otherOperators || x.attempts[0]!.seq - y.attempts[0]!.seq);
+  const authorSide = live.filter((a) => BLOCKER_SIDE[a.blocker] === "author");
+  const verifiedAuthorSide = new Set(authorSide.filter((a) => a.tier === "verified").map((a) => a.operatorId));
+  const dominant = blockers.find((b) => b.side === "author")?.blocker ?? null;
+  const capability = blockers.filter((b) => b.side === "operator").map((b) => b.blocker);
+  return { claim, blockers, verifiedOperators: verifiedAuthorSide.size, dominant, capability };
 }
