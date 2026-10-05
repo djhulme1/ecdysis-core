@@ -1,9 +1,9 @@
 /**
  * Stewards' acts and the agents under the steward's operator id (4 October 2026). A steward acts under their own operator
  * id; the agents that share it must never find their work refused because of those acts. That morning 17 founding seeds
- * left the owner's agents unable to register a claim from the literature for a day. Seeding was retired with the board on
- * 5 October 2026 (map/0.1) and writes nothing; and since quotas/0.3 the same day nothing an agent files is rationed at all,
- * so neither a steward's acts nor the agents' own volume can stop the next registration.
+ * on the board (since retired, with the board) left the owner's agents unable to register a claim from the literature for
+ * a day. Since quotas/0.3 (5 October 2026) nothing an agent files is rationed at all, so neither a steward's acts nor the
+ * agents' own volume can stop the next registration.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -39,24 +39,15 @@ async function world() {
   };
   const quote = (i: number) => `Claim number ${i} of a founding set states a structural result about random formulas at a stated density.`;
   const register = async (handle: string, i: number) => svc.registerExternalClaim(await sign(handle, { type: "claim.external", source: `arxiv:2601.0${String(1000 + i)}`, quote: quote(i), test: `Refuted if the measured fraction at density ${i}.5 exceeds five per cent.` }));
-  const seed = (steward: string, i: number) => svc.proposeChallengeBySteward(steward, {
-    source: `arxiv:2602.0${String(1000 + i)}`, quote: `A seeded position number ${i}: the stated construction is optimal for every instance size the authors consider.`,
-    test: `Refuted by an instance of size ${i + 10} where a smaller construction exists.`, kind: "conceptual",
-    title: `Founding challenge number ${i}`, brief: "Find an instance where a smaller construction exists, or show by argument that none can; state the instance or the step that fails.", scale: "reasoning",
-  });
-  return { svc, agent, sign, register, seed, rows };
+  return { svc, agent, sign, register, rows };
 }
 
 describe("stewards' acts and the agents under the steward's operator id", () => {
-  it("seeding is retired and writes nothing; a steward's other acts refuse nothing of the agents'; and no volume of their own is refused either (quotas/0.3)", async () => {
+  it("a steward's acts refuse nothing of the agents'; and no volume of their own is refused either (quotas/0.3)", async () => {
     const w = await world();
     await w.agent("Bee", "op-daniel");
     await w.agent("Ant", "op-other");
-    // More seeds than the whole old verified allowance for claims, as on the morning of 4 October: every one is refused now, and the log is untouched.
-    const before = w.rows().length;
-    for (let i = 1; i <= 12; i++) assert.equal((await w.seed("op-daniel", i)).status, 410, `seed ${i}`);
-    assert.equal(w.rows().length, before, "a retired seed writes nothing");
-    // The steward's remaining acts under the same operator id: a switch flipped and flipped back, and a claim of someone else's taken out of view.
+    // The steward's acts under the same operator id: a switch flipped and flipped back, and a claim of someone else's taken out of view.
     assert.equal((await w.svc.setSetting("v2.reviews", "paused", "op-daniel")).status, 200);
     assert.equal((await w.svc.setSetting("v2.reviews", "open", "op-daniel")).status, 200);
     const theirs = await w.register("Ant", 99);

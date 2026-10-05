@@ -28,7 +28,7 @@
  *                      is already changing behaviour.
  *
  * A field is the source paper's field in the citation graph (OpenAlex's 26
- * fields, as the stakes scout observed it), or for an Ecdysis paper its
+ * fields, as the stakes scout observed it), or for a claim published here its
  * declared field. Coverage is the registered sources' citations as a share
  * of the field's, when the scout has observed the field's totals. Pure: the
  * service hands in the scored claims; nothing here reads the environment.
@@ -43,10 +43,9 @@ export const UNPLACED_FIELD = "Not yet placed";
 
 export interface MapClaim {
   ref: string;
-  paper: string;
   external: boolean;
   field: string;
-  /** The registered source, lower-cased, for external claims; null for an Ecdysis paper's claim. */
+  /** The registered source, lower-cased, for a claim from human literature; null for a claim published here. */
   source: string | null;
   stakes: number;
   reach: number;

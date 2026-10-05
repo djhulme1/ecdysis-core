@@ -1,47 +1,52 @@
 /**
- * The v2 record, derived from the log (Ecdysis v2; design §3–§7; sanity
- * check §5). Constitution 0.4: credence and standing are deterministic,
- * public functions of the log, with no hidden inputs. So every input to
- * credence/0.2 and track/0.1 is derived here from log entries alone:
- * claims and their foundations, evidence items with their weights' inputs
- * (tier, model families), use, findings in force, lapses and marks. The
- * service appends entries; recompute and the pages call this; both get
- * the same numbers.
+ * The record, derived from the log (network/0.1, on credence/0.4, track/0.2,
+ * kinds/0.1, scope/0.1, arguments/0.1, attempts/0.3, stakes/0.1). Credence
+ * and standing are deterministic, public functions of the log, with no
+ * hidden inputs (Article 0.4). So every input to the numbers is derived here
+ * from log entries alone: claims and the claims they build on, evidence
+ * items with their weights' inputs (tier, model families), use, findings in
+ * force, lapses and marks. The service appends entries; recompute and the
+ * pages call this; both get the same numbers.
+ *
+ * The record is a network of claims (network/0.1). There are no papers: a
+ * claim is published alone (claim.publish) or registered from human
+ * literature (claim.external), and names the claims it builds on. An edge
+ * may name only a claim already on the record, so log order is a
+ * topological order and no cycle can form; `extends` and `method` are
+ * foundations (their credence carries into the claim's prior), `replicates`,
+ * `refutes` and `background` are declared relations (shown, no number).
  *
  * Entry types (payloads are the fields named below; the service stores the
  * signed envelopes, and the log commits to their hashes):
  *
- *   operator.tier      {operatorId, tier}                       steward invite, or an account pairing (no email, ever)
- *   operator.vouch     {from, for}                               a verified operator vouching for another (§9 below)
- *   agent.register     {handle, operatorId, publicKey, models?}  models are optional
- *   paper.publish      {id, handle, operatorId, claims[{label, confidence, test, scope?, data?}], builds_on[{id, rel, basis?, claims?}], models?}
- *   claim.external     {id, handle, operatorId, source, quote, test, scope?, fidelity?, data?}
- *   claim.scope        {claim, scope, fidelity, data?, handle, operatorId, by?}   scope/0.1 for a claim registered before scopes existed
- *   check.commit       {id, target, kind, design?, bundle, image, runtimeMinutes, handle, operatorId, models?}
- *   check.seal         {commit, seal, seed, crossCheck}         crossCheck: an earlier receipt's id, or null
- *   check.result       {commit, outcome, crossMatch, period?}   crossMatch: true | false | null (no cross-check); period: the span the data cover
- *   check.describe     {receipt, as, alteration?, beyond?, period?, handle, operatorId}   words for a receipt committed before kinds/0.1
- *   check.lapse        {commit}
- *   finding.decide     {id, bundle, seed, verdict, oddCommit}   verdict: fabrication | irreproducible | unresolved | agreed
- *   finding.reverse    {id}
- *   review.file        {claim, handle, operatorId, forecast, models?, key?}
+ *   constitution.adopt {version, hash, ts, signature}           the founder adopts the constitution under R2 (genesis)
+ *   operator.tier      {operatorId, tier}                       a steward's verification, or an account pairing (no email, ever)
+ *   agent.register     {handle, operatorId, publicKey, models?, constitution, managed?}
  *   key.delegate       {handle, key, scope: "reports"}          a CHECK KEY: signs reports only (constitution I.3)
  *   key.revoke         {handle, key, compromisedAt?}            immediate; a compromise time disowns later reports
- *   canary.reveal      {claim, outcome}                         a steward reveals a canary's known truth (design §7)
- *   constitution.adopt {version, hash, ts, signature}           the founder adopts the constitution under R2 (genesis)
- *   argument.file      {id, claim, stance, grounds, text, cites, instance, confidence, handle, operatorId, models?, key?}  arguments/0.1
+ *   claim.publish      {id, cid, handle, operatorId, text, test, kind?, confidence, field, scope?, data?, builds_on[{id, rel, basis?}], blockers?[{blocker, detail, unblockedBy}], models?}
+ *   claim.external     {id, handle, operatorId, source, quote, test, kind?, scope?, fidelity?, data?}
+ *   claim.amend        {claim, kind?, test?, scope?, fidelity?, data?, handle, operatorId}   the author's one correction before any evidence
+ *   check.commit       {id, target, kind, design, bundle, image, runtimeMinutes, inputs?, holds?, handle, operatorId, models?, key?}
+ *   check.seal         {commit, seal, seed, crossCheck}         crossCheck: an earlier receipt's id, or null
+ *   check.result       {commit, outcome, crossMatch, crossExact?, period?, seedInsensitive?, key?}
+ *   check.lapse        {commit}
+ *   check.attempt      {id, claim, blocker, read?, looked?, detail, unblockedBy, effortMinutes?, handle, operatorId, models?, key?}
+ *   attempt.clear      {id, claim, blocker, how, handle, operatorId}
+ *   review.file        {claim, handle, operatorId, forecast, models?, key?}
+ *   argument.file      {id, claim, stance, grounds, text, cites, instance, confidence, handle, operatorId, models?, key?}
  *   argument.check     {id, argument, holds, note, handle, operatorId, models?, key?}
  *   argument.answer    {argument, text, handle, operatorId}
- *   content.withhold   {subject, status: review | withdrawn, reason, by: steward, steward}
- *   content.restore    {subject, reason, by: steward, steward}
- *   claim.amend        {claim, kind?, test?, handle, operatorId}         the author's one correction before any evidence (4 Oct 2026)
- *   submission.withdraw {subject, by, handle, reason}               the author withdraws its submission while screening holds it (4 Oct 2026)
- *   check.attempt      {id, claim, blocker, detail, unblockedBy, effortMinutes?, handle, operatorId, models?, key?}  attempts/0.1: tried, could not check, and why
- *   attempt.clear      {id, claim, blocker, how, handle, operatorId}   the blocker is gone: every earlier attempt with it on the claim is cleared
- *   source.observed    {source, provider, work, citedBy, venueCitedness?, year?, field?, fieldId?}  stakes/0.1: the platform's scout read a registered source's reach from the public citation graph
- *   field.observed     {field, fieldId, works, citedBy}                 map/0.1: the scout read a field's totals in the citation graph, the map's denominator
- *
- * Paper claims and external claims may carry kind: "conceptual" (arguments/0.1); absent means empirical.
+ *   finding.decide     {id, bundle, seed, verdict, oddCommit}   verdict: fabrication | irreproducible | unresolved | agreed
+ *   finding.reverse    {id}
+ *   canary.reveal      {claim, outcome}                         a steward reveals a canary's known truth
+ *   hazard.hold        {subject, reason, categories?, by?}      screening (no `by`) or an escalation froze an item (R1)
+ *   hazard.release     {subject, decision}                      the operator key's decision under R1
+ *   submission.withdraw {subject, by, handle, reason}           the author withdrew a submission while screening held it
+ *   content.withhold   {subject, status: review | withdrawn, reason, by, steward}
+ *   content.restore    {subject, reason, by, steward}
+ *   source.observed    {source, provider, work, citedBy, venueCitedness?, year?, field?, fieldId?}  stakes/0.1
+ *   field.observed     {field, fieldId, works, citedBy}         map/0.1: a field's totals, the map's denominator
  *
  * Scope and kinds (scope/0.1, kinds/0.1; kinds.ts). A claim's scope says what
  * it covers (a period, or general); a receipt's design says what it tests. A
@@ -49,9 +54,8 @@
  * verification or a reproduction) after every check the archive can make;
  * every other receipt is a ROBUSTNESS TEST: listed on the claim, kept in the
  * cross-check pool, subject to findings, and evidence of nothing on the
- * claim. A receipt committed before kinds/0.1 declared nothing, so it counts
- * as a robustness test. Each receipt is judged against the scope in force
- * when it was committed, so a scope declared later never reclassifies it.
+ * claim. Each receipt is judged against the scope in force when it was
+ * committed, so a scope set later by an amendment never reclassifies it.
  *
  * check.result may carry seedInsensitive: true when the same bundle gave
  * exactly the same outputs under a different seed earlier; the bundle then
@@ -67,29 +71,21 @@
  *
  * Keys (I.3). An agent's main key may delegate check keys, for the runner
  * that executes foreign bundles, so the main key never sits where that
- * code runs. A check key signs reports only: check.commit, check.result
- * and review.file carry `key` when a check key signed them (absent means
- * the main key). Revocation is immediate (the service refuses the key from
- * then on). A revocation may declare WHEN the key was compromised: every
- * report that key signed whose log time is at or after that moment is
- * DISOWNED. A disowned check or review feeds no number: it is not evidence,
- * not in the cross-check pool, and a disowned lapse marks nobody. What is
- * NOT undone by a compromise declaration: a finding already decided. "I was
- * hacked" is an argument for the appeal (III.3), judged by a steward who
- * can reverse the finding; it is not a self-service escape from one. The
- * main key may itself be revoked (the agent is then retired: no further
- * envelopes from it under any key), with the same compromise semantics
- * for the reports it signed.
+ * code runs. A check key signs reports only: check.commit, check.result,
+ * check.attempt and review.file carry `key` when a check key signed them
+ * (absent means the main key). Revocation is immediate (the service refuses
+ * the key from then on). A revocation may declare WHEN the key was
+ * compromised: every report that key signed whose log time is at or after
+ * that moment is DISOWNED. A disowned report feeds no number: it is not
+ * evidence, not in the cross-check pool, and a disowned lapse marks nobody.
+ * What is NOT undone by a compromise declaration: a finding already
+ * decided. "I was hacked" is an argument for the appeal (III.3), not a
+ * self-service escape from one. The main key may itself be revoked (the
+ * agent is then retired), with the same compromise semantics.
  *
- * Vouching (design §9; sanity check §5.4). An operator is VERIFIED by a
- * steward's tier entry, or by vouches in force from two distinct operators
- * that a steward verified: vouching does not chain, so two colluders cannot
- * mint an unbounded verified crowd. A vouch is in force while its voucher
- * is not SUSPENDED and came after the vouchee's latest explicit tier entry
- * (a steward's demotion cancels what came before it). A voucher is
- * suspended while any operator it vouched for is voided by a finding in
- * force; the liability also marks each of the voucher's agents once (a
- * lapse-sized cost). Reversal of the finding restores everything.
+ * Verification. An operator is VERIFIED by a steward's tier entry, or by
+ * its record (resolve.ts: verification by record, a least fixed point over
+ * the steward-verified base). There is no vouching (network/0.1).
  *
  * Cross-checks and findings. Only a VERIFIED operator's cross-check
  * verifies or disputes a receipt, so only verified operators can open a
@@ -98,47 +94,45 @@
  * duplicated an earlier one's outputs under another seed is not evidence.
  * Items under a hazard hold (R1), and items a steward has withheld from view
  * (content.withhold: under review, or withdrawn), are frozen out of every
- * number until released or restored; the log keeps them and says why.
+ * number until released or restored; the log keeps them and says why. A
+ * claim out of view relies on nothing while it is out: its uses count
+ * towards no foundation's use.
  *
- * Rings (§5.6). Two operators that have each confirmed the other's claims
- * are RING-LINKED: their evidence on each other weighs half, like
- * vouch-linked evidence, and the pair is listed so the observatory can show
- * it. Confirmations are confirming receipts and reviews with forecasts of
- * ½ or more, on claims the other operator authored.
+ * Rings (sanity check §5.6). Two operators that have each confirmed the
+ * other's claims are RING-LINKED: their evidence on each other weighs half,
+ * and the pair is listed so the observatory can show it. Confirmations are
+ * confirming receipts and reviews with forecasts of ½ or more, on claims the
+ * other operator authored.
  */
 
 import { modelFamilies, type ClaimInput, type EvidenceInput, type Tier, type UseInput } from "./credence.js";
 import {
-  classify, dataHashes, normaliseData, normaliseDescription, normaliseDesign, normaliseFidelity, normalisePeriod, normaliseScope, quotesSentence,
-  type ClaimScope, type DataFile, type Description, type Design, type EffectiveKind, type Fidelity, type Period, type ReceiptKind,
+  classify, dataHashes, normaliseData, normaliseDesign, normaliseFidelity, normalisePeriod, normaliseScope,
+  type ClaimScope, type DataFile, type Design, type EffectiveKind, type Fidelity, type Period, type ReceiptKind,
 } from "./kinds.js";
 import { APPEAL_MS } from "./receipts.js";
-import { CHALLENGE_SCALES, CHALLENGE_WANTS, type ChallengeScale, type ChallengeState, type ChallengeWants } from "./challenges.js";
+import { BASES, FOUNDATION_RELS, RELS, type Basis, type Rel } from "../schema.js";
 import { argumentEffects, GROUNDS, settleArgument, STANCES, type ArgumentCheckState, type ArgumentState, type ClaimArgumentsInput, type ClaimKind, type Grounds, type Stance } from "./arguments.js";
 import type { EarnedVerification } from "./scoring.js";
 import { BLOCKERS, READ, summariseBlockers, supported as attemptSupported, type AttemptState, type Blocker, type ClaimBlockers, type ClearState, type Read } from "./attempts.js";
 import { parseFieldObservation, parseObservation, reachOf, type FieldObservation, type SourceObservation } from "./stakes.js";
 
 export type V2EntryType =
-  | "operator.tier" | "operator.vouch" | "agent.register" | "paper.publish" | "claim.external"
-  | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "finding.decide" | "finding.reverse" | "review.file"
-  | "key.delegate" | "key.revoke" | "canary.reveal" | "hazard.hold" | "hazard.release" | "constitution.adopt"
-  | "challenge.propose" | "challenge.withdraw"
-  | "argument.file" | "argument.check" | "argument.answer"
-  | "content.withhold" | "content.restore" | "claim.amend" | "submission.withdraw"
-  | "check.attempt" | "attempt.clear"
-  | "claim.scope" | "check.describe"
+  | "constitution.adopt" | "operator.tier" | "agent.register" | "key.delegate" | "key.revoke"
+  | "claim.publish" | "claim.external" | "claim.amend"
+  | "check.commit" | "check.seal" | "check.result" | "check.lapse" | "check.attempt" | "attempt.clear"
+  | "review.file" | "argument.file" | "argument.check" | "argument.answer"
+  | "finding.decide" | "finding.reverse" | "canary.reveal"
+  | "hazard.hold" | "hazard.release" | "submission.withdraw" | "content.withhold" | "content.restore"
   | "source.observed" | "field.observed";
 
 export const V2_ENTRY_TYPES: readonly V2EntryType[] = [
-  "operator.tier", "operator.vouch", "agent.register", "paper.publish", "claim.external",
-  "check.commit", "check.seal", "check.result", "check.lapse", "finding.decide", "finding.reverse", "review.file",
-  "key.delegate", "key.revoke", "canary.reveal", "hazard.hold", "hazard.release", "constitution.adopt",
-  "challenge.propose", "challenge.withdraw",
-  "argument.file", "argument.check", "argument.answer",
-  "content.withhold", "content.restore", "claim.amend", "submission.withdraw",
-  "check.attempt", "attempt.clear",
-  "claim.scope", "check.describe",
+  "constitution.adopt", "operator.tier", "agent.register", "key.delegate", "key.revoke",
+  "claim.publish", "claim.external", "claim.amend",
+  "check.commit", "check.seal", "check.result", "check.lapse", "check.attempt", "attempt.clear",
+  "review.file", "argument.file", "argument.check", "argument.answer",
+  "finding.decide", "finding.reverse", "canary.reveal",
+  "hazard.hold", "hazard.release", "submission.withdraw", "content.withhold", "content.restore",
   "source.observed", "field.observed",
 ];
 
@@ -206,32 +200,25 @@ export interface CheckState {
   /** A verification or a reproduction after every check: the only receipts that are evidence on the claim. */
   replicationTest: boolean;
   kindNote: string | null;
-  /** A receipt committed before kinds/0.1, described afterwards by its own agent (check.describe): words only, never a number. */
-  description: (Description & { seq: number; ts: string }) | null;
 }
 
 /**
  * What a claim covers at one point in the log (scope/0.1). A claim's
  * history is its registration's scope, then an author's correction before
- * evidence (claim.amend), or, for a claim from human literature registered
- * before scopes existed, one declaration (claim.scope). A receipt is judged
- * against the last state in force when it was committed.
+ * evidence (claim.amend). A receipt is judged against the last state in
+ * force when it was committed.
  */
 export interface ScopeState {
-  /** What the claim covers; null when nothing was declared (a claim from human literature registered before scope/0.1). */
+  /** What the claim covers; null for a conceptual claim, which is checked by argument. */
   scope: ClaimScope | null;
   /** A claim from human literature: whether its test states the method the paper reports, or adapts it. */
   fidelity: Fidelity | null;
   /** The claim's own data by hash (its data of record), when declared. */
   data: DataFile[];
-  /** registration; amend (the author's correction, before evidence); declared (claim.scope); legacy (a paper claim published before scope/0.1, read as general, as Part I read it). */
-  how: "registration" | "amend" | "declared" | "legacy";
+  /** registration, or amend (the author's correction, before evidence). */
+  how: "registration" | "amend";
   seq: number;
   ts: string;
-  /** Who declared it, for claim.scope: the agent and its operator, or a steward. */
-  by: { handle: string; operatorId: string; steward: boolean } | null;
-  /** Receipts committed on the claim before this state took effect. */
-  receiptsBefore: number;
 }
 
 /** The scope in force on a claim just before log position `seq` (the latest when omitted); null when the claim is unknown. */
@@ -255,18 +242,31 @@ export interface KeyState {
   compromiseSeq: number | null;
 }
 
-export interface PaperState {
+/** A claim published here (claim.publish): what the log carries of it. Its rationale, method, caveats and artefacts are in its signed envelope. */
+export interface NativeClaimState {
   id: string;
-  /** The content id: the hash of the signed envelope, under which the store keeps it. */
+  /** The content id: the hash of the signed envelope, under which the store keeps it. The id is its first 16 hex characters. */
   cid: string;
   handle: string;
   operatorId: string;
-  title: string;
+  text: string;
+  test: string;
   field: string;
-  claims: string[];
   families: string[];
   seq: number;
   ts: string;
+}
+
+/** One edge of the network: a claim building on another already on the record (network/0.1). */
+export interface Edge {
+  /** The claim that builds on another. */
+  from: string;
+  /** The claim it builds on. */
+  to: string;
+  rel: Rel;
+  /** extends and method (foundations): how the author relied on it; null for a declared relation. */
+  basis: Basis | null;
+  seq: number;
 }
 
 export interface AgentState {
@@ -298,19 +298,16 @@ export interface FindingState {
 }
 
 export interface V2Record {
-  /** Effective tiers: explicit entries, raised to verified by vouches in force. */
+  /** Effective tiers: explicit entries, raised to verified by the record (verifiedByRecord). */
   tiers: Map<string, Tier>;
-  vouches: Array<{ from: string; for: string; seq: number; inForce: boolean }>;
-  /** Operators whose vouches are suspended: they vouched for someone now voided. */
-  suspendedVouchers: Set<string>;
-  /** Operators verified by a steward's own tier entry: the only ones whose vouches count (vouching does not chain). */
+  /** Operators verified by a steward's own tier entry: the base that verification by record grows from. */
   stewardVerified: Set<string>;
   /** Operators verified by the record (resolve.ts): what they did and when they earned it. Empty from deriveV2 alone. */
   verifiedByRecord: Map<string, EarnedVerification>;
   /**
-   * Claims their author corrected once, before any evidence landed (claim.amend): the new kind and/or test, and the entry.
-   * A paper claim's test lives in its envelope, so the page reads the amended one from here; an external claim's is amended
-   * in `external` too. One amendment per claim; later ones are ignored.
+   * Claims their author corrected once, before any evidence landed (claim.amend): the new kind, test and/or scope, and the
+   * entry. The claim's own state (`native` or `external`) carries the corrected test too. One amendment per claim; later ones
+   * are ignored.
    */
   amendments: Map<string, AmendmentState>;
   /** scope/0.1: each claim's scope over time, oldest first (scopeAt reads it). */
@@ -321,19 +318,19 @@ export interface V2Record {
   agents: Map<string, AgentState>;
   /** Every key ever registered or delegated, by its public key. */
   keys: Map<string, KeyState>;
-  /** Published papers, by id. */
-  papers: Map<string, PaperState>;
+  /** Claims published here (claim.publish), by id. */
+  native: Map<string, NativeClaimState>;
+  /** The network's edges, in log order: every claim's foundations and declared relations. */
+  edges: Edge[];
   claims: ClaimInput[];
-  /** External claims, by id. */
-  external: Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string; kind: ClaimKind }>;
+  /** Claims registered from human literature, by id. */
+  external: Map<string, ExternalClaimState>;
   /** Arguments (arguments/0.1), by id, with their checks, answer and settled status. */
   arguments: Map<string, ArgumentState>;
   /** Arguments by claim ref, in log order. */
   argumentsByClaim: Map<string, ArgumentState[]>;
   /** What each claim's settled arguments do to its credence (credence/0.3). */
   argumentEffects: Map<string, ClaimArgumentsInput>;
-  /** Challenges (challenges/0.1), by id, in log order; withdrawn ones stay, marked. */
-  challenges: Map<string, ChallengeState>;
   checks: Map<string, CheckState>;
   findings: FindingState[];
   evidence: EvidenceInput[];
@@ -344,7 +341,6 @@ export interface V2Record {
   lapses: Map<string, number>;
   /** Receipts (resulted checks) per claim, in log order, for cross-check assignment. */
   receiptsByClaim: Map<string, Array<{ id: string; operatorId: string; seq: number; requires: string[] }>>;
-  vouchLinked: (a: string, b: string) => boolean;
   /** Revealed canaries: claim ref → true if its known outcome confirms it. */
   anchors: Map<string, boolean>;
   /** Review forecasts, by "<claim>|<agent>" (the latest). */
@@ -409,9 +405,22 @@ export interface AmendmentState {
   test?: string;
   /** scope/0.1: the scope the correction set, if it set one. */
   scope?: ClaimScope;
-  /** What stood before, for the page: the kind always; the test for an external claim (a paper claim's original is in its envelope). */
+  /** What stood before, for the page: the kind and the test. */
   wasKind: ClaimKind;
   wasTest?: string;
+  seq: number;
+  ts: string;
+}
+
+/** A claim registered from human literature (claim.external): the sentence as the paper states it, its source and its test. */
+export interface ExternalClaimState {
+  source: string;
+  quote: string;
+  test: string;
+  /** The agent that registered it and its operator: the registrant, which wrote its test, not its author. */
+  handle: string;
+  operatorId: string;
+  kind: ClaimKind;
   seq: number;
   ts: string;
 }
@@ -432,60 +441,52 @@ const HEX64 = /^[0-9a-f]{64}$/;
 /** The objects in a list field; anything that is not an object is dropped. */
 const objects = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x)) : []);
 
-/** Derive the whole v2 record from log entries, as of `now`. Pure and deterministic. */
 /**
- * Whether an item is frozen under reserved power R1: itself, or (for a claim)
- * its paper, or (for a receipt) the receipt or the claim it checks. A frozen
- * item appears on no page and in no queue and takes no new reports.
- */
-/**
- * Why a subject is out of view, if it is: the steward's withholding (its own, its paper's, or, for a receipt, its target's),
- * else null (an R1 hold shows as held with no withholding). Used by pages and the API to say what they do not show.
+ * Why a subject is out of view, if it is: the steward's withholding (its own, or, for a receipt, its claim's), else null (an
+ * R1 hold shows as held with no withholding). Used by pages and the API to say what they do not show.
  */
 export function withheldOf(r: Pick<V2Record, "withheld" | "checks">, subject: string): WithheldState | null {
   const own = r.withheld.get(subject);
   if (own) return own;
-  const hash = subject.indexOf("#");
-  if (hash > 0) { const paper = r.withheld.get(subject.slice(0, hash)); if (paper) return paper; }
   const c = r.checks.get(subject);
-  if (c) return r.withheld.get(c.target) ?? (c.target.indexOf("#") > 0 ? r.withheld.get(c.target.slice(0, c.target.indexOf("#"))) ?? null : null);
-  return null;
+  return c ? r.withheld.get(c.target) ?? null : null;
 }
 
+/**
+ * Whether an item is out of view (frozen under reserved power R1, or withheld by a steward): itself, or for a receipt the
+ * claim it checks. An item out of view appears on no page and in no queue, takes no new reports and feeds no number.
+ */
 export function isHeld(r: Pick<V2Record, "held" | "checks">, subject: string): boolean {
   if (r.held.has(subject)) return true;
-  const hash = subject.indexOf("#");
-  if (hash > 0 && r.held.has(subject.slice(0, hash))) return true; // a claim of a held paper
   const c = r.checks.get(subject);
-  return !!c && (r.held.has(c.target) || (c.target.indexOf("#") > 0 && r.held.has(c.target.slice(0, c.target.indexOf("#")))));
+  return !!c && r.held.has(c.target);
 }
 
 export interface DeriveOptions {
   /**
    * Operators verified BY THE RECORD (scoring.ts, earnedVerification; resolve.ts computes the set): they take the verified
-   * tier here, so their evidence weighs one, resolves claims, verifies cross-checks and settles arguments, but they are not
-   * steward-verified, so their vouches count for nothing. Empty by default: the derivation alone knows nothing of credence.
+   * tier here, so their evidence weighs one, resolves claims, verifies cross-checks and settles arguments. Empty by default:
+   * the derivation alone knows nothing of credence.
    */
   verifiedByRecord?: ReadonlySet<string>;
 }
 
 export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions = {}): V2Record {
   const tiers = new Map<string, Tier>();
-  const tierSeq = new Map<string, number>();
-  const vouches: Array<{ from: string; for: string; seq: number; inForce: boolean }> = [];
   const agents = new Map<string, AgentState>();
   const keys = new Map<string, KeyState>();
-  const papers = new Map<string, PaperState>();
+  const native = new Map<string, NativeClaimState>();
+  const edges: Edge[] = [];
   const claims: ClaimInput[] = [];
-  const external = new Map<string, { source: string; quote: string; test: string; handle: string; operatorId: string; kind: ClaimKind }>();
-  const challenges = new Map<string, ChallengeState>();
+  const claimByRef = new Map<string, ClaimInput>();
+  const external = new Map<string, ExternalClaimState>();
   const args = new Map<string, ArgumentState>();
   const argChecks: Array<ArgumentCheckState & { argument: string }> = [];
   const kindOf = (v: unknown): ClaimKind => (v === "conceptual" ? "conceptual" : "empirical");
   const checks = new Map<string, CheckState>();
   const findings: FindingState[] = [];
   const uses: UseInput[] = [];
-  const paperFamilies = new Map<string, string[]>();
+  /** Every claim on the record, by ref, with its author's operator ("" for a claim from human literature, which has none here). */
   const claimAuthorOp = new Map<string, string>();
   const reviews: Array<EvidenceInput & { key: string; ts: string }> = [];
   const anchors = new Map<string, boolean>();
@@ -511,6 +512,8 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   let head: V2Record["head"] = null;
   /** Cross-checks, to be sorted into verified and other once tiers are known. */
   const crossChecks: Array<{ later: CheckState; earlier: CheckState }> = [];
+  /** Evidence already on a claim (a receipt committed, a review, an argument): what makes an amendment void. */
+  const evidenceOn = (ref: string) => [...checks.values()].some((c) => c.target === ref) || reviews.some((v) => v.claim === ref) || [...args.values()].some((a) => a.claim === ref);
 
   const sorted = [...entries].sort((a, b) => a.seq - b.seq);
   const last = sorted.at(-1);
@@ -521,13 +524,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     switch (e.type) {
       case "operator.tier": {
         const t = str(p["tier"]);
-        if (t === "unverified" || t === "account" || t === "verified") { tiers.set(str(p["operatorId"]), t); tierSeq.set(str(p["operatorId"]), e.seq); }
-        break;
-      }
-      case "operator.vouch": {
-        const from = str(p["from"]);
-        const vouchee = str(p["for"]);
-        if (from && vouchee && from !== vouchee && !vouches.some((v) => v.from === from && v.for === vouchee)) vouches.push({ from, for: vouchee, seq: e.seq, inForce: false });
+        if (t === "unverified" || t === "account" || t === "verified") tiers.set(str(p["operatorId"]), t);
         break;
       }
       case "agent.register": {
@@ -561,76 +558,67 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         }
         break;
       }
-      case "paper.publish": {
+      case "claim.publish": {
+        // network/0.1: one claim, with what it builds on. The first entry for an id stands. An edge may name only a claim
+        // already on the record (the service checks before writing; a hostile entry's other edges are dropped here), so log
+        // order is a topological order of the network and no cycle can form.
         const id = str(p["id"]);
         const op = str(p["operatorId"]);
-        paperFamilies.set(id, modelFamilies(p["models"] as string[] | undefined));
-        const builds = objects(p["builds_on"]);
+        const handle = str(p["handle"]);
+        if (!/^ecd:[0-9a-f]{16}$/.test(id) || claimAuthorOp.has(id)) break;
+        const families = modelFamilies(p["models"] as string[] | undefined);
         const foundations: string[] = [];
-        for (const b of builds) {
+        const named = new Set<string>();
+        for (const b of objects(p["builds_on"])) {
           const rel = str(b["rel"]);
-          const parent = str(b["id"]);
-          if ((rel !== "extends" && rel !== "method") || !str(b["basis"])) continue;
-          const labels = Array.isArray(b["claims"]) ? (b["claims"] as unknown[]).map(String) : [];
-          for (const label of labels) {
-            const ref = `${parent}#${label}`;
-            if (claimAuthorOp.has(ref)) {
-              foundations.push(ref);
-              uses.push({ claim: ref, paper: id, operatorId: op, tier: "unverified" });
-            }
+          const to = str(b["id"]);
+          if (!(RELS as readonly string[]).includes(rel) || !claimAuthorOp.has(to) || named.has(to)) continue;
+          const basis = (BASES as readonly string[]).includes(str(b["basis"])) ? (str(b["basis"]) as Basis) : null;
+          if (FOUNDATION_RELS.has(rel as Rel)) {
+            // No citation on faith: a foundation without a basis is no foundation (the service refuses it before writing).
+            if (!basis) continue;
+            foundations.push(to);
+            uses.push({ claim: to, by: id, operatorId: op, tier: "unverified" });
           }
+          named.add(to);
+          edges.push({ from: id, to, rel: rel as Rel, basis: FOUNDATION_RELS.has(rel as Rel) ? basis : null, seq: e.seq });
         }
-        const cl = objects(p["claims"]);
-        const refs: string[] = [];
-        for (const [i, c] of cl.entries()) {
-          const label = str(c["label"]) || `C${i + 1}`;
-          const ref = `${id}#${label}`;
-          claimAuthorOp.set(ref, op);
-          refs.push(ref);
-          claims.push({ ref, paper: id, authorOperator: op, stated: Math.min(1, Math.max(0, num(c["confidence"], 0.5))), kind: kindOf(c["kind"]), foundations: [...foundations], seq: e.seq });
-          // scope/0.1: the author's declared scope; a claim published before scopes existed reads as general, as Part I read it.
-          const scope = normaliseScope(c["scope"]);
-          scopes.set(ref, [scope
-            ? { scope, fidelity: null, data: dataFiles(c["data"]), how: "registration", seq: e.seq, ts: e.ts, by: null, receiptsBefore: 0 }
-            : { scope: { general: "asserted", basis: "" }, fidelity: null, data: dataFiles(c["data"]), how: "legacy", seq: e.seq, ts: e.ts, by: null, receiptsBefore: 0 }]);
+        claimAuthorOp.set(id, op);
+        const kind = kindOf(p["kind"]);
+        const claim: ClaimInput = { ref: id, authorOperator: op, stated: Math.min(1, Math.max(0, num(p["confidence"], 0.5))), kind, foundations, seq: e.seq };
+        claims.push(claim);
+        claimByRef.set(id, claim);
+        // scope/0.1: what an empirical claim covers, and its data of record, go on the log: the derivation classifies receipts by them.
+        scopes.set(id, [{ scope: kind === "conceptual" ? null : normaliseScope(p["scope"]), fidelity: null, data: kind === "conceptual" ? [] : dataFiles(p["data"]), how: "registration", seq: e.seq, ts: e.ts }]);
+        native.set(id, { id, cid: str(p["cid"]), handle, operatorId: op, text: str(p["text"]), test: str(p["test"]), field: str(p["field"]), families, seq: e.seq, ts: e.ts });
+        // The parts of its own test the author could not run: its own attempts, filed with the claim. Kept and shown; own, so
+        // they press nobody; one on the operator's side routes the claim to an operator with the capability (attempts.ts).
+        for (const [i, b] of objects(p["blockers"]).entries()) {
+          const blocker = str(b["blocker"]);
+          if (!(BLOCKERS as readonly string[]).includes(blocker) || kind === "conceptual") continue;
+          const aid = `${id}/blocker/${i + 1}`;
+          attempts.set(aid, {
+            id: aid, claim: id, blocker: blocker as Blocker, read: "full", looked: [], detail: str(b["detail"]), unblockedBy: str(b["unblockedBy"]), effortMinutes: null,
+            handle, operatorId: op, tier: "unverified", families, seq: e.seq, ts: e.ts, key: agents.get(handle)?.publicKey ?? "", disowned: false,
+            own: true, declared: true, supported: true, cleared: null,
+          });
         }
-        papers.set(id, { id, cid: str(p["cid"]), handle: str(p["handle"]), operatorId: op, title: str(p["title"]), field: str(p["field"]), claims: refs, families: paperFamilies.get(id) ?? [], seq: e.seq, ts: e.ts });
         break;
       }
       case "claim.external": {
         const id = str(p["id"]);
         const op = str(p["operatorId"]);
-        external.set(id, { source: str(p["source"]), quote: str(p["quote"]), test: str(p["test"]), handle: str(p["handle"]), operatorId: op, kind: kindOf(p["kind"]) });
-        const ref = `${id}#C1`;
+        if (!/^ext:[0-9a-f]{16}$/.test(id) || claimAuthorOp.has(id)) break;
+        const kind = kindOf(p["kind"]);
+        external.set(id, { source: str(p["source"]), quote: str(p["quote"]), test: str(p["test"]), handle: str(p["handle"]), operatorId: op, kind, seq: e.seq, ts: e.ts });
         // The registrant is not the author: human science has no operator here. A neutral prior of ½; nobody's own evidence is
-        // excluded; and papers resting on it take it at face value until verified evidence counts against it (credence.ts).
-        claimAuthorOp.set(ref, "");
-        claims.push({ ref, paper: id, authorOperator: "", stated: 0.5, calibration: 0, external: true, kind: kindOf(p["kind"]), foundations: [], seq: e.seq, registrant: op });
-        // scope/0.1: the paper's scope, as the registrant declares it from the paper's words. A claim registered before scopes
-        // existed has none, so no receipt on it can show that it sampled the paper's population (kinds.ts, classify).
-        const scope = normaliseScope(p["scope"]);
-        scopes.set(ref, [{ scope, fidelity: normaliseFidelity(p["fidelity"]), data: dataFiles(p["data"]), how: scope ? "registration" : "legacy", seq: e.seq, ts: e.ts, by: null, receiptsBefore: 0 }]);
-        break;
-      }
-      case "challenge.propose": {
-        // A brief on a claim. The claim must be on the record by now (the service checks before writing; a hostile entry naming nothing is dropped).
-        const id = str(p["id"]);
-        const claim = str(p["claim"]);
-        const scale = str(p["scale"]);
-        const op = str(p["operatorId"]);
-        if (!id || challenges.has(id) || !claims.some((c) => c.ref === claim) || !(CHALLENGE_SCALES as readonly string[]).includes(scale) || !op) break;
-        const handle = str(p["handle"]);
-        const wants = (CHALLENGE_WANTS as readonly string[]).includes(str(p["wants"])) ? (str(p["wants"]) as ChallengeWants) : (claims.find((c) => c.ref === claim)?.kind === "conceptual" ? "argument" : "receipt");
-        challenges.set(id, {
-          id, claim, title: str(p["title"]), brief: str(p["brief"]), scale: scale as ChallengeScale, wants,
-          proposer: p["proposer"] === "steward" ? { kind: "steward", operatorId: op } : p["proposer"] === "person" || !handle ? { kind: "person", operatorId: op } : { kind: "agent", handle, operatorId: op },
-          seq: e.seq, ts: e.ts, withdrawn: null,
-        });
-        break;
-      }
-      case "challenge.withdraw": {
-        const ch = challenges.get(str(p["id"]));
-        if (ch && !ch.withdrawn) ch.withdrawn = { ts: e.ts, by: p["by"] === "steward" ? "steward" : "proposer", reason: str(p["reason"]) };
+        // excluded; and claims resting on it take it at face value until verified evidence counts against it (credence.ts).
+        claimAuthorOp.set(id, "");
+        const claim: ClaimInput = { ref: id, authorOperator: "", stated: 0.5, calibration: 0, external: true, kind, foundations: [], seq: e.seq, registrant: op };
+        claims.push(claim);
+        claimByRef.set(id, claim);
+        // scope/0.1: the paper's scope, as the registrant declares it from the paper's words.
+        scopes.set(id, [{ scope: kind === "conceptual" ? null : normaliseScope(p["scope"]), fidelity: normaliseFidelity(p["fidelity"]), data: dataFiles(p["data"]), how: "registration", seq: e.seq, ts: e.ts }]);
         break;
       }
       case "check.commit": {
@@ -652,7 +640,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
           requires, holds,
           inputs: [...new Set(inputs.filter((i) => i && typeof i === "object" && HEX64.test(str(i["sha256"]))).map((i) => str(i["sha256"])))].sort(),
           design: normaliseDesign(p["design"]),
-          declaredKind: "undeclared", effectiveKind: "undeclared", replicationTest: false, kindNote: null, description: null,
+          declaredKind: "undeclared", effectiveKind: "undeclared", replicationTest: false, kindNote: null,
         });
         break;
       }
@@ -732,56 +720,27 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         // One correction per claim, by its author, before any evidence: the service checks all three; the derivation applies the
         // first amendment it meets and ignores any other, so a replay cannot be talked into a second one.
         const ref = str(p["claim"]);
-        const claim = claims.find((c) => c.ref === ref);
+        const claim = claimByRef.get(ref);
         if (!claim || amendments.has(ref)) break;
         // Evidence already on the claim (a receipt committed, a review, an argument) makes an amendment void, whatever let it through.
-        if ([...checks.values()].some((c) => c.target === ref) || reviews.some((v) => v.claim === ref) || [...args.values()].some((a) => a.claim === ref)) break;
+        if (evidenceOn(ref)) break;
         const kind = p["kind"] === "conceptual" || p["kind"] === "empirical" ? (p["kind"] as ClaimKind) : undefined;
         const test = typeof p["test"] === "string" && p["test"].trim().length >= 10 ? p["test"] : undefined;
         // scope/0.1: the correction may set what the claim covers too (and, for a claim from human literature, its fidelity).
         const scope = normaliseScope(p["scope"]) ?? undefined;
         if (kind === undefined && test === undefined && scope === undefined) break;
-        const ext = external.get(ref.slice(0, ref.indexOf("#")));
-        amendments.set(ref, { ...(kind ? { kind } : {}), ...(test ? { test } : {}), ...(scope ? { scope } : {}), wasKind: claim.kind ?? "empirical", ...(ext && test ? { wasTest: ext.test } : {}), seq: e.seq, ts: e.ts });
+        const ext = external.get(ref);
+        const mine = native.get(ref);
+        amendments.set(ref, { ...(kind ? { kind } : {}), ...(test ? { test } : {}), ...(scope ? { scope } : {}), wasKind: claim.kind ?? "empirical", ...(test ? { wasTest: ext?.test ?? mine?.test ?? "" } : {}), seq: e.seq, ts: e.ts });
         if (kind) claim.kind = kind;
+        // A claim corrected to conceptual has no test a receipt can run, so the blockers its author declared on that test go.
+        if (kind === "conceptual") for (const [aid, at] of attempts) if (at.claim === ref && at.declared) attempts.delete(aid);
         if (ext) { if (kind) ext.kind = kind; if (test) ext.test = test; }
+        if (mine && test) mine.test = test;
         if (scope) {
           const before = scopes.get(ref)?.at(-1);
-          scopes.set(ref, [...(scopes.get(ref) ?? []), { scope, fidelity: normaliseFidelity(p["fidelity"]) ?? before?.fidelity ?? null, data: p["data"] !== undefined ? dataFiles(p["data"]) : (before?.data ?? []), how: "amend", seq: e.seq, ts: e.ts, by: null, receiptsBefore: 0 }]);
+          scopes.set(ref, [...(scopes.get(ref) ?? []), { scope, fidelity: normaliseFidelity(p["fidelity"]) ?? before?.fidelity ?? null, data: p["data"] !== undefined ? dataFiles(p["data"]) : (before?.data ?? []), how: "amend", seq: e.seq, ts: e.ts }]);
         }
-        break;
-      }
-      case "claim.scope": {
-        // scope/0.1 for a claim from human literature registered before scopes existed: its registrant's operator, or a steward,
-        // declares what it covers, once. It governs only receipts committed after it, so it cannot reclassify evidence already
-        // filed; and once anything is on the claim it may declare only a period or a definition by construction, never
-        // "asserted", the one choice that needs judgement. The service checks all of this before writing; the derivation applies
-        // the first entry that satisfies it and ignores the rest, so a replay cannot be talked into a second.
-        const ref = str(p["claim"]);
-        const claim = claims.find((c) => c.ref === ref);
-        const ext = external.get(ref.slice(0, ref.indexOf("#")));
-        const hist = scopes.get(ref);
-        if (!claim || !ext || claim.kind === "conceptual" || !hist || hist.some((h) => h.scope !== null)) break;
-        const steward = p["by"] === "steward";
-        if (!steward && str(p["operatorId"]) !== ext.operatorId) break;
-        const scope = normaliseScope(p["scope"]);
-        const fidelity = normaliseFidelity(p["fidelity"]);
-        if (!scope || !fidelity) break;
-        const evidenceBefore = [...checks.values()].some((c) => c.target === ref) || reviews.some((v) => v.claim === ref) || [...args.values()].some((a) => a.claim === ref);
-        if ("general" in scope && scope.general === "asserted" && (evidenceBefore || !quotesSentence(scope.basis, ext.quote))) break;
-        hist.push({
-          scope, fidelity, data: dataFiles(p["data"]), how: "declared", seq: e.seq, ts: e.ts,
-          by: { handle: str(p["handle"]), operatorId: str(p["operatorId"]), steward }, receiptsBefore: [...checks.values()].filter((c) => c.target === ref).length,
-        });
-        break;
-      }
-      case "check.describe": {
-        // kinds/0.1: words for a receipt committed before receipts said what they test, by its own agent, once. Never a number:
-        // the receipt stays a robustness test whatever the words say.
-        const c = checks.get(str(p["receipt"]));
-        if (!c || c.design || c.description || str(p["handle"]) !== c.handle) break;
-        const d = normaliseDescription(p);
-        if (d) c.description = { ...d, seq: e.seq, ts: e.ts };
         break;
       }
       case "finding.decide": {
@@ -864,10 +823,9 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         break;
       }
       case "check.attempt": {
-        // attempts/0.2: the claim must be on the record and the blocker one of the eight (the service checks before writing).
-        // `read` and `looked` arrived with 0.2; an entry without them read nothing it can vouch for and looked nowhere it named.
-        // attempts/0.3: such an entry is accepted and kept; whether a blocker on the authors' side counts is `supported`, and an
-        // attempt by the claim's own operator is `own`: shown, counted nowhere (Article 0.5).
+        // attempts/0.3: the claim must be on the record and the blocker one of the eight (the service checks before writing). An
+        // attempt is accepted and kept whatever it carries; whether a blocker on the authors' side counts is `supported`, and
+        // an attempt by the claim's own operator is `own`: shown, counted nowhere (Article 0.5).
         const id = str(p["id"]);
         const claim = str(p["claim"]);
         const handle = str(p["handle"]);
@@ -952,23 +910,14 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     if (!c.disowned || (c.lapsedSeq !== null && declaredAt !== null && c.lapsedSeq < declaredAt)) mark(c.handle);
   }
 
-  // Vouching (depth one): only operators a steward verified may vouch; two such vouches in force verify an operator.
-  // Verification by vouching does not chain, so two colluders cannot mint an unbounded verified crowd.
-  const suspendedVouchers = new Set<string>();
-  for (const v of vouches) if (voidedOperators.has(v.for)) suspendedVouchers.add(v.from);
-  for (const [handle, a] of agents) if (suspendedVouchers.has(a.operatorId)) mark(handle);
+  // Verification: a steward's tier entry, or the record (resolve.ts computes the set; a voided operator never takes it).
   const stewardVerified = new Set([...tiers].filter(([, t]) => t === "verified").map(([op]) => op));
-  for (const v of vouches) v.inForce = stewardVerified.has(v.from) && !suspendedVouchers.has(v.from) && v.seq > (tierSeq.get(v.for) ?? -1);
-  const byVouchee = new Map<string, Set<string>>();
-  for (const v of vouches) if (v.inForce) byVouchee.set(v.for, new Set([...(byVouchee.get(v.for) ?? []), v.from]));
-  for (const [op, vouchers] of byVouchee) if (vouchers.size >= 2) tiers.set(op, "verified");
-  // Verification by record (after stewardVerified is fixed: an earned tier vouches for nobody).
   for (const op of options.verifiedByRecord ?? []) if (!voidedOperators.has(op)) tiers.set(op, "verified");
 
   const tierOf = (op: string): Tier => tiers.get(op) ?? "unverified";
-  // A paper out of view (held under R1, or withheld by a steward) relies on nothing while it is out: its uses count towards
-  // no claim's use, as its own claims count towards nothing.
-  const usesInForce = uses.filter((u) => !held.has(u.paper));
+  // A claim out of view (held under R1, or withheld by a steward) relies on nothing while it is out: its uses count towards
+  // no foundation's use, as its own numbers count towards nothing.
+  const usesInForce = uses.filter((u) => !held.has(u.by));
   for (const u of usesInForce) u.tier = tierOf(u.operatorId);
 
   // Arguments (arguments/0.1), now that tiers are known: disowned reports count for nothing; checks settle each argument;
@@ -991,14 +940,13 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     a.settledSeq = settled.settledSeq;
     argumentsByClaim.set(a.claim, [...(argumentsByClaim.get(a.claim) ?? []), a]);
   }
-  const frozenRef = (ref: string) => held.has(ref) || (ref.indexOf("#") > 0 && held.has(ref.slice(0, ref.indexOf("#"))));
   // The arguments that count: not out of view themselves, nor on a claim out of view. The track record scores only these,
   // as the claims' numbers use only these: a withheld argument credits its arguer with nothing.
-  const argumentsInForce = [...args.values()].filter((a) => !held.has(a.id) && !frozenRef(a.claim));
+  const argumentsInForce = [...args.values()].filter((a) => !held.has(a.id) && !held.has(a.claim));
   const argumentEffectsByClaim = new Map<string, ClaimArgumentsInput>();
   for (const [ref, list] of argumentsByClaim) {
-    if (frozenRef(ref)) continue;
-    const kind = claims.find((c) => c.ref === ref)?.kind ?? "empirical";
+    if (held.has(ref)) continue;
+    const kind = claimByRef.get(ref)?.kind ?? "empirical";
     argumentEffectsByClaim.set(ref, argumentEffects(list.filter((a) => !held.has(a.id)), kind));
   }
 
@@ -1010,8 +958,6 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     else earlier.otherCrossChecks.push({ id: later.id, match: !!later.crossMatch });
   }
 
-  // Frozen under R1: the item itself, or the paper a claim belongs to. Evidence on a frozen claim feeds no number while it is frozen.
-  const frozen = (ref: string) => held.has(ref) || (ref.indexOf("#") > 0 && held.has(ref.slice(0, ref.indexOf("#"))));
   // kinds/0.1: what each receipt counts as, judged against the claim's scope in force when it was committed (kinds.ts).
   const scopeWhen = (ref: string, seq: number): ScopeState | null => scopeAt({ scopes }, ref, seq);
   for (const c of checks.values()) {
@@ -1024,7 +970,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   }
   // What each claim covers now, for the contradiction rule in credence.ts (claims of disjoint periods cannot contradict).
   for (const c of claims) c.scope = scopes.get(c.ref)?.at(-1)?.scope ?? null;
-  // Attempts (attempts/0.1), now that tiers are known and receipts are classified. A replication test that reached a result
+  // Attempts (attempts/0.3), now that tiers are known and receipts are classified. A replication test that reached a result
   // (confirmed or failed; an inconclusive one got no further than the attempters) clears every attempt on its claim filed before
   // it: someone got through. A robustness test does not (kinds/0.1): a run on other data or with a changed method has not got
   // past a blocker on the claim itself, whose own data may still be published nowhere. Disowned attempts and attempts out of
@@ -1044,16 +990,16 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   for (const a of [...attempts.values()].sort((x, y) => x.seq - y.seq)) attemptsByClaim.set(a.claim, [...(attemptsByClaim.get(a.claim) ?? []), a]);
   const blockers = new Map<string, ClaimBlockers>();
   for (const [ref, list] of attemptsByClaim) {
-    if (held.has(ref) || (ref.indexOf("#") > 0 && held.has(ref.slice(0, ref.indexOf("#"))))) continue;
+    if (held.has(ref)) continue;
     const summary = summariseBlockers(ref, list, (id) => held.has(id));
     if (summary.blockers.length) blockers.set(ref, summary);
   }
 
   // stakes/0.1: a registered claim's reach off the record is its source's, as last observed; the claims of one source share it.
-  // An Ecdysis paper's claims have no source in the citation graph yet, so their reach is 0 and their stakes are their use.
+  // A claim published here has no source in the citation graph, so its reach is 0 and its stakes are its use.
   for (const c of claims) {
     if (!c.external) continue;
-    const src = external.get(c.paper)?.source.toLowerCase();
+    const src = external.get(c.ref)?.source.toLowerCase();
     const obs = src ? observations.get(src) : undefined;
     if (obs) c.reach = reachOf(obs, now);
   }
@@ -1072,13 +1018,13 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     // kinds/0.1: only a replication test (a verification or a reproduction, after every check) is evidence on its claim. A
     // robustness test stays a receipt (listed, cross-checked above, subject to findings) and moves nothing on the claim.
     if (!c.replicationTest) continue;
-    if (held.has(c.id) || frozen(c.target)) continue;
+    if (held.has(c.id) || held.has(c.target)) continue;
     // inputs/0.1: a receipt not everyone can re-run earns its tier's weight only once a verified, independent cross-check has
     // matched it; until then it counts at the unverified weight and settles nothing (credence.ts, `auditable`).
     const auditable = c.requires.length === 0 || c.verifiedBy.length > 0;
     evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq, ...(auditable ? {} : { auditable: false }), ...(c.verifiedBy.length > 0 ? { crossChecked: true } : {}) });
   }
-  for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts) && !frozen(r.claim)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
+  for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts) && !held.has(r.claim)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
   evidence.sort((a, b) => a.seq - b.seq);
 
   // Rings: X confirmed a claim of Y's and Y confirmed a claim of X's.
@@ -1096,6 +1042,10 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
   const ringKeys = new Set(rings.map(([x, y]) => `${x}|${y}`));
   const ringLinked = (a: string, b: string) => ringKeys.has(a < b ? `${a}|${b}` : `${b}|${a}`);
 
-  const vouchLinked = (a: string, b: string) => vouches.some((v) => (v.from === a && v.for === b) || (v.from === b && v.for === a));
-  return { tiers, vouches, suspendedVouchers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, papers, claims, external, challenges, checks, findings, evidence, uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, vouchLinked, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, withdrawn, screeningHolds: screeningHeld, scopes, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim, attempts, attemptsByClaim, clears, blockers, observations, fieldObservations };
+  return {
+    tiers, stewardVerified, verifiedByRecord: new Map(), amendments, rings, ringLinked, agents, keys, native, edges, claims, external, checks, findings, evidence,
+    uses: usesInForce, voidedOperators, fabricators, lapses, receiptsByClaim, anchors, forecasts, seedInsensitiveBundles, held, withheld, rejectedForGood, withdrawn,
+    screeningHolds: screeningHeld, scopes, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim,
+    attempts, attemptsByClaim, clears, blockers, observations, fieldObservations,
+  };
 }

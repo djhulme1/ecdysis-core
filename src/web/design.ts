@@ -344,50 +344,31 @@ footer .foot-brand .symbol{width:40px;height:auto}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 `;
 
-const PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
-  ["/people", "Start"],
-  ["/connect", "Connect"],
-  ["/observatory", "Observatory"],
-  ["/papers", "Papers"],
-  ["/graph", "Graph"],
-  ["/frontier", "Frontier"],
-  ["/review", "Review"],
-  ["/apps", "Apps"],
-  ["/commons", "Commons"],
-];
-
-/** v2's halves: no review queue, no apps; a place of one's own. */
+/** The people's half: start, connect, the lab, the network of claims, the map, the leaderboard, the observatory, questions. */
 export const V2_PEOPLE_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/people", "Start"],
   ["/connect", "Connect"],
   ["/lab", "Lab"],
-  ["/papers", "Papers"],
-  ["/graph", "Graph"],
+  ["/claims", "Claims"],
   ["/map", "Map"],
-  ["/frontier", "Frontier"],
   ["/leaderboard", "Leaderboard"],
   ["/observatory", "Observatory"],
   ["/faq", "FAQ"],
 ];
+/** The agents' half: the protocol and its references. */
 export const V2_AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
   ["/agents", "Overview"],
   ["/skill.md", "Protocol"],
   ["/api", "API"],
   ["/constitution.md", "Constitution"],
   ["/governance", "Amendments"],
+  ["/claims", "Claims"],
   ["/map", "Map"],
-  ["/frontier", "Frontier"],
   ["/lab", "Lab"],
   ["/llms.txt", "llms.txt"],
 ];
-
-const AGENT_NAV: ReadonlyArray<readonly [string, string]> = [
-  ["/agents", "Overview"],
-  ["/skill.md", "Protocol"],
-  ["/constitution.md", "Constitution"],
-  ["/v1/challenges", "Challenges"],
-  ["/llms.txt", "llms.txt"],
-];
+const PEOPLE_NAV = V2_PEOPLE_NAV;
+const AGENT_NAV = V2_AGENT_NAV;
 
 export interface ShellOptions {
   title: string;
@@ -472,33 +453,6 @@ export function shortDate(iso: string): string {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
-/** Platform-minted paper handles only; anything else is never linked. */
-export const PAPER_ID = /^ecd:\d{4}\.[a-z0-9]{4,12}$/;
-
-/**
- * Where a claim stands in the record (credence/0.1). A paper shows the
- * weakest status among its claims.
- */
-export type RecordStatus = "established" | "supported" | "unchecked" | "contested" | "refuted";
-
-/** What each status means, in a reader's words. */
-export const STATUS_MEANING: Record<RecordStatus, string> = {
-  established: "independently reproduced, and supported strongly enough for how much rests on it",
-  supported: "independent evidence supports it, but it is not established yet",
-  unchecked: "accepted by a jury, but nobody independent has checked it yet",
-  contested: "independent checks disagree, the evidence leans against it, or it rests on a refuted claim",
-  refuted: "independent checks say it does not hold",
-};
-
-/** How a citing paper relied on its parent, in words ("extends it, after reproducing it"). */
-export function howRelied(rel: string, basis: string | null | undefined): string {
-  if (rel === "background") return "mentions it as background (no weight)";
-  if (rel === "replicates") return "replicates it";
-  if (rel === "refutes") return "refutes it";
-  const verb = rel === "method" ? "takes its method from it" : "extends it";
-  return basis === "reproduced" ? `${verb}, after reproducing it` : basis === "reviewed" ? `${verb}, after reviewing it` : verb;
-}
-
 /**
  * The mark for a status, never colour alone: established is a filled ink
  * chip (●), supported an outlined one (◐), unchecked a dashed one (○),
@@ -507,40 +461,4 @@ export function howRelied(rel: string, basis: string | null | undefined): string
  */
 export function statusTone(s: string | null | undefined): "sound" | "part" | "open" | "risk" | "broken" {
   return s === "established" ? "sound" : s === "supported" ? "part" : s === "contested" ? "risk" : s === "refuted" ? "broken" : "open";
-}
-
-export interface SpecimenData {
-  id: string;
-  title: string;
-  agent: string;
-  fieldLabel: string;
-  ts: string;
-  /** The paper's claims counted by status. */
-  counts?: Partial<Record<string, number>> | null;
-}
-
-export const STATUS_ORDER: RecordStatus[] = ["established", "supported", "unchecked", "contested", "refuted"];
-
-/**
- * A paper's claims by status, as a row of status marks. There is no
- * paper-level verdict: claims are refuted, not papers (Article II.4). A
- * one-claim paper shows just its claim's status.
- */
-export function statusChips(counts: Partial<Record<string, number>> | null | undefined): string {
-  if (!counts) return "";
-  const present = STATUS_ORDER.filter((k) => (counts[k] ?? 0) > 0);
-  const total = present.reduce((n, k) => n + (counts[k] ?? 0), 0);
-  return present
-    .map((k) => `<span class="status ${statusTone(k)}">${esc(total === 1 ? k : `${counts[k]} ${k}`)}</span>`)
-    .join(" ");
-}
-
-/** The specimen label: the signature element of the identity. */
-export function specimenLabel(p: SpecimenData): string {
-  const linked = PAPER_ID.test(p.id);
-  const title = linked
-    ? `<a class="what" href="/p/${esc(p.id)}">${esc(p.title)}</a>`
-    : `<span class="what">${esc(p.title)}</span>`;
-  const date = shortDate(p.ts);
-  return `<div class="label"><div class="no">${esc(p.id)}</div>${title}<div class="meta"><span>${esc(p.agent)}</span><span>${esc(p.fieldLabel)}</span>${date ? `<span>${esc(date)}</span>` : ""}</div>${statusChips(p.counts)}</div>`;
 }

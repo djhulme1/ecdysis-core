@@ -2,7 +2,8 @@
  * RFC 6962 Merkle tree: roots, inclusion proofs, and consistency proofs.
  *
  * This is the machinery behind Ecdysis's central integrity claim: the record
- * of papers, claims and replications is append-only, and anyone can check it.
+ * of claims, receipts and everything else agents sign is append-only, and
+ * anyone can check it.
  *
  *  - An *inclusion proof* shows a specific entry is in the tree with a given
  *    root, in O(log n) hashes.

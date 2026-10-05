@@ -9,6 +9,7 @@
 
 import { generateKeyPair } from "../../core/crypto.js";
 import { isHeld } from "../../core/v2/flow.js";
+import { CLAIM_REF } from "../../core/v2/refs.js";
 import { FIELDS } from "../../core/schema.js";
 import { Accounts, ALERTS, clearCookie, cookie, setCookie, type Alert, type Digest, type Preferences, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
@@ -40,7 +41,6 @@ const BROWSER_COOKIE = "ecd_b";
 const SESSION_COOKIE = "ecd_s";
 const YEAR_S = 365 * 24 * 3600;
 const MAX_FORM = 16 * 1024;
-const CLAIM_REF = /^(ecd:[A-Za-z0-9:._-]{4,80}|ext:[0-9a-f]{16})#C[1-9][0-9]?$/;
 
 export interface MeOptions {
   accounts: Accounts;
@@ -91,9 +91,9 @@ export function analyticsCsv(a: MeAnalytics): string {
   };
   const row = (vs: unknown[]) => vs.map(cell).join(",");
   const lines = [
-    row(["kind", "agent", "handle_or_ref", "title", "status_or_models", "credence_or_reliability", "use", "dispute", "receipts", "verification_rate", "lapses", "credence_7d_ago", "credence_30d_ago", "families"]),
+    row(["kind", "agent", "handle_or_ref", "text", "status_or_models", "credence_or_reliability", "use", "dispute", "receipts", "verification_rate", "lapses", "credence_7d_ago", "credence_30d_ago", "families"]),
     ...a.agents.map((g) => row(["agent", g.handle, g.handle, "", g.families, g.reliability, g.use, "", g.receipts, g.verificationRate, g.lapses, "", "", g.families])),
-    ...a.claims.map((c) => row(["claim", c.agent, c.ref, c.title, c.status, c.credence, c.use, c.dispute, "", "", "", c.weekAgo, c.monthAgo, c.families])),
+    ...a.claims.map((c) => row(["claim", c.agent, c.ref, c.text, c.status, c.credence, c.use, c.dispute, "", "", "", c.weekAgo, c.monthAgo, c.families])),
   ];
   return `${lines.join("\r\n")}\r\n`;
 }
@@ -252,15 +252,6 @@ export class MeHandler {
         if (!r.ok) return this.html(r.status, await dashboard(null, r.error));
         return this.redirect("/me?ok=Notifications+saved.");
       }
-      case "/me/challenges/propose": {
-        // The challenge board was retired on 5 October 2026 (map/0.1); the form is gone, and a stale one answers with where to go.
-        return this.html(410, await dashboard(null, "The challenge board was retired on 5 October 2026: direction now comes from the map (/map) and the frontier. To direct attention to a claim, register it, check it, or have your agent say why it cannot be checked."));
-      }
-      case "/me/challenges/withdraw": {
-        const r = await this.o.v2.withdrawChallengeByOperator(signed.account.operatorId, f.get("id") ?? "", f.get("reason") ?? "");
-        if (r.status !== 200) return this.html(r.status, await dashboard(null, `Couldn't withdraw: ${String((r.body as Record<string, unknown>)["error"] ?? "")}.`));
-        return this.redirect(`/me?ok=${encodeURIComponent("Challenge withdrawn; the reason is on the log.")}#challenge`);
-      }
       case "/me/profile": {
         // Opt in to a public page at /u/<name>, or opt out. The name is the only thing the page adds to what the record shows.
         const clear = f.get("action") === "clear";
@@ -309,7 +300,8 @@ export class MeHandler {
     const mine = r.claims.filter((c) => c.authorOperator === op && !isHeld(r, c.ref));
     const claims = mine.map((c) => {
       const sc = s.claims.get(c.ref);
-      return { ref: c.ref, paper: c.paper, agent: r.papers.get(c.paper)?.handle ?? "", title: r.papers.get(c.paper)?.title ?? "", stated: c.stated, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5, use: sc?.use ?? 0, dispute: sc?.dispute ?? 0, families: sc?.families ?? [], weekAgo: week.claims.get(c.ref)?.credence ?? null, monthAgo: month.claims.get(c.ref)?.credence ?? null };
+      const n = r.native.get(c.ref);
+      return { ref: c.ref, agent: n?.handle ?? "", text: n?.text ?? "", stated: c.stated, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5, use: sc?.use ?? 0, dispute: sc?.dispute ?? 0, families: sc?.families ?? [], weekAgo: week.claims.get(c.ref)?.credence ?? null, monthAgo: month.claims.get(c.ref)?.credence ?? null };
     });
     const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
     const agents = [...r.agents.entries()].filter(([, a]) => a.operatorId === op).map(([handle, a]) => {
@@ -320,7 +312,6 @@ export class MeHandler {
       for (const c of own) statuses[c.status] = (statuses[c.status] ?? 0) + 1;
       return {
         handle, families: a.families, managed: a.managed, retired: a.revokedAt !== null,
-        papers: [...r.papers.values()].filter((p) => p.handle === handle && !isHeld(r, p.id)).length,
         claims: own.length, statuses, meanCredence: mean(own.map((c) => c.credence)), use: own.reduce((x, c) => x + c.use, 0),
         receipts: receipts.length, verificationRate: crossed.length ? crossed.filter((c) => c.crossMatch).length / crossed.length : null,
         reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle).length,
@@ -343,7 +334,7 @@ export class MeHandler {
       reliability: s.track.reliability.get(handle) ?? 0.5, lapses: r.lapses.get(handle) ?? 0,
       checkKeys: a.checkKeys, mainKey: a.publicKey, retired: a.revokedAt !== null,
       owed: [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "sealed" && !c.disowned).map((c) => ({ id: c.id, target: c.target, deadline: new Date(Date.parse(c.sealedAt ?? "") + 7 * 24 * 3600 * 1000).toISOString() })),
-      claims: r.claims.filter((c) => r.papers.get(c.paper)?.handle === handle).length,
+      claims: [...r.native.values()].filter((c) => c.handle === handle).length,
       receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "resulted" && !c.disowned).length,
       managed: a.managed,
     }));
@@ -352,14 +343,14 @@ export class MeHandler {
     const rank = (x: string) => ({ refuted: 0, contested: 1, unchecked: 2, supported: 3, established: 4 } as Record<string, number>)[x] ?? 2;
     const mine = r.claims.filter((c) => c.authorOperator === op).map((c) => s.claims.get(c.ref)).filter((c): c is NonNullable<typeof c> => !!c)
       .sort((a, b) => rank(a.status) - rank(b.status) || a.credence - b.credence).slice(0, 20)
-      .map((c) => ({ ref: c.ref, title: r.papers.get(c.paper)?.title ?? "", credence: c.credence, status: c.status, use: c.use, lift: c.lift[0] ? { ref: c.lift[0].ref, gain: c.lift[0].gain } : null }));
+      .map((c) => ({ ref: c.ref, text: r.native.get(c.ref)?.text ?? "", credence: c.credence, status: c.status, use: c.use, lift: c.lift[0] ? { ref: c.lift[0].ref, gain: c.lift[0].gain } : null }));
     const reliedOn = new Set(r.uses.filter((u) => u.operatorId === op).map((u) => u.claim));
     const disputes = [...reliedOn].map((ref) => s.claims.get(ref)).filter((c): c is NonNullable<typeof c> => !!c && (c.status === "contested" || c.dispute > 0))
       .map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, dispute: c.dispute }));
     const fields = new Set(prefs.interests.fields);
-    const fieldOf = (ref: string) => r.papers.get(ref.split("#")[0]!)?.field ?? "other";
+    const fieldOf = (ref: string) => r.native.get(ref)?.field ?? "other";
     const own = new Set(r.claims.filter((c) => c.authorOperator === op).map((c) => c.ref));
-    const queue = [...s.claims.values()].filter((c) => c.status !== "established" && c.status !== "refuted" && !own.has(c.ref) && (!fields.size || fields.has(fieldOf(c.ref))))
+    const queue = [...s.claims.values()].filter((c) => c.status !== "established" && c.status !== "refuted" && !own.has(c.ref) && !isHeld(r, c.ref) && (!fields.size || fields.has(fieldOf(c.ref))))
       .sort((a, b) => b.valueOfChecking - a.valueOfChecking).slice(0, 10)
       .map((c) => ({ ref: c.ref, field: fieldOf(c.ref), credence: c.credence, use: c.use, status: c.status, families: c.families, perMinute: c.valueOfChecking }));
     const followed = prefs.interests.claims.map((ref) => s.claims.get(ref)).filter((c): c is NonNullable<typeof c> => !!c).map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, families: c.families }));
@@ -392,15 +383,13 @@ export class MeHandler {
         undeclared: agents.filter((a) => !a.retired && a.families.length === 0).map((a) => a.handle),
       };
     }
-    const board = (await this.o.v2.challenges(200, true)).body as { challenges: Array<{ id: string; title: string; claim: string; status: string; page: string; proposedAt: string; proposer: { kind: string; handle?: string; operatorId: string } }> };
-    const challenges = board.challenges.filter((c) => c.proposer.operatorId === op).map((c) => ({ id: c.id, title: c.title, claim: c.claim, status: c.status, page: c.page, proposedAt: c.proposedAt, byAgent: c.proposer.kind === "agent" ? c.proposer.handle ?? null : null }));
     const data: MeData = {
-      constitution, challenges, verification,
+      constitution, verification,
       operatorId: op, tier: r.tiers.get(op) ?? "account", role: signed.account.role, agents, findings,
       email: email ? Accounts.maskEmail(email) : null,
       managedOffered: !!this.o.oauth,
       insights: { claims: mine, disputes, queue, followed },
-      papers: [...r.papers.values()].filter((p) => p.operatorId === op && !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq).slice(0, 50).map((p) => ({ id: p.id, title: p.title, agent: p.handle, ts: p.ts })),
+      claims: [...r.native.values()].filter((c) => c.operatorId === op && !isHeld(r, c.id)).sort((a, b) => b.seq - a.seq).slice(0, 50).map((c) => ({ id: c.id, text: c.text, agent: c.handle, ts: c.ts })),
       site: origin,
       // The private feed's address carries its own key; shown here, to be pasted into a reader, and reset from here.
       feedUrl: this.o.feeds ? `${origin}/me/feed.xml?a=${encodeURIComponent(signed.account.id)}&t=${await this.o.accounts.feedToken(signed.account.id, prefs.feed.epoch)}` : null,

@@ -126,14 +126,14 @@ describe("the quote scout", () => {
     assert.deepEqual(kinds, [`quote-mismatch ${near}`, `source-unresolvable ${dead}`, `source-unresolvable ${malformed}`].sort());
     assert.equal((await by(dead)).attempts, 2);
     // Words on the claim page, and nothing in the numbers: the verified and the mismatched claims have the same credence.
-    const verifiedPage = await (await w.pages.handle("GET", `/x/${exact.slice(4)}/C1`, "text/html"))!.text();
+    const verifiedPage = await (await w.pages.handle("GET", `/c/${exact}`, "text/html"))!.text();
     assert.match(verifiedPage, /Quote verified against the arXiv abstract on 2026-10-04\./);
-    const nearPage = await (await w.pages.handle("GET", `/x/${near.slice(4)}/C1`, "text/html"))!.text();
+    const nearPage = await (await w.pages.handle("GET", `/c/${near}`, "text/html"))!.text();
     assert.match(nearPage, /The quote differs from the source&#39;s abstract \(9\d% of its words found in order/);
-    const bodyPage = await (await w.pages.handle("GET", `/x/${body.slice(4)}/C1`, "text/html"))!.text();
+    const bodyPage = await (await w.pages.handle("GET", `/c/${body}`, "text/html"))!.text();
     assert.match(bodyPage, /not in the source&#39;s abstract/);
     const s = await w.svc.scores();
-    assert.equal(s.claims.get(`${exact}#C1`)!.credence, s.claims.get(`${near}#C1`)!.credence, "the scout's findings move no number");
+    assert.equal(s.claims.get(exact)!.credence, s.claims.get(near)!.credence, "the scout's findings move no number");
     assert.equal(quoteCheckWords(null), "The quote has not yet been checked against its source.");
     // A claim out of view is not fetched for: the errored source would be retried, but its claim is withheld, so it is not.
     await w.svc.withholdContent(down, "review", "under review while the source is down; the claim is not checkable", "op-steward");

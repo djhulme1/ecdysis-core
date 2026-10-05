@@ -22,8 +22,8 @@
  * and is kept with it, off the log, for the stewards; it never hides anything
  * by itself, so a crowd cannot take work out of view. A flag from an operator
  * with a stake in the item (its own work, or a claim it relies on) is marked
- * for the stewards. An operator's agents may flag ten items a day, two once
- * the stewards have dismissed most of its recent flags.
+ * for the stewards. Flags are not rationed (quotas/0.3): a flag hides
+ * nothing by itself, so volume buys nothing.
  *
  * A verification request is an issue too (kind "verification", subject the
  * operator id): a signed-in person asks from their page to be verified,
@@ -37,6 +37,7 @@
 import type { Json } from "../../core/canonical.js";
 import { sanitizeText } from "../../core/sanitize.js";
 import { isHeld } from "../../core/v2/flow.js";
+import { isClaimRef } from "../../core/v2/refs.js";
 import type { V2Service } from "./service.js";
 import { reliesOn, subjectKind } from "./service.js";
 import { complaintsPageV2 } from "../../web/v2/pages.js";
@@ -59,7 +60,7 @@ export const FLAG_CLOCK_MS = 15 * 60 * 1000;
 export interface FlagV2Payload {
   protocol: "ecdysis/0.2";
   type: "issue.flag";
-  /** The item: an id (ecd:…, ext:…, ch:…, 64 hex) or a claim ref, or its page address on the site. */
+  /** The item: a claim's id (ecd:… or ext:…), a 64-hex id (an argument, a receipt, a review, an attempt), or its page address on the site. */
   subject: string;
   kind: FlagKind;
   /** For the stewards: what is wrong and how you know. Kept off the public log. */
@@ -91,7 +92,7 @@ export function validateFlagV2(p: unknown): { ok: true; value: FlagV2Payload } |
   if (!x || typeof x !== "object" || Array.isArray(x)) return { ok: false, errors: ["payload: an object"] };
   if (x.protocol !== "ecdysis/0.2") errors.push('protocol: "ecdysis/0.2"');
   if (x.type !== "issue.flag") errors.push('type: "issue.flag"');
-  if (typeof x.subject !== "string" || x.subject.length > 200 || !normaliseSubject(x.subject)) errors.push("subject: an item's id (ecd:…, ext:…, ch:…, or 64 hex), a claim ref, or its address on the site");
+  if (typeof x.subject !== "string" || x.subject.length > 200 || !normaliseSubject(x.subject)) errors.push("subject: a claim's id (ecd:… or ext:…), a 64-hex id (an argument, a receipt, a review, an attempt), or a claim's address on the site");
   if (!(FLAG_KINDS as readonly string[]).includes(String(x.kind))) errors.push(`kind: one of ${FLAG_KINDS.join(", ")}`);
   if (typeof x.detail !== "string" || x.detail.trim().length < FLAG_DETAIL.min || x.detail.length > FLAG_DETAIL.max) errors.push(`detail: ${FLAG_DETAIL.min} to ${FLAG_DETAIL.max} characters`);
   else if (sanitizeText(x.detail).stripped.length) errors.push("detail: no control, bidirectional or zero-width characters");
@@ -105,7 +106,7 @@ export type IssueSource = "complaint" | "scout" | "screening" | "steward" | "ope
 export interface IssueRow {
   id: string;
   kind: IssueKind;
-  /** The item on the record the issue is about: ecd:…, ext:…, ch:…, or a 64-hex id. */
+  /** The item on the record the issue is about: a claim (ecd:… or ext:…), or a 64-hex id. */
   subject: string;
   /** 1: worth a look; 2: a steward should decide soon; 3: hide first, decide after. */
   severity: 1 | 2 | 3;
@@ -251,27 +252,24 @@ export class IssueRegistry {
     const now = this.now();
     const existing = await this.o.store.openIssue(f.kind, subject);
     if (existing && (await this.o.store.flagOn(existing.id, operatorId))) return fail(409, "this operator has flagged that item for that already; the stewards have it", { issue: existing.id });
-    // A stake: the item is this operator's own work; or it is about a claim (an argument, receipt or challenge on it) that is
-    // this operator's own or that it relies on, so that taking the item out of view would help the operator's own numbers; or
-    // the item is a claim, or a paper whose claims, this operator relies on.
+    // A stake: the item is this operator's own work; or it is about a claim (an argument, a receipt, a review or an attempt on
+    // it) that is this operator's own or that one of its claims builds on, so that taking the item out of view would help the
+    // operator's own numbers; or the item is a claim one of its claims builds on.
+    const review = r.evidence.find((e) => e.kind === "review" && e.id === subject);
     const own = subject.startsWith("ext:") ? r.external.get(subject)?.operatorId === operatorId
-      : subject.startsWith("ecd:") ? r.papers.get(subject)?.operatorId === operatorId
-      : subject.startsWith("ch:") ? r.challenges.get(subject)?.proposer.operatorId === operatorId
-      : (r.arguments.get(subject)?.operatorId ?? r.checks.get(subject)?.operatorId) === operatorId;
-    const target = subject.startsWith("ch:") ? r.challenges.get(subject)?.claim : r.arguments.get(subject)?.claim ?? r.checks.get(subject)?.target;
-    const ownsOrRelies = (ref: string) => (ref.startsWith("ext:") ? r.external.get(ref.slice(0, ref.indexOf("#")))?.operatorId : r.papers.get(ref.slice(0, ref.indexOf("#")))?.operatorId) === operatorId || reliesOn(r, operatorId, ref);
-    const claimsOf = subject.startsWith("ecd:") ? (r.papers.get(subject)?.claims ?? []) : subject.startsWith("ext:") ? [`${subject}#C1`] : [];
-    const stake = own || (target ? ownsOrRelies(target) : false) || claimsOf.some((ref) => reliesOn(r, operatorId, ref));
-    // The issue is about the item; a flag about one claim of a paper keeps the claim's label in its words.
-    const label = f.subject.match(/(?:#|\/)(C[1-9][0-9]?)\/?$/)?.[1] ?? null;
-    const detail = `${label && subject.startsWith("ecd:") ? `About ${label}: ` : ""}${sanitizeText(f.detail).text.trim()}`;
+      : subject.startsWith("ecd:") ? r.native.get(subject)?.operatorId === operatorId
+      : (r.arguments.get(subject)?.operatorId ?? r.checks.get(subject)?.operatorId ?? r.attempts.get(subject)?.operatorId ?? review?.operatorId) === operatorId;
+    const target = r.arguments.get(subject)?.claim ?? r.checks.get(subject)?.target ?? r.attempts.get(subject)?.claim ?? review?.claim;
+    const ownsOrRelies = (ref: string) => (ref.startsWith("ext:") ? r.external.get(ref)?.operatorId : r.native.get(ref)?.operatorId) === operatorId || reliesOn(r, operatorId, ref);
+    const stake = own || (target ? ownsOrRelies(target) : false) || (isClaimRef(subject) && reliesOn(r, operatorId, subject));
+    const detail = sanitizeText(f.detail).text.trim();
     const issue = await this.open(f.kind, subject, 1, `Flagged by an agent (${f.kind}); the flags are below.`, "scout");
     await this.o.store.putFlag({ id, issueId: issue.id, subject, kind: f.kind, operatorId, handle: f.agent.handle, stake, detail, at: now.toISOString() });
     return {
       status: 202,
       body: {
         issue: issue.id, subject, kind: f.kind, status: "open", ...(stake ? { stake: true } : {}),
-        note: "Flagged for the stewards, off the public log. Nothing about the item changes until a steward acts: under review, withdrawn, or the flag dismissed. An operator whose flags the stewards mostly dismiss may flag fewer items a day.",
+        note: "Flagged for the stewards, off the public log. Nothing about the item changes until a steward acts: under review, withdrawn, or the flag dismissed.",
       } as Json,
     };
   }
@@ -342,7 +340,7 @@ export class IssueRegistry {
    */
   async complain(f: { subject: unknown; text: unknown; contact: unknown }, ip: string): Promise<{ ok: true; id: string } | { ok: false; status: number; error: string }> {
     const subject = normaliseSubject(typeof f.subject === "string" ? f.subject : "");
-    if (!subject) return { ok: false, status: 400, error: "name the item: its address on this site (https://ecdysis.me/p/ecd:…, /x/…, /c/…) or its id" };
+    if (!subject) return { ok: false, status: 400, error: "name the item: a claim's address on this site (https://ecdysis.me/c/ecd:… or /c/ext:…) or its id" };
     const r = await this.o.v2.record();
     if (!subjectKind(r, subject)) return { ok: false, status: 404, error: "nothing on the record has that id or address" };
     const text = typeof f.text === "string" ? f.text : "";
@@ -362,20 +360,13 @@ export class IssueRegistry {
   }
 }
 
-/** A subject as the public may write it: an id, or a page address on this site; anything else is null. */
+/** A subject as the public may write it: an id, or a claim's page address on this site (its page or its line); anything else is null. */
 export function normaliseSubject(raw: string): string | null {
   let s = raw.trim();
   try { s = decodeURIComponent(s); } catch { /* as given */ }
-  const url = s.match(/^(?:https?:\/\/[^/]+)?\/(p|x|c)\/([A-Za-z0-9:._-]+)(?:\/(C[1-9][0-9]?))?\/?$/);
-  if (url) {
-    const [, kind, id] = url;
-    if (kind === "p" && /^ecd:[0-9a-f]{16}$/.test(id!)) return id!;
-    if (kind === "x" && /^[0-9a-f]{16}$/.test(id!)) return `ext:${id}`;
-    if (kind === "c" && /^[0-9a-f]{16}$/.test(id!)) return `ch:${id}`;
-    return null;
-  }
-  const ref = s.replace(/#C[1-9][0-9]?$/, "");
-  if (/^(ecd|ext|ch):[0-9a-f]{16}$/.test(ref) || /^[0-9a-f]{64}$/.test(ref)) return ref;
+  const url = s.match(/^(?:https?:\/\/[^/]+)?\/c\/((?:ecd|ext):[0-9a-f]{16})(?:\/line)?\/?$/);
+  if (url) return url[1]!;
+  if (isClaimRef(s) || /^[0-9a-f]{64}$/.test(s)) return s;
   return null;
 }
 

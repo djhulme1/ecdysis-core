@@ -1,23 +1,32 @@
 /**
- * HTTP-layer tests: the public site, the kill switch, HEAD handling, and
- * header discipline. Policy is tested at the service layer; this file covers
- * what the router itself adds.
+ * HTTP-layer tests: the public site, the retired addresses, the kill switch,
+ * HEAD handling, header discipline and the fallback rate limiter. Policy is
+ * tested at the service layer; this file covers what the router itself adds.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { MemoryRateLimiter, route } from "../src/api/router.js";
+import { MemoryRateLimiter, RETIRED_V2, route } from "../src/api/router.js";
 import { MCP_PER_ADDRESS_PER_MINUTE, PER_ADDRESS_PER_MINUTE } from "../src/core/v2/quotas.js";
-import { EcdysisService } from "../src/api/service.js";
 import { MemoryStore } from "../src/store/memory-store.js";
-import { structuralScreener } from "../src/core/hazard.js";
+import { TransparencyLog } from "../src/core/log.js";
+import { generateKeyPair } from "../src/core/crypto.js";
+import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
+import { PagesHandler, PAGE_MOVES } from "../src/api/v2/pages.js";
+import { LogApi } from "../src/api/v2/log-api.js";
 import { constitutionHash } from "../src/core/constitution.js";
+import type { Json } from "../src/core/canonical.js";
 
-function makeSvc(): EcdysisService {
-  return new EcdysisService({
-    store: new MemoryStore(),
-    screeners: [structuralScreener()],
-    sthPrivateKey: null,
-  });
+async function world(o: { signingKey?: boolean; finalSth?: { treeSize: number; rootHash: string; timestamp: string; signature: string } | null } = {}) {
+  const now = () => new Date(Date.UTC(2026, 9, 5, 12, 0, 0));
+  const store = new MemoryStore();
+  const log = new TransparencyLog(store, now);
+  const logKey = await generateKeyPair();
+  const v2store = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
+  const svc = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, now });
+  const logApi = new LogApi({ log, reader: store, signingKey: o.signingKey === false ? null : logKey.privateKey, finalSth: o.finalSth ?? null, now });
+  const pages = new PagesHandler(svc, { host: "api.ecdysis.me", logPublicKey: logKey.publicKey, archive: "https://v1.ecdysis.me", log: logApi });
+  const opts = { v2: svc, log: logApi, pages, sthPublicKey: logKey.publicKey, archive: "https://v1.ecdysis.me" };
+  return { svc, log, logApi, logKey, pages, opts, store };
 }
 
 function req(path: string, init: RequestInit & { accept?: string } = {}): Request {
@@ -30,198 +39,157 @@ const limiter = () => new MemoryRateLimiter(1000);
 
 describe("public site", () => {
   it("serves the landing page to browsers and the JSON index to agents", async () => {
-    const svc = makeSvc();
-
-    const page = await route(req("/", { accept: "text/html,application/xhtml+xml" }), svc, limiter(), {
-      sthPublicKey: "test-public-key-value-long-enough",
-    });
+    const w = await world();
+    const page = await route(req("/", { accept: "text/html,application/xhtml+xml" }), limiter(), w.opts);
     assert.equal(page.status, 200);
     assert.match(page.headers.get("content-type") ?? "", /text\/html/);
     const html = await page.text();
-    assert.match(html, /An open record of machine science/);
     assert.match(html, /href="\/people"/, "the person door");
     assert.match(html, /href="\/agents"/, "the agent door");
     assert.ok(html.includes(await constitutionHash()), "landing page shows the constitution hash");
-    assert.ok(html.includes("test-public-key-value-long-enough"), "landing page shows the log public key");
+    assert.ok(html.includes(w.logKey.publicKey), "landing page shows the log public key");
     const csp = page.headers.get("content-security-policy") ?? "";
     assert.match(csp, /frame-ancestors 'none'/);
     assert.ok(!csp.includes("script-src"), "the fork ships no script at all");
     assert.ok(!html.includes("<script"), "and contains none");
 
-    const index = await route(req("/"), svc, limiter());
+    const index = await route(req("/"), limiter(), w.opts);
     assert.match(index.headers.get("content-type") ?? "", /application\/json/);
-    const body = (await index.json()) as { service: string; start: string; if_blocked: string };
-    assert.equal(body.service, "ecdysis-core");
+    const body = (await index.json()) as { service: string; protocol: string; start: string; if_blocked: string; site: string[]; archive?: { v1: string } };
+    assert.equal(body.service, "ecdysis");
+    assert.equal(body.protocol, "ecdysis/0.2");
     assert.equal(body.start, "GET /skill.md");
-    // The index is often the ONE path a walled-in agent can reach: it must say
-    // how to get through the allowlist and where the readable mirror lives.
+    assert.ok(body.site.includes("GET /claims") && body.site.includes("GET /map"), "the site's pages are the network's");
+    assert.ok(!body.site.some((s) => /papers|frontier|challenges/.test(s)), "and none from the paper era");
+    assert.equal(body.archive?.v1, "https://v1.ecdysis.me");
+    // The index is often the ONE path a walled-in agent can reach: it must say how to get through the allowlist and where
+    // the readable mirror lives.
     assert.match(body.if_blocked, /allowlist api\.ecdysis\.me/);
     assert.match(body.if_blocked, /github\.com\/djhulme1\/ecdysis-core/);
   });
 
   it("serves the onboarding files with safe headers", async () => {
-    const svc = makeSvc();
+    const w = await world();
     const hash = await constitutionHash();
-
-    const skill = await route(req("/skill.md"), svc, limiter());
+    const skill = await route(req("/skill.md"), limiter(), w.opts);
     assert.equal(skill.status, 200);
     assert.match(skill.headers.get("content-type") ?? "", /text\/markdown/);
     const skillBody = await skill.text();
-    assert.match(skillBody, /https:\/\/api\.ecdysis\.me\/v1\/agents\/register/);
-    assert.match(skillBody, /Never publish personal information/);
-
-    const cons = await route(req("/constitution.md"), svc, limiter());
+    assert.match(skillBody, /\/v2\/agents\/register/);
+    assert.match(skillBody, /network\/0\.1/);
+    assert.ok(skillBody.includes(w.logKey.publicKey), "the protocol names the log key");
+    const cons = await route(req("/constitution.md"), limiter(), w.opts);
     assert.equal(cons.status, 200);
     assert.ok((await cons.text()).includes(hash), "constitution page carries its own hash");
-
     for (const p of ["/llms.txt", "/robots.txt"]) {
-      const r = await route(req(p), svc, limiter());
+      const r = await route(req(p), limiter(), w.opts);
       assert.equal(r.status, 200, p);
       assert.equal(r.headers.get("x-content-type-options"), "nosniff", p);
-      assert.equal(r.headers.get("content-security-policy"), "default-src 'none'", p);
-      assert.match(await r.text(), /skill\.md/, p);
+      assert.match(r.headers.get("content-security-policy") ?? "", /^default-src 'none'/, p);
     }
   });
 });
 
-describe("about page", () => {
-  it("serves the why-this-exists page for humans, script-free", async () => {
-    const svc = makeSvc();
-    for (const p of ["/about", "/why"]) {
-      const r = await route(req(p, { accept: "text/html" }), svc, limiter());
-      assert.equal(r.status, 200, p);
-      const html = await r.text();
-      assert.match(html, /second engine/);
-      assert.match(html, /ecdysis\.me holds the record/);
-      assert.match(html, /ecdysis\.app holds the impact/);
-      assert.match(html, /What this is not/);
-      assert.ok(!html.includes("<script"), "about page ships no script");
+describe("retired addresses", () => {
+  it("the paper era's API paths answer 410 with where the work went, before anything else is read", async () => {
+    const w = await world();
+    for (const [path, reason] of Object.entries(RETIRED_V2)) {
+      for (const method of ["GET", "POST"]) {
+        const r = await route(req(path, { method, ...(method === "POST" ? { body: "{}", headers: { "content-type": "application/json" } } : {}) }), limiter(), w.opts);
+        assert.equal(r.status, 410, `${method} ${path}`);
+        const body = (await r.json()) as { error: string; see?: string };
+        assert.match(body.error, /retired on 5 October 2026/);
+        assert.ok(body.error.includes(reason), `${path} says where the work went`);
+      }
     }
-    const landing = await route(req("/", { accept: "text/html" }), svc, limiter());
-    const text = await landing.text();
-    assert.match(text, /href="\/people"/, "the landing forks to the people half");
-    assert.match(text, /href="\/agents"/, "and to the agents half");
-    assert.match(text, /<a class="me" href="\/me">Your Ecdysis<\/a>/, "the person's own page sits in the top bar");
+    assert.ok(Object.keys(RETIRED_V2).includes("/v2/papers") && Object.keys(RETIRED_V2).includes("/v2/frontier") && Object.keys(RETIRED_V2).includes("/v2/vouch"));
+  });
+
+  it("the first record's API, and the log's old address, answer 410 and point at the live log", async () => {
+    const w = await world();
+    const sth = await route(req("/v1/log/sth"), limiter(), w.opts);
+    assert.equal(sth.status, 410);
+    const body = (await sth.json()) as { error: string; see: string; earlier: string; archive: string };
+    assert.equal(body.see, "/v2/log/sth");
+    assert.match(body.error, /new genesis on 5 October 2026/);
+    assert.match(body.earlier, /mirror\/v2/);
+    assert.equal(body.archive, "https://v1.ecdysis.me");
+    const reg = await route(req("/v1/agents/register", { method: "POST", body: "{}", headers: { "content-type": "application/json" } }), limiter(), w.opts);
+    assert.equal(reg.status, 410);
+    assert.match(((await reg.json()) as { error: string }).error, /archived/);
+  });
+
+  it("the paper era's pages move, permanently, to where their subject lives now", async () => {
+    const w = await world();
+    for (const [from, to] of Object.entries(PAGE_MOVES)) {
+      const r = await route(req(from, { accept: "text/html" }), limiter(), w.opts);
+      assert.equal(r.status, 301, from);
+      assert.equal(r.headers.get("location"), to, from);
+    }
+    const hex = "0123456789abcdef";
+    for (const [from, to] of [[`/x/${hex}/C1`, `/c/ext:${hex}`], [`/x/${hex}`, `/c/ext:${hex}`], ["/p/ecd:2610.abc", "/claims"], ["/p/ecd:2610.abc/C2", "/claims"], [`/c/${hex}`, "/map"]]) {
+      const r = await route(req(from!, { accept: "text/html" }), limiter(), w.opts);
+      assert.equal(r.status, 301, from);
+      assert.equal(r.headers.get("location"), to, from);
+    }
+    // The first record's own pages go to its archive.
+    const apps = await route(req("/apps", { accept: "text/html" }), limiter(), w.opts);
+    assert.equal(apps.status, 301);
+    assert.equal(apps.headers.get("location"), "https://v1.ecdysis.me/apps");
   });
 });
 
-describe("marketplace page", () => {
-  it("serves the human shelf with recomputable-ranking framing", async () => {
-    const svc = makeSvc();
-    for (const p of ["/apps", "/marketplace"]) {
-      const r = await route(req(p, { accept: "text/html" }), svc, limiter());
-      assert.equal(r.status, 200, p);
-      const html = await r.text();
-      assert.match(html, /recomputable, never opinion/);
-      assert.match(html, /challenge board/, "empty shelf points at the path onto it");
-      assert.ok(!html.includes("<script"), "shelf ships no script");
-    }
-  });
-});
-
-describe("sitemap", () => {
+describe("sitemap and feeds", () => {
   it("serves /sitemap.xml with the public pages and a robots.txt pointer", async () => {
-    const svc = makeSvc();
-    const r = await route(req("/sitemap.xml"), svc, limiter());
+    const w = await world();
+    const r = await route(req("/sitemap.xml"), limiter(), w.opts);
     assert.equal(r.status, 200);
     assert.match(r.headers.get("content-type") ?? "", /application\/xml/);
     const xml = await r.text();
     assert.match(xml, /<urlset/);
-    assert.match(xml, /https:\/\/api\.ecdysis\.me\/about<\/loc>/);
+    assert.match(xml, /https:\/\/ecdysis\.me\/claims<\/loc>/);
+    assert.match(xml, /https:\/\/ecdysis\.me\/map<\/loc>/);
     assert.match(xml, /skill\.md<\/loc>/);
-
-    const robots = await route(req("/robots.txt"), svc, limiter());
-    assert.match(await robots.text(), /Sitemap: https:\/\/api\.ecdysis\.me\/sitemap\.xml/);
+    assert.doesNotMatch(xml, /\/papers|\/frontier|\/challenges/);
+    const robots = await route(req("/robots.txt"), limiter(), w.opts);
+    assert.match(await robots.text(), /Sitemap: https:\/\/ecdysis\.me\/sitemap\.xml/);
   });
-});
 
-describe("field feeds", () => {
-  it("serves valid Atom per field and for 'all', and 404s unknown fields", async () => {
-    const svc = makeSvc();
+  it("serves valid Atom per field and for 'all', and 404s unknown fields; the observatory advertises them", async () => {
+    const w = await world();
     for (const p of ["/feeds/all.atom", "/feeds/ml.atom", "/feeds/neuro.atom"]) {
-      const r = await route(req(p), svc, limiter());
+      const r = await route(req(p), limiter(), w.opts);
       assert.equal(r.status, 200, p);
       assert.match(r.headers.get("content-type") ?? "", /application\/atom\+xml/);
       const xml = await r.text();
       assert.match(xml, /<feed xmlns="http:\/\/www\.w3\.org\/2005\/Atom">/);
-      assert.match(xml, /<link href="https:\/\/api\.ecdysis\.me\/feeds\/\w+\.atom" rel="self"\/>/);
+      assert.match(xml, /<link href="https:\/\/(api\.)?ecdysis\.me\/feeds\/\w+\.atom" rel="self" type="application\/atom\+xml"\/>/);
     }
-    const bad = await route(req("/feeds/astrology.atom"), svc, limiter());
-    assert.equal(bad.status, 404);
-  });
-
-  it("the observatory advertises the feeds, with autodiscovery", async () => {
-    const svc = makeSvc();
-    const r = await route(req("/observatory", { accept: "text/html" }), svc, limiter());
+    assert.equal((await route(req("/feeds/astrology.atom"), limiter(), w.opts)).status, 404);
+    const r = await route(req("/observatory", { accept: "text/html" }), limiter(), w.opts);
     const html = await r.text();
-    assert.match(html, /Follow a field/);
     assert.match(html, /feeds\/all\.atom/);
     assert.match(html, /rel="alternate" type="application\/atom\+xml"/);
   });
 });
 
-describe("review status", () => {
-  it("rejects malformed ids and 404s unknown ones without leaking anything", async () => {
-    const svc = makeSvc();
-    const bad = await route(req("/v1/review/not-a-hash"), svc, limiter());
-    assert.equal(bad.status, 400);
-    const missing = await route(req(`/v1/review/${"ab".repeat(32)}`), svc, limiter());
-    assert.equal(missing.status, 404);
-  });
-
-  it("reports pending progress by receipt id, without exposing content", async () => {
-    const store = new MemoryStore();
-    const svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
-    const id = "cd".repeat(32);
-    await store.putQuarantine({
-      id,
-      kind: "paper",
-      envelope: { payload: { title: "SECRET-UNREVIEWED-TITLE" }, signature: "sig" },
-      findings: [],
-      receivedAt: "2026-10-01T09:00:00.000Z",
-      status: "pending",
-      jury: ["Chrysalis-1"],
-      juryOperators: ["hulme.ai"],
-      votes: [],
-    });
-    const r = await route(req(`/v1/review/${id}`), svc, limiter());
-    assert.equal(r.status, 200);
-    const body = (await r.json()) as Record<string, unknown>;
-    assert.equal(body["status"], "pending");
-    assert.equal(body["jurySize"], 1);
-    assert.equal(body["votesCast"], 0);
-    assert.match(String(body["note"]), /0 of 1/);
-    assert.ok(!JSON.stringify(body).includes("SECRET-UNREVIEWED-TITLE"), "quarantined content never leaks");
-  });
-});
-
 describe("kill switch", () => {
   it("refuses writes with 503 in read-only mode while reads stay up", async () => {
-    const svc = makeSvc();
-    const post = await route(
-      req("/v1/agents/register", { method: "POST", body: "{}", accept: "application/json" }),
-      svc,
-      limiter(),
-      { readOnly: true },
-    );
+    const w = await world();
+    const post = await route(req("/v2/agents/register", { method: "POST", body: "{}", accept: "application/json", headers: { "content-type": "application/json" } }), limiter(), { ...w.opts, readOnly: true });
     assert.equal(post.status, 503);
     const body = (await post.json()) as { error: string };
     assert.match(body.error, /read-only/);
-
-    const read = await route(req("/v1/log/sth"), svc, limiter(), { readOnly: true });
-    assert.equal(read.status, 200);
-    const site = await route(req("/skill.md"), svc, limiter(), { readOnly: true });
-    assert.equal(site.status, 200);
+    const claim = await route(req("/v2/claims", { method: "POST", body: "{}", headers: { "content-type": "application/json" } }), limiter(), { ...w.opts, readOnly: true });
+    assert.equal(claim.status, 503);
+    assert.equal((await route(req("/v2/log/sth"), limiter(), { ...w.opts, readOnly: true })).status, 200);
+    assert.equal((await route(req("/v2/claims"), limiter(), { ...w.opts, readOnly: true })).status, 200);
+    assert.equal((await route(req("/skill.md"), limiter(), { ...w.opts, readOnly: true })).status, 200);
   });
 
   it("does not gate writes when the switch is off", async () => {
-    const svc = makeSvc();
-    const post = await route(
-      req("/v1/agents/register", { method: "POST", body: "{}" }),
-      svc,
-      limiter(),
-      { readOnly: false },
-    );
+    const w = await world();
+    const post = await route(req("/v2/agents/register", { method: "POST", body: "{}", headers: { "content-type": "application/json" } }), limiter(), { ...w.opts, readOnly: false });
     // 4xx from validation, never 503: the request reached the service.
     assert.ok(post.status >= 400 && post.status < 500, String(post.status));
   });
@@ -229,14 +197,41 @@ describe("kill switch", () => {
 
 describe("HEAD", () => {
   it("answers HEAD like GET, without a body", async () => {
-    const svc = makeSvc();
-    const head = await route(req("/v1/log/sth", { method: "HEAD" }), svc, limiter());
+    const w = await world();
+    const head = await route(req("/v2/log/sth", { method: "HEAD" }), limiter(), w.opts);
     assert.equal(head.status, 200);
     assert.equal(await head.text(), "");
-
-    const page = await route(req("/skill.md", { method: "HEAD" }), svc, limiter());
+    const page = await route(req("/skill.md", { method: "HEAD" }), limiter(), w.opts);
     assert.equal(page.status, 200);
     assert.equal(await page.text(), "");
+    const claims = await route(req("/claims", { method: "HEAD", accept: "text/html" }), limiter(), w.opts);
+    assert.equal(claims.status, 200);
+    assert.equal(await claims.text(), "");
+  });
+});
+
+describe("the log over HTTP", () => {
+  it("serves a signed head, entries with payloads, proofs and an audit; without a key the head is unsigned and says so by its shape", async () => {
+    const w = await world();
+    await w.log.append("claim.publish", { id: "ecd:0000000000000001", cid: "1".repeat(64), handle: "Ant", operatorId: "op-a", text: "a claim", test: "its test", field: "math", confidence: 0.7, builds_on: [] });
+    const sth = (await (await route(req("/v2/log/sth"), limiter(), w.opts)).json()) as { treeSize: number; rootHash: string; signature?: string };
+    assert.equal(sth.treeSize, 1);
+    assert.ok(await TransparencyLog.verifySth(w.logKey.publicKey, sth as never), "the head verifies with the log key");
+    const entries = (await (await route(req("/v2/log/entries?from=0&limit=10"), limiter(), w.opts)).json()) as { version: string; entries: Array<{ seq: number; type: string; payload: Record<string, unknown> }>; withheld: string };
+    assert.equal(entries.version, "log-entries/0.2");
+    assert.equal(entries.entries[0]!.type, "claim.publish");
+    assert.equal(entries.entries[0]!.payload["text"], "a claim");
+    assert.match(entries.withheld, /Nothing on the log is withheld/);
+    const incl = await route(req("/v2/log/inclusion?seq=0"), limiter(), w.opts);
+    assert.equal(incl.status, 200);
+    const audit = (await (await route(req("/v2/log/audit"), limiter(), w.opts)).json()) as { intact: boolean };
+    assert.equal(audit.intact, true);
+    assert.equal((await route(req("/v2/log/sth", { method: "POST", body: "{}" }), limiter(), w.opts)).status, 405, "the log takes no writes over HTTP");
+    assert.equal((await route(req("/v2/log/sth", { method: "POST" }), limiter(), w.opts)).status, 400, "a bodiless POST is refused before any route is read");
+    const unsigned = await world({ signingKey: false });
+    const head = (await (await route(req("/v2/log/sth"), limiter(), unsigned.opts)).json()) as Record<string, unknown>;
+    assert.equal("signature" in head, false, "no key: an unsigned head, a known state");
+    assert.equal((await route(req("/v2/log/sth"), limiter(), { v2: w.svc })).status, 501, "no log API configured: the endpoints say so");
   });
 });
 
@@ -315,17 +310,14 @@ describe("the fallback rate limiter", () => {
   });
 });
 
-describe("a frozen archive's final tree head", () => {
-  it("is served verbatim under READ_ONLY, so the archive needs no log key and the head verifies for ever", async () => {
+describe("a frozen record's final tree head", () => {
+  it("is served verbatim under READ_ONLY, so an archive needs no log key and the head verifies for ever", async () => {
     const { finalSthFrom } = await import("../src/index.js");
-    const { generateKeyPair } = await import("../src/core/crypto.js");
-    const { TransparencyLog } = await import("../src/core/log.js");
-    // The live v1 Worker signs the final head with its key; the archive is given that head and no key.
-    const logKey = await generateKeyPair();
-    const store = new MemoryStore();
-    const signer = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: logKey.privateKey });
-    const final = (await signer.sth()) as { treeSize: number; rootHash: string; timestamp: string; signature: string };
-    assert.ok(await TransparencyLog.verifySth(logKey.publicKey, final));
+    // The live Worker signs the final head with its key; the archive is given that head and no key.
+    const live = await world();
+    await live.log.append("claim.publish", { id: "ecd:0000000000000001", cid: "1".repeat(64), handle: "Ant", operatorId: "op-a", text: "a claim", test: "its test", field: "math", confidence: 0.7, builds_on: [] });
+    const final = (await live.logApi.sth()) as { treeSize: number; rootHash: string; timestamp: string; signature: string };
+    assert.ok(await TransparencyLog.verifySth(live.logKey.publicKey, final));
     const json = JSON.stringify(final);
     // Parsed only when frozen; anything unreadable is ignored rather than trusted.
     assert.equal(finalSthFrom({ READ_ONLY: "0", FINAL_STH: json }), null, "not frozen: a fresh head is signed as usual");
@@ -333,15 +325,10 @@ describe("a frozen archive's final tree head", () => {
     assert.equal(finalSthFrom({ READ_ONLY: "1", FINAL_STH: JSON.stringify({ ...final, rootHash: "short" }) }), null);
     assert.deepEqual(finalSthFrom({ READ_ONLY: "1", FINAL_STH: json }), final);
     // The archive: no private key, the final head configured; it serves exactly that head, timestamp and signature included.
-    const archive = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null, finalSth: finalSthFrom({ READ_ONLY: "1", FINAL_STH: json }) });
+    const archive = new LogApi({ log: live.log, reader: live.store, signingKey: null, finalSth: finalSthFrom({ READ_ONLY: "1", FINAL_STH: json }) });
     assert.deepEqual(await archive.sth(), final);
-    const res = await route(new Request("https://v1.ecdysis.me/v1/log/sth"), archive, new MemoryRateLimiter(), { readOnly: true });
+    const res = await route(new Request("https://v1.ecdysis.me/v2/log/sth"), new MemoryRateLimiter(), { v2: live.svc, log: archive, readOnly: true });
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), final);
-    // Without a head and without a key, an unsigned head is served rather than nothing.
-    const bare = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
-    const head = await bare.sth();
-    assert.equal(head.treeSize, final.treeSize);
-    assert.equal("signature" in head, false);
   });
 });

@@ -3,16 +3,17 @@
  * /me, sent once each, bundled per run, with a one-click stop. Doorbells
  * remain the agent's channel; these are the person's. Every email draws on
  * the record only (ids, refs, deadlines, numbers): nothing anyone wrote in
- * a paper or a bundle reaches an inbox. Sends count against the shared
+ * a claim or a bundle reaches an inbox. Sends count against the shared
  * daily email cap like every other email Ecdysis sends.
  */
 
 import type { Store } from "../../store/store.js";
 import { sameString } from "../access.js";
-import { EMAIL_DAILY_CAP_DEFAULT, type SendEmail } from "../herald.js";
+import { EMAIL_DAILY_CAP_DEFAULT, type SendEmail } from "../email.js";
 import type { Accounts, AccountStore, Alert } from "./accounts.js";
 import { APPEAL_MS } from "../../core/v2/receipts.js";
 import { RESULT_DEADLINE_MS, type V2Service } from "./service.js";
+import { isHeld } from "../../core/v2/flow.js";
 
 export interface NotifierOptions {
   accounts: Accounts;
@@ -62,11 +63,11 @@ export class Notifier {
     }
     if (want.has("dispute.opened")) {
       const reliedOn = new Set(r.uses.filter((u) => u.operatorId === operatorId).map((u) => u.claim));
-      for (const c of s.claims.values()) if (reliedOn.has(c.ref) && (c.dispute > 0 || c.status === "contested")) out.push({ kind: "dispute.opened", subject: c.ref, line: `The evidence on ${c.ref}, which your work relies on, disagrees (credence ${c.credence.toFixed(2)}, dispute ${c.dispute.toFixed(2)}). Further independent runs settle it.` });
+      for (const c of s.claims.values()) if (reliedOn.has(c.ref) && !isHeld(r, c.ref) && (c.dispute > 0 || c.status === "contested")) out.push({ kind: "dispute.opened", subject: c.ref, line: `The evidence on ${c.ref}, which claims of yours rest on, disagrees (credence ${c.credence.toFixed(2)}, dispute ${c.dispute.toFixed(2)}). Further independent runs settle it.` });
     }
     if (want.has("claim.contested") || want.has("claim.established")) {
       for (const c of s.claims.values()) {
-        if (r.papers.get(c.paper)?.operatorId !== operatorId) continue;
+        if (r.native.get(c.ref)?.operatorId !== operatorId || isHeld(r, c.ref)) continue;
         if (want.has("claim.contested") && c.status === "contested") out.push({ kind: "claim.contested", subject: `${c.ref}:contested`, line: `Your claim ${c.ref} is contested: the evidence disagrees, or a foundation it rests on was refuted.` });
         if (want.has("claim.established") && c.status === "established") out.push({ kind: "claim.established", subject: `${c.ref}:established`, line: `Your claim ${c.ref} is established: replication tests from at least two verified operators, on at least two model families, credence ${c.credence.toFixed(2)}.` });
       }
@@ -133,7 +134,8 @@ export class Notifier {
     if (!accounts.length) return out;
     const r = await this.o.v2.record();
     const s = await this.o.v2.scores();
-    const fr = (await this.o.v2.frontier(25)).body as { checking?: Array<{ ref: string; perMinute: number; use: number; credence: number }> };
+    // direction/0.1: the checks most worth doing, on the record's one scale.
+    const checks = (await this.o.v2.directionList(50)).filter((a) => a.act === "check" && a.ref !== null);
     for (const { account, prefs } of accounts) {
       const weekly = prefs.notifications.digest === "weekly";
       if (weekly && now.getUTCDay() !== 1) continue;
@@ -142,14 +144,14 @@ export class Notifier {
       if (await this.o.accountStore.wasSent(account.id, key)) continue;
       const since = now.getTime() - (weekly ? 7 : 1) * DAY_MS;
       const fields = new Set(prefs.interests.fields);
-      const fieldOf = (ref: string) => r.papers.get(ref.split("#")[0]!)?.field ?? null;
+      const fieldOf = (ref: string) => r.native.get(ref)?.field ?? null;
       const lines: string[] = [];
-      // New papers in the fields followed.
-      const fresh = [...r.papers.values()].filter((p) => fields.has(p.field) && Date.parse(p.ts) >= since && p.operatorId !== account.operatorId);
+      // New claims in the fields followed.
+      const fresh = [...r.native.values()].filter((c) => fields.has(c.field) && Date.parse(c.ts) >= since && c.operatorId !== account.operatorId && !isHeld(r, c.id));
       if (fresh.length) {
-        lines.push(`${fresh.length} new paper${fresh.length === 1 ? "" : "s"} in ${[...new Set(fresh.map((p) => p.field))].join(", ")}:`);
-        for (const p of fresh.slice(0, 10)) lines.push(`  ${this.o.siteBase}/p/${p.id} (${p.field}, ${p.claims.length} claim${p.claims.length === 1 ? "" : "s"})`);
-        if (fresh.length > 10) lines.push(`  and ${fresh.length - 10} more: ${this.o.siteBase}/papers`);
+        lines.push(`${fresh.length} new claim${fresh.length === 1 ? "" : "s"} in ${[...new Set(fresh.map((c) => c.field))].join(", ")}:`);
+        for (const c of fresh.slice(0, 10)) lines.push(`  ${this.o.siteBase}${claimPath(c.id)} (${c.field})`);
+        if (fresh.length > 10) lines.push(`  and ${fresh.length - 10} more: ${this.o.siteBase}/claims`);
       }
       // Claims followed: where they stand, and receipts filed on them this period.
       const followed = prefs.interests.claims.map((ref) => s.claims.get(ref)).filter((c): c is NonNullable<typeof c> => !!c);
@@ -160,18 +162,18 @@ export class Notifier {
           lines.push(`  ${c.ref}: ${c.status}, credence ${c.credence.toFixed(2)}, use ${c.use.toFixed(1)}${receipts ? `, ${receipts} new receipt${receipts === 1 ? "" : "s"}` : ""} — ${this.o.siteBase}${claimPath(c.ref)}`);
         }
       }
-      // The frontier, in the fields followed.
-      const queue = (fr.checking ?? []).filter((q) => { const f = fieldOf(q.ref); return !fields.size || (f !== null && fields.has(f)); }).slice(0, 3);
+      // The checks most worth doing, in the fields followed.
+      const queue = checks.filter((q) => { const f = fieldOf(q.ref!); return !fields.size || (f !== null && fields.has(f)); }).slice(0, 3);
       if (queue.length) {
         lines.push(`Most worth checking${fields.size ? " in your fields" : ""}:`);
-        for (const q of queue) lines.push(`  ${q.ref}: credence ${q.credence.toFixed(2)}, use ${q.use.toFixed(1)} — ${this.o.siteBase}${claimPath(q.ref)}`);
+        for (const q of queue) { const c = s.claims.get(q.ref!); lines.push(`  ${q.ref}: credence ${(c?.credence ?? 0.5).toFixed(2)}, stakes ${q.stakes.toFixed(1)} — ${this.o.siteBase}${claimPath(q.ref!)}`); }
       }
       // The person's own operator.
       const mine = [...r.agents.entries()].filter(([, a]) => a.operatorId === account.operatorId).map(([h]) => h);
       if (mine.length) {
         const receipts = [...r.checks.values()].filter((c) => mine.includes(c.handle) && c.stage === "resulted" && !c.disowned && c.resultedAt && Date.parse(c.resultedAt) >= since).length;
         const owed = [...r.checks.values()].filter((c) => mine.includes(c.handle) && c.stage === "sealed" && !c.disowned).length;
-        const claims = [...s.claims.values()].filter((c) => r.papers.get(c.paper)?.operatorId === account.operatorId);
+        const claims = [...s.claims.values()].filter((c) => r.native.get(c.ref)?.operatorId === account.operatorId && !isHeld(r, c.ref));
         const byStatus: Record<string, number> = {};
         for (const c of claims) byStatus[c.status] = (byStatus[c.status] ?? 0) + 1;
         lines.push(`Your agents (${mine.join(", ")}): ${receipts} receipt${receipts === 1 ? "" : "s"} filed this ${weekly ? "week" : "day"}, ${owed} owed${claims.length ? `; your ${claims.length} claim${claims.length === 1 ? "" : "s"}: ${Object.entries(byStatus).map(([k, v]) => `${v} ${k}`).join(", ")}` : ""}.`);
@@ -213,10 +215,9 @@ export class Notifier {
   }
 }
 
-/** The path of a claim's page. */
+/** The path of a claim's page: ids are validated on the way in (ecd: or ext: and hex), so they go in the path as they are. */
 function claimPath(ref: string): string {
-  const [p, l] = ref.split("#") as [string, string];
-  return p.startsWith("ext:") ? `/x/${encodeURIComponent(p.slice(4))}/${encodeURIComponent(l)}` : `/p/${encodeURIComponent(p)}/${encodeURIComponent(l)}`;
+  return `/c/${ref}`;
 }
 
 /** ISO-8601 week number, for the weekly digest's once-a-week key. */

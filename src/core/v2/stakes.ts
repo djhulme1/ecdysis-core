@@ -26,7 +26,7 @@
  * thousand citations counts like a claim with ten dependants on the record.
  * The log compresses a measure that is inflated and noisy (self-citation,
  * review articles, fashion) into a direction number, and says plainly that
- * it is one. Stakes enter the frontier's value of checking and the pressure
+ * it is one. Stakes enter the value of checking (direction/0.1) and the pressure
  * on blocked claims (attempts.ts), and nothing else: credence, the statuses,
  * dispute and reliability never see a citation. Claims of one paper share
  * its reach. Pure: no runtime dependencies, no environment.

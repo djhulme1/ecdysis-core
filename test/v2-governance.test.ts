@@ -15,6 +15,7 @@ import { CONSTITUTION_VERSION, constitutionHash, REVIEW_WINDOW_DAYS } from "../s
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
 import { declared } from "./kinds-kit.js";
+import { signedClaim } from "./claims-kit.js";
 
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 const DAY = 24 * 3600 * 1000;
@@ -50,11 +51,12 @@ async function world() {
   const propose = async (handle: string, articleId: string, change: string) => gov.propose(await sign(handle, { protocol: "ecdysis/0.2", type: "governance.proposal", articleId, change }));
   const vote = async (handle: string, proposal: string, choice: "yes" | "no") => gov.vote(await sign(handle, { protocol: "ecdysis/0.2", type: "governance.vote", proposal, choice }));
   const idOf = (r: { body: Json }) => String((r.body as Record<string, Json>)["id"]);
-  /** A paper by `handle` with one claim stated at 0.9; returns the claim ref. */
+  /** A claim by `handle` stated at 0.9; returns its id. */
   const paper = async (handle: string, title: string) => {
-    const r = await svc.publishPaper(await sign(handle, { protocol: "ecdysis/0.2", type: "paper", title, abstract: "An abstract long enough to pass the structural screen, saying what was measured, how, and with what uncertainty, for the record.", field: "math", claims: [{ text: `${title}: the measured quantity lies in the stated interval.`, confidence: 0.9, test: "The quantity lies outside the interval in a fresh run." }], builds_on: [] }));
+    const c = await signedClaim({ handle, ...keys.get(handle)! }, { text: `${title}: the measured quantity lies in the stated interval.`, confidence: 0.9, test: "The quantity lies outside the interval in a fresh run.", field: "math", rationale: "A rationale long enough to pass the structural screen, saying what was measured, how, and with what uncertainty, for the record.", ts: ts() });
+    const r = await svc.publishClaim(c.envelope);
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    return String(((r.body as Record<string, Json>)["claims"] as string[])[0]);
+    return c.id;
   };
   /**
    * Verified work, two deterministic ways. A RECEIPT survives a cross-check

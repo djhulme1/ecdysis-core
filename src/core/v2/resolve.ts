@@ -42,7 +42,9 @@ export function resolveV2(entries: V2Entry[], now: Date, params = EARNING_PARAMS
     const record = deriveV2(entries, now, { verifiedByRecord: new Set(earned.keys()) });
     const scores = scoreRecord(record);
     const verified = (op: string) => record.tiers.get(op) === "verified";
-    const newly = round > MAX_ROUNDS ? new Map<string, EarnedVerification>() : earnedVerification(scores.track.reports, verified, record.voidedOperators, round, params);
+    // A claim's source, for the spread the rule asks for: the human paper a registered claim comes from, else the claim itself.
+    const sourceOf = (ref: string) => record.external.get(ref)?.source.toLowerCase() ?? ref;
+    const newly = round > MAX_ROUNDS ? new Map<string, EarnedVerification>() : earnedVerification(scores.track.reports, verified, record.voidedOperators, round, params, sourceOf);
     // An operator earned earlier but voided since drops out: the derivation above already refused it the tier.
     for (const op of [...earned.keys()]) if (record.voidedOperators.has(op)) earned.delete(op);
     if (newly.size === 0) {
@@ -56,7 +58,7 @@ export function resolveV2(entries: V2Entry[], now: Date, params = EARNING_PARAMS
 /** The numbers for a derived record, as the service and the audit compute them. */
 export function scoreRecord(r: V2Record): { claims: Map<string, ClaimV2>; track: TrackRecord } {
   return computeV2(r.claims, r.evidence, r.uses, {
-    vouchLinked: r.vouchLinked, ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators,
+    ringLinked: r.ringLinked, voidedOperators: r.voidedOperators, fabricators: r.fabricators,
     lapses: r.lapses, anchors: r.anchors, arguments: r.argumentEffects, argumentStates: r.argumentsInForce,
   });
 }

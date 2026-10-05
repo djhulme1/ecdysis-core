@@ -1,12 +1,12 @@
 /**
- * Integrity, part three (4 October 2026), on top of integrity-0.1 and the
- * author's one amendment (claim.amend): what an item out of view still
- * reached (the titles of papers that rely on others, the uses it made, the
- * track record of withheld arguments, the numbers shown beside a paper's
- * other claims); verified operators' agents' flags into the stewards' issues
- * queue; and the gaps an independent review found in amendments (invisible
- * characters, a race with screening, the log's view of a held claim's new
- * test, a stranded challenge, the paper page's test).
+ * Integrity, part three (4 October 2026, restated for the network of claims),
+ * on top of integrity-0.1 and the author's one amendment (claim.amend): what
+ * an item out of view still reached (the claims shown as building on
+ * another, the uses it made, the track record of withheld arguments, the
+ * numbers of the claims beside it in a line); verified operators' agents'
+ * flags into the stewards' issues queue; and the gaps an independent review
+ * found in amendments (invisible characters, a race with screening, the
+ * log's view of a held claim's new test, the claim page's test).
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -18,8 +18,8 @@ import { Accounts, MemoryAccountStore } from "../src/api/v2/accounts.js";
 import { StewardHandler } from "../src/api/v2/steward.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
 import { IssueRegistry, MemoryIssueStore } from "../src/api/v2/issues.js";
-import { EcdysisService } from "../src/api/service.js";
 import { route, MemoryRateLimiter } from "../src/api/router.js";
+import { LogApi } from "../src/api/v2/log-api.js";
 import { v2Tools } from "../src/api/v2/tools.js";
 import { recomputeV2 } from "../src/api/v2/recompute.js";
 import { sha256Hex } from "../src/api/access.js";
@@ -27,9 +27,9 @@ import type { Screener } from "../src/core/hazard.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
 import { declared } from "./kinds-kit.js";
+import { relies, signedClaim } from "./claims-kit.js";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
-type Claim = { text: string; confidence: number; test: string; kind?: string };
 
 async function world(o: { screeners?: Screener[] } = {}) {
   const clock = { t: Date.UTC(2026, 9, 4, 9, 0, 0) };
@@ -62,14 +62,13 @@ async function world(o: { screeners?: Screener[] } = {}) {
     const full: Json = declared({ protocol: "ecdysis/0.2", ...payload, agent: { handle, publicKey: kp.publicKey }, ts: ts() });
     return { payload: full, signature: await signJson(kp.privateKey, full) } as Json;
   };
-  const paper = async (handle: string, title: string, claims: Claim[] = [{ text: "The ratio grows without bound as the size of the instance grows.", confidence: 0.7, test: "Refuted if the ratio stays bounded as the size grows." }], builds_on: Json[] = []) => {
-    const r = await svc.publishPaper(await sign(handle, {
-      type: "paper", title, field: "math",
-      abstract: "We state a structural result about a family of constructions and the regime in which it holds.\n\nThe argument is given in full; every step is checkable by reading.",
-      claims: claims as unknown as Json, builds_on,
-    }));
+  /** A claim of the agent's own: its text (what a title used to be), optionally its confidence, test and kind, and what it builds on. */
+  const claim = async (handle: string, text: string, o: { confidence?: number; test?: string; kind?: "conceptual"; builds_on?: Json[] } = {}) => {
+    const kp = keys.get(handle)!;
+    const c = await signedClaim({ handle, publicKey: kp.publicKey, privateKey: kp.privateKey }, { text, confidence: o.confidence ?? 0.7, test: o.test ?? "Refuted if the ratio stays bounded as the size grows.", ...(o.kind ? { kind: o.kind } : {}), builds_on: o.builds_on ?? [], ts: ts() });
+    const r = await svc.publishClaim(c.envelope);
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    return String((r.body as Record<string, Json>)["id"]);
+    return c.id;
   };
   const signIn = async (email: string) => {
     const b = "browser-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -93,34 +92,34 @@ async function world(o: { screeners?: Screener[] } = {}) {
   const amend = async (handle: string, claim: string, change: Record<string, Json>) => svc.amendClaim(await sign(handle, { type: "claim.amend", claim, ...change }));
   const flag = async (handle: string, subject: string, kind: string, detail = "The quoted sentence is not in the cited source: searched the full text and the abstract, no match.") =>
     issues.flag(await sign(handle, { type: "issue.flag", subject, kind, detail }));
-  const v1 = new EcdysisService({ store: logStore, screeners: [], sthPrivateKey: null });
-  const http = (path: string, init?: RequestInit) => route(new Request(`https://api.ecdysis.me${path}`, init), v1, new MemoryRateLimiter(10_000), { v2: svc, pages, steward, issues });
-  return { svc, accounts, steward, pages, issues, agent, sign, paper, external, amend, flag, signIn, get, post, page, http, entries: rows, now, tick: (ms: number) => { clock.t += ms; }, log };
+  const logApi = new LogApi({ log, reader: logStore, signingKey: logKey.privateKey, now });
+  const http = (path: string, init?: RequestInit) => route(new Request(`https://api.ecdysis.me${path}`, init), new MemoryRateLimiter(10_000), { v2: svc, log: logApi, pages, steward, issues });
+  return { svc, accounts, steward, pages, issues, agent, sign, claim, external, amend, flag, signIn, get, post, page, http, entries: rows, now, tick: (ms: number) => { clock.t += ms; }, log };
 }
 
-const relyOn = (id: string, claims = ["C1"]): Json => ({ id, rel: "extends", basis: "reviewed", claims, note: "Read the proof of the result we extend and checked each of its steps." });
 const body = (r: { body: Json }) => r.body as Record<string, Json>;
 
 describe("out of view: what an item out of view still reached", () => {
-  it("a withheld paper's title is shown under no paper or claim it relies on, and its uses count for nothing until it is restored", async () => {
+  it("a withheld claim's words are shown under no claim it relies on, and its uses count for nothing until it is restored", async () => {
     const w = await world();
     await w.agent("Author", "op-author", ["gemma"]);
     await w.agent("Builder", "op-builder", ["claude"]);
-    const p1 = await w.paper("Author", "The foundation everyone builds on");
-    const p2 = await w.paper("Builder", "A title that names a private individual", undefined, [relyOn(p1)]);
-    const before = (await w.svc.scores()).claims.get(`${p1}#C1`)!.use;
+    const p1 = await w.claim("Author", "The foundation everyone builds on");
+    const p2 = await w.claim("Builder", "A claim whose words name a private individual", { builds_on: [relies(p1, "extends", "reviewed")] });
+    const before = (await w.svc.scores()).claims.get(p1)!.use;
     assert.ok(before > 0, "the reliance counts as a use");
-    assert.match((await w.page(`/p/${p1}`)).html, /A title that names a private individual/);
-    assert.match((await w.page(`/p/${p1}/C1`)).html, /A title that names a private individual/);
+    assert.match((await w.page(`/c/${p1}`)).html, /A claim whose words name a private individual/);
+    assert.match((await w.page(`/c/${p1}/line`)).html, /A claim whose words name a private individual/);
 
-    assert.equal((await w.svc.withholdContent(p2, "review", "a complaint says the title names a private individual; under review", "op-steward")).status, 200);
-    assert.doesNotMatch((await w.page(`/p/${p1}`)).html, /A title that names a private individual/, "not under the paper it relies on");
-    assert.doesNotMatch((await w.page(`/p/${p1}/C1`)).html, /A title that names a private individual/, "nor under the claim");
-    assert.equal((await w.svc.scores()).claims.get(`${p1}#C1`)!.use, 0, "out of view, it relies on nothing");
+    assert.equal((await w.svc.withholdContent(p2, "review", "a complaint says the words name a private individual; under review", "op-steward")).status, 200);
+    assert.doesNotMatch((await w.page(`/c/${p1}`)).html, /A claim whose words name a private individual/, "not under the claim it relies on");
+    assert.doesNotMatch((await w.page(`/c/${p1}/line`)).html, /A claim whose words name a private individual/, "nor in its line");
+    assert.ok(!JSON.stringify((await w.svc.claim(p1)).body).includes("private individual"), "nor in the API's view of what builds on it");
+    assert.equal((await w.svc.scores()).claims.get(p1)!.use, 0, "out of view, it relies on nothing");
 
-    assert.equal((await w.svc.restoreContent(p2, "the title names nobody; the complaint did not stand", "op-steward")).status, 200);
-    assert.equal((await w.svc.scores()).claims.get(`${p1}#C1`)!.use, before, "restored, its use counts again");
-    assert.match((await w.page(`/p/${p1}`)).html, /A title that names a private individual/);
+    assert.equal((await w.svc.restoreContent(p2, "the words name nobody; the complaint did not stand", "op-steward")).status, 200);
+    assert.equal((await w.svc.scores()).claims.get(p1)!.use, before, "restored, its use counts again");
+    assert.match((await w.page(`/c/${p1}`)).html, /A claim whose words name a private individual/);
   });
 
   it("a withheld argument feeds no track record: its arguer's reliability returns with the claim's credence", async () => {
@@ -129,8 +128,7 @@ describe("out of view: what an item out of view still reached", () => {
     await w.agent("Critic", "op-critic", ["claude"]);
     await w.agent("J1", "op-j1", ["gpt"]);
     await w.agent("J2", "op-j2", ["mistral"]);
-    const pid = await w.paper("Author", "A structural claim to attack", [{ text: "Every satisfiable instance of the family has a unique solution under the stated symmetry breaking.", confidence: 0.7, test: "Refuted by a satisfiable instance with two solutions under the symmetry breaking.", kind: "conceptual" }]);
-    const ref = `${pid}#C1`;
+    const ref = await w.claim("Author", "Every satisfiable instance of the family has a unique solution under the stated symmetry breaking.", { test: "Refuted by a satisfiable instance with two solutions under the symmetry breaking.", kind: "conceptual" });
     const s0 = await w.svc.scores();
     const before = { credence: s0.claims.get(ref)!.credence, reliability: s0.track.reliability.get("Critic") ?? null };
     const a = await w.svc.fileArgument(await w.sign("Critic", { type: "argument.file", claim: ref, stance: "refutes", grounds: "counterexample", text: "The instance below is satisfiable and has two solutions that the stated symmetry breaking does not identify, so the uniqueness claim fails as stated.", instance: { text: "Variables x1..x4, clauses (x1 or x2), (not x1 or not x2), (x3 or x4), (not x3 or not x4): solutions 1010 and 0101 survive the breaking." }, confidence: 0.8 }));
@@ -147,28 +145,29 @@ describe("out of view: what an item out of view still reached", () => {
     assert.equal(s2.track.reliability.get("Critic") ?? null, before.reliability, "and so is its arguer's record");
   });
 
-  it("a claim held under R1 by its ref keeps its place on its paper's page, and the others keep their own numbers", async () => {
+  it("a claim held under R1 keeps its place in its line, out of view, and the claims beside it keep their own numbers", async () => {
     const w = await world();
     await w.agent("Author", "op-author", ["gemma"]);
     await w.agent("Reporter", "op-rep", ["claude"]);
-    const id = await w.paper("Author", "A paper with one claim held", [
-      { text: "The first claim, which someone escalated under R1 for a human decision.", confidence: 0.6, test: "Refuted if the first quantity is below one." },
-      { text: "The second claim, which stands on its own and has its own numbers.", confidence: 0.9, test: "Refuted if the second quantity is below two." },
-      { text: "The third claim, which also stands on its own.", confidence: 0.3, test: "Refuted if the third quantity is below three." },
-    ]);
+    const c1 = await w.claim("Author", "The first claim, which someone escalated under R1 for a human decision.", { confidence: 0.6, test: "Refuted if the first quantity is below one." });
+    const c2 = await w.claim("Author", "The second claim, which extends the first and has its own numbers.", { confidence: 0.9, test: "Refuted if the second quantity is below two.", builds_on: [relies(c1)] });
+    const c3 = await w.claim("Author", "The third claim, which extends the second.", { confidence: 0.3, test: "Refuted if the third quantity is below three.", builds_on: [relies(c2)] });
     const s = await w.svc.scores();
-    const c2 = s.claims.get(`${id}#C2`)!, c3 = s.claims.get(`${id}#C3`)!;
-    assert.notEqual(c2.credence.toFixed(2), c3.credence.toFixed(2), "the test needs claims whose numbers differ");
-    assert.equal((await w.svc.escalate(await w.sign("Reporter", { type: "hazard.escalate", subject: `${id}#C1`, reason: "The first claim should be decided by a human before it is shown anywhere." }))).status, 202);
-    const { status, html } = await w.page(`/p/${id}`);
-    assert.equal(status, 200, "the paper itself is in view");
+    const s2 = s.claims.get(c2)!, s3 = s.claims.get(c3)!;
+    assert.notEqual(s2.credence.toFixed(2), s3.credence.toFixed(2), "the test needs claims whose numbers differ");
+    assert.equal((await w.svc.escalate(await w.sign("Reporter", { type: "hazard.escalate", subject: c1, reason: "The first claim should be decided by a human before it is shown anywhere." }))).status, 202);
+    const { status, html } = await w.page(`/c/${c3}/line`);
+    assert.equal(status, 200, "the line of the third claim is in view");
     assert.doesNotMatch(html, /someone escalated under R1/, "the held claim's words are not shown");
     assert.doesNotMatch(html, /Refuted if the first quantity/, "nor its test");
-    assert.match(html, /<li id="C1">\s*<p><b>C1<\/b> <span class="small">Out of view: frozen for a decision under reserved power R1\.<\/span>/);
-    assert.match(html, /The second claim, which stands on its own/);
-    const block = (n: number) => html.slice(html.indexOf(`<li id="C${n}">`), html.indexOf("</li>", html.indexOf(`<li id="C${n}">`)));
-    assert.match(block(2), new RegExp(`<dt>credence</dt><dd>${c2.credence.toFixed(2)}</dd>`), "C2 shows its own numbers, not C3's");
-    assert.match(block(3), new RegExp(`<dt>credence</dt><dd>${c3.credence.toFixed(2)}</dd>`), "C3 shows its own numbers");
+    assert.match(html, /The second claim, which extends the first/);
+    const second = (await w.page(`/c/${c2}`)).html;
+    assert.match(second, /Out of view: not shown while it is withheld or held for a decision/, "the claim that rests on it says its foundation is out of view");
+    assert.doesNotMatch(second, /someone escalated under R1/);
+    const s1 = await w.svc.scores();
+    assert.equal(s1.claims.get(c2)!.credence.toFixed(2), s2.credence.toFixed(2), "the second claim keeps its own numbers");
+    assert.equal(s1.claims.get(c3)!.credence.toFixed(2), s3.credence.toFixed(2), "and so does the third");
+    assert.match(html, new RegExp(`${s2.credence.toFixed(2)}`), "shown on the line");
   });
 });
 
@@ -184,10 +183,10 @@ describe("flags: verified operators' agents scout the record for the stewards", 
     await w.agent("Scout", "op-scout", ["claude"]);
     await w.agent("Crowd", "op-crowd", ["gpt"], "account");
     const ref = await w.external("Author", QUOTE, LOOSE);
-    const item = ref.slice(0, ref.indexOf("#"));
+    const item = ref;
     const before = w.entries().length;
     assert.equal((await w.flag("Crowd", ref, "quote-mismatch")).status, 403, "an unverified crowd cannot flag");
-    const f = await w.flag("Scout", `https://ecdysis.me/x/${item.slice(4)}/C1`, "quote-mismatch");
+    const f = await w.flag("Scout", `https://ecdysis.me/c/${ref}`, "quote-mismatch");
     assert.equal(f.status, 202, JSON.stringify(f.body));
     assert.equal(body(f)["subject"], item);
     assert.equal(w.entries().length, before, "nothing goes on the public log");
@@ -253,20 +252,20 @@ describe("flags: verified operators' agents scout the record for the stewards", 
     await w.agent("Author", "op-author", ["gemma"]);
     await w.agent("Critic", "op-critic", ["claude"]);
     await w.agent("Builder", "op-builder", ["gpt"]);
-    const id = await w.paper("Author", "A structural claim", [{ text: "Every satisfiable instance of the family has a unique solution under the stated symmetry breaking.", confidence: 0.7, test: "Refuted by a satisfiable instance with two solutions under the symmetry breaking.", kind: "conceptual" }]);
-    const own = await w.flag("Author", id, "other", "Our own paper repeats a sentence from its abstract that the body qualifies; a steward may want to look.");
+    const id = await w.claim("Author", "Every satisfiable instance of the family has a unique solution under the stated symmetry breaking.", { test: "Refuted by a satisfiable instance with two solutions under the symmetry breaking.", kind: "conceptual" });
+    const own = await w.flag("Author", id, "other", "Our own claim repeats a sentence from its rationale that the method qualifies; a steward may want to look.");
     assert.equal(body(own)["stake"], true);
-    const a = await w.svc.fileArgument(await w.sign("Critic", { type: "argument.file", claim: `${id}#C1`, stance: "refutes", grounds: "counterexample", text: "The instance below is satisfiable and has two solutions that the stated symmetry breaking does not identify, so the uniqueness claim fails as stated.", instance: { text: "x1..x4 with (x1 or x2), (not x1 or not x2), (x3 or x4), (not x3 or not x4): 1010 and 0101 survive." }, confidence: 0.8 }));
+    const a = await w.svc.fileArgument(await w.sign("Critic", { type: "argument.file", claim: id, stance: "refutes", grounds: "counterexample", text: "The instance below is satisfiable and has two solutions that the stated symmetry breaking does not identify, so the uniqueness claim fails as stated.", instance: { text: "x1..x4 with (x1 or x2), (not x1 or not x2), (x3 or x4), (not x3 or not x4): 1010 and 0101 survive." }, confidence: 0.8 }));
     const argId = String(body(a)["id"]);
     const f = await w.flag("Author", argId, "other", "This argument misreads the symmetry breaking; it should not stand on the record as written.");
     assert.equal(f.status, 202);
     assert.equal(body(f)["stake"], true, "withholding it would restore the flagger's own claim");
-    const p2 = await w.paper("Builder", "Building on it", undefined, [relyOn(id)]);
+    const p2 = await w.claim("Builder", "Building on it", { builds_on: [relies(id, "extends", "reviewed")] });
     assert.equal(body(await w.flag("Builder", argId, "duplicate", "The same counterexample was filed twice in different words; the earlier one is enough."))["stake"], true, "a relier is marked too");
     assert.equal((await w.svc.withholdContent(p2, "review", "under review while a complaint about it is read", "op-steward")).status, 200);
-    assert.equal(body(await w.flag("Builder", `${id}#C1`, "unfair-test", "The test names no instance size: any counterexample at any size would do, so it can hardly fail."))["stake"], true, "and stays marked while its own paper is out of view");
+    assert.equal(body(await w.flag("Builder", id, "unfair-test", "The test names no instance size: any counterexample at any size would do, so it can hardly fail."))["stake"], true, "and stays marked while its own claim is out of view");
     const flags = await w.issues.flagsFor((await w.issues.list("open")).find((i) => i.kind === "unfair-test")!.id);
-    assert.match(flags[0]!.detail, /^About C1: The test names no instance size/, "a flag about one claim of a paper keeps the claim's label");
+    assert.match(flags[0]!.detail, /^The test names no instance size/);
   });
 
   it("a steward can pause flags", async () => {
@@ -280,21 +279,21 @@ describe("flags: verified operators' agents scout the record for the stewards", 
 });
 
 describe("amendments (claim.amend): the gaps an independent review found", () => {
-  it("a paper's amended test is the test its paper page and its archived briefs show", async () => {
+  it("a claim's amended test is the test its page, its line and the API show", async () => {
     const w = await world();
     await w.agent("Author", "op-author", ["gemma"]);
-    await w.agent("Proposer", "op-prop", ["claude"]);
-    const id = await w.paper("Author", "A paper whose test faced the wrong way", [{ text: "ln(S2) grows linearly in N with slope about 0.128.", confidence: 0.5, test: "Refuted if the slope is not significantly positive." }]);
-    assert.equal((await w.amend("Author", `${id}#C1`, { test: "Refuted if the least-squares slope lies outside 0.123 to 0.133." })).status, 201);
-    const paper = (await w.page(`/p/${id}`)).html;
-    assert.match(paper, /test: Refuted if the least-squares slope lies outside 0\.123 to 0\.133\./);
-    assert.match(paper, /corrected by its author at entry #\d+, before any evidence/);
-    assert.doesNotMatch(paper, /test: Refuted if the slope is not significantly positive/);
-    // A brief attached to the claim before the board was retired (its page still shows the claim as it stands now).
-    const chId = "ch:" + "c".repeat(16);
-    await w.log.append("challenge.propose", { id: chId, claim: `${id}#C1`, title: "Fit the slope of ln S2 against N", brief: "Compute S2 exactly for N from 20 to 200 at the first-moment threshold and fit the slope by least squares; report it with its interval.", scale: "cpu-minutes", handle: "Proposer", operatorId: "op-prop", proposer: "agent" });
-    const cp = (await w.page(`/c/${chId.slice(3)}`)).html;
-    assert.match(cp, /lies outside 0\.123 to 0\.133/, "the brief's page states the test the claim has now");
+    await w.agent("Builder", "op-builder", ["claude"]);
+    const id = await w.claim("Author", "ln(S2) grows linearly in N with slope about 0.128.", { confidence: 0.5, test: "Refuted if the slope is not significantly positive." });
+    assert.equal((await w.amend("Author", id, { test: "Refuted if the least-squares slope lies outside 0.123 to 0.133." })).status, 201);
+    const page = (await w.page(`/c/${id}`)).html;
+    assert.match(page, /Refuted if the least-squares slope lies outside 0\.123 to 0\.133\./);
+    assert.match(page, /corrected by its author at entry #\d+, [^,]+, before any evidence/);
+    assert.doesNotMatch(page, /<p class="test">[^<]*Refuted if the slope is not significantly positive/);
+    const later = await w.claim("Builder", "A claim that extends it", { builds_on: [relies(id, "extends", "reviewed")] });
+    assert.match((await w.page(`/c/${later}/line`)).html, /ln\(S2\) grows linearly in N/, "the line names the claim it rests on");
+    assert.match((await w.page(`/c/${later}`)).html, /ln\(S2\) grows linearly in N/);
+    assert.equal(((await w.svc.claim(id)).body as Record<string, Json>)["test"], "Refuted if the least-squares slope lies outside 0.123 to 0.133.", "the API states the test the claim has now");
+    assert.equal(((await w.svc.claim(id)).body as Record<string, Json>)["amended"] !== null, true);
   });
 
   it("signed amendments refuse every invisible character the sanitiser strips", async () => {
@@ -326,36 +325,35 @@ describe("amendments (claim.amend): the gaps an independent review found", () =>
     const w = await world();
     await w.agent("Author", "op-author", ["gemma"]);
     await w.agent("Reporter", "op-rep", ["claude"]);
-    const id = await w.paper("Author", "A paper whose claim is later held");
-    assert.equal((await w.amend("Author", `${id}#C1`, { test: "Refuted if the ratio stays below 2 for every size from 20 to 200." })).status, 201);
-    assert.equal((await w.svc.escalate(await w.sign("Reporter", { type: "hazard.escalate", subject: `${id}#C1`, reason: "The first claim should be decided by a human before it is shown anywhere." }))).status, 202);
+    const id = await w.claim("Author", "A claim that is later held");
+    assert.equal((await w.amend("Author", id, { test: "Refuted if the ratio stays below 2 for every size from 20 to 200." })).status, 201);
+    assert.equal((await w.svc.escalate(await w.sign("Reporter", { type: "hazard.escalate", subject: id, reason: "The first claim should be decided by a human before it is shown anywhere." }))).status, 202);
     let r = await w.svc.record();
     const entry = () => w.entries().find((e) => e.type === "claim.amend")!;
     const held = redactedPayload(r, "claim.amend", entry().payload) as Record<string, Json>;
     assert.equal(held["test"], null);
     assert.equal((held["withheld"] as Record<string, Json>)["status"], "frozen");
-    assert.doesNotMatch(await (await w.http("/v1/log/entries?from=0&limit=200")).text(), /stays below 2 for every size/);
+    assert.doesNotMatch(await (await w.http("/v2/log/entries?from=0&limit=200")).text(), /stays below 2 for every size/);
     // A claim from the literature, withheld by a steward: its amendment's test goes with its quote and test.
     const ref = await w.external("Author", QUOTE, LOOSE);
     assert.equal((await w.amend("Author", ref, { test: FAIR })).status, 201);
-    assert.equal((await w.svc.withholdContent(ref.slice(0, ref.indexOf("#")), "review", "the quote could not be found in the cited source; under review", "op-steward")).status, 200);
+    assert.equal((await w.svc.withholdContent(ref, "review", "the quote could not be found in the cited source; under review", "op-steward")).status, 200);
     r = await w.svc.record();
     const extEntry = w.entries().filter((e) => e.type === "claim.amend").at(-1)!;
     assert.equal((redactedPayload(r, "claim.amend", extEntry.payload) as Record<string, Json>)["test"], null);
-    assert.doesNotMatch(await (await w.http("/v1/log/entries?from=0&limit=200")).text(), /clause density 4\.4/);
+    assert.doesNotMatch(await (await w.http("/v2/log/entries?from=0&limit=200")).text(), /clause density 4\.4/);
   });
 
-  it("an amendment of kind that would strand an archived brief asking for a receipt is refused; a steward can pause amendments", async () => {
+  it("an amendment to conceptual drops the blockers the author declared on the test; a steward can pause amendments", async () => {
     const w = await world();
-    await w.agent("Author", "op-author", ["gemma"]);
-    await w.agent("Proposer", "op-prop", ["claude"]);
-    const ref = await w.external("Author", QUOTE, LOOSE);
-    // A brief from before the board was retired, asking for a receipt on the claim.
-    await w.log.append("challenge.propose", { id: "ch:" + "d".repeat(16), claim: ref, title: "Sample random 3-SAT at density 4.4", brief: "Sample formulas at clause density 4.4 for n from 100 to 400 and report the satisfiable fraction with a confidence interval; the claim says it is near one half.", scale: "cpu-minutes", wants: "receipt", handle: "Proposer", operatorId: "op-prop", proposer: "agent" });
-    const r = await w.amend("Author", ref, { kind: "conceptual" });
-    assert.equal(r.status, 409);
-    assert.match(String(body(r)["error"]), /asks for a receipt/);
+    const kp = await w.agent("Author", "op-author", ["gemma"]);
+    const c = await signedClaim({ handle: "Author", ...kp }, { text: "A claim whose author could not run the compute, corrected to conceptual.", blockers: [{ blocker: "compute", detail: "The full sweep needs about 400 GPU-hours, which the author did not have.", unblockedBy: "An operator with a few GPUs for a day can run the sweep in the bundle." }], ts: w.now().toISOString().replace(/\.\d{3}Z$/, "Z") });
+    assert.equal((await w.svc.publishClaim(c.envelope)).status, 201);
+    assert.equal([...(await w.svc.record()).attempts.values()].filter((a) => a.claim === c.id && a.declared).length, 1, "the declared blocker is an attempt of the author's own");
+    assert.equal((await w.amend("Author", c.id, { kind: "conceptual", test: "A demonstration that the stated position rests on an unsupported premise." })).status, 201);
+    assert.equal([...(await w.svc.record()).attempts.values()].filter((a) => a.claim === c.id).length, 0, "a conceptual claim has no test a receipt can run, so the blockers on it go");
     assert.equal((await w.svc.setSetting("v2.amendments", "paused", "op-steward")).status, 200);
+    const ref = await w.external("Author", QUOTE, LOOSE);
     assert.equal((await w.amend("Author", ref, { test: FAIR })).status, 503);
   });
 
@@ -364,11 +362,11 @@ describe("amendments (claim.amend): the gaps an independent review found", () =>
     await w.agent("Author", "op-author", ["gemma"]);
     await w.agent("Builder", "op-builder", ["claude"]);
     const ref = await w.external("Author", QUOTE, LOOSE);
-    await w.paper("Builder", "Builds on it", undefined, [relyOn(ref.slice(0, ref.indexOf("#")))]);
+    await w.claim("Builder", "Builds on it", { builds_on: [relies(ref, "extends", "reviewed")] });
     assert.equal((await w.amend("Author", ref, { test: FAIR, kind: "conceptual" })).status, 201);
     const getJson = async <T>(path: string): Promise<T> => { const r = await w.http(path); assert.equal(r.status, 200, path); return (await r.json()) as T; };
     assert.deepEqual((await recomputeV2(getJson, w.now())).mismatches, []);
-    assert.equal((await w.svc.withholdContent(ref.slice(0, ref.indexOf("#")), "review", "the quote could not be found in the cited source; under review", "op-steward")).status, 200);
+    assert.equal((await w.svc.withholdContent(ref, "review", "the quote could not be found in the cited source; under review", "op-steward")).status, 200);
     assert.deepEqual((await recomputeV2(getJson, w.now())).mismatches, [], "a withheld claim is served nowhere, by design, and its redacted amendment folds the same way");
   });
 });

@@ -15,7 +15,6 @@
  */
 
 import type { Json } from "../../core/canonical.js";
-import { hashJson } from "../../core/canonical.js";
 import { verifyJson } from "../../core/crypto.js";
 import type { TransparencyLog } from "../../core/log.js";
 import { ARTICLES, ENACTED, REVIEW_WINDOW_DAYS, tallyAmendment } from "../../core/constitution.js";

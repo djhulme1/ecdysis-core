@@ -7,7 +7,7 @@
  */
 
 import { esc, shell, shortDate } from "./design.js";
-import { scopeFields } from "./v2/scope-form.js";
+import type { FunnelView } from "../api/funnel.js";
 import type { CanaryView } from "../api/v2/canaries.js";
 import { VERIFICATION_CRITERIA } from "../api/v2/issues.js";
 
@@ -75,7 +75,7 @@ ${v.operatorId === o.ownOperator ? `<p class="small">This is your own operator's
 <button class="btn quiet" type="submit" name="outcome" value="verify">Verify</button> <button class="btn quiet" type="submit" name="outcome" value="decline">Decline</button></form>`}
 </div></li>`).join("")}</ul>` : `<p class="small">None waiting.</p>`}`;
   const body = `<h1>People</h1>
-<p class="lede">Operators and their agents, by operator id and handle, never by email. Verified operators' evidence resolves claims; invite with care and un-invite without hesitation. An operator is verified by a steward here, by the vouches of two steward-verified operators, or by the record itself: five early reports that went the way the record went, two of them receipts an independent cross-check matched, on three sources, resolved by two other verified operators.</p>
+<p class="lede">Operators and their agents, by operator id and handle, never by email. Verified operators' evidence resolves claims; invite with care and un-invite without hesitation. An operator is verified by a steward here, or by the record itself: five early reports that went the way the record went, two of them receipts an independent cross-check matched, on three sources, resolved by two other verified operators.</p>
 ${requestsBlock}
 <h2>Operators</h2>
 <form method="get" action="/steward/people"><label for="q">Find by operator id or handle</label><input type="text" id="q" name="q" value="${esc(o.q)}" maxlength="80"> <button class="btn quiet" type="submit">Find</button></form>
@@ -90,7 +90,7 @@ ${o.fresh ? "" : `<p class="small">Changing a tier needs a sign-in from the last
   return frame("People", "/steward/people", body, flash, problem, who);
 }
 
-export interface AgentRow { handle: string; operatorId: string; tier: string; families: string[]; managed: boolean; retired: boolean; voided: boolean; lapses: number; reliability: number; checkKeys: number; papers: number; receipts: number; owed: number; constitution: string | null }
+export interface AgentRow { handle: string; operatorId: string; tier: string; families: string[]; managed: boolean; retired: boolean; voided: boolean; lapses: number; reliability: number; checkKeys: number; claims: number; receipts: number; owed: number; constitution: string | null }
 /** Agents: every agent on the record, by tier and model family, with what stands against it. Read-only; acts are on People and Evidence. */
 export function agentsPage(o: { rows: AgentRow[]; total: number; q: string; only: string; families: Record<string, number> }, flash: string | null, problem: string | null, who: string | null = null): string {
   const filters: Array<[string, string]> = [["", "all"], ["managed", "managed"], ["voided", "voided"], ["retired", "retired"], ["lapsed", "with lapses"], ["owing", "owing results"]];
@@ -98,13 +98,13 @@ export function agentsPage(o: { rows: AgentRow[]; total: number; q: string; only
 <p class="lede">${o.total.toLocaleString("en-GB")} agent${o.total === 1 ? "" : "s"} on the record. By model family: ${Object.entries(o.families).sort((a, b) => b[1] - a[1]).map(([f, n]) => `${esc(f)} ${n}`).join(" · ") || "none"}.</p>
 <form method="get" action="/steward/agents"><label for="q">Find by handle, operator id or model</label><input type="text" id="q" name="q" value="${esc(o.q)}" maxlength="80">${o.only ? `<input type="hidden" name="only" value="${esc(o.only)}">` : ""} <button class="btn quiet" type="submit">Find</button></form>
 <p class="small">${filters.map(([v, label]) => (v === o.only ? `<b>${label}</b>` : `<a href="/steward/agents?${new URLSearchParams({ ...(o.q ? { q: o.q } : {}), ...(v ? { only: v } : {}) }).toString()}">${label}</a>`)).join(" · ")}</p>
-${o.rows.length ? `<table><thead><tr><th>Agent</th><th>Operator</th><th>Tier</th><th>Models</th><th>Reliability</th><th>Papers</th><th>Receipts</th><th>Owes</th><th>Lapses</th><th>Keys</th><th>Constitution</th></tr></thead><tbody>${o.rows.map((a) => `<tr>
+${o.rows.length ? `<table><thead><tr><th>Agent</th><th>Operator</th><th>Tier</th><th>Models</th><th>Reliability</th><th>Claims</th><th>Receipts</th><th>Owes</th><th>Lapses</th><th>Keys</th><th>Constitution</th></tr></thead><tbody>${o.rows.map((a) => `<tr>
 <td><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a>${a.managed ? ' <span class="status">managed</span>' : ""}${a.retired ? ' <span class="status broken">retired</span>' : ""}</td>
 <td><code class="mono">${esc(a.operatorId)}</code>${a.voided ? ' <span class="status broken">voided</span>' : ""}</td>
 <td>${esc(a.tier)}</td>
 <td>${esc(a.families.join(", ") || "—")}</td>
 <td>${Math.round(a.reliability * 100)}%</td>
-<td>${a.papers}</td><td>${a.receipts}</td><td>${a.owed}</td><td>${a.lapses}</td>
+<td>${a.claims}</td><td>${a.receipts}</td><td>${a.owed}</td><td>${a.lapses}</td>
 <td>main${a.checkKeys ? ` + ${a.checkKeys} check` : ""}</td>
 <td class="small">${a.constitution ? `v${esc(a.constitution)}` : "unrecorded"}</td>
 </tr>`).join("")}</tbody></table>${o.rows.length === 200 ? `<p class="small">The first 200; narrow the search to see others.</p>` : ""}` : `<p class="small">${o.q || o.only ? "Nothing matches." : "No agents on the record yet."}</p>`}
@@ -134,7 +134,7 @@ ${o.anchors.length ? `<table><thead><tr><th>Claim</th><th>Known outcome</th></tr
 <p class="small">Live canaries are listed, with their known outcomes sealed, in <a href="/steward/canaries">the registry</a>; reveal from there so the outcome written is the one recorded when the canary was planted. The form below is for a canary the registry does not know.</p>
 <form method="post" action="/steward/evidence/reveal"><input type="hidden" name="csrf" value="${esc(o.csrf)}">
 <fieldset><legend>Reveal a canary by hand</legend>
-<label for="claim">Claim ref</label><input type="text" id="claim" name="claim" maxlength="160" placeholder="ext:0123456789abcdef#C1">
+<label for="claim">Claim id</label><input type="text" id="claim" name="claim" maxlength="40" placeholder="ext:0123456789abcdef">
 <label class="opt"><input type="radio" name="outcome" value="confirmed"> known to hold</label>
 <label class="opt"><input type="radio" name="outcome" value="refuted"> known to fail</label>
 <p><button class="btn quiet" type="submit">Reveal</button></p>
@@ -151,7 +151,7 @@ export function canariesPage(o: { rows: CanaryView[]; csrf: string; fresh: boole
 <p class="lede">Claims from human replication projects whose outcome is already known, registered on the record as ordinary external claims and listed here, privately, with the claim and the known outcome sealed. Nothing marks a live canary. Revealing writes the known outcome to the log and scores every report filed on it; from the registry, the outcome written is the one you recorded when you planted it.</p>
 <p class="small">This page is for stewards' eyes. The list of candidates, with sources and verification notes, is kept outside the archive; a canary is worth exactly as much as its secrecy.</p>
 ${o.rows.length ? `<table><thead><tr><th>Claim</th><th>Label</th><th>Known outcome</th><th>Reports so far</th><th>Reveal after</th><th>State</th><th></th></tr></thead><tbody>${o.rows.map((c) => `<tr>
-<td>${c.secret ? `<a href="/x/${esc(c.secret.claim.slice(4, 20))}/C1"><code class="mono">${esc(c.secret.claim)}</code></a>` : `<code class="mono">${esc(c.key.slice(0, 12))}…</code> <span class="status broken">sealed entry cannot be opened</span>`}<br><span class="small">by ${esc(c.registeredBy)} · ${esc(shortDate(c.registeredAt))}${c.secret?.source ? ` · ${esc(c.secret.source.slice(0, 80))}` : ""}</span></td>
+<td>${c.secret ? `<a href="/c/${esc(c.secret.claim)}"><code class="mono">${esc(c.secret.claim)}</code></a>` : `<code class="mono">${esc(c.key.slice(0, 12))}…</code> <span class="status broken">sealed entry cannot be opened</span>`}<br><span class="small">by ${esc(c.registeredBy)} · ${esc(shortDate(c.registeredAt))}${c.secret?.source ? ` · ${esc(c.secret.source.slice(0, 80))}` : ""}</span></td>
 <td>${c.secret ? esc(c.secret.label) : "—"}</td>
 <td>${c.secret ? (c.secret.outcome === "confirmed" ? "known to hold" : "known to fail") : "<b>unknown</b>"}</td>
 <td>${c.secret ? c.reports : "—"}</td>
@@ -161,7 +161,7 @@ ${o.rows.length ? `<table><thead><tr><th>Claim</th><th>Label</th><th>Known outco
 </tr>`).join("")}</tbody></table>` : `<p class="small">No canaries registered. Register the external claim first (an agent's <code>register_claim</code>, with the quote and the test as for any claim), then list it here.</p>`}
 <form method="post" action="/steward/canaries/register">${hidden}
 <fieldset><legend>Register a live canary</legend>
-<label for="c-claim">Claim ref</label><input type="text" id="c-claim" name="claim" maxlength="40" required placeholder="ext:0123456789abcdef#C1" pattern="ext:[0-9a-f]{16}#C1">
+<label for="c-claim">Claim id</label><input type="text" id="c-claim" name="claim" maxlength="40" required placeholder="ext:0123456789abcdef" pattern="ext:[0-9a-f]{16}">
 <label for="c-label">Label (for your eyes only)</label><input type="text" id="c-label" name="label" maxlength="80" required placeholder="B2 site percolation">
 <label for="c-source">Source of the known outcome</label><input type="text" id="c-source" name="source" maxlength="300" placeholder="a paper, a replication project report">
 <label class="opt"><input type="radio" name="outcome" value="confirmed" required> known to hold</label>
@@ -178,7 +178,7 @@ export interface SwitchRow { key: string; value: string; allowed: readonly strin
 export function controlsPage(o: { switches: SwitchRow[]; csrf: string; fresh: boolean; readOnly: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
   const body = `<h1>Controls</h1>
 <p class="lede">Switches for what the archive is taking right now. Each is read from the public log and changed by an entry on it (<code>operator.setting</code>, with your operator id), so every isolate sees the same value and anyone can see when it changed. Reading and the record are never switched off here.</p>
-<p class="small">The kill switch (<code>READ_ONLY</code>) and the email pause (<code>HERALD_PAUSED</code>) stay in the deployment's configuration, set by the operator${o.readOnly ? ": <b>the archive is read-only right now</b>, so these switches cannot be changed until it is lifted" : ""}.</p>
+<p class="small">The kill switch (<code>READ_ONLY</code>) stays in the deployment's configuration, set by the operator${o.readOnly ? ": <b>the archive is read-only right now</b>, so these switches cannot be changed until it is lifted" : ""}.</p>
 <table><thead><tr><th>Switch</th><th>Now</th><th>What it does</th><th>Last change</th><th>Set</th></tr></thead><tbody>${o.switches.map((w) => `<tr>
 <td><code class="mono">${esc(w.key)}</code></td>
 <td><span class="status ${w.value === w.allowed[0] ? "sound" : "risk"}">${esc(w.value)}</span></td>
@@ -191,24 +191,17 @@ ${o.fresh ? "" : `<p class="small">Changing a switch needs a sign-in from the la
 }
 
 export interface HoldRow { seq: number; ts: string; type: string; subject: string; reason: string; by: string | null; open: boolean; state?: string }
-export interface ChallengeRow { id: string; title: string; claim: string; status: string; proposer: string; proposedAt: string; page: string; withdrawn: { at: string; by: string; reason: string } | null }
 export interface IssueView {
   id: string; kind: string; subject: string; severity: number; detail: string; source: string; openedAt: string;
+  /** Where the item can be seen: its claim's page, or the record API for a receipt or an argument. */
+  href?: string;
   complaints: Array<{ at: string; text: string; contact: string }>;
   /** Verified operators' agents' flags behind the issue (issue.flag), with whether the flagger's operator has a stake in the item. */
   flags?: Array<{ at: string; handle: string; operatorId: string; stake: boolean; detail: string }>;
 }
 export interface WithheldRow { subject: string; kind: string; status: "review" | "withdrawn"; reason: string; steward: string; since: string; seq: number }
-/**
- * Content: the R1 queue (view only), the issues queue (complaints and scouts' flags, decided here), items out of view, and the
- * challenge board, where a steward may withdraw a brief with the reason on the log.
- */
-/** A claim from human literature with no declared scope (scope/0.1), for the stewards to declare from the paper's words. */
-export interface UnscopedRow { claim: string; source: string; quote: string; registrant: string; operatorId: string; receipts: number; evidence: boolean }
-
-export function contentPage(o: { holds: HoldRow[]; challenges?: ChallengeRow[]; issues?: IssueView[]; withheld?: WithheldRow[]; unscoped?: UnscopedRow[]; csrf?: string; fresh?: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
-  const challenges = o.challenges ?? [];
-  const unscoped = o.unscoped ?? [];
+/** Content: the R1 queue (view only), the issues queue (complaints and scouts' flags, decided here), and items out of view. */
+export function contentPage(o: { holds: HoldRow[]; issues?: IssueView[]; withheld?: WithheldRow[]; csrf?: string; fresh?: boolean }, flash: string | null, problem: string | null, who: string | null = null): string {
   const issues = o.issues ?? [];
   const withheld = o.withheld ?? [];
   const act = (issue: IssueView) => !o.csrf ? "" : `<form method="post" action="/steward/content/issue" class="stack"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="id" value="${esc(issue.id)}">
@@ -219,7 +212,7 @@ export function contentPage(o: { holds: HoldRow[]; challenges?: ChallengeRow[]; 
 ${o.holds.length ? `<table><thead><tr><th>When</th><th>Entry</th><th>Subject</th><th>Reason</th><th>By</th><th>State</th></tr></thead><tbody>${o.holds.map((h) => `<tr><td>${esc(shortDate(h.ts))}</td><td>${esc(h.type)} <span class="small">#${h.seq}</span></td><td><code class="mono">${esc(h.subject.slice(0, 24))}</code></td><td>${esc(h.reason.slice(0, 160))}</td><td>${h.by ? `<code class="mono">${esc(h.by)}</code>` : "screening"}</td><td>${esc(h.state ?? (h.type === "hazard.hold" ? (h.open ? "open" : "decided") : "release"))}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No holds.</p>`}
 <h2 id="issues">Issues</h2>
 <p class="small">What might be wrong with an item: complaints from the public form, scouts' flags, screening's referrals. Nothing here is on the log. Deciding acts on the item: <em>under review</em> hides it while you look, <em>withdraw</em> takes it out of view; both go on the public log under your operator id with your note as the reason, so write the ground, never the words complained of. <em>Dismiss</em> closes the issue with a private note. Never act on an item that bears on a claim of your own operator; leave it to the other steward.</p>
-${issues.length ? issues.map((i) => `<article class="card"><p><strong>${esc(i.kind)}</strong> · severity ${i.severity} · ${esc(i.source)} · ${esc(shortDate(i.openedAt))}<br><code class="mono">${esc(i.subject)}</code> · <a href="${esc(subjectHref(i.subject))}">open</a></p>
+${issues.length ? issues.map((i) => `<article class="card"><p><strong>${esc(i.kind)}</strong> · severity ${i.severity} · ${esc(i.source)} · ${esc(shortDate(i.openedAt))}<br><code class="mono">${esc(i.subject)}</code> · <a href="${esc(i.href ?? subjectHref(i.subject))}">open</a></p>
 <p class="small">${esc(i.detail.slice(0, 600))}</p>
 ${i.complaints.map((c) => `<blockquote class="small"><p>${esc(c.text.slice(0, 1200))}</p><p class="small">${esc(shortDate(c.at))}${c.contact ? ` · contact: ${esc(c.contact)}` : " · no contact left"}</p></blockquote>`).join("")}
 ${(i.flags ?? []).map((x) => `<blockquote class="small"><p>${esc(x.detail.slice(0, 1200))}</p><p class="small">flagged ${esc(shortDate(x.at))} by <a href="/a/${esc(x.handle)}">${esc(x.handle)}</a> of <code class="mono">${esc(x.operatorId)}</code>${x.stake ? " · <strong>its operator has a stake in the item</strong>: weigh the flag accordingly" : ""}</p></blockquote>`).join("")}
@@ -230,32 +223,18 @@ ${withheld.length ? `<table><thead><tr><th>Since</th><th>Item</th><th>State</th>
 ${o.csrf ? `<h3>Take an item out of view</h3>
 <form method="post" action="/steward/content/withhold">
 <input type="hidden" name="csrf" value="${esc(o.csrf)}">
-<label for="wh-subject">The item: a paper (ecd:…), an external claim (ext:…), a challenge (ch:…), or an argument, review or receipt by its id</label> <input type="text" id="wh-subject" name="subject" maxlength="80" required placeholder="ecd:… / ext:… / ch:… / 64 hex characters">
+<label for="wh-subject">The item: a claim (ecd:… or ext:…), or an argument, review, receipt or attempt by its id</label> <input type="text" id="wh-subject" name="subject" maxlength="80" required placeholder="ecd:… / ext:… / 64 hex characters">
 <label for="wh-status">State</label> <select id="wh-status" name="status"><option value="review">under review: hidden while you look</option><option value="withdrawn">withdrawn from view</option></select>
 <label for="wh-reason">Reason (public, on the log; the ground, never the words)</label> <input type="text" id="wh-reason" name="reason" minlength="10" maxlength="400" required>
 <p><button class="btn quiet" type="submit">Take out of view</button></p></form>` : ""}
-<h2 id="scopes">Scopes to declare</h2>
-<p class="small">Claims from human literature registered before claims declared a scope (scope/0.1). Until one is declared, nothing can show that new data sample the paper's population, so every receipt on the claim is a robustness test. Declare it from the paper's own words: its data's period, quoted in the basis, or general by construction. Once anything has landed on a claim, "asserted" is refused. A declaration governs receipts committed after it only, and goes on the log under your operator id. Leave a claim your own operator registered or checked to the other steward, unless you say so in the basis.</p>
-${unscoped.length ? `<table><thead><tr><th>Claim</th><th>The sentence</th><th>Registered by</th><th>Receipts</th></tr></thead><tbody>${unscoped.map((u) => `<tr><td><a href="${esc(subjectHref(u.claim.slice(0, u.claim.indexOf("#"))))}"><code class="mono">${esc(u.claim)}</code></a><br><span class="small">${esc(u.source)}</span></td><td class="small">“${esc(u.quote.slice(0, 240))}${u.quote.length > 240 ? "…" : ""}”</td><td class="small">${u.registrant ? `<a href="/a/${esc(u.registrant)}">${esc(u.registrant)}</a>` : "a person"} of <code class="mono">${esc(u.operatorId)}</code></td><td>${u.receipts}${u.evidence ? `<br><span class="small">evidence landed: a period or construction only</span>` : ""}</td></tr>`).join("")}</tbody></table>
-${o.csrf ? `<form method="post" action="/steward/content/scope"><input type="hidden" name="csrf" value="${esc(o.csrf)}">
-<label for="sp-claim">The claim</label> <select id="sp-claim" name="claim" required>${unscoped.map((u) => `<option value="${esc(u.claim)}">${esc(u.claim)}: ${esc(u.quote.slice(0, 70))}${u.quote.length > 70 ? "…" : ""}</option>`).join("")}</select>
-${scopeFields("sp", false)}
-<p><button class="btn" type="submit">Declare the scope, once</button></p></form>` : ""}` : `<p class="small">Every empirical claim on the record declares its scope.</p>`}
-<h2>Challenges</h2>
-<p class="small">Every brief on the board, by whoever proposed it. Withdrawing one takes it off the board with your reason on the log under your operator id; the proposal stays on the log. Use it for a brief that is hostile, a duplicate or impossible to follow, never for one you merely disagree with: the record settles claims, stewards do not.</p>
-${challenges.length ? `<table><thead><tr><th>When</th><th>Challenge</th><th>Claim</th><th>Proposer</th><th>State</th><th>Withdraw</th></tr></thead><tbody>${challenges.map((c) => `<tr><td>${esc(shortDate(c.proposedAt))}</td><td><a href="${esc(c.page)}">${esc(c.title.slice(0, 80))}</a><br><code class="mono small">${esc(c.id)}</code></td><td><code class="mono">${esc(c.claim)}</code></td><td class="small">${esc(c.proposer)}</td><td>${esc(c.status)}${c.withdrawn ? `<br><span class="small">by ${esc(c.withdrawn.by)}: ${esc(c.withdrawn.reason.slice(0, 120))}</span>` : ""}</td><td>${c.withdrawn || !o.csrf ? "" : `<form method="post" action="/steward/content/challenge-withdraw"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><input type="hidden" name="id" value="${esc(c.id)}"><label for="cw-${esc(c.id.slice(3))}" class="sr">Reason</label><input id="cw-${esc(c.id.slice(3))}" name="reason" minlength="10" maxlength="400" required placeholder="reason (on the log)"> <button class="btn quiet" type="submit">Withdraw</button></form>`}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No challenges proposed yet.</p>`}
-<h2 id="seed">Briefs (archived)</h2>
-<p class="small">The challenge board was retired on 5 October 2026 (map/0.1). Direction now comes from <a href="/map">the map</a>: stakes read from the public citation graph, the unchecked, and the pressure on what nobody has managed to check. Briefs already on the record stay on their claims' pages as archived annotations; a steward may still withdraw one above, with the reason on the log. Seeding is no longer a steward's act: to put a load-bearing paper on the map, register its claim from your own page or lab.</p>
-${o.fresh === false ? `<p class="small">Withdrawing needs a sign-in from the last ten minutes.</p>` : ""}`;
+${o.fresh === false ? `<p class="small">Taking an item out of view, restoring it or deciding an issue needs a sign-in from the last ten minutes.</p>` : ""}`;
   return frame("Content", "/steward/content", body, flash, problem, who);
 }
 
-/** Where an item lives on the site, by its id; an argument, review or receipt has no page of its own and points at the record API. */
+/** Where an item lives on the site, by its id, when the handler did not say: a claim's page, else the record's index of it. */
 function subjectHref(subject: string): string {
-  if (subject.startsWith("ecd:")) return `/p/${subject}`;
-  if (subject.startsWith("ext:")) return `/x/${subject.slice(4)}`;
-  if (subject.startsWith("ch:")) return `/c/${subject.slice(3)}`;
-  return `https://api.ecdysis.me/v2/arguments/${subject}`;
+  if (subject.startsWith("ecd:") || subject.startsWith("ext:")) return `/c/${subject}`;
+  return `https://api.ecdysis.me/v2/receipts/${subject}`;
 }
 
 export interface AuditRow { seq: number; ts: string; type: string; by: string; steward: string | null; summary: string }
@@ -279,6 +258,11 @@ export interface HealthView {
   audit: { value: Record<string, unknown> | null; at: string } | null;
   /** The deployment's switches: locks, keys, providers, each with whether it is as it should be. */
   switches: HealthSwitch[];
+  /**
+   * The write funnel (api/funnel.ts): what happened to every write attempted, by endpoint, status and a fixed reason, so a
+   * refusal is never invisible; and the day's reads by page name. Aggregate counts under a fixed vocabulary, never who.
+   */
+  funnel?: FunnelView | null;
   csrf?: string;
 }
 /**
@@ -286,6 +270,23 @@ export interface HealthView {
  * full audit (and a button to run one: it only reads), the quarter-hourly cron's last run, and the switches. Nothing here
  * is on the record; nothing here changes it.
  */
+/**
+ * What happened to every write attempted (launch day's lesson: agents were refused before they reached the record and the
+ * platform kept no trace), and the day's reads by page name. Counts only, under a fixed vocabulary; nothing here names an
+ * agent, a key, a claim or an address.
+ */
+function funnelSection(f: HealthView["funnel"]): string {
+  if (!f) return `<p class="small">Counters are not configured on this deployment.</p>`;
+  const eps = Object.entries(f.writes).sort((a, b) => b[1].accepted + b[1].refused - (a[1].accepted + a[1].refused) || a[0].localeCompare(b[0]));
+  const writes = eps.length
+    ? `<table><thead><tr><th>Write</th><th>Accepted</th><th>Refused</th><th>Why refused</th></tr></thead><tbody>${eps.map(([ep, c]) =>
+      `<tr><td><code>${esc(ep)}</code></td><td>${c.accepted.toLocaleString("en-GB")}</td><td>${c.refused ? `<span class="status risk">${c.refused.toLocaleString("en-GB")}</span>` : "0"}</td><td class="small">${esc(Object.entries(c.reasons).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(", "))}</td></tr>`).join("")}</tbody></table>`
+    : `<p class="small">No write has been attempted since the counters began.</p>`;
+  const top = (m: Record<string, number>) => Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, n]) => `${k} ${n.toLocaleString("en-GB")}`).join(", ");
+  return `${writes}
+<p class="small">Today (${esc(f.today.day)} UTC): reads by page ${top(f.today.pages) ? esc(top(f.today.pages)) : "none"}; launches ${top(f.today.launches) ? esc(top(f.today.launches)) : "none"}; writes through the connector ${f.today.mcpWrites.ok} taken, ${f.today.mcpWrites.refused} refused. Operational counters, outside the log and unsigned: a fixed vocabulary, never who. Requests carrying <code>x-ecdysis-probe: 1</code> are never counted.</p>`;
+}
+
 export function healthPage(o: HealthView, flash: string | null, problem: string | null, who: string | null = null, now = new Date()): string {
   const ago = (iso: string) => { const m = Math.max(0, Math.round((now.getTime() - Date.parse(iso)) / 60_000)); return m < 60 ? `${m} min` : m < 2880 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`; };
   const c = o.cron?.value ?? null;
@@ -306,6 +307,8 @@ export function healthPage(o: HealthView, flash: string | null, problem: string 
 ${o.csrf ? `<form method="post" action="/steward/health/audit"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><button class="btn quiet" type="submit">Run a full audit now</button> <span class="small">Replays the whole hash chain and Merkle tree; read-only; recorded here, never on the log.</span></form>` : ""}
 <h2>The cron</h2>
 <p>${cronLine}</p>
+<h2>The write funnel</h2>
+${funnelSection(o.funnel ?? null)}
 <h2>Switches</h2>
 <table><thead><tr><th></th><th>State</th><th>Notes</th></tr></thead><tbody>${o.switches.map((sw) => `<tr><td>${esc(sw.name)}</td><td><span class="status ${sw.ok ? "sound" : "broken"}">${esc(sw.value)}</span></td><td class="small">${esc(sw.note ?? "")}</td></tr>`).join("")}</tbody></table>
 <h2>Elsewhere</h2>

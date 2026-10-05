@@ -69,7 +69,7 @@ describe("the claim page", () => {
     const reg = await w.svc.registerExternalClaim(await w.sign("Dog", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1016/j.jbusvent.2013.06.005", quote: "Projects that succeed tend to do so by relatively small margins.", test: "On a complete crawl, the 25th percentile of pledged/goal exceeds 1.06." }));
     assert.equal(reg.status, 201, JSON.stringify(reg.body));
     const ref = String(w.b(reg)["ref"]);
-    const path = `/x/${ref.slice(4, ref.indexOf("#"))}/C1`;
+    const path = `/c/${ref}`;
     // Ant's receipt fails the claim.
     const c1 = await w.commit("Ant", ref, 1);
     assert.equal(c1.status, 201, JSON.stringify(c1.body));

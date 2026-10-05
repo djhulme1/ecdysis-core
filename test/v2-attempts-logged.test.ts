@@ -13,7 +13,7 @@ import { llmsTxtV2, skillMdV2 } from "../src/api/v2/skill.js";
 import { LAB_BRIEF, LAB_GUIDE_MD } from "../src/web/v2/lab-guide.js";
 import { mapPageV2 } from "../src/web/v2/map.js";
 import { buildMap } from "../src/core/v2/map.js";
-import { attemptsSection, frontierPageV2 } from "../src/web/v2/pages.js";
+import { attemptsSection, claimsPageV2 } from "../src/web/v2/pages.js";
 import { peoplePromptsV2 } from "../src/web/starters.js";
 import { openApiDocument } from "../src/api/openapi.js";
 import { v2Tools } from "../src/api/v2/tools.js";
@@ -34,7 +34,7 @@ describe("even an attempt is logged, and attempts build the map of pressure: sai
   });
 
   it("on the front page, in the contrast table and in its own section", () => {
-    const html = landingPageV2({ host: "ecdysis.me", constitution: { version: "2.0.0", hash: "0".repeat(64) }, logPublicKey: null, counts: { papers: 0, claims: 0, receipts: 0, agents: 0 }, latest: null });
+    const html = landingPageV2({ host: "ecdysis.me", constitution: { version: "2.1.0", hash: "0".repeat(64) }, logPublicKey: null, counts: { claims: 0, external: 0, receipts: 0, agents: 0 }, latest: null });
     const t = text(html);
     assert.match(t, LOGGED);
     assert.match(t, PRESSURE);
@@ -54,13 +54,12 @@ describe("even an attempt is logged, and attempts build the map of pressure: sai
     }
   });
 
-  it("on the map, the frontier and every claim's attempts section", () => {
+  it("on the map, the claims page and every claim's attempts section", () => {
     const map = mapPageV2(buildMap([], [], new Map(), new Map(), 10));
     assert.match(text(map), LOGGED);
-    const frontier = frontierPageV2({ checking: [], disputes: [] });
-    assert.match(text(frontier), LOGGED);
-    assert.match(text(frontier), PRESSURE);
-    assert.match(text(attemptsSection("ext:0123456789abcdef#C1", "empirical", null, [])), LOGGED);
+    const claims = claimsPageV2({ claims: [], all: false, unlisted: 0, graph: { nodes: [], edges: [], omitted: 0 }, totals: { claims: 0, external: 0, edges: 0, maxGen: 0, deepUnchecked: 0 } });
+    assert.match(text(claims), /The map/);
+    assert.match(text(attemptsSection("ext:0123456789abcdef", "empirical", null, [])), LOGGED);
   });
 
   it("in the protocol, llms.txt, the lab guide and brief, and the prompts people hand their AI", () => {
@@ -88,7 +87,7 @@ describe("even an attempt is logged, and attempts build the map of pressure: sai
   });
 
   it("in the repository's README, the quickstart and the mirrored protocol", () => {
-    for (const f of ["README.md", "docs/v2/QUICKSTART.md", "docs/v2/skill.md"]) {
+    for (const f of ["README.md", "docs/QUICKSTART.md", "docs/skill.md"]) {
       const s = readFileSync(new URL(`../${f}`, import.meta.url), "utf8").replace(/\s+/g, " ").replace(/^> /gm, "");
       assert.match(s.replace(/ > /g, " "), LOGGED, f);
     }

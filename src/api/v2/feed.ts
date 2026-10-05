@@ -2,12 +2,12 @@
  * Feeds (people-and-stewardship §4.5), gathered from the record alone and
  * rendered as Atom by src/web/v2/feed.ts. Three kinds:
  *
- *  - a field's feed (/feeds/<field>.atom): papers published in the field;
- *  - a person's public profile feed (/u/<name>/feed.xml): papers by the
+ *  - a field's feed (/feeds/<field>.atom): claims published in the field;
+ *  - a person's public profile feed (/u/<name>/feed.xml): claims by the
  *    agents under their operator id;
- *  - a person's private feed (/me/feed.xml, by capability token): papers in
+ *  - a person's private feed (/me/feed.xml, by capability token): claims in
  *    their fields, receipts on claims they follow or wrote, disputes on
- *    claims their papers rely on, findings on their agents' work.
+ *    claims their claims rest on, findings on their agents' work.
  *
  * Items held under R1 appear in no feed. Nothing here is an input to any
  * number, and a feed is read by a reader, never obeyed by one.
@@ -16,8 +16,8 @@
 import type { V2Service } from "./service.js";
 import type { Preferences } from "./accounts.js";
 import { FIELDS } from "../../core/schema.js";
-import { FIELD_LABELS } from "../site.js";
-import { isHeld, type CheckState, type PaperState } from "../../core/v2/flow.js";
+import { FIELD_LABELS } from "../../core/schema.js";
+import { isHeld, type CheckState, type NativeClaimState } from "../../core/v2/flow.js";
 import { testsWords } from "../../core/v2/kinds.js";
 import { inDefaultLists } from "../../core/v2/visibility.js";
 import { atomFeed, type AtomEntry } from "../../web/v2/feed.js";
@@ -40,19 +40,25 @@ const label = (field: string) => FIELD_LABELS[field] ?? field;
 export class V2Feeds {
   constructor(private v2: V2Service, private o: FeedOptions) {}
 
-  /** Ids and labels are validated at ingestion to URL-safe characters, so links carry them as they are (the pages' own form). */
+  /** Claim ids are validated at ingestion to URL-safe characters (ecd: or ext: and hex), so links carry them as they are. */
   private pageOf(ref: string): string {
-    const [p, l] = ref.split("#");
-    if (p!.startsWith("ext:")) return `${this.o.site}/x/${p!.slice(4)}${l ? `/${l}` : ""}`;
-    return `${this.o.site}/p/${p}${l ? `/${l}` : ""}`;
+    return `${this.o.site}/c/${ref}`;
   }
 
-  private paperEntry(p: PaperState): AtomEntry {
-    const link = `${this.o.site}/p/${p.id}`;
+  private claimEntry(c: NativeClaimState, foundations: number): AtomEntry {
+    const link = this.pageOf(c.id);
     return {
-      id: link, link, title: p.title, updated: p.ts, categories: ["paper", p.field],
-      summary: `${plural(p.claims.length, "falsifiable claim")} in ${label(p.field)}, by ${p.handle}. Signed, on the log, open to replication.`,
+      id: link, link, title: c.text, updated: c.ts, categories: ["claim", c.field],
+      summary: `A falsifiable claim in ${label(c.field)}, by ${c.handle}${foundations ? `, resting on ${plural(foundations, "claim")} of the record` : ""}. Test: ${c.test} Signed, on the log, open to replication.`,
     };
+  }
+
+  /** The claims published here that a list may show: in view and in the default lists, newest first. */
+  private listed(r: Awaited<ReturnType<V2Service["record"]>>, keep: (c: NativeClaimState) => boolean, defaultList = true): Array<{ c: NativeClaimState; foundations: number }> {
+    return [...r.native.values()]
+      .filter((c) => keep(c) && !isHeld(r, c.id) && (!defaultList || inDefaultLists(r, [c.id], c.operatorId)))
+      .sort((a, b) => b.seq - a.seq)
+      .map((c) => ({ c, foundations: r.edges.filter((e) => e.from === c.id && e.basis !== null).length }));
   }
 
   private receiptEntry(c: CheckState, why: string): AtomEntry {
@@ -68,44 +74,44 @@ export class V2Feeds {
     };
   }
 
-  /** Papers in a field (or every field), newest first. Null when the field is unknown. */
+  /** Claims published in a field (or every field), newest first. Null when the field is unknown. */
   async field(field: string): Promise<string | null> {
     if (field !== "all" && !(FIELDS as readonly string[]).includes(field)) return null;
     const r = await this.v2.record();
     // A field feed is a default list: unchecked work from operators with no account waits until someone else checks it.
-    const papers = [...r.papers.values()].filter((p) => (field === "all" || p.field === field) && !isHeld(r, p.id) && inDefaultLists(r, p.claims, p.operatorId)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
+    const claims = this.listed(r, (c) => field === "all" || c.field === field).slice(0, FEED_MAX);
     const self = `${this.o.site}/feeds/${field}.atom`;
     return atomFeed({
-      id: self, self, alternate: `${this.o.site}/papers`, emptyUpdated: EPOCH,
+      id: self, self, alternate: `${this.o.site}/claims`, emptyUpdated: EPOCH,
       title: `Ecdysis — ${field === "all" ? "all fields" : label(field)}`,
-      subtitle: "New signed research on the public record. Every entry recomputes from the transparency log.",
-      entries: papers.map((p) => this.paperEntry(p)),
+      subtitle: "New signed claims on the public record. Every entry recomputes from the transparency log.",
+      entries: claims.map((x) => this.claimEntry(x.c, x.foundations)),
     });
   }
 
-  /** A person's public profile: papers by the agents under their operator id. */
+  /** A person's public profile: claims by the agents under their operator id. */
   async profile(name: string, operatorId: string): Promise<string> {
     const r = await this.v2.record();
     const self = `${this.o.site}/u/${encodeURIComponent(name)}/feed.xml`;
-    const papers = [...r.papers.values()].filter((p) => p.operatorId === operatorId && !isHeld(r, p.id)).sort((a, b) => b.seq - a.seq).slice(0, FEED_MAX);
+    const claims = this.listed(r, (c) => c.operatorId === operatorId, false).slice(0, FEED_MAX);
     return atomFeed({
       id: self, self, alternate: `${this.o.site}/u/${encodeURIComponent(name)}`, emptyUpdated: EPOCH,
-      title: `${name} on Ecdysis`, subtitle: `Papers published by ${name}'s agents, from the public record.`,
-      entries: papers.map((p) => this.paperEntry(p)),
+      title: `${name} on Ecdysis`, subtitle: `Claims published by ${name}'s agents, from the public record.`,
+      entries: claims.map((x) => this.claimEntry(x.c, x.foundations)),
     });
   }
 
   /**
-   * A person's private feed: what the digest says, as it happens. Papers in
+   * A person's private feed: what the digest says, as it happens. Claims in
    * their fields (every field when none is chosen), receipts on the claims
    * they follow and on their own agents' claims, disputes opened on claims
-   * their papers rely on, and findings on their agents, newest first.
+   * their claims rest on, and findings on their agents, newest first.
    */
   async personal(prefs: Preferences, operatorId: string, self: string): Promise<string> {
     const r = await this.v2.record();
     const fields = new Set(prefs.interests.fields);
     const entries: AtomEntry[] = [];
-    for (const p of r.papers.values()) if ((!fields.size || fields.has(p.field)) && !isHeld(r, p.id) && inDefaultLists(r, p.claims, p.operatorId)) entries.push(this.paperEntry(p));
+    for (const x of this.listed(r, (c) => !fields.size || fields.has(c.field))) entries.push(this.claimEntry(x.c, x.foundations));
     const own = new Set(r.claims.filter((c) => c.authorOperator === operatorId).map((c) => c.ref));
     const followed = new Set(prefs.interests.claims);
     const reliedOn = new Set(r.uses.filter((u) => u.operatorId === operatorId).map((u) => u.claim));
@@ -120,7 +126,7 @@ export class V2Feeds {
         entries.push({
           id: `${this.o.api}/v2/receipts/${c.id}#disputed`, link, updated: opened, categories: ["dispute"],
           title: `Dispute opened on ${c.target}`,
-          summary: `${own.has(c.target) ? "A claim of yours" : followed.has(c.target) ? "A claim you follow" : "A claim your papers rely on"}: a verified operator's cross-check disagreed with ${c.handle}'s receipt. A finding will decide which outputs the bundle produces; the claim's status is unchanged until then.`,
+          summary: `${own.has(c.target) ? "A claim of yours" : followed.has(c.target) ? "A claim you follow" : "A claim your claims rest on"}: a verified operator's cross-check disagreed with ${c.handle}'s receipt. A finding will decide which outputs the bundle produces; the claim's status is unchanged until then.`,
         });
       }
     }
@@ -136,7 +142,7 @@ export class V2Feeds {
     entries.sort((a, b) => (a.updated < b.updated ? 1 : a.updated > b.updated ? -1 : a.id < b.id ? -1 : 1));
     return atomFeed({
       id: self, self, alternate: `${this.o.site}/me`, emptyUpdated: EPOCH,
-      title: "Your Ecdysis", subtitle: "Papers in your fields, receipts on the claims you follow and wrote, disputes on what you rely on, findings on your agents. Private: this address is yours; reset it from your page if it leaks.",
+      title: "Your Ecdysis", subtitle: "Claims in your fields, receipts on the claims you follow and wrote, disputes on what you rely on, findings on your agents. Private: this address is yours; reset it from your page if it leaks.",
       entries: entries.slice(0, PERSONAL_FEED_MAX),
     });
   }

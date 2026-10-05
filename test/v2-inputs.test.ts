@@ -87,7 +87,7 @@ describe("inputs/0.1: the core", () => {
     assert.deepEqual(requiredHoldings([OPEN, PRIVATE, { ...PRIVATE, name: "survey2" }]), [SHA_B]);
     assert.ok(canRun([], []) && canRun([SHA_B], [SHA_B, SHA_A]) && !canRun([SHA_B], [SHA_A]));
     // The commit validator carries both; holdings must be hashes.
-    const base = { protocol: "ecdysis/0.2", type: "check.commit", target: "ext:0123456789abcdef#C1", kind: "replication", design: REPRODUCTION, agent: { handle: "Ant", publicKey: "k".repeat(44) }, ts: "2026-10-03T09:00:00Z" };
+    const base = { protocol: "ecdysis/0.2", type: "check.commit", target: "ext:0123456789abcdef", kind: "replication", design: REPRODUCTION, agent: { handle: "Ant", publicKey: "k".repeat(44) }, ts: "2026-10-03T09:00:00Z" };
     const bundle = { repo: "https://github.com/example/rep", commit: "0".repeat(40), run: "python run.py", outputs: [{ name: "effect" }], runtimeMinutes: 5, inputs: [OPEN, PRIVATE] };
     assert.equal(validateCheckCommit({ ...base, bundle, holds: [SHA_B] }).ok, true);
     const v = validateCheckCommit({ ...base, bundle: { ...bundle, inputs: [{ ...PRIVATE, access: "secret" }] }, holds: ["nothex"] });
@@ -116,7 +116,7 @@ describe("inputs/0.1: the core", () => {
   });
 
   it("weighs a receipt the audit cannot reach as an unverified operator's, whatever its tier", () => {
-    const item = (over: Partial<EvidenceInput>): EvidenceInput => ({ id: "r", claim: "c#C1", kind: "replication", confirms: true, agent: "Ant", operatorId: "op-a", tier: "verified", families: ["claude"], seq: 1, ...over });
+    const item = (over: Partial<EvidenceInput>): EvidenceInput => ({ id: "r", claim: "ecd:cccccccccccccccc", kind: "replication", confirms: true, agent: "Ant", operatorId: "op-a", tier: "verified", families: ["claude"], seq: 1, ...over });
     const audited = sumEvidence([item({})], "op-author");
     const unaudited = sumEvidence([item({ auditable: false })], "op-author");
     assert.ok(audited.confirmingReplication && audited.s > 0 && audited.sumVerified > 0);

@@ -20,12 +20,12 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Doorbells } from "../src/api/doorbells.js";
 import { MemoryStore } from "../src/store/memory-store.js";
-import { EcdysisService } from "../src/api/service.js";
 import { handleMcp, type McpContext } from "../src/api/mcp.js";
 import { MemoryRateLimiter, route } from "../src/api/router.js";
 import { generateKeyPair, signJson, verifyJson } from "../src/core/crypto.js";
-import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
-import { structuralScreener } from "../src/core/hazard.js";
+import { TransparencyLog } from "../src/core/log.js";
+import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
+import { v2Tools } from "../src/api/v2/tools.js";
 import type { Json } from "../src/core/canonical.js";
 import { newSecret, verifyDelivery } from "../src/core/webhooks.js";
 
@@ -59,17 +59,22 @@ async function world() {
   let n = 11;
   const bells = new Doorbells({
     store, siteBase: "https://ecdysis.me", apiBase: "https://api.ecdysis.me", sthPrivateKey: log.privateKey, sealSecret: null, readOnly: false,
-    fetchImpl, now: () => new Date(now), random: () => ((n++ * 2654435761) % 4294967296) / 4294967296, v2: true,
+    fetchImpl, now: () => new Date(now), random: () => ((n++ * 2654435761) % 4294967296) / 4294967296,
     resolveAgent: async (h) => (owners.has(h) ? { publicKey: "k", operatorId: owners.get(h)! } : null),
   });
-  const svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: log.privateKey, now: () => new Date(now) });
+  // The record, whose tools the connector serves beside the events.
+  const v2 = new V2Service({
+    log: new TransparencyLog(store, () => new Date(now)), logPrivateKey: log.privateKey, now: () => new Date(now),
+    store: new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload }))),
+  });
+  const tools = v2Tools(v2);
   const rpc = async (method: string, params: Record<string, unknown>, principal: McpContext["principal"] = DANIEL) => {
-    const r = await handleMcp({ jsonrpc: "2.0", id: 1, method, params } as Json, { svc, host: "api.ecdysis.me", doorbells: bells, principal } as McpContext);
+    const r = await handleMcp({ jsonrpc: "2.0", id: 1, method, params } as Json, { host: "api.ecdysis.me", doorbells: bells, principal, tools });
     return r.body as { result?: Record<string, Json>; error?: { code: number; message: string; data?: { reason?: string } } };
   };
   const subscribe = (secret: string, extra: Record<string, unknown> = {}, principal: McpContext["principal"] = DANIEL) =>
     rpc("events/subscribe", { name: "ecdysis.wake", arguments: { agent: "gemini-djhulme" }, delivery: { mode: "webhook", url: CALLBACK, secret }, cursor: null, ...extra }, principal);
-  return { store, log, calls, bells, svc, owners, rpc, subscribe, on(h: typeof handler) { handler = h; }, tick(ms: number) { now += ms; }, get now() { return now; } };
+  return { store, log, calls, bells, v2, owners, rpc, subscribe, on(h: typeof handler) { handler = h; }, tick(ms: number) { now += ms; }, get now() { return now; } };
 }
 
 describe("MCP Events: discovery", () => {
@@ -95,7 +100,7 @@ describe("MCP Events: discovery", () => {
   it("refuses a request whose header and _meta disagree, and answers an unknown method with 404 under 2026-07-28", async () => {
     const w = await world();
     const lim = new MemoryRateLimiter(1000);
-    const post = (headers: Record<string, string>, body: unknown) => route(new Request("https://api.ecdysis.me/mcp", { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers }, body: JSON.stringify(body) }), w.svc, lim, { doorbells: w.bells });
+    const post = (headers: Record<string, string>, body: unknown) => route(new Request("https://api.ecdysis.me/mcp", { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers }, body: JSON.stringify(body) }), lim, { v2: w.v2, doorbells: w.bells });
     const mismatch = await post({ "mcp-protocol-version": "2026-07-28" }, { jsonrpc: "2.0", id: 7, method: "tools/list", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2025-06-18" } } });
     assert.equal(mismatch.status, 400);
     assert.equal(((await mismatch.json()) as { error: { code: number } }).error.code, -32020);
@@ -249,13 +254,11 @@ describe("MCP Events: delivery", () => {
     const w = await world();
     const s = newSecret();
     await w.subscribe(s);
-    // The agent sets a new doorbell (its person gets a link), and the person chooses a schedule on it.
+    // The agent sets a new doorbell with its main key (its person gets a link), and the person chooses a schedule on it.
     const kp = await generateKeyPair();
-    w.owners.set("gemini-djhulme", "op-daniel");
-    await w.svc.registerAgent({ handle: "gemini-djhulme", publicKey: kp.publicKey, operatorId: "op-daniel", constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() } });
     const bells = new Doorbells({
       store: w.store, siteBase: "https://ecdysis.me", apiBase: "https://api.ecdysis.me", sthPrivateKey: w.log.privateKey, sealSecret: null, readOnly: false,
-      now: () => new Date(w.now), random: Math.random, v2: true,
+      now: () => new Date(w.now), random: Math.random,
       resolveAgent: async (h) => (h === "gemini-djhulme" ? { publicKey: kp.publicKey, operatorId: "op-daniel" } : null),
       fetchImpl: (async () => new Response("{}")) as typeof fetch,
     });

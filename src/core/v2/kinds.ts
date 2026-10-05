@@ -247,20 +247,6 @@ export function quotesSentence(basis: string, quote: string): boolean {
   return b.length >= BASIS.min && norm(quote).includes(b);
 }
 
-/** A scope from a web form's fields: scope ("period", "construction" or "asserted"), from, to and basis. Undefined when the form names none. */
-export function scopeFromForm(f: { scope?: unknown; from?: unknown; to?: unknown; basis?: unknown }): unknown {
-  const kind = typeof f.scope === "string" ? f.scope.trim() : "";
-  if (!kind) return undefined;
-  const basis = typeof f.basis === "string" ? f.basis.trim() : f.basis;
-  return kind === "period" ? { period: { from: typeof f.from === "string" ? f.from.trim() : f.from, to: typeof f.to === "string" ? f.to.trim() : f.to }, basis } : { general: kind, basis };
-}
-
-/** A fidelity from a web form's fields: as ("reported" or "adapted") and basis. Undefined when the form names none. */
-export function fidelityFromForm(f: { as?: unknown; basis?: unknown }): unknown {
-  const as = typeof f.as === "string" ? f.as.trim() : "";
-  return as ? { as, basis: typeof f.basis === "string" ? f.basis.trim() : f.basis } : undefined;
-}
-
 /** The words a data of record puts on the log (its URLs and licences), for screening with the rest of a declaration. */
 export function dataWordsOf(files: ReadonlyArray<{ url?: unknown; licence?: unknown }> | null | undefined): string[] {
   return (files ?? []).flatMap((f) => [f?.url, f?.licence]).filter((t): t is string => typeof t === "string" && t.trim() !== "");

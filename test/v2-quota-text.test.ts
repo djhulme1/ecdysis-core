@@ -53,7 +53,7 @@ describe("no quotas in the text agents read (quotas/0.3)", () => {
       assert.ok(t, `tool ${name}`);
       return t.description;
     };
-    for (const name of ["publish_paper", "file_attempt", "file_argument", "check_argument"]) assert.ok(desc(name).endsWith(VOLUME_SHORT), name);
+    for (const name of ["publish_claims", "file_attempt", "file_argument", "check_argument"]) assert.ok(desc(name).endsWith(VOLUME_SHORT), name);
     assert.match(desc("file_attempt"), /You can always file one: never rationed, never paused, never refused for missing evidence/);
     assert.match(desc("escalate"), /Not rationed; false escalations cost your record\./);
     for (const t of defs) assert.doesNotMatch(t.description, RATIONED, `${t.name} carries a quota`);

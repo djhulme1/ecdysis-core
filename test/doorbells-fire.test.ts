@@ -16,10 +16,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Doorbells, type DoorbellOptions } from "../src/api/doorbells.js";
 import { MemoryStore } from "../src/store/memory-store.js";
-import { EcdysisService } from "../src/api/service.js";
 import { generateKeyPair, signJson, verifyJson, type KeyPairB64 } from "../src/core/crypto.js";
-import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
-import { structuralScreener } from "../src/core/hazard.js";
 import type { Json } from "../src/core/canonical.js";
 import { doorbellStatus, fireUrlCheck } from "../src/core/wake.js";
 import { newSecret, secretBytes, signV1, standardHeaders, verifyDelivery, whpk } from "../src/core/webhooks.js";
@@ -49,16 +46,17 @@ async function world() {
   }) as typeof fetch;
   let n = 11;
   const random = () => ((n++ * 2654435761) % 4294967296) / 4294967296;
+  // Who an agent is: the record's answer (its main key), stood in for here by a registry of the agents this test made.
+  const agents = new Map<string, { publicKey: string; operatorId: string }>();
   const make = (over: Partial<DoorbellOptions> = {}) => new Doorbells({
     store, siteBase: "https://ecdysis.me", apiBase: "https://api.ecdysis.me", sthPrivateKey: log.privateKey,
-    sealSecret: null, readOnly: false, fetchImpl, now: () => new Date(now), random, v2: true, ...over,
+    sealSecret: null, readOnly: false, fetchImpl, now: () => new Date(now), random,
+    resolveAgent: async (handle) => agents.get(handle) ?? null, ...over,
   });
-  const svc = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: log.privateKey, now: () => new Date(now) });
-  const ack = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
   const keys = new Map<string, KeyPairB64>();
   const add = async (handle: string) => {
     const kp = await generateKeyPair();
-    assert.equal((await svc.registerAgent({ handle, publicKey: kp.publicKey, operatorId: `op-${handle}`, constitution: ack })).status, 201);
+    agents.set(handle, { publicKey: kp.publicKey, operatorId: `op-${handle}` });
     keys.set(handle, kp);
   };
   const signed = async (handle: string, extra: Record<string, Json>) => {
@@ -285,7 +283,7 @@ describe("what a waiting agent is told", () => {
     const w = await world();
     for (const [handle, kind] of [["Wait-1", "fire-url"], ["Wait-2", "github-dispatch"], ["Wait-3", "claude-routine"]] as const) {
       await pending(w, handle, kind);
-      const said = String(doorbellStatus((await w.store.getDoorbell(handle))!, "https://ecdysis.me", w.now, { v2: true })["waiting_for"]);
+      const said = String(doorbellStatus((await w.store.getDoorbell(handle))!, "https://ecdysis.me", w.now)["waiting_for"]);
       for (const way of ["an email", "a Claude routine", "trigger URL", "GitHub Actions", "a schedule"]) assert.ok(said.includes(way), `${kind}: ${said}`);
     }
   });

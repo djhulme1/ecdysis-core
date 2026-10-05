@@ -8,7 +8,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
-import { EcdysisService } from "../src/api/service.js";
 import { structuralScreener } from "../src/core/hazard.js";
 import { generateKeyPair } from "../src/core/crypto.js";
 import { MemoryV2Store, RESULT_DEADLINE_MS, V2Service } from "../src/api/v2/service.js";
@@ -26,10 +25,9 @@ async function world() {
   const logKey = await generateKeyPair();
   const v2store = new MemoryV2Store(() => (store as unknown as { log: Array<{ entry: { seq: number; ts: string; type: string }; payload: Json }> }).log.map((r) => ({ seq: r.entry.seq, ts: r.entry.ts, type: r.entry.type, payload: r.payload })));
   const v2 = new V2Service({ log, store: v2store, logPrivateKey: logKey.privateKey, screeners: [structuralScreener()] });
-  const v1 = new EcdysisService({ store, screeners: [structuralScreener()], sthPrivateKey: null });
   const limiter = new MemoryRateLimiter(1000);
   const pages = new PagesHandler(v2, { host: "api.ecdysis.me" });
-  const site = (path: string, v2on = true) => route(new Request(`https://ecdysis.me${path}`, { headers: { accept: "text/html" } }), v1, limiter, v2on ? { v2, pages } : {});
+  const site = (path: string) => route(new Request(`https://ecdysis.me${path}`, { headers: { accept: "text/html" } }), limiter, { v2, pages });
   return { site };
 }
 
@@ -65,7 +63,7 @@ describe("the lab guide", () => {
     const landing = await (await w.site("/")).text();
     assert.match(landing, /<a class="door" href="\/lab"><span class="who">I have a spare GPU<\/span>/);
     assert.match(await (await w.site("/sitemap.xml")).text(), /<loc>https:\/\/ecdysis\.me\/lab<\/loc>/);
-    assert.match(await (await w.site("/skill.md")).text(), /ecdysis\.me\/lab\.md is the guide to\nrunning continuously/);
+    assert.match(await (await w.site("/skill.md")).text(), /ecdysis\.me\/lab\.md is the guide to running\ncontinuously/);
     // The Markdown twin and the script.
     const md = await w.site("/lab.md");
     assert.equal(md.status, 200);
@@ -88,7 +86,7 @@ describe("the lab guide", () => {
     assert.ok(labPageV2({ host: "api.ecdysis.me", mcpUrl: "https://api.ecdysis.me/mcp" }).includes("https://api.ecdysis.me/mcp"));
   });
 
-  it("the brief fits every app's link, is on the page, and the launcher types it only when v2 is on", async () => {
+  it("the brief fits every app's link, is on the page, and the launcher types it", async () => {
     const brief = labBriefV2("https://ecdysis.me");
     assert.ok(brief.length < Math.min(...Object.values(PROMPT_APPS).map((a) => a.max)), `the brief (${brief.length} chars) fits the tightest app`);
     assert.match(brief, /Never print, log, upload or send a\s+private key, and never show one to a model/);
@@ -105,7 +103,6 @@ describe("the lab guide", () => {
     const go = await w.site("/o/claude/lab");
     assert.equal(go.status, 302);
     assert.match(decodeURIComponent(go.headers.get("location") ?? ""), /^https:\/\/claude\.ai\/new\?q=Set up a continuously running contributor to Ecdysis/);
-    assert.equal((await w.site("/o/claude/lab", false)).status, 404, "v1 has no lab brief");
-    assert.equal((await w.site("/o/claude/juror")).status, 404, "v1's starters are gone under v2");
+    assert.equal((await w.site("/o/claude/juror")).status, 404, "the first record's starters are gone");
   });
 });

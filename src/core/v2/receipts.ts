@@ -40,6 +40,7 @@ import type { Json } from "../canonical.js";
 import { hashJson, sha256, toHex } from "../canonical.js";
 import { signJson, verifyJson } from "../crypto.js";
 import { designProblems, PERIOD_OUTPUTS, type Design } from "./kinds.js";
+import { CLAIM_REF_WORDS, isClaimRef } from "./refs.js";
 
 export const RECEIPT_PROTOCOL = "ecdysis/0.2";
 export const SEAL_STATEMENT = "check.seal/v1";
@@ -202,7 +203,8 @@ export async function bundleHash(b: Bundle): Promise<string> {
 /**
  * The earlier receipt a new check must re-run: uniform, under the seed,
  * among earlier receipts of the same claim by operators independent of
- * the checker, and (inputs/0.1) runnable by the checker: a receipt whose
+ * the checker (not its own, and not linked to it by a ring of mutual
+ * confirmations), and (inputs/0.1) runnable by the checker: a receipt whose
  * bundle needs inputs that are not open is eligible only when every one of
  * them is among the holdings the checker pre-registered with its commit.
  * Null when there is none (the first receipt of a claim).
@@ -211,12 +213,12 @@ export function pickCrossCheck(
   seed: string,
   earlier: Array<{ id: string; operatorId: string; seq: number; requires?: readonly string[] }>,
   checkerOperator: string,
-  vouchLinked?: (a: string, b: string) => boolean,
+  linked?: (a: string, b: string) => boolean,
   holds: ReadonlySet<string> | readonly string[] = [],
 ): string | null {
   const held = holds instanceof Set ? holds : new Set(holds);
   const eligible = earlier
-    .filter((r) => r.operatorId !== checkerOperator && !vouchLinked?.(r.operatorId, checkerOperator) && canRun(r.requires ?? [], held))
+    .filter((r) => r.operatorId !== checkerOperator && !linked?.(r.operatorId, checkerOperator) && canRun(r.requires ?? [], held))
     .sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : 1));
   if (eligible.length === 0) return null;
   const k = Number(BigInt(`0x${seed}`) % BigInt(eligible.length));
@@ -349,7 +351,6 @@ export function inputProblems(inputs: unknown): string[] {
 /* ---------------- validation ---------------- */
 
 const HEX64 = /^[0-9a-f]{64}$/;
-const TARGET = /^.{3,140}#C[1-9][0-9]?$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
 export const MAX_OUTPUTS = 20;
@@ -381,7 +382,7 @@ export function validateCheckCommit(p: unknown): { ok: true; value: CheckCommit 
   if (!c || typeof c !== "object") return { ok: false, errors: ["payload: an object"] };
   if (c.protocol !== RECEIPT_PROTOCOL) errors.push(`protocol: "${RECEIPT_PROTOCOL}"`);
   if (c.type !== "check.commit") errors.push('type: "check.commit"');
-  if (typeof c.target !== "string" || !TARGET.test(c.target)) errors.push('target: "<paper-id>#C<n>"');
+  if (!isClaimRef(c.target)) errors.push(`target: ${CLAIM_REF_WORDS}`);
   if (c.kind !== "rerun" && c.kind !== "replication") errors.push('kind: "rerun" (the original\'s own bundle, re-run) or "replication" (your own implementation): this is about code; design says what the receipt tests');
   errors.push(...designProblems(c.design, c.kind === "rerun" || c.kind === "replication" ? c.kind : undefined));
   if (c.models !== undefined) {

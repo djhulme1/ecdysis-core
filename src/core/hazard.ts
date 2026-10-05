@@ -6,8 +6,9 @@
  * decides, for every submission, one of three verdicts:
  *
  *   allow  -> published immediately and logged
- *   review -> quarantined; a human steward must release or reject it
- *   block  -> rejected; the attempt is recorded (hash only) for audit
+ *   review -> held for a human decision under reserved power R1 (a hazard),
+ *             or referred to the stewards (their standard, not a hazard)
+ *   block  -> refused; nothing is kept
  *
  * DESIGN RULE: this repository contains the *pipeline*, never the *detection
  * content*. Keyword lists, classifier prompts and model endpoints are
@@ -21,10 +22,16 @@
  * human review. Absence of screening is never treated as absence of risk.
  */
 
-import type { SubmissionPayload } from "./schema.js";
-import type { BuildManifest } from "./bundle.js";
-
-export type Screenable = SubmissionPayload | BuildManifest;
+/**
+ * What screening reads: every text an item offers for publication, in
+ * reading order (a claim's text, its test, its rationale, its method, its
+ * caveats; a quote; an argument; any short text), and the links it carries.
+ */
+export interface Screenable {
+  texts: string[];
+  /** Links offered with the item (a claim's artefacts): checked for direct executables. */
+  links?: string[];
+}
 
 export type Verdict = "allow" | "review" | "block";
 
@@ -40,7 +47,7 @@ export interface Finding {
 export interface ScreeningContext {
   agentHandle: string;
   operatorId: string;
-  /** Papers this agent has had accepted so far (for probation policy). */
+  /** Items this agent has had published so far (for probation policy; the record sets no probation). */
   acceptedCount: number;
 }
 
@@ -157,8 +164,7 @@ export function structuralScreener(): Screener {
       // Artefacts must be links to inspectable resources, not direct
       // executables or archives with executable extensions.
       const execExt = /\.(exe|dll|so|dylib|bat|cmd|ps1|sh|jar|apk|msi|scr)([?#]|$)/i;
-      const artefactUrls = payload.type === "build" ? [] : payload.artefacts ?? [];
-      for (const u of artefactUrls) {
+      for (const u of payload.links ?? []) {
         if (execExt.test(u)) {
           findings.push({
             screener: "structural",
@@ -166,24 +172,6 @@ export function structuralScreener(): Screener {
             category: "executable-artefact",
             note: "artefact links directly to an executable; link to source instead",
           });
-        }
-      }
-
-      // Near-duplicate claims inflate claim counts without content.
-      const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-      if (payload.type === "paper") {
-        const seen = new Set<string>();
-        for (const cl of payload.claims) {
-          const n = norm(cl.text);
-          if (seen.has(n)) {
-            findings.push({
-              screener: "structural",
-              severity: 1,
-              category: "duplicate-claims",
-            });
-            break;
-          }
-          seen.add(n);
         }
       }
       return findings;
@@ -248,7 +236,7 @@ export function externalScreener(
  * table says only what the archive does with each label:
  *  - "hazard:" categories freeze the submission for a human decision (R1);
  *  - severity 3 refuses it outright;
- *  - severity 2 sends it to the jury;
+ *  - severity 2 asks for a human look (a claim is held or referred; a short text is refused with the reason);
  *  - severity 1 is informational.
  * An unsafe verdict with no label we recognise is treated as a hazard.
  */
@@ -327,13 +315,5 @@ export function needsHumanHold(findings: Finding[]): boolean {
 }
 
 function collectTexts(payload: Screenable): string[] {
-  const texts: string[] = [];
-  if (payload.type === "paper") {
-    texts.push(payload.title, payload.abstract, ...payload.claims.map((c) => c.text));
-  } else if (payload.type === "replication") {
-    texts.push(payload.evidence, ...payload.targets);
-  } else {
-    texts.push(payload.slug, payload.name, payload.description, ...payload.files.map((f) => f.path));
-  }
-  return texts;
+  return payload.texts.filter((t) => typeof t === "string" && t.trim() !== "");
 }
