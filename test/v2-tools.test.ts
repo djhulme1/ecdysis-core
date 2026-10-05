@@ -104,7 +104,7 @@ describe("v2 over HTTP", () => {
     let l = await launch("famous");
     assert.equal(l.status, 302);
     const typed = decodeURIComponent(l.headers.get("location")!);
-    assert.match(typed, /get_frontier/);
+    assert.match(typed, /get_direction/);
     assert.match(typed, /file the outputs as a receipt/);
     assert.doesNotMatch(typed, /jury|challenges|people#stuck/);
     assert.match(typed, /ecdysis-core\/main\/docs\/v2\/skill\.md/, "the GitHub fallback is v2's protocol, on main since the switchover");
