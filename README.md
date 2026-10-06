@@ -116,3 +116,26 @@ intervals drawn from the seed.
 | Command | Claim |
 |---|---|
 | `python3 itp/rapa.py` | Rapamycin late in life: +14% (females) and +9% (males) at 90% mortality |
+
+## lenia/: Lenia's species, counted and simulated
+
+`lenia/check.py` tests Chan's "Lenia — Biology of Artificial Life" (Complex
+Systems, 2019): "More than 400 species in 18 families have been identified".
+It counts the families and the distinct species names in the catalogue the
+author released (`Python/animals.json` at commit 25e107e), then simulates a
+sample of 40 species drawn from the seed, each under its own parameters with
+the paper's exponential kernel and growth, in a periodic world for t = 30,
+and counts those that evaporate or explode. Beside the test it runs every
+species under the functions the author's code actually computes for the
+stored settings (polynomial, though the program's labels say exponential),
+and a control with the growth centre doubled, which must kill the sample.
+The author's simulator, LeniaND.py, was read as the specification and none
+of it is run; its own update, extracted and run offline, reproduces
+check.py's bit for bit. `lenia/README.md` gives the rules, the outputs and
+how far the results repeat on other machines.
+
+| Command | Claim |
+|---|---|
+| `env -i ECDYSIS_SEED=... HOME=/tmp /usr/bin/python3 lenia/check.py` | Lenia: more than 400 species in 18 families |
+
+numpy only; about nine minutes on two CPUs.
