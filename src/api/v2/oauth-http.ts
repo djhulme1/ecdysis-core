@@ -63,14 +63,16 @@ export class OAuthHandler {
     const url = new URL(req.url);
     // RFC 8414: the authorization server's document lives on the issuer's host and names it; served anywhere else it would
     // contradict itself, so it is not served there. RFC 9728: the resource's document lives on the resource's host, at the
-    // root and at the resource's own path (and /mcp/me, which is the same resource).
+    // root and at the resource's own path; and at /mcp/me, the same resource under the address that insists on a token,
+    // where it names /mcp/me, because a strict client uses a document only if it names the URL the client connected to.
     if (path === "/.well-known/oauth-authorization-server") {
       if (url.origin !== this.o.oauth.issuer) return this.json(404, { error: "not_found", error_description: `the authorization server is ${this.o.oauth.issuer}` });
       return this.json(200, this.o.oauth.metadata(), { "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" });
     }
     if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp" || path === "/.well-known/oauth-protected-resource/mcp/me") {
       if (url.origin !== new URL(this.o.oauth.resource).origin) return this.json(404, { error: "not_found", error_description: `the protected resource is ${this.o.oauth.resource}` });
-      return this.json(200, this.o.oauth.resourceMetadata(), { "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" });
+      const named = path.endsWith("/mcp/me") ? this.o.oauth.meResource : this.o.oauth.resource;
+      return this.json(200, this.o.oauth.resourceMetadata(named), { "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" });
     }
     if (path.startsWith("/.well-known/oauth-protected-resource/")) return this.json(404, { error: "not_found" });
     if (method === "OPTIONS" && (path === "/oauth/register" || path === "/oauth/token" || path === "/oauth/revoke")) {

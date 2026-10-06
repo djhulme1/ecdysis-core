@@ -133,6 +133,25 @@ export class OAuth {
 
   get issuer(): string { return this.o.issuer; }
   get resource(): string { return this.o.resource; }
+  /** The connector's second address: /mcp/me, which insists on a token. The same resource as /mcp, so a token for one serves both. */
+  get meResource(): string { return `${this.o.resource}/me`; }
+  /**
+   * The resource a client names (RFC 8707), as tokens are bound to it: the connector, under either of its addresses, or
+   * null for anything else. A client that names nothing means the connector. Clients that follow the MCP specification name
+   * the URL they connected to, so /mcp/me must be accepted as itself; it is stored as /mcp, the one resource.
+   */
+  resourceOf(given: string | null): string | null {
+    if (given === null) return this.resource;
+    return given === this.resource || given === this.meResource ? this.resource : null;
+  }
+  /** RFC 9207: an authorization response's parameters, with the issuer named before the client's state. */
+  private answer(redirectUri: string, params: Record<string, string>, state: string | null): string {
+    const u = new URL(redirectUri);
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+    u.searchParams.set("iss", this.o.issuer);
+    if (state) u.searchParams.set("state", state);
+    return u.toString();
+  }
   private token(): string { return b64urlEncode(this.rnd(32)); }
   private async hash(secret: string): Promise<string> { return sha256Hex(`ecdysis-oauth|${secret}`); }
 
@@ -152,12 +171,19 @@ export class OAuth {
       token_endpoint_auth_methods_supported: ["none"],
       scopes_supported: [SCOPE],
       resource_indicators_supported: true,
+      // RFC 9207: every authorization response names its issuer, so a client talking to several servers can't be mixed up.
+      authorization_response_iss_parameter_supported: true,
       service_documentation: `${this.o.siteBase}/people`,
     };
   }
-  resourceMetadata(): Json {
+  /**
+   * The resource's document (RFC 9728), naming the address it was fetched for: the connector at /mcp, or at /mcp/me, the
+   * same resource under the address that insists on a token. A strict client checks that the document names the URL it
+   * connected to, and uses nothing else.
+   */
+  resourceMetadata(resource: string = this.resource): Json {
     return {
-      resource: this.resource,
+      resource: this.resourceOf(resource) ? resource : this.resource,
       authorization_servers: [this.o.issuer],
       bearer_methods_supported: ["header"],
       scopes_supported: [SCOPE],
@@ -208,20 +234,15 @@ export class OAuth {
     const redirectUri = q.get("redirect_uri") ?? "";
     if (!client.redirectUris.some((u) => redirectMatches(u, redirectUri))) return { ok: false, status: 400, error: "redirect_uri is not one the client registered" };
     const state = q.get("state");
-    const back = (error: string, description: string) => {
-      const u = new URL(redirectUri);
-      u.searchParams.set("error", error);
-      u.searchParams.set("error_description", description);
-      if (state) u.searchParams.set("state", state);
-      return { ok: false as const, status: 303, error: description, redirect: u.toString() };
-    };
+    const back = (error: string, description: string) =>
+      ({ ok: false as const, status: 303, error: description, redirect: this.answer(redirectUri, { error, error_description: description }, state) });
     if (q.get("response_type") !== "code") return back("unsupported_response_type", "response_type must be code");
     const codeChallenge = q.get("code_challenge") ?? "";
     if (q.get("code_challenge_method") !== "S256" || !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge)) return back("invalid_request", "PKCE with S256 is required: code_challenge (43 base64url characters) and code_challenge_method=S256");
     const scope = q.get("scope") ?? SCOPE;
     if (scope.split(" ").some((s) => s !== SCOPE)) return back("invalid_scope", `scope: ${SCOPE}`);
-    const resource = q.get("resource") ?? this.resource;
-    if (resource !== this.resource) return back("invalid_target", `resource: ${this.resource}`);
+    const resource = this.resourceOf(q.get("resource"));
+    if (!resource) return back("invalid_target", `resource: ${this.resource} (or ${this.meResource}, the same resource)`);
     return { ok: true, client, redirectUri, codeChallenge, state, scope: SCOPE, resource };
   }
 
@@ -235,21 +256,14 @@ export class OAuth {
       hash: await this.hash(code), grantId: `gr_${toHex(this.rnd(12))}`, clientId: c.client.id, accountId: signed.account.id, redirectUri: c.redirectUri, codeChallenge: c.codeChallenge,
       scope: c.scope, resource: c.resource, createdAt: nowIso, expiresAt: new Date(this.now().getTime() + CODE_TTL_MS).toISOString(), usedAt: null,
     });
-    const u = new URL(c.redirectUri);
-    u.searchParams.set("code", code);
-    if (c.state) u.searchParams.set("state", c.state);
-    return { ok: true, redirect: u.toString() };
+    return { ok: true, redirect: this.answer(c.redirectUri, { code }, c.state) };
   }
 
   /** The person said no. */
   async deny(q: URLSearchParams): Promise<{ redirect: string } | null> {
     const c = await this.checkAuthorize(q);
     if (!c.ok) return c.redirect ? { redirect: c.redirect } : null;
-    const u = new URL(c.redirectUri);
-    u.searchParams.set("error", "access_denied");
-    u.searchParams.set("error_description", "the person declined");
-    if (c.state) u.searchParams.set("state", c.state);
-    return { redirect: u.toString() };
+    return { redirect: this.answer(c.redirectUri, { error: "access_denied", error_description: "the person declined" }, c.state) };
   }
 
   /* ---------------- tokens ---------------- */
@@ -276,8 +290,7 @@ export class OAuth {
       if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return oauthError(400, "invalid_grant", "code_verifier");
       const challenge = b64urlEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", bufferSource(new TextEncoder().encode(verifier)))));
       if (!sameString(challenge, row.codeChallenge)) return oauthError(400, "invalid_grant", "code_verifier does not match the code_challenge");
-      const resource = form.get("resource") ?? row.resource;
-      if (resource !== row.resource) return oauthError(400, "invalid_target", `resource: ${row.resource}`);
+      if (this.resourceOf(form.get("resource")) !== row.resource) return oauthError(400, "invalid_target", `resource: ${row.resource}`);
       // Spend before issuing: a code used twice issues nothing twice.
       if (!(await this.o.store.useCode(row.hash, nowIso))) { await this.o.store.revokeGrant(row.grantId, nowIso); return oauthError(400, "invalid_grant", "the code was already used; every token it issued is now revoked"); }
       return this.issue(row.grantId, row.accountId, row.clientId, row.scope, row.resource);
