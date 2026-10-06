@@ -102,3 +102,17 @@ released, and the model is retired.
 | Command | Claim |
 |---|---|
 | `python3 af/count.py` | Alignment faking: 14% compliance for free users, almost none for paid |
+
+## itp/: rapamycin and lifespan in the ITP's 2005 cohort
+
+`itp/rapa.py` recomputes, from the per-mouse lifespans the NIA Interventions
+Testing Program released on the Mouse Phenome Database (project ITP2005), the
+result of Harrison et al. (Nature, 2009): rapamycin fed from 600 days raised
+the age at 90% mortality by 14% in females and 9% in males. It reads the
+workbook with the standard library, computes Kaplan-Meier quantiles with
+removed mice censored, log-rank and Wang-Allison tests, and bootstrap
+intervals drawn from the seed.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/rapa.py` | Rapamycin late in life: +14% (females) and +9% (males) at 90% mortality |
