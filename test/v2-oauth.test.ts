@@ -82,7 +82,7 @@ describe("OAuth 2.1 for the connector, and managed agents (I.4)", () => {
     // /mcp/me demands a token and says where to get one; /mcp does not.
     const unauth = await w.mcp("whoami", {}, null, "/mcp/me");
     assert.equal(unauth.status, 401);
-    assert.match(unauth.headers.get("www-authenticate") ?? "", /^Bearer resource_metadata="https:\/\/api\.ecdysis\.me\/\.well-known\/oauth-protected-resource\/mcp"$/);
+    assert.match(unauth.headers.get("www-authenticate") ?? "", /^Bearer resource_metadata="https:\/\/api\.ecdysis\.me\/\.well-known\/oauth-protected-resource\/mcp\/me"$/);
     assert.equal((await w.req("/.well-known/oauth-protected-resource/mcp")).status, 200, "the resource's own document, where RFC 9728 clients look");
     assert.equal((await w.req("/.well-known/oauth-protected-resource/other")).status, 404);
     const anon = await w.mcp("whoami", {}, null);
@@ -334,5 +334,84 @@ describe("OAuth 2.1 for the connector, and managed agents (I.4)", () => {
     r = await w.req("/me/signout-all", { method: "POST", ...w.form({ csrf: csrf3 }), cookies: cookies3 });
     assert.equal(r.status, 303);
     assert.equal((await w.mcp("whoami", {}, access3)).status, 401);
+  });
+
+  it("speaks to strict clients: the issuer on every answer (RFC 9207), /mcp/me as itself (RFC 9728, RFC 8707), and a 405 that says what is allowed", async () => {
+    const w = await world();
+    const ISS = "https://api.ecdysis.me";
+    // RFC 9207: the server says it names itself in its answers, and does, below.
+    const as = (await (await w.req("/.well-known/oauth-authorization-server")).json()) as R;
+    assert.equal(as["authorization_response_iss_parameter_supported"], true);
+    // RFC 9728: each address's document names that address, and /mcp/me's challenge points at its own document.
+    for (const [doc, named] of [["/.well-known/oauth-protected-resource", "/mcp"], ["/.well-known/oauth-protected-resource/mcp", "/mcp"], ["/.well-known/oauth-protected-resource/mcp/me", "/mcp/me"]] as const) {
+      const d = (await (await w.req(doc)).json()) as R;
+      assert.equal(d["resource"], `https://api.ecdysis.me${named}`, doc);
+      assert.deepEqual(d["authorization_servers"], [ISS], doc);
+    }
+    const unauth = await w.mcp("whoami", {}, null, "/mcp/me");
+    assert.equal(unauth.status, 401);
+    assert.match(unauth.headers.get("www-authenticate") ?? "", /resource_metadata="https:\/\/api\.ecdysis\.me\/\.well-known\/oauth-protected-resource\/mcp\/me"/);
+    // Stateless: no stream to GET and no session to DELETE, said before any token is asked for (some clients open the
+    // stream without one), with what is allowed.
+    for (const path of ["/mcp", "/mcp/me"]) for (const method of ["GET", "DELETE"]) {
+      const r = await w.req(path, { method });
+      assert.equal(r.status, 405, `${method} ${path}`);
+      assert.equal(r.headers.get("allow"), "POST", `${method} ${path}`);
+    }
+
+    // A command-line client: a loopback redirect on whatever port it opened, naming the URL it connected to, /mcp/me.
+    const reg = await w.req("/oauth/register", { method: "POST", body: JSON.stringify({ redirect_uris: ["http://127.0.0.1/callback"], client_name: "A command line" }), headers: { "content-type": "application/json" } });
+    assert.equal(reg.status, 201);
+    const clientId = String(((await reg.json()) as R)["client_id"]);
+    const { verifier, challenge } = await pkce();
+    const back = "http://127.0.0.1:53682/callback";
+    const q = (over: Record<string, string> = {}) => new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: back, code_challenge: challenge, code_challenge_method: "S256", state: "n1", scope: "agent", resource: "https://api.ecdysis.me/mcp/me", ...over }).toString();
+    let r = await w.req(`/oauth/authorize?${q()}`);
+    assert.equal(r.status, 200);
+    const b = w.cookieOf(r, "ecd_b")!;
+    const nextCookie = encodeURIComponent(w.cookieOf(r, "ecd_next")!);
+    await w.req("/me/login", { method: "POST", ...w.form({ email: "nat@example.org" }), cookies: { ecd_b: b, ecd_next: nextCookie } });
+    const t = w.sent.at(-1)!.match(/t=([A-Za-z0-9_-]+)/)![1]!;
+    r = await w.req(`/me/login?t=${t}`, { cookies: { ecd_b: b, ecd_next: nextCookie } });
+    const cookies = { ecd_b: b, ecd_s: w.cookieOf(r, "ecd_s")! };
+    // Any resource but the connector's two addresses is another resource: refused, and the refusal names the issuer.
+    for (const other of ["https://api.ecdysis.me/mcp/other", "https://api.ecdysis.me/mcp/me/", "https://api.ecdysis.me/me", "https://evil.example/mcp/me", "https://evil.example/mcp"]) {
+      r = await w.req(`/oauth/authorize?${q({ resource: other })}`, { cookies });
+      assert.equal(r.status, 303, other);
+      const loc = new URL(r.headers.get("location")!);
+      assert.equal(`${loc.origin}${loc.pathname}`, back);
+      assert.equal(loc.searchParams.get("error"), "invalid_target", other);
+      assert.equal(loc.searchParams.get("iss"), ISS);
+      assert.equal(loc.searchParams.get("state"), "n1");
+    }
+    // Consent, then a decline: the way back names the issuer too.
+    r = await w.req(`/oauth/authorize?${q()}`, { cookies });
+    assert.equal(r.status, 200);
+    const csrf = (await r.text()).match(/name="csrf" value="([0-9a-f]{40})"/)![1]!;
+    r = await w.req(`/oauth/authorize?${q()}`, { method: "POST", ...w.form({ csrf, decision: "deny" }), cookies });
+    assert.match(await r.text(), /href="http:\/\/127\.0\.0\.1:53682\/callback\?error=access_denied&amp;error_description=[^"&]*&amp;iss=https%3A%2F%2Fapi\.ecdysis\.me&amp;state=n1"/);
+    // Allowed: a code, the issuer and the state, at the port the client opened.
+    r = await w.req(`/oauth/authorize?${q()}`, { method: "POST", ...w.form({ csrf, decision: "allow" }), cookies });
+    assert.equal(r.status, 303);
+    const loc = new URL(r.headers.get("location")!);
+    assert.equal(`${loc.origin}${loc.pathname}`, back);
+    assert.equal(loc.searchParams.get("iss"), ISS);
+    assert.equal(loc.searchParams.get("state"), "n1");
+    const code = loc.searchParams.get("code")!;
+    // The exchange names the resource as /mcp/me, as /mcp or not at all: one resource. Another is refused before the code
+    // is spent, so the refusal costs the client nothing it can use against anyone.
+    const exchange = (resource: string | null) => w.req("/oauth/token", { method: "POST", ...w.form({ grant_type: "authorization_code", code, client_id: clientId, code_verifier: verifier, ...(resource ? { resource } : {}) }) });
+    for (const other of ["https://evil.example/mcp/me", "https://api.ecdysis.me/mcp/other"]) {
+      r = await exchange(other);
+      assert.equal(r.status, 400, other);
+      assert.equal(((await r.json()) as R)["error"], "invalid_target");
+    }
+    r = await exchange("https://api.ecdysis.me/mcp/me");
+    const tokensText = await r.text();
+    assert.equal(r.status, 200, tokensText);
+    const access = String((JSON.parse(tokensText) as R)["access_token"]);
+    // The token serves both addresses of the one resource.
+    assert.equal((await w.mcp("whoami", {}, access, "/mcp/me")).body["signedIn"], true);
+    assert.equal((await w.mcp("whoami", {}, access, "/mcp")).body["signedIn"], true);
   });
 });
