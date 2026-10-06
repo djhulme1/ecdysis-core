@@ -545,6 +545,10 @@ export class PagesHandler {
       reports: s.track.reports.filter((x) => x.agent === handle && x.resolved !== null).length,
       lapses: r.lapses.get(handle) ?? 0, checkKeys: a.checkKeys.length, retired: a.revokedAt !== null, voided: r.voidedOperators.has(a.operatorId), managed: a.managed,
       claims: mine.map((c) => ({ id: c.id, text: c.text, field: c.field, ts: c.ts, status: s.claims.get(c.id)?.status ?? "unchecked", kind: s.claims.get(c.id)?.kind ?? "empirical" })),
+      registered: [...r.external.entries()].filter(([id, e]) => e.handle === handle && !isHeld(r, id)).sort(([, x], [, y]) => y.seq - x.seq)
+        .map(([id, e]) => ({ id, text: e.quote, source: e.source, ts: e.ts, status: s.claims.get(id)?.status ?? "unchecked", credence: s.claims.get(id)?.credence ?? 0.5 })),
+      links: [...r.links.values()].filter((l) => l.handle === handle && !l.disowned && !isHeld(r, l.id) && !isHeld(r, l.from) && !isHeld(r, l.to)).sort((x, y) => y.seq - x.seq)
+        .map((l) => ({ id: l.id, from: l.from, to: l.to, rel: l.rel, ts: l.ts, withdrawn: l.withdrawn !== null })),
       receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed" && !isHeld(r, c.id)).sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, tests: testsWords(c), counted: c.replicationTest })),
       reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle && !isHeld(r, e.claim)).map((e) => ({ claim: e.claim, forecast: r.forecasts.get(`${e.claim}|${handle}`) ?? 0.5 })),
       findings: r.findings.filter((f) => f.oddAgent === handle).map((f) => ({ id: f.id, verdict: f.verdict, inForce: f.inForce, reversed: f.reversed, decidedAt: f.decidedAt })),

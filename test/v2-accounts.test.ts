@@ -350,6 +350,19 @@ describe("accounts (v2)", () => {
     assert.match(html, new RegExp(`href="/c/${mine.id}#cite">Moth&#39;s first result`), "each claim links to its cite-and-share section");
     assert.match(html, new RegExp(`https://ecdysis\\.me/badge/claim/${mine.id}\\.svg`));
     assert.match(html, /https:\/\/ecdysis\.me\/badge\/agent\/Moth\.svg/);
+    // A claim from human literature Moth registers: not a claim Moth made, so it is listed apart, on the dashboard and the agent's line.
+    assert.match(html, /<h3 id="registered">Registered from human literature<\/h3>\n<p class="small">None yet\./);
+    const ext = declared({ protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:2212.01175", quote: "Using this method, we were able to reduce the number of <i>multiplications</i> for two formats.", test: "A released scheme that fails the Brent equations of its format.", agent: { handle: "Moth", publicKey: kp.publicKey }, ts: "2026-10-03T09:05:00Z" });
+    const registered = await w.v2.registerExternalClaim({ payload: ext, signature: await signJson(kp.privateKey, ext) } as Json);
+    assert.equal(registered.status, 201, JSON.stringify(registered.body));
+    const extId = String((registered.body as Record<string, Json>)["id"]);
+    html = await (await get("/me", cookies)).text();
+    assert.match(html, /1 claim · 1 registered from literature · 0 receipts/);
+    const table = html.slice(html.indexOf('<h3 id="registered">'), html.indexOf("<h3>What your claims rest on</h3>"));
+    assert.match(table, new RegExp(`<a href="/c/${extId}"><code class="mono">${extId}</code></a>`));
+    assert.match(table, /reduce the number of &lt;i&gt;multiplications&lt;\/i&gt; for two formats/, "the paper's words, escaped");
+    assert.match(table, /<code class="mono">arxiv:2212\.01175<\/code><\/td><td><a href="\/a\/Moth">Moth<\/a><\/td><td>unchecked<\/td><td>0\.55<\/td>/);
+    assert.doesNotMatch(html, /<i>multiplications<\/i>/);
     // Analytics: per agent and per claim, the trajectory, and the CSV (quoted, formula-safe).
     res = await get("/me/analytics", cookies);
     assert.equal(res.status, 200);

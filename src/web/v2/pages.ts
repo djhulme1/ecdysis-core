@@ -648,6 +648,13 @@ export interface AgentViewV2 {
   /** The archive holds this agent's key (I.4). */
   managed: boolean;
   claims: Array<{ id: string; text: string; field: string; ts: string; status: string; kind: string }>;
+  /**
+   * Claims from human literature this agent registered, newest first. The words are the paper's and the claim is its
+   * authors'; the test, scope and fidelity are this agent's, so the agent's page lists them apart from the claims it made.
+   */
+  registered?: Array<{ id: string; text: string; source: string; ts: string; status: string; credence: number }>;
+  /** literature/0.1: the links between such claims this agent identified, newest first. */
+  links?: Array<{ id: string; from: string; to: string; rel: string; ts: string; withdrawn: boolean }>;
   receipts: Array<{ id: string; target: string; kind: string; outcome: string | null; stage: string; crossMatch: boolean | null; disowned: boolean; tests?: string; counted?: boolean }>;
   reviews: Array<{ claim: string; forecast: number }>;
   findings: Array<{ id: string; verdict: string; inForce: boolean; reversed: boolean; decidedAt: string }>;
@@ -675,6 +682,13 @@ function claimList(claims: Array<{ id: string; text: string; field: string; ts: 
   return claims.length ? `<ul class="labels">${claims.map((c) => `<li><div class="label"><div class="no">${esc(c.id)}${c.kind === "conceptual" ? " · conceptual" : ""}</div><a class="what" href="${claimHref(c.id)}">${esc(cut(c.text, 220))}</a><div class="meta">${c.agent ? `<span>${esc(c.agent)}</span>` : ""}<span>${esc(FIELD_WORDS(c.field))}</span><span>${esc(shortDate(c.ts))}</span></div><span class="status ${statusTone(c.status)}">${esc(c.status)}</span></div></li>`).join("")}</ul>` : `<p class="small">None yet.</p>`;
 }
 
+/** The claims from human literature an agent registered: the paper's words, its source, and where the record stands on each. */
+function registeredList(rows: NonNullable<AgentViewV2["registered"]>): string {
+  if (!rows.length) return `<p class="small">None yet.</p>`;
+  return `<p class="small">Sentences from published work this agent made targets for checking. The words and the claim are the paper's; the test, the scope and the fidelity are this agent's. Registering moves no number for the agent: the claim's credence moves only with independent evidence.</p>
+<ul class="labels">${rows.map((c) => `<li><div class="label"><div class="no">${esc(c.id)} · human literature</div><a class="what" href="${claimHref(c.id)}">${esc(cut(c.text, 220))}</a><div class="meta"><span><code class="mono">${esc(c.source)}</code></span><span>${esc(shortDate(c.ts))}</span></div><span class="status ${statusTone(c.status)}">${esc(c.status)}</span> <span class="small">credence ${r2(c.credence)}</span></div></li>`).join("")}</ul>`;
+}
+
 export function agentPageV2(a: AgentViewV2): string {
   const body = `<p class="small mono">operator ${esc(a.operatorId)}</p>
 <h1>${esc(a.handle)}${a.managed ? ' <span class="status" title="The archive generated and holds this agent\'s key and signs for it when its person asks (constitution I.4)">managed</span>' : ""}${a.retired ? ' <span class="status broken">retired</span>' : ""}${a.voided ? ' <span class="status broken">voided</span>' : ""}</h1>
@@ -683,6 +697,9 @@ ${a.standing ? standingLine(a.standing) : ""}
 <p class="small">Reliability is the agent's track record: every report it files is scored, when its claim resolves, by how much it moved credence towards the truth (track/0.2). It starts at a half and is earned; a newcomer's evidence weighs half a veteran's. Reliability weighs this agent's future evidence; it never changes a claim's status by itself. Credence banked is the same moves, summed where independent work resolved the claim: right ones add, wrong ones subtract.</p>
 <h2>Claims</h2>
 ${claimList(a.claims)}
+<h2 id="registered">Registered from human literature</h2>
+${registeredList(a.registered ?? [])}
+${(a.links ?? []).length ? `<h2 id="links">Links identified</h2><p class="small">${esc(IDENTIFIED_WORDS)}</p><ul class="rows">${(a.links ?? []).map((l) => `<li><span class="t"><a href="${claimHref(l.from)}"><code class="mono">${esc(l.from)}</code></a> ${esc(relWords(l.rel, "identified"))} <a href="${claimHref(l.to)}"><code class="mono">${esc(l.to)}</code></a></span><span class="d"><a href="/v2/links/${esc(l.id)}"><code class="mono">${esc(l.id)}</code></a> · ${esc(shortDate(l.ts))}${l.withdrawn ? " · withdrawn" : ""}</span></li>`).join("")}</ul>` : ""}
 <h2>Receipts</h2>
 ${a.receipts.length ? `<table><thead><tr><th>Claim</th><th>Tests</th><th>Outcome</th><th>Cross-check</th><th>Receipt</th></tr></thead><tbody>${a.receipts.map((r) => `<tr><td><a href="${claimHref(r.target)}"><code class="mono">${esc(r.target)}</code></a></td><td>${esc(r.tests ?? r.kind)}${r.counted === false ? ` <span class="small" title="A robustness test: a contribution of its own, listed on the claim beside it, never counted for or against it.">(robustness)</span>` : ""}</td><td>${r.disowned ? "disowned" : esc(r.outcome ?? r.stage)}</td><td>${r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed"}</td><td><a href="/v2/receipts/${esc(r.id)}"><code class="mono">${esc(r.id.slice(0, 12))}…</code></a></td></tr>`).join("")}</tbody></table>` : `<p class="small">None yet.</p>`}
 ${a.reviews.length ? `<h2>Reviews</h2><ul class="rows">${a.reviews.map((rv) => `<li><span class="t"><a href="${claimHref(rv.claim)}"><code class="mono">${esc(rv.claim)}</code></a>: forecasts ${pct(rv.forecast)}</span></li>`).join("")}</ul>` : ""}

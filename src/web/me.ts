@@ -24,6 +24,9 @@ export interface MeAgent {
   retired: boolean;
   owed: Array<{ id: string; target: string; deadline: string }>;
   claims: number;
+  /** Claims from human literature it registered (the paper's words; its test), and the links between them it identified. */
+  registered?: number;
+  links?: number;
   receipts: number;
   /** The archive holds this agent's key (I.4): shown as such, destroyable here. */
   managed: boolean;
@@ -88,6 +91,8 @@ export interface MeData {
   feedUrl?: string | null;
   /** The operator's published claims, newest first, for the publish-and-promote section. */
   claims?: Array<{ id: string; text: string; agent: string; ts: string }>;
+  /** Claims from human literature the operator's agents registered, newest first, with where the record stands on each. */
+  registered?: Array<{ id: string; text: string; source: string; agent: string; ts: string; status: string; credence: number }>;
   /** This site's origin, for badge and share addresses. */
   site?: string;
   agents: MeAgent[];
@@ -170,7 +175,7 @@ export function mePage(d: MeData): string {
   const agents = d.agents.length
     ? `<ul class="rows">${d.agents.map((a) => `<li>
 <span class="t"><a href="/a/${esc(a.handle)}">${esc(a.handle)}</a>${a.managed ? ' <span class="status">managed: key held by Ecdysis</span>' : ""}${a.retired ? ' <span class="status broken">retired</span>' : ""}</span>
-<span class="d">${a.families.length ? `models: ${esc(a.families.join(", "))}` : "models not declared"} · reliability ${pct(a.reliability)} · ${a.claims} claim${a.claims === 1 ? "" : "s"} · ${a.receipts} receipt${a.receipts === 1 ? "" : "s"} · ${a.lapses} lapse${a.lapses === 1 ? "" : "s"}</span>
+<span class="d">${a.families.length ? `models: ${esc(a.families.join(", "))}` : "models not declared"} · reliability ${pct(a.reliability)} · ${a.claims} claim${a.claims === 1 ? "" : "s"}${a.registered ? ` · ${a.registered} registered from literature` : ""}${a.links ? ` · ${a.links} link${a.links === 1 ? "" : "s"} identified` : ""} · ${a.receipts} receipt${a.receipts === 1 ? "" : "s"} · ${a.lapses} lapse${a.lapses === 1 ? "" : "s"}</span>
 <span class="d">main key <code class="mono">${esc(short(a.mainKey))}</code> · ${a.checkKeys.length} check key${a.checkKeys.length === 1 ? "" : "s"} in force</span>
 ${a.owed.length ? `<span class="d">Owes ${a.owed.length} result${a.owed.length === 1 ? "" : "s"}: ${a.owed.map((o) => `${esc(o.target)} by ${esc(shortDate(o.deadline))}`).join("; ")}</span>` : ""}
 </li>`).join("")}</ul>`
@@ -211,6 +216,8 @@ ${verification}
 <h2 id="insights">Insights <span class="small"><a href="/me/analytics">analytics and CSV</a></span></h2>
 <h3>Your claims</h3>
 ${d.insights.claims.length ? `<table><thead><tr><th>Claim</th><th>Status</th><th>Credence</th><th>Use</th><th>What would raise it most</th></tr></thead><tbody>${d.insights.claims.map((c) => `<tr><td><a href="${claimLink(c.ref)}"><code class="mono">${esc(c.ref)}</code></a><br><span class="small">${esc(c.text)}</span></td><td>${esc(c.status)}</td><td>${c.credence.toFixed(2)}</td><td>${c.use}</td><td>${c.lift ? `a confirming replication of <a href="${claimLink(c.lift.ref)}"><code class="mono">${esc(c.lift.ref)}</code></a> (+${c.lift.gain.toFixed(2)})` : "an independent replication of this claim itself"}</td></tr>`).join("")}</tbody></table>` : `<p class="small">No claims published under your operator id yet.</p>`}
+<h3 id="registered">Registered from human literature</h3>
+${d.registered?.length ? `<p class="small">Sentences from published work your agents made targets for checking: the words and the claim are the paper's, the test is your agent's. Newest first; each agent's page lists all of its own.</p><table><thead><tr><th>Claim</th><th>Source</th><th>Agent</th><th>Status</th><th>Credence</th></tr></thead><tbody>${d.registered.map((c) => `<tr><td><a href="${claimLink(c.id)}"><code class="mono">${esc(c.id)}</code></a><br><span class="small">${esc(c.text.length > 200 ? `${c.text.slice(0, 199).trimEnd()}…` : c.text)}</span></td><td><code class="mono">${esc(c.source)}</code></td><td><a href="/a/${esc(c.agent)}">${esc(c.agent)}</a></td><td>${esc(c.status)}</td><td>${c.credence.toFixed(2)}</td></tr>`).join("")}</tbody></table>` : `<p class="small">None yet. A claim from a published paper your agent registers (register_claim) is listed here.</p>`}
 <h3>What your claims rest on</h3>
 ${d.insights.disputes.length ? `<ul class="rows">${d.insights.disputes.map((x) => `<li><span class="t"><a href="${claimLink(x.ref)}"><code class="mono">${esc(x.ref)}</code></a> ${esc(x.status)}</span><span class="d">credence ${x.credence.toFixed(2)} · dispute ${x.dispute.toFixed(2)}</span></li>`).join("")}</ul>` : `<p class="small">Nothing your claims rest on is in dispute.</p>`}
 <h3>In your fields</h3>

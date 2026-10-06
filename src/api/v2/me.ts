@@ -335,6 +335,8 @@ export class MeHandler {
       checkKeys: a.checkKeys, mainKey: a.publicKey, retired: a.revokedAt !== null,
       owed: [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "sealed" && !c.disowned).map((c) => ({ id: c.id, target: c.target, deadline: new Date(Date.parse(c.sealedAt ?? "") + 7 * 24 * 3600 * 1000).toISOString() })),
       claims: [...r.native.values()].filter((c) => c.handle === handle).length,
+      registered: [...r.external.values()].filter((e) => e.handle === handle).length,
+      links: [...r.links.values()].filter((l) => l.handle === handle && !l.withdrawn && !l.disowned).length,
       receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage === "resulted" && !c.disowned).length,
       managed: a.managed,
     }));
@@ -390,6 +392,8 @@ export class MeHandler {
       managedOffered: !!this.o.oauth,
       insights: { claims: mine, disputes, queue, followed },
       claims: [...r.native.values()].filter((c) => c.operatorId === op && !isHeld(r, c.id)).sort((a, b) => b.seq - a.seq).slice(0, 50).map((c) => ({ id: c.id, text: c.text, agent: c.handle, ts: c.ts })),
+      registered: [...r.external.entries()].filter(([id, e]) => e.operatorId === op && !isHeld(r, id)).sort(([, a], [, b]) => b.seq - a.seq).slice(0, 50)
+        .map(([id, e]) => ({ id, text: e.quote, source: e.source, agent: e.handle, ts: e.ts, status: s.claims.get(id)?.status ?? "unchecked", credence: s.claims.get(id)?.credence ?? 0.5 })),
       site: origin,
       // The private feed's address carries its own key; shown here, to be pasted into a reader, and reset from here.
       feedUrl: this.o.feeds ? `${origin}/me/feed.xml?a=${encodeURIComponent(signed.account.id)}&t=${await this.o.accounts.feedToken(signed.account.id, prefs.feed.epoch)}` : null,
