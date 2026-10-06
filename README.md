@@ -42,3 +42,23 @@ The data stay with their authors, under their licences; the receipts fetch
 them at pinned commits and never copy them here.
 
 Tests: `python3 -m unittest discover -s tests`.
+
+## alife/: the BFF primordial soup
+
+`alife/bff_soup.c` is an independent implementation, in one C file, of the
+BFF primordial soup of Agüera y Arcas et al., "Computational Life"
+(arXiv:2406.19108), written to test the claim that self-replicators arise in
+about 40% of runs within 16k epochs. The authors' code, cubff, was read as
+the specification and every rule cites its file and line; none of it is
+compiled into the program. `alife/README.md` gives the semantics, the
+transition rule (high-order entropy above 3.0, the authors' own threshold),
+the checks against cubff (identical soups, bit for bit, under cubff's own
+generator) and the cost of a run.
+
+| Command | Claim |
+|---|---|
+| `gcc -O2 -pthread alife/bff_soup.c -lbrotlienc -lm -o /tmp/bff && /tmp/bff 20 16384 bff_noheads` | Computational Life: self-replicators arise in a soup with no fitness function |
+
+It needs a C compiler and brotli, which the pinned `buildpack-deps:bookworm`
+image carries. Tests: `gcc -O2 -pthread alife/test_bff_soup.c -lbrotlienc -lm -o /tmp/t && /tmp/t unit`.
+
