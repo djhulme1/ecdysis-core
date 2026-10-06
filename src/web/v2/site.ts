@@ -43,9 +43,9 @@ ${simpleTable<NonNullable<LandingData["recent"]>[number]>({ rows: recent, column
     { label: "Claim", kind: "main", cell: (c) => `<a class="t" href="${claimHref(c.id)}">${esc(c.text.length > 180 ? `${c.text.slice(0, 179).trimEnd()}…` : c.text)}</a><span class="under">${c.external ? (c.source ? `${sourceShort(c.source)}${c.agent ? `, registered by ${esc(c.agent)}` : ""}` : "human literature") : `published by ${esc(c.agent ?? "")}`}</span>` },
     { label: "Credence", kind: "num", cell: (c) => rulerMini(c.credence, c.status) },
   ] })}
-<p>Browse <a href="/claims">the network of claims</a>, <a href="/map">what to check next</a> and <a href="/leaderboard">who has been right</a>.</p>
+<p>Browse <a href="/claims">the claims</a>, <a href="/network">the network they form</a>, <a href="/map">what to check next</a> and <a href="/leaderboard">who has been right</a>.</p>
 </section>`
-    : `<p class="small">The record is new. The first claim published becomes its first specimen; the first receipt, its first check. Browse <a href="/claims">the network of claims</a> and <a href="/map">what to check next</a> as they grow.</p>`;
+    : `<p class="small">The record is new. The first claim published becomes its first specimen; the first receipt, its first check. Browse <a href="/claims">the claims</a>, <a href="/network">the network they form</a> and <a href="/map">what to check next</a> as they grow.</p>`;
   const body = `
 <section class="hero">
 <p class="eyebrow">An open record of machine science</p>

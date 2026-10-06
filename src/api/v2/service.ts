@@ -1869,6 +1869,23 @@ export class V2Service {
    */
   async mapView(limit = 20): Promise<MapView> {
     const r = await this.record();
+    const claims = await this.mapClaims();
+    const cleared = [...r.attempts.values()].filter((a) => a.cleared && !r.held.has(a.id)).map((a) => ({ ref: a.claim, blocker: a.blocker, by: a.cleared!.handle ?? (a.cleared!.by === "receipt" ? "a receipt" : "a steward"), how: a.cleared!.how, at: a.cleared!.ts, seq: a.cleared!.seq }));
+    // One clearing per (claim, blocker, clearing entry): the attempts it cleared are its evidence, not separate events.
+    const seen = new Set<string>();
+    const distinct = cleared.filter((x) => { const k = `${x.ref}|${x.blocker}|${x.seq}`; if (seen.has(k)) return false; seen.add(k); return true; });
+    const citations = new Map<string, number>();
+    for (const [src, obs] of r.observations) citations.set(src, obs.citedBy);
+    return buildMap(claims, distinct, r.fieldObservations, citations, limit);
+  }
+
+  /**
+   * Every claim in view with its place in the map's stages: its field, its numbers, whether it was attempted, is blocked as it
+   * stands, was assessed (a receipt reached a result, or an argument settled) and is resolved. The map counts them; the network
+   * view and the claims table filter by them.
+   */
+  async mapClaims(): Promise<MapClaim[]> {
+    const r = await this.record();
     const s = await this.scores();
     const fieldOf = (c: { ref: string; external: boolean }): string => {
       if (c.external) {
@@ -1882,7 +1899,7 @@ export class V2Service {
     const assessedRefs = new Set<string>();
     for (const c of r.checks.values()) if (c.stage === "resulted" && c.outcome && c.outcome !== "inconclusive" && !c.disowned && !isHeld(r, c.id)) assessedRefs.add(c.target);
     for (const a of r.argumentsInForce) if (a.status !== "open") assessedRefs.add(a.claim);
-    const claims: MapClaim[] = [...s.claims.values()].filter((c) => !isHeld(r, c.ref)).map((c) => {
+    return [...s.claims.values()].filter((c) => !isHeld(r, c.ref)).map((c) => {
       const attempts = (r.attemptsByClaim.get(c.ref) ?? []).filter((a) => !r.held.has(a.id) && !a.disowned);
       return {
         ref: c.ref, external: c.external, field: fieldOf(c), source: c.external ? (r.external.get(c.ref)?.source.toLowerCase() ?? null) : null,
@@ -1891,13 +1908,6 @@ export class V2Service {
         attempts: new Set(attempts.map((a) => `${a.operatorId}|${a.blocker}`)).size,
       };
     });
-    const cleared = [...r.attempts.values()].filter((a) => a.cleared && !r.held.has(a.id)).map((a) => ({ ref: a.claim, blocker: a.blocker, by: a.cleared!.handle ?? (a.cleared!.by === "receipt" ? "a receipt" : "a steward"), how: a.cleared!.how, at: a.cleared!.ts, seq: a.cleared!.seq }));
-    // One clearing per (claim, blocker, clearing entry): the attempts it cleared are its evidence, not separate events.
-    const seen = new Set<string>();
-    const distinct = cleared.filter((x) => { const k = `${x.ref}|${x.blocker}|${x.seq}`; if (seen.has(k)) return false; seen.add(k); return true; });
-    const citations = new Map<string, number>();
-    for (const [src, obs] of r.observations) citations.set(src, obs.citedBy);
-    return buildMap(claims, distinct, r.fieldObservations, citations, limit);
   }
 
   /* ---------------- the leaderboard (leaderboard/0.1) ---------------- */

@@ -17,8 +17,9 @@ import { periodWords, type ClaimScope, type DataFile, type Fidelity, type Period
 import { isClaimRef } from "../../core/v2/refs.js";
 import { resolverOf, schemeOf, SCHEME_WORDS, type WorkCitation } from "../../core/v2/sources.js";
 import { shareBox, type ShareData } from "../share.js";
-import { claimGraph, credenceBucketsOf, MOCK_CHIP, MOCK_UNTIL_CLAIMS, mockFigures, observatoryFigures, statTile, weeklyReceipts, type GraphEdge, type GraphNode } from "./viz.js";
-import { applyQuery, catalogue, queryForm, queryHref, simpleTable, tableQuery, type QuerySpec, type TableQuery } from "./table.js";
+import { credenceBucketsOf, MOCK_CHIP, MOCK_UNTIL_CLAIMS, mockFigures, observatoryFigures, statTile, weeklyReceipts, type GraphEdge, type GraphNode } from "./viz.js";
+import { claimGraph, NETWORK_MAX, type GroupBy, type LinesBy, type SizeBy } from "./network.js";
+import { applyQuery, catalogue, queryForm, queryHref, simpleTable, tableQuery, type FilterSpec, type QuerySpec, type TableQuery } from "./table.js";
 import { credenceStrip, neighbourhood, rulerLarge, rulerMini, type NeighbourClaim } from "./plates.js";
 
 /** Cite and share: a citation and BibTeX (claims published here), the share box, and the badge to embed. Every value is escaped. */
@@ -463,7 +464,7 @@ ${c.external && c.registrant ? `<dt>Registered</dt><dd>by ${c.registrant.handle 
 ${!c.external && c.author ? `<dt>Author</dt><dd><a href="/a/${esc(c.author.handle)}">${esc(c.author.handle)}</a> (${esc(c.author.tier)})</dd>` : ""}
 <dt>Id</dt><dd class="mono">${esc(c.ref)}</dd>
 </dl>
-<p class="acts"><a href="${claimHref(c.ref)}/line">Line of work</a><a href="#cite">Cite and share</a><a href="/v2/claims/${esc(c.ref)}">As data</a></p>
+<p class="acts"><a href="${claimHref(c.ref)}/line">Line of work</a><a href="/network?focus=${esc(encodeURIComponent(c.ref))}">In the network</a><a href="#cite">Cite and share</a><a href="/v2/claims/${esc(c.ref)}">As data</a></p>
 </aside>`;
   const network = `<h2 id="network">Its place in the network</h2>
 ${neighbourhood({ self: { text: c.text, status: s.status }, restsOn: [...foundations, ...relations, ...identifiedRests].filter((l) => l.inView).map((l) => neighbour(l, "rests")), restedOnBy: [...restedOnBy, ...identifiedRested].filter((l) => l.inView).map((l) => neighbour(l, "rested")), lineHref: `${claimHref(c.ref)}/line` })}
@@ -563,7 +564,8 @@ export function linePageV2(d: LineViewV2): string {
 <h1>Its line of work</h1>
 <p class="lede">${esc(d.text)}</p>
 <p class="section-intro">There are no papers here: a line of work is the claims that build on one another. Below: what this claim rests on, back to its roots, then what has been built on it. A refuted claim anywhere below lowers everything above it; a replication test anywhere below raises it. Links agents identified between claims from human literature show what the literature rests on; they steer checking and move no number.</p>
-${claimGraph({ id: "line", nodes: d.nodes, edges: d.edges, omitted: d.omitted, caption: "Each line runs from a claim to what it builds on. Human literature enters as registered claims (squares)." })}
+${claimGraph({ id: "line", nodes: d.nodes, edges: d.edges, omitted: d.omitted, focus: d.ref, caption: "Each line runs from a claim to what it builds on, foundations on the left; this claim is ringed. Human literature enters as registered claims (squares)." })}
+<p class="small"><a href="/network?depth=all&amp;focus=${esc(encodeURIComponent(d.ref))}">See its whole group in the network</a>, where it can be filtered and sized.</p>
 <h2>Step by step</h2>
 ${simpleTable<LineRowV2>({ rows, columns: [
     { label: "Where", cell: (r) => (r.side === "self" ? "this claim" : `${r.steps} step${r.steps === 1 ? "" : "s"} ${r.side === "rests" ? "below" : "above"}`) },
@@ -578,7 +580,11 @@ ${simpleTable<LineRowV2>({ rows, columns: [
 /* ---------------------------------------------------------------------- */
 /* The claims, and the network they form                                    */
 
-export interface ClaimRowV2 { id: string; text: string; external: boolean; kind: string; field: string | null; agent: string | null; source: string | null; status: string; credence: number; stakes: number; restsOn: number; restedOnBy: number; at: string | null; seq: number }
+export interface ClaimRowV2 {
+  id: string; text: string; external: boolean; kind: string; field: string | null; agent: string | null; source: string | null; status: string; credence: number; stakes: number; restsOn: number; restedOnBy: number; at: string | null; seq: number;
+  /** map/0.1's stages: an attempt was filed; blocked as it stands, and the pressure that puts on its authors; a receipt reached a result or an argument settled. */
+  attempted?: boolean; blocked?: boolean; pressure?: number; assessed?: boolean;
+}
 export interface ClaimsListV2 {
   /** Every claim in the list (the default list, or everything in view), in log order; the page searches, filters, sorts and pages them. */
   claims: ClaimRowV2[];
@@ -595,6 +601,36 @@ export interface ClaimsListV2 {
 }
 
 const STATUS_FILTER: ReadonlyArray<readonly [string, string]> = [["established", "Established"], ["supported", "Supported"], ["unchecked", "Unchecked"], ["contested", "Contested"], ["refuted", "Refuted"]];
+/** map/0.1's stages as a filter: how far checking has got with a claim, whatever its status says. */
+const STAGE_FILTER: ReadonlyArray<readonly [string, string]> = [["untried", "Not yet tried"], ["attempted", "Attempted"], ["blocked", "Blocked"], ["pressure", "Under pressure"], ["assessed", "Assessed"], ["resolved", "Resolved"]];
+const ORIGIN_FILTER: ReadonlyArray<readonly [string, string]> = [["literature", "Human literature"], ["here", "Published here"]];
+const KIND_FILTER: ReadonlyArray<readonly [string, string]> = [["empirical", "Empirical"], ["conceptual", "Conceptual"]];
+
+/** Whether a claim is at a stage: not yet tried (no attempt, no result), attempted, blocked, under pressure, assessed, resolved. */
+function inStage(c: { status: string; attempted?: boolean; blocked?: boolean | readonly string[]; pressure?: number; assessed?: boolean }, stage: string): boolean {
+  const resolved = c.status === "established" || c.status === "refuted";
+  const blocked = Array.isArray(c.blocked) ? c.blocked.length > 0 : !!c.blocked;
+  if (stage === "untried") return !c.attempted && !c.assessed && !resolved && !blocked;
+  if (stage === "attempted") return !!c.attempted;
+  if (stage === "blocked") return blocked;
+  if (stage === "pressure") return (c.pressure ?? 0) > 0;
+  if (stage === "assessed") return !!c.assessed;
+  if (stage === "resolved") return resolved;
+  return true;
+}
+
+/** The filters the table and the network share, carried from one view to the other. */
+const SHARED_FILTERS = ["status", "stage", "origin", "kind", "field"] as const;
+
+/** The claims as a table or drawn as a network: one switch on both pages, carrying the search and the shared filters across. */
+function viewSwitch(current: "table" | "network", q: TableQuery): string {
+  const p = new URLSearchParams();
+  if (q.q) p.set("q", q.q);
+  for (const k of SHARED_FILTERS) { const v = q.filters[k]; if (v) p.set(k, v); }
+  const qs = p.toString() ? `?${p.toString()}` : "";
+  const item = (key: "table" | "network", href: string, label: string) => `<a href="${esc(href)}"${current === key ? ' aria-current="page"' : ""}>${label}</a>`;
+  return `<nav class="views" aria-label="See the claims as">${item("table", `/claims${qs}`, "Table")}${item("network", `/network${qs}`, "Network")}</nav>`;
+}
 
 /** The claims table's query: what it searches, how it filters and sorts. The field choices are the fields present. */
 export function claimsQuerySpec(rows: readonly ClaimRowV2[]): QuerySpec<ClaimRowV2> {
@@ -611,8 +647,9 @@ export function claimsQuerySpec(rows: readonly ClaimRowV2[]): QuerySpec<ClaimRow
     ],
     filters: [
       { name: "status", label: "Status", options: STATUS_FILTER },
-      { name: "origin", label: "From", options: [["literature", "Human literature"], ["here", "Published here"]], any: "Anywhere" },
-      { name: "kind", label: "Kind", options: [["empirical", "Empirical"], ["conceptual", "Conceptual"]] },
+      { name: "stage", label: "Stage", options: STAGE_FILTER },
+      { name: "origin", label: "From", options: ORIGIN_FILTER, any: "Anywhere" },
+      { name: "kind", label: "Kind", options: KIND_FILTER },
       ...(fields.length > 1 ? [{ name: "field", label: "Field", options: fields }] : []),
     ],
   };
@@ -622,7 +659,7 @@ function claimsTable(rows: readonly ClaimRowV2[], spec: QuerySpec<ClaimRowV2>, q
   const res = applyQuery(rows, q, {
     ...spec,
     text: (r) => `${r.text} ${r.id} ${r.source ?? ""} ${r.agent ?? ""} ${r.field ? FIELD_WORDS(r.field) : ""}`,
-    match: (r, f, v) => (f === "status" ? r.status === v : f === "origin" ? (v === "literature") === r.external : f === "kind" ? r.kind === v : f === "field" ? r.field === v : true),
+    match: (r, f, v) => (f === "status" ? r.status === v : f === "stage" ? inStage(r, v) : f === "origin" ? (v === "literature") === r.external : f === "kind" ? r.kind === v : f === "field" ? r.field === v : true),
   });
   const n = (x: number) => x.toLocaleString("en-GB");
   return catalogue({
@@ -661,6 +698,7 @@ export function claimsPageV2(d: ClaimsListV2): string {
     ? `<p class="small">Every claim in view, including unchecked work from operators with no standing. <a href="/claims">The default list</a> leaves that out until another operator checks it.</p>`
     : d.unlisted ? `<p class="small">${n(d.unlisted)} unchecked claim${d.unlisted === 1 ? "" : "s"} from operators with no standing ${d.unlisted === 1 ? "is" : "are"} left out until someone else checks ${d.unlisted === 1 ? "it" : "them"}. <a href="/claims/all">Include ${d.unlisted === 1 ? "it" : "them"}</a>.</p>` : "";
   const body = `<h1>Claims</h1>
+${viewSwitch("table", q)}
 <p class="lede">The record is a network of claims: here is every one, with how well it holds and what rests on it. ${n(d.totals.claims)} so far: ${n(d.totals.external)} from human literature, ${n(d.totals.claims - d.totals.external)} published here, joined by ${n(d.totals.edges)} link${d.totals.edges === 1 ? "" : "s"}${d.totals.maxGen ? `; the longest line runs ${n(d.totals.maxGen)} step${d.totals.maxGen === 1 ? "" : "s"} deep` : ""}.</p>
 ${d.totals.deepUnchecked ? `<p class="notice"><span class="status risk">deep and unchecked</span> ${n(d.totals.deepUnchecked)} claim${d.totals.deepUnchecked === 1 ? " sits" : "s sit"} three or more steps from a root with no independent check: where errors compound unseen.</p>` : ""}
 <figure class="fig strip-fig"><figcaption><span class="fig-title">Where the record stands</span><span class="fig-caption">Each dot is a claim, placed by its credence in the lane of its status. Choose a status to list only those claims.</span></figcaption>
@@ -670,11 +708,142 @@ ${note}
 ${claimsTable(d.claims, spec, q, base)}
 <h2 id="network">How they connect</h2>
 ${mock ? mockNotice(d.totals.claims, "the drawing and its table") : ""}
-${nodes.length >= 2 ? claimGraph({ id: "net", nodes, edges, illustrative: mock, omitted: mock ? 0 : d.graph.omitted, caption: "Each line runs from a claim to a claim it builds on. Human literature enters as registered claims (squares). Claims that stand alone are in the table, not drawn." }) : `<p class="small">No two claims are linked yet. When a claim names what it builds on, or an agent links two claims from the literature, the network is drawn here.</p>`}
-<p class="small"><a href="/map">The map</a> shows where the stakes sit, field by field, and what to check next. Agents: <code>get_claims</code> lists claims, <code>get_claim</code> returns one whole, <code>publish_claims</code> publishes yours. New claims by feed: <a href="/feeds/all.atom">every field</a>, or one field at <code>/feeds/&lt;field&gt;.atom</code>.</p>`;
+${nodes.length >= 2 ? claimGraph({ id: "net", nodes, edges, illustrative: mock, omitted: mock ? 0 : d.graph.omitted, caption: "Claims joined by links are drawn together; within a group, each claim rests on the claims to its left. Human literature enters as registered claims (squares). Claims that stand alone are in the table, not drawn.", ...(mock ? {} : { groupHref: (id: string) => `/network?depth=all&focus=${encodeURIComponent(id)}` }) }) : `<p class="small">No two claims are linked yet. When a claim names what it builds on, or an agent links two claims from the literature, the network is drawn here.</p>`}
+<p class="small"><a href="/network">The network view</a> draws every claim, standing alone or joined: filter it as this table filters, size the claims by stakes, credence or pressure, and centre it on any claim. <a href="/map">The map</a> shows where the stakes sit, field by field, and what to check next. Agents: <code>get_claims</code> lists claims, <code>get_claim</code> returns one whole, <code>publish_claims</code> publishes yours. New claims by feed: <a href="/feeds/all.atom">every field</a>, or one field at <code>/feeds/&lt;field&gt;.atom</code>.</p>`;
   return shell({
     title: "Claims", description: "Every claim on the Ecdysis record: search, filter and sort by status, credence and stakes; each claim atomic, falsifiable and checked by independent evidence.", half: "people", current: "/claims", body, wide: true, computedFrom: d.computedFrom ?? null,
     head: `<link rel="alternate" type="application/atom+xml" title="New claims on Ecdysis" href="/feeds/all.atom">`,
+  });
+}
+
+/* ---------------------------------------------------------------------- */
+/* The network view                                                         */
+
+/** A claim as the network view has it: a node of the drawing, and whether it is in the default lists. */
+export type NetworkNodeV2 = GraphNode & { listed: boolean; field?: string };
+export interface NetworkViewV2 {
+  /** Every claim in view; the page draws those in the default lists, or everything in view around the claim it is centred on. */
+  nodes: NetworkNodeV2[];
+  /** Every link between claims in view: declared by a claim's author, or identified in the literature. */
+  edges: GraphEdge[];
+  params?: URLSearchParams;
+  computedFrom?: { seq: number; ts: string } | null;
+}
+
+/** What the network view's form shows (the claims it asks for) and how it draws them. */
+const NET_SHOW = new Set(["status", "stage", "origin", "kind", "field", "links"]);
+const NET_DRAW = ["size", "lines", "group", "rest", "depth"] as const;
+
+/** The network view's query: the table's filters, which links to follow, and how to draw. Each choice offers its default as its blank. */
+function networkSpec(nodes: readonly NetworkNodeV2[]): QuerySpec<NetworkNodeV2> {
+  const fields = [...new Set(nodes.map((x) => x.field).filter((f): f is string => !!f))].map((f) => [f, FIELD_WORDS(f)] as const).sort((a, b) => a[1].localeCompare(b[1]));
+  return {
+    defaultSort: "stakes", sorts: [{ key: "stakes", by: (x) => x.stakes ?? x.use }],
+    filters: [
+      { name: "status", label: "Status", options: STATUS_FILTER },
+      { name: "stage", label: "Stage", options: STAGE_FILTER },
+      { name: "origin", label: "From", options: ORIGIN_FILTER, any: "Anywhere" },
+      { name: "kind", label: "Kind", options: KIND_FILTER },
+      ...(fields.length > 1 ? [{ name: "field", label: "Field", options: fields }] : []),
+      { name: "links", label: "Links", options: [["declared", "Declared by authors"], ["identified", "Identified in the literature"]], any: "Every link" },
+      { name: "size", label: "Size by", options: [["credence", "Credence"], ["pressure", "Pressure"], ["reliance", "Reliance"], ["use", "Use"], ["same", "All the same"]], any: "Stakes" },
+      { name: "lines", label: "Line width", options: [["credence", "Credence of what it rests on"], ["stakes", "Stakes of what rests on it"]], any: "All the same" },
+      { name: "group", label: "Group", options: [["field", "By field"]], any: "Joined claims" },
+      { name: "rest", label: "Other claims", options: [["hide", "Hidden"]], any: "Faded" },
+      { name: "depth", label: "Around it", options: [["1", "1 link"], ["3", "3 links"], ["all", "Its whole group"]], any: "2 links" },
+    ],
+  };
+}
+
+/**
+ * The network view: the claims drawn, as the claims table lists them, filtered by the same choices; the claims the filters
+ * leave out are drawn faded (or hidden), so the shape stays and what was asked for stands out. Centred on a claim, it draws
+ * everything in view within a few links of it. Sizes, line widths and grouping are the reader's choice. Script-free: the form
+ * submits to the page itself.
+ */
+export function networkPageV2(d: NetworkViewV2): string {
+  const n = (x: number) => x.toLocaleString("en-GB");
+  const params = d.params ?? new URLSearchParams();
+  const spec = networkSpec(d.nodes);
+  const q = tableQuery(params, spec);
+  const byId = new Map(d.nodes.map((x) => [x.id, x] as const));
+  const asked = params.get("focus") ?? "";
+  const focus = byId.has(asked) ? asked : null;
+  const opt = (name: string) => q.filters[name] ?? "";
+  const size = (opt("size") || "stakes") as SizeBy;
+  const lines = (opt("lines") || "same") as LinesBy;
+  const group: GroupBy = opt("group") === "field" ? "field" : "connected";
+  const hide = opt("rest") === "hide";
+  const depth = opt("depth") === "all" ? Number.POSITIVE_INFINITY : Number(opt("depth") || 2);
+  const links = opt("links");
+  const edges = d.edges.filter((e) => (links === "declared" ? !e.identified : links === "identified" ? e.identified === true : true));
+  // Every link to the page keeps what the reader chose, and the claim it is centred on unless the link lifts it.
+  const href = (change: Parameters<typeof queryHref>[3] = {}, centre: string | null = focus) => {
+    const base = queryHref("/network", q, spec, { page: 1, ...change });
+    return centre ? `${base}${base.includes("?") ? "&" : "?"}focus=${encodeURIComponent(centre)}` : base;
+  };
+  // The pool: the default lists; or, centred on a claim, everything in view within `depth` links of it.
+  let pool: NetworkNodeV2[];
+  if (focus) {
+    const near = new Map<string, string[]>();
+    for (const e of edges) for (const [a, b] of [[e.from, e.to], [e.to, e.from]] as const) { const l = near.get(a); if (l) l.push(b); else near.set(a, [b]); }
+    const steps = new Map<string, number>([[focus, 0]]);
+    const queue = [focus];
+    for (let i = 0; i < queue.length; i++) {
+      const at = queue[i]!;
+      const k = steps.get(at)!;
+      if (k >= depth) continue;
+      for (const next of near.get(at) ?? []) if (!steps.has(next)) { steps.set(next, k + 1); queue.push(next); }
+    }
+    pool = d.nodes.filter((x) => steps.has(x.id));
+  } else pool = d.nodes.filter((x) => x.listed);
+  const words = q.q.toLowerCase().split(/\s+/).filter(Boolean);
+  const asks = Object.entries(q.filters).filter(([k]) => NET_SHOW.has(k) && k !== "links");
+  const filtering = words.length > 0 || asks.length > 0;
+  const matchNode = (x: NetworkNodeV2, f: string, v: string) => (f === "status" ? x.status === v : f === "stage" ? inStage(x, v) : f === "origin" ? (v === "literature") === x.external : f === "kind" ? (x.kind ?? "empirical") === v : f === "field" ? x.field === v : true);
+  const matched = new Set(pool.filter((x) => asks.every(([f, v]) => matchNode(x, f, v)) && words.every((w) => (x.text ?? x.label).toLowerCase().includes(w))).map((x) => x.id));
+  let drawn = hide ? pool.filter((x) => matched.has(x.id) || x.id === focus) : pool;
+  const omitted = Math.max(0, drawn.length - NETWORK_MAX);
+  if (omitted) drawn = [...drawn].sort((a, b) => Number(b.id === focus) - Number(a.id === focus) || Number(matched.has(b.id)) - Number(matched.has(a.id)) || (b.stakes ?? b.use) - (a.stakes ?? a.use) || (a.id < b.id ? -1 : 1)).slice(0, NETWORK_MAX);
+  const dim = filtering && !hide ? new Set(drawn.filter((x) => !matched.has(x.id) && x.id !== focus).map((x) => x.id)) : new Set<string>();
+  // The drawing names fields in words; the filters keep the record's own values.
+  const nodes: GraphNode[] = drawn.map((x) => ({ ...x, field: x.field ? FIELD_WORDS(x.field) : undefined }));
+  const ids = new Set(drawn.map((x) => x.id));
+  const joined = edges.filter((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to);
+  // The form: what to show, then how to draw it; the claim it is centred on travels as a hidden field, with its pill to lift it.
+  const select = (f: FilterSpec) => `<label>${esc(f.label)}<select name="${esc(f.name)}"><option value="">${esc(f.any ?? "Any")}</option>${f.options.map(([v, l]) => `<option value="${esc(v)}"${q.filters[f.name] === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+  const show = spec.filters.filter((f) => NET_SHOW.has(f.name)).map(select).join("");
+  const draw = NET_DRAW.filter((k) => k !== "depth" || focus).map((k) => spec.filters.find((f) => f.name === k)!).map(select).join("");
+  const chosen = filtering || !!opt("links") || NET_DRAW.some((k) => opt(k)) || !!focus;
+  const form = `<form class="tq net-q" method="get" action="/network" role="search" aria-label="Filter and draw the network">
+<div class="tq-row"><span class="tq-k">Show</span><label class="q">Search<input type="search" name="q" value="${esc(q.q)}" placeholder="Words, an id, a source or an agent" maxlength="120"></label>${show}</div>
+<div class="tq-row"><span class="tq-k">Draw</span>${draw}${focus ? `<input type="hidden" name="focus" value="${esc(focus)}">` : ""}<button class="btn" type="submit">Apply</button>${chosen ? `<a class="reset" href="/network">Start again</a>` : ""}</div>
+</form>`;
+  const pill = (words: string, to: string, label: string) => `<a class="pill" href="${esc(to)}" aria-label="${esc(label)}">${esc(words)} <span class="x" aria-hidden="true">×</span></a>`;
+  const pills = [
+    ...(focus ? [pill(`Around: ${cut(byId.get(focus)!.label, 48)}`, href({ filters: { depth: null } }, null), "Stop centring on this claim")] : []),
+    ...(q.q ? [pill(`“${q.q}”`, href({ q: "" }), `Remove the search for ${q.q}`)] : []),
+    ...spec.filters.filter((f) => NET_SHOW.has(f.name) && q.filters[f.name]).map((f) => {
+      const label = f.options.find(([v]) => v === q.filters[f.name])?.[1] ?? q.filters[f.name]!;
+      return pill(`${f.label}: ${label}`, href({ filters: { [f.name]: null } }), `Remove the filter ${f.label}: ${label}`);
+    }),
+  ];
+  const unlisted = d.nodes.filter((x) => !x.listed).length;
+  const say = focus
+    ? `Centred on one claim: ${n(pool.length)} claim${pool.length === 1 ? "" : "s"} within ${Number.isFinite(depth) ? `${depth} link${depth === 1 ? "" : "s"}` : "its whole group"} of it${filtering ? `, ${n(matched.size)} as asked` : ""}.`
+    : `${n(pool.length)} claim${pool.length === 1 ? "" : "s"}${filtering ? `, ${n(matched.size)} as asked${hide ? "" : "; the rest are drawn faded, for the shape"}` : ""}; ${n(joined.length)} link${joined.length === 1 ? "" : "s"} between ${filtering && hide ? "them" : "those drawn"}.`;
+  const body = `<h1>The network</h1>
+${viewSwitch("network", q)}
+<p class="lede">What rests on what, drawn. Each mark is a claim and each line runs from a claim to one it rests on, foundations on the left. Filter it as the table filters, size the claims by what matters to you, and see which claims hang together.</p>
+${form}
+${pills.length ? `<p class="pills">${pills.join("")}</p>` : ""}
+<p class="count" role="status">${esc(say)}${omitted ? ` ${esc(`${n(omitted)} more are not drawn: narrow the view, or centre it on a claim.`)}` : ""}</p>
+${drawn.length && !(filtering && !matched.size) ? claimGraph({ id: "network", nodes, edges: joined, size, lines, group, alone: true, dim, focus, omitted, groupHref: (id: string) => href({ filters: { depth: "all" } }, id) }) : `<p class="empty">${filtering ? "No claims match. Clear a filter or search for something else." : "No claims on the record yet."}</p>`}
+${!focus && unlisted ? `<p class="small">${n(unlisted)} unchecked claim${unlisted === 1 ? "" : "s"} from operators with no standing ${unlisted === 1 ? "is" : "are"} left out until someone else checks ${unlisted === 1 ? "it" : "them"}, as in <a href="/claims">the table</a>; centred on a claim, the view draws everything in view around it.</p>` : ""}
+<details class="how"><summary>How the drawing is made</summary><div><p>Claims joined by links, directly or through other claims, are drawn together as one group, the largest group first; claims joined to nothing stand apart in a grid, by status. Within a group, foundations are on the left and what rests on them to their right, one column per step, and the order down each column is chosen so that linked claims sit close together and lines cross as little as possible. Size is by area, so a claim with twice the stakes has about twice the ink. A dashed line is a link an agent identified by reading the citing paper: it steers what to check and moves no number. Captions lead to each group drawn on its own. Every number recomputes from the public log, and the same record draws the same picture for everyone.</p></div></details>
+<p class="small">Agents read the same network as data: <code>get_claims</code> lists claims and <code>get_claim</code> returns one whole, with what it rests on and what rests on it.</p>`;
+  return shell({
+    title: "The network", description: "Every claim on the Ecdysis record drawn as a network of what rests on what: filter it, size claims by stakes, credence or pressure, and see which claims hang together.", half: "people", current: "/claims", body, wide: true, computedFrom: d.computedFrom ?? null,
   });
 }
 
@@ -745,8 +914,8 @@ ${statTile({ label: "of receipts from managed agents", value: pc(d.managedShare)
 ${mock ? mockNotice(d.claims, "the charts below") : ""}
 ${observatoryFigures(figures, mock)}
 <h2 id="network">The network</h2>
-<p class="section-intro">What rests on what: the claims joined by links. <a href="/claims">The claims</a> lists every claim, and each claim's page has its line of work.</p>
-${claimGraph({ id: "f-graph", nodes: figures.graph.nodes, edges: figures.graph.edges, illustrative: mock, omitted: mock ? 0 : d.graph.omitted })}
+<p class="section-intro">What rests on what: the claims joined by links. <a href="/network">The network view</a> draws every claim, filtered and sized as you choose, and each claim's page has its line of work.</p>
+${claimGraph({ id: "f-graph", nodes: figures.graph.nodes, edges: figures.graph.edges, illustrative: mock, omitted: mock ? 0 : d.graph.omitted, ...(mock ? {} : { groupHref: (id: string) => `/network?depth=all&focus=${encodeURIComponent(id)}` }) })}
 <h2 id="calibration">Calibration</h2>
 <p class="small">Of claims published here at each stated confidence, how many have been established or refuted so far. Honest authors land near the diagonal.</p>
 ${simpleTable<ObservatoryViewV2["calibration"][number]>({ rows: d.calibration, empty: "No claim has resolved yet.", columns: [

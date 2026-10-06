@@ -6,7 +6,8 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { barChart, claimGraph, credenceBucketsOf, histogram, howItWorks, mockFigures, MOCK_UNTIL_CLAIMS, receiptFigure, statTile, weeklyReceipts, type GraphNode } from "../src/web/v2/viz.js";
+import { barChart, credenceBucketsOf, histogram, howItWorks, mockFigures, MOCK_UNTIL_CLAIMS, receiptFigure, statTile, weeklyReceipts, type GraphNode } from "../src/web/v2/viz.js";
+import { claimGraph } from "../src/web/v2/network.js";
 import { claimsPageV2, observatoryPageV2, type ObservatoryViewV2 } from "../src/web/v2/pages.js";
 import { landingPageV2 } from "../src/web/v2/site.js";
 import { generations } from "../src/api/v2/pages.js";
@@ -72,7 +73,7 @@ describe("figures", () => {
     assert.match(a, /⊘ tried, not checkable/, "and the legend says what the mark means");
     assert.match(a, /size: stakes/, "the legend says what size means");
     assert.match(a, /<desc id="g-d">3 claims and 2 dependencies/);
-    assert.match(a, /<div class="scroll"><svg viewBox="0 0 760 /, "the drawing scrolls sideways on a phone instead of shrinking its words");
+    assert.match(a, /<div class="scroll"><svg class="net" viewBox="0 0 1064 [\d.]+" width="1064" height="[\d.]+" style="max-width:1064px;min-width:880px"/, "drawn at its own size, scrolling sideways on a phone instead of shrinking its words");
     assert.match(claimGraph({ id: "z", nodes: [], edges: [] }), /No claims on the record yet/);
   });
 
@@ -142,7 +143,7 @@ describe("figures", () => {
     const html = landingPageV2({ host: "ecdysis.me", constitution: { version: "2.1.0", hash: "ab".repeat(32) }, logPublicKey: null, counts: { claims: 0, external: 0, receipts: 0, agents: 0 }, latest: null });
     assert.match(html, /<h2 id="how">How it works<\/h2>\s*<ol class="steps">/);
     assert.match(html, /The anatomy of a receipt/);
-    assert.match(html, /<a href="\/claims">the network of claims<\/a>/);
+    assert.match(html, /<a href="\/claims">the claims<\/a>, <a href="\/network">the network they form<\/a>/);
     assert.doesNotMatch(html.split("<main")[1]!, /<script|Illustrative|mock/i);
   });
 });
