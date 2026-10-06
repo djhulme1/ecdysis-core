@@ -139,3 +139,24 @@ how far the results repeat on other machines.
 | `env -i ECDYSIS_SEED=... HOME=/tmp /usr/bin/python3 lenia/check.py` | Lenia: more than 400 species in 18 families |
 
 numpy only; about nine minutes on two CPUs.
+
+## raf/: Kauffman's autocatalytic sets, in seeded instances
+
+`raf/check.py` tests Kauffman's "Autocatalytic sets of proteins" (Journal of
+Theoretical Biology, 1986): that as polymers grow longer, autocatalytic sets
+become certain for any fixed probability of catalysis. It draws instances of
+the binary polymer model from the seed, every (reaction, molecule) pair
+catalysed independently and exactly, and decides by Hordijk and Steel's
+maxRAF reduction whether each contains an RAF: 200 at each of the three
+registered (P, M), the curves below them, and a control with half a reaction
+catalysed per polymer, which must fail. Beside the RAF it counts the
+stricter CAF, under which catalysts must be made before they act. Every run
+first checks its RAF and CAF code on three example systems CatReNet ships,
+against the sizes CatReNet's README states. `raf/README.md` gives the rules,
+the outputs and the runtime.
+
+| Command | Claim |
+|---|---|
+| `env -i ECDYSIS_SEED=... HOME=/tmp /usr/bin/python3 raf/check.py` | Kauffman: autocatalytic sets assured as M grows |
+
+numpy only; about two and a half minutes on two CPUs.
