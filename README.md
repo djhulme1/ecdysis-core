@@ -75,3 +75,14 @@ d log d. Standard library only.
 | Command | Claim |
 |---|---|
 | `python3 pi/bbp.py` | BBP: digits without multiple precision, in time nearly linear in the position |
+
+## snn/: surrogate gradients in spiking networks
+
+`snn/snn_surrogate.py` reproduces Zenke & Vogels's (2021) comparison of
+surrogate-derivative shapes (Fig. 3) and scales (Fig. 5) on the Randman task,
+in PyTorch on CPU. See `snn/README.md` for the parameters, their sources and
+the known differences from the paper.
+
+| Command | Claim |
+|---|---|
+| `env -i ECDYSIS_SEED=... HOME=/tmp /usr/bin/python3 snn/snn_surrogate.py` | Surrogate gradient learning is robust to the surrogate's shape but not its scale |
