@@ -85,7 +85,7 @@ export interface DirectionArgument {
 export interface Candidate {
   /** The graph's id for the work. */
   work: string;
-  /** The source string a registration would use: "doi:…" or "arxiv:…", lower-cased. */
+  /** The source a registration would use, in sources/0.1's one spelling: "arxiv:…", "doi:…", "pmid:…", "openalex:W…" and so on. */
   source: string;
   title: string;
   citedBy: number;

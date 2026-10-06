@@ -43,6 +43,8 @@
  * dependencies, no environment.
  */
 
+import { isSourceKey } from "./sources.js";
+
 export const STAKES_VERSION = "stakes/0.2";
 
 export const STAKES_PARAMS = {
@@ -57,7 +59,7 @@ export type ObservationProvider = (typeof OBSERVATION_PROVIDERS)[number];
 
 /** What the stakes scout observed about a registered source, as logged (source.observed). */
 export interface SourceObservation {
-  /** The source as registered, lower-cased: "arxiv:…" or "doi:…". */
+  /** The source as registered, lower-cased (sources/0.1): "arxiv:…", "doi:…", "pmid:…", "openalex:w…" and so on. */
   source: string;
   provider: ObservationProvider;
   /** The provider's id for the work (an OpenAlex W…, a Semantic Scholar paper id, or the DOI). */
@@ -87,7 +89,7 @@ export function parseObservation(p: Record<string, unknown>, seq: number, ts: st
   const source = str(p["source"])?.toLowerCase() ?? null;
   const provider = str(p["provider"]);
   const citedBy = num(p["citedBy"]);
-  if (!source || !/^(arxiv:|doi:)/.test(source) || !provider || !(OBSERVATION_PROVIDERS as readonly string[]).includes(provider) || citedBy === null || citedBy < 0) return null;
+  if (!source || !isSourceKey(source) || !provider || !(OBSERVATION_PROVIDERS as readonly string[]).includes(provider) || citedBy === null || citedBy < 0) return null;
   const year = num(p["year"]);
   const venue = num(p["venueCitedness"]);
   return {

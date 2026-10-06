@@ -552,6 +552,8 @@ async function dispatchV2(method: string, path: string, q: URLSearchParams, body
     }
     if (path === "/v2/credence") return v2.credenceList();
     if (path === "/v2/constitution") return v2.constitutionText();
+    // sources/0.1: the schemes a human work is named by; with ?name=, one work's source in its one spelling.
+    if (path === "/v2/sources") return v2.sourcesView(q.has("name") ? (q.get("name") ?? "") : null);
     const rc = path.match(/^\/v2\/receipts\/([0-9a-f]{64})$/);
     if (rc) return v2.receipt(rc[1]!);
     // literature/0.1: one identified link, in force or withdrawn.

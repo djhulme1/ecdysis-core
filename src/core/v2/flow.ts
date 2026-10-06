@@ -119,6 +119,7 @@
  * other operator authored.
  */
 
+import type { WorkCitation } from "./sources.js";
 import { modelFamilies, type ClaimInput, type EvidenceInput, type Tier, type UseInput } from "./credence.js";
 import {
   classify, dataHashes, normaliseData, normaliseDesign, normaliseFidelity, normalisePeriod, normaliseScope,
@@ -440,6 +441,8 @@ export interface ExternalClaimState {
   handle: string;
   operatorId: string;
   kind: ClaimKind;
+  /** sources/0.1: the work as its registrant cited it, when it did (a cite: source always carries one). */
+  work: WorkCitation | null;
   seq: number;
   ts: string;
 }
@@ -632,7 +635,7 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
         const op = str(p["operatorId"]);
         if (!/^ext:[0-9a-f]{16}$/.test(id) || claimAuthorOp.has(id)) break;
         const kind = kindOf(p["kind"]);
-        external.set(id, { source: str(p["source"]), quote: str(p["quote"]), test: str(p["test"]), handle: str(p["handle"]), operatorId: op, kind, seq: e.seq, ts: e.ts });
+        external.set(id, { source: str(p["source"]), quote: str(p["quote"]), test: str(p["test"]), handle: str(p["handle"]), operatorId: op, kind, work: workOf(p["work"]), seq: e.seq, ts: e.ts });
         // The registrant is not the author: human science has no operator here. A neutral prior of ½; nobody's own evidence is
         // excluded; and claims resting on it take it at face value until verified evidence counts against it (credence.ts).
         claimAuthorOp.set(id, "");
@@ -1113,4 +1116,12 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     screeningHolds: screeningHeld, scopes, constitution, head, arguments: args, argumentsInForce, argumentsByClaim, argumentEffects: argumentEffectsByClaim,
     attempts, attemptsByClaim, clears, blockers, observations, fieldObservations, links, linkEdges,
   };
+}
+
+/** sources/0.1: a registered citation as the log holds it, or null for anything that is not one (a hostile entry changes nothing). */
+function workOf(v: unknown): WorkCitation | null {
+  const w = v as Partial<WorkCitation> | null;
+  if (!w || typeof w !== "object" || typeof w.title !== "string" || !Array.isArray(w.authors) || typeof w.year !== "number") return null;
+  const authors = w.authors.filter((a): a is string => typeof a === "string").slice(0, 20);
+  return { title: w.title.slice(0, 300), authors, year: Math.floor(w.year), ...(typeof w.venue === "string" ? { venue: w.venue.slice(0, 200) } : {}) };
 }

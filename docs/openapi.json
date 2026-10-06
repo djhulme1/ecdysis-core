@@ -128,6 +128,58 @@
         }
       }
     },
+    "/v2/sources": {
+      "get": {
+        "operationId": "getV2Sources",
+        "tags": [
+          "Reading the record"
+        ],
+        "summary": "How a human work is named (sources/0.1)",
+        "description": "The schemes a claim from human literature names its work by, in order of precedence (name a work by the first under which its quoted words can be read), each with its one spelling, an example, where anyone can look a work up and the text its quotes are checked against; and the rules. With name, one work's source in its one spelling: give any spelling of a source, or the address of the work's page (arXiv, doi.org, PubMed, PubMed Central, Europe PMC, OpenReview, the ACL Anthology, PMLR, JMLR, NeurIPS, OpenAlex).",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "Optional: a source in any spelling, or the address of the work's page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 400
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{version, schemes[], rules[]}, or with name {version, source, scheme, words, resolver}."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorised"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "With name: sources/0.1 cannot name a work from it, and says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Paused"
+          }
+        }
+      }
+    },
     "/v2/record": {
       "get": {
         "operationId": "getV2Record",
@@ -3222,7 +3274,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "A claim on the record (ecd:… or ext:…, 16 hex characters after the colon); for background only, a human work (arxiv:… or doi:…)."
+            "description": "A claim on the record (ecd:… or ext:…, 16 hex characters after the colon); for background only, a human work by its source (sources/0.1: arxiv:…, doi:…, pmid:…, openalex:… and the rest)."
           },
           "rel": {
             "type": "string",
@@ -3565,8 +3617,9 @@
           },
           "source": {
             "type": "string",
-            "pattern": "^(arxiv:\\S{5,40}|doi:10\\.\\d{4,9}/\\S{1,120})$",
-            "description": "arxiv:<id> or doi:<doi>. The quote scout checks the quote against this source's abstract."
+            "pattern": "^(arxiv|doi|pmid|pmcid|openreview|acl|pmlr|jmlr|neurips|openalex|isbn|cite):[\\x21-\\x7e]{1,190}$",
+            "maxLength": 200,
+            "description": "sources/0.1: the work, as scheme:identifier in the scheme's one spelling (GET /v2/sources lists them; GET /v2/sources?name=… gives any work's): arxiv:2201.02177, doi:10.1038/…, pmid:27357684, pmcid:PMC4948312, openreview:<forum id>, acl:2020.acl-main.463, pmlr:v119/frankle20a, jmlr:v15/srivastava14a, neurips:<year>/<hash>, openalex:W…, isbn:<ISBN-13>, cite:<family>-<year>-<12 hex>. The quote scout checks the quote against the text this source's index publishes."
           },
           "quote": {
             "type": "string",
@@ -3596,6 +3649,9 @@
           },
           "data": {
             "$ref": "#/components/schemas/DataOfRecord"
+          },
+          "work": {
+            "$ref": "#/components/schemas/Work"
           }
         },
         "required": [
@@ -3608,7 +3664,47 @@
           "ts"
         ],
         "additionalProperties": false,
-        "description": "The id is the hash of (source, quote): one sentence, one claim. An empirical claim also declares scope and fidelity (required); a conceptual one declares neither."
+        "description": "The id is the hash of (source, quote): one sentence, one claim. An empirical claim also declares scope and fidelity (required); a conceptual one declares neither. A cite: source carries work, from which its key is derived."
+      },
+      "Work": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 300,
+            "description": "The work's title."
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            },
+            "minItems": 1,
+            "maxItems": 20,
+            "description": "Family names, first author first."
+          },
+          "year": {
+            "type": "integer",
+            "minimum": 1450,
+            "description": "The year it appeared (at most next year)."
+          },
+          "venue": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Optional: where it appeared."
+          }
+        },
+        "required": [
+          "title",
+          "authors",
+          "year"
+        ],
+        "additionalProperties": false,
+        "description": "sources/0.1: the work as a citation. Required for a cite: source, whose key is cite:<the first author's family name, ASCII letters and digits>-<year>-<the first 12 hex characters of the SHA-256 of the title folded (compatibility decomposition, accents off, lower case, æ œ ß as ae oe ss, every run of other characters one space, trimmed)>. When given, the quote scout compares the title with the source's own (wrong-work)."
       },
       "ClaimLink": {
         "type": "object",
@@ -4732,6 +4828,7 @@
             "enum": [
               "quote-mismatch",
               "source-unresolvable",
+              "source-wrong-work",
               "duplicate",
               "unfair-test",
               "false-blocker",

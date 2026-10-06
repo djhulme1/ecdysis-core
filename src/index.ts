@@ -318,7 +318,7 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
   v2.setReferralHook((subject, detail) => issues.open("screening", subject, 2, detail, "screening").then(() => undefined));
   // The quote scout: on the cron, a few registered quotes are checked against their source's abstract; the claim page shows the result.
   const quoteStore = new D1QuoteCheckStore(env.DB);
-  const quotes = new QuoteScout({ store: quoteStore, v2, issues, contact: REPLY_TO(env) });
+  const quotes = new QuoteScout({ store: quoteStore, v2, issues, contact: REPLY_TO(env), openAlexKey: env.OPENALEX_API_KEY ?? null });
   // The stakes scout (stakes/0.1): on the cron, a few registered sources' reach is read from the public citation graph and logged.
   const stakes = new StakesScout({ v2, log, candidates, contact: REPLY_TO(env), apiKey: env.OPENALEX_API_KEY ?? null });
   return {
@@ -439,7 +439,7 @@ function switchesFrom(env: Env, access: AccessConfig, keysAgree = true): HealthS
     { name: "Email provider", ...on(!!env.HERALD_API_KEY, "installed", "missing", "HERALD_API_KEY, installed by the deploy from the GitHub secret.") },
     { name: "Email sending", ...on(!emailPaused(env), "on", "paused", "HERALD_PAUSED (read-only mode also pauses it).") },
     { name: "Shared daily email cap", ok: true, value: String(emailCap(env)), note: "EMAIL_DAILY_CAP: set it to your provider plan's daily quota." },
-    { name: "OpenAlex key (stakes scout)", ...on(!!env.OPENALEX_API_KEY, "installed", "missing: the scout shares OpenAlex's anonymous budget", "OPENALEX_API_KEY, installed by the deploy from the GitHub secret.") },
+    { name: "OpenAlex key (stakes and quote scouts)", ...on(!!env.OPENALEX_API_KEY, "installed", "missing: the scouts share OpenAlex's anonymous budget", "OPENALEX_API_KEY, installed by the deploy from the GitHub secret.") },
     {
       name: "Doorbell token key",
       ok: env.DOORBELL_KEY ? bellKeyReadable(env.DOORBELL_KEY) : !!env.STH_SIGNING_KEY_PKCS8,

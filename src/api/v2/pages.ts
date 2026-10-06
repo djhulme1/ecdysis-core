@@ -464,6 +464,7 @@ export class PagesHandler {
       ref, external: !!x, text: claimText(r, ref), test, field: n?.field ?? obs?.field ?? null, stated: input.stated,
       author: n ? { handle: n.handle, operatorId: n.operatorId, tier: r.tiers.get(n.operatorId) ?? "unverified" } : null,
       source: x?.source ?? null,
+      work: x?.work ?? null,
       rationale: payload?.rationale ?? null, method: payload?.method ?? null, caveats: payload?.caveats ?? [], artefacts: payload?.artefacts ?? [], models: payload?.models ?? [],
       restsOn, background, restedOnBy,
       amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, scope, registrant, robustness, promote,

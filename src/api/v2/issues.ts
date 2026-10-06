@@ -43,7 +43,7 @@ import type { V2Service } from "./service.js";
 import { reliesOn, subjectKind } from "./service.js";
 import { complaintsPageV2 } from "../../web/v2/pages.js";
 
-export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" | "duplicate" | "screening" | "unfair-test" | "false-blocker" | "verification" | "other";
+export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" | "source-wrong-work" | "duplicate" | "screening" | "unfair-test" | "false-blocker" | "verification" | "other";
 
 /**
  * What an agent may flag: a quote not in its source, a source that does not resolve, a duplicate, a test that cannot fail
@@ -51,7 +51,7 @@ export type IssueKind = "complaint" | "quote-mismatch" | "source-unresolvable" |
  * the paper does state the protocol), or something else, said in the detail (kinds are named after the defect a scout can
  * check, never after what screening looks for).
  */
-export const FLAG_KINDS = ["quote-mismatch", "source-unresolvable", "duplicate", "unfair-test", "false-blocker", "other"] as const;
+export const FLAG_KINDS = ["quote-mismatch", "source-unresolvable", "source-wrong-work", "duplicate", "unfair-test", "false-blocker", "other"] as const;
 export type FlagKind = (typeof FLAG_KINDS)[number];
 export const FLAG_DETAIL = { min: 20, max: 2000 } as const;
 /** quotas/0.3 (5 October 2026): flags are not rationed, and an operator's dismissed flags no longer damp its allowance. */

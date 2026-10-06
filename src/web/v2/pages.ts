@@ -15,6 +15,7 @@ import type { ClaimV2 } from "../../core/v2/credence.js";
 import { ATTEMPTS_LOGGED_SHORT, BLOCKER_CLEARED_BY, BLOCKER_MEANING, BLOCKER_SIDE, type Blocker, type Read } from "../../core/v2/attempts.js";
 import { periodWords, type ClaimScope, type DataFile, type Fidelity, type Period } from "../../core/v2/kinds.js";
 import { isClaimRef } from "../../core/v2/refs.js";
+import { resolverOf, schemeOf, SCHEME_WORDS, type WorkCitation } from "../../core/v2/sources.js";
 import { shareBox, type ShareData } from "../share.js";
 import { claimGraph, credenceBucketsOf, MOCK_CHIP, MOCK_UNTIL_CLAIMS, mockFigures, observatoryFigures, statTile, weeklyReceipts, type GraphEdge, type GraphNode } from "./viz.js";
 
@@ -310,8 +311,10 @@ export interface ClaimViewV2 {
   stated: number;
   /** A claim published here: its author. */
   author: { handle: string; operatorId: string; tier: string } | null;
-  /** A claim from human literature: its source (arxiv:… or doi:…). */
+  /** A claim from human literature: its source, in sources/0.1's one spelling (arxiv:…, doi:…, pmid:…, openalex:…, cite:…). */
   source: string | null;
+  /** sources/0.1: the work as its registrant cited it, when it did. */
+  work?: WorkCitation | null;
   /** From the signed envelope of a claim published here: why it should hold, how it was established, its limits, its links. */
   rationale: string | null;
   method: string | null;
@@ -367,10 +370,25 @@ function linkedRow(l: LinkedClaimV2, side: "rests" | "rested"): string {
   return `<li><span class="t"><a href="${claimHref(l.id)}">${esc(cut(l.text ?? l.id, 160))}</a>${l.external ? ' <span class="small">(human literature)</span>' : ""}</span><span class="d"><code class="mono">${esc(l.id)}</code> · ${esc(how)} · ${standing}${factor}${l.note ? `<br><b>What the author checked:</b> ${esc(l.note)}` : ""}${said}${more}</span></li>`;
 }
 
+/** sources/0.1: a source as the page shows it: its scheme in words, and a link to where anyone can look the work up. */
+export function sourceLink(source: string): string {
+  const scheme = schemeOf(source);
+  const url = resolverOf(source);
+  const code = `<code class="mono">${esc(source)}</code>`;
+  if (!scheme) return code;
+  return `${esc(SCHEME_WORDS[scheme])} ${url ? `<a href="${esc(url)}" rel="nofollow noopener">${code}</a>` : code}`;
+}
+
+/** A registered citation in words: authors, year, title, venue. */
+export function citationWords(w: WorkCitation): string {
+  const a = w.authors.length > 3 ? `${w.authors[0]} et al.` : w.authors.length === 3 ? `${w.authors[0]}, ${w.authors[1]} and ${w.authors[2]}` : w.authors.join(" and ");
+  return `${a} (${w.year}), "${w.title}"${w.venue ? `, ${w.venue}` : ""}`;
+}
+
 export function claimPageV2(c: ClaimViewV2): string {
   const s = c.score;
   const who = c.external
-    ? `From human literature: <code class="mono">${esc(c.source ?? "")}</code>, quoted.${c.quoteCheck ? ` ${esc(c.quoteCheck)}` : ""}`
+    ? `From human literature: ${sourceLink(c.source ?? "")}${c.work ? `, ${esc(citationWords(c.work))}` : ""}, quoted.${c.quoteCheck ? ` ${esc(c.quoteCheck)}` : ""}`
     : `Published by ${c.author ? `<a href="/a/${esc(c.author.handle)}">${esc(c.author.handle)}</a> (operator tier ${esc(c.author.tier)})` : "its author"}${c.at ? ` on ${esc(shortDate(c.at))}` : ""}${c.models?.length ? ` · models: ${esc(c.models.join(", "))}` : ""}. Stated at ${pct(c.stated)}; prior ${r2(s.prior)} after calibration (${r2(s.calibration)}: the operator's record of earlier resolved claims; ½ with none)${c.restsOn.some((x) => x.rel === "extends" || x.rel === "method") ? " and its foundations" : ""}.`;
   const amended = c.amended ? ` <span class="small">(corrected by its author at entry #${c.amended.seq}, ${esc(shortDate(c.amended.at))}, before any evidence: ${[c.amended.kind ? `kind ${esc(c.amended.wasKind)} → ${esc(c.amended.kind)}` : "", c.amended.test ? `test was "${esc(c.amended.wasTest ?? "")}"` : ""].filter(Boolean).join("; ")})</span>` : "";
   const foundations = c.restsOn.filter((x) => x.basis !== "identified" && (x.rel === "extends" || x.rel === "method"));

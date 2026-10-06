@@ -1,18 +1,31 @@
 /**
  * The quote scout: does a registered claim's quote exist in its source?
  *
- * An external claim is a sentence from human literature with a source
- * (arxiv:… or doi:…). Nothing checked, until now, that the sentence is in
- * the paper: putting false words in a real author's mouth is the costliest
- * error the record can make. On a schedule the scout takes a few unchecked
- * claims, fetches what the source's own index publishes (the arXiv API's
- * abstract and title; Crossref's abstract, when the publisher deposited one,
- * and title), and compares:
+ * An external claim is a sentence from human literature with a source, the
+ * work named in sources/0.1's one spelling (core/v2/sources.ts). Nothing
+ * checked, until 4 October, that the sentence is in the paper: putting false
+ * words in a real author's mouth is the costliest error the record can make.
+ * On a schedule the scout takes a few unchecked claims, fetches what the
+ * source's own index publishes, and compares. What it reads, by scheme
+ * (sources/0.1, rule 3):
+ *
+ *   arxiv:          the arXiv API's abstract and title
+ *   doi:            Crossref's abstract (when the publisher deposited one) and title; failing an abstract, Europe PMC's
+ *                   record of the DOI, then OpenAlex's
+ *   pmid:, pmcid:   Europe PMC's abstract and title (PubMed's)
+ *   openreview:     OpenReview's abstract and title
+ *   acl:, pmlr:, jmlr:, neurips:   the proceedings page's abstract and title
+ *   openalex:       OpenAlex's abstract and title
+ *   isbn:, cite:    nothing: a book and a work no index names have no open text; their quotes are their registrants' word
+ *
+ * and what it finds:
  *
  *   verified         the quote is in the abstract (or the title), word for word after normalisation
  *   mismatch         it nearly is: the nearest stretch of the abstract shares most of its words but not all; an issue is opened
  *   not-in-abstract  it is not: the quote may be from the body of the paper, which the scout cannot read; nothing follows
- *   no-abstract      the source publishes no abstract to check against
+ *   no-abstract      the source publishes no abstract to check against (or, isbn: and cite:, has no open text)
+ *   wrong-work       the registration named the work in words, and the source's own title is another work's: the
+ *                    identifier is wrong (a DOI one digit out); an issue is opened
  *   unresolvable     the source does not resolve (a wrong id or DOI); an issue is opened
  *   error            the fetch failed; tried again later
  *
@@ -24,14 +37,19 @@
 
 import type { V2Service } from "./service.js";
 import type { IssueRegistry } from "./issues.js";
+import { parseSource, titleAgreement, WRONG_WORK_BELOW, type WorkCitation } from "../../core/v2/sources.js";
 
-export type QuoteStatus = "verified" | "mismatch" | "not-in-abstract" | "no-abstract" | "unresolvable" | "error";
+export type QuoteStatus = "verified" | "mismatch" | "not-in-abstract" | "no-abstract" | "wrong-work" | "unresolvable" | "error";
+
+/** Whose index the scout read: the first half of `where`. */
+export type QuoteIndex = "arxiv" | "crossref" | "europepmc" | "openalex" | "openreview" | "proceedings";
+export type QuoteWhere = `${QuoteIndex}-abstract` | `${QuoteIndex}-title`;
 
 export interface QuoteCheck {
   claim: string;
   status: QuoteStatus;
   /** What the quote was found in or compared against. */
-  where: "arxiv-abstract" | "arxiv-title" | "crossref-abstract" | "crossref-title" | null;
+  where: QuoteWhere | null;
   /** The best-matching stretch of the source text (for mismatches, so a steward sees the difference). */
   nearest: string | null;
   /** Share of the quote's words found in order in the nearest stretch (1 for verified). */
@@ -71,6 +89,8 @@ export interface QuoteScoutOptions {
   pause?: (ms: number) => Promise<void>;
   /** Named in the user agent, as Crossref asks. */
   contact?: string;
+  /** The account's OpenAlex key, when one is installed (OPENALEX_API_KEY): sent to OpenAlex only, in a header. */
+  openAlexKey?: string | null;
 }
 
 export class QuoteScout {
@@ -99,28 +119,34 @@ export class QuoteScout {
       const ours = prev?.status === "error" && /Illegal invocation/.test(prev.detail ?? "");
       if (prev && !ours && !((prev.status === "error" || prev.status === "unresolvable") && prev.attempts < MAX_ATTEMPTS && Date.parse(prev.checkedAt) < cutoff)) continue;
       if (out.checked > 0) await this.pause(3000);
-      const row = await this.check(id, x.source, x.quote, ours ? 1 : (prev?.attempts ?? 0) + 1);
+      const row = await this.check(id, x.source, x.quote, ours ? 1 : (prev?.attempts ?? 0) + 1, x.work ?? null);
       await this.o.store.put(row);
       out.checked++;
       if (row.status === "verified") out.verified++;
       if (row.status === "mismatch") { out.mismatched++; await this.o.issues?.open("quote-mismatch", id, 2, `The quote is not in the source's ${row.where?.replace("-", " ")} as registered; the nearest stretch shares ${Math.round((row.similarity ?? 0) * 100)}% of its words. Nearest: "${row.nearest ?? ""}"`, "scout"); }
       if (row.status === "unresolvable") { out.unresolvable++; if (row.attempts >= 2) await this.o.issues?.open("source-unresolvable", id, 2, `The source ${x.source} did not resolve on ${row.attempts} attempts: ${row.detail ?? ""}`, "scout"); }
+      if (row.status === "wrong-work") { out.mismatched++; await this.o.issues?.open("source-wrong-work", id, 2, `The source ${x.source} names another work: its index gives the title "${row.nearest ?? ""}", against the registered "${x.work?.title ?? ""}" (${Math.round((row.similarity ?? 0) * 100)}% of the words agree)`, "scout"); }
       if (row.status === "error") out.errors++;
     }
     return out;
   }
 
   /** One claim: fetch the source's index entry and compare. Never throws. */
-  async check(claim: string, source: string, quote: string, attempts = 1): Promise<QuoteCheck> {
+  async check(claim: string, source: string, quote: string, attempts = 1, work: WorkCitation | null = null): Promise<QuoteCheck> {
     const at = this.now().toISOString();
     const base = { claim, checkedAt: at, attempts };
     try {
       const got = await this.fetchSource(source);
       if (!got.ok) return { ...base, status: got.status, where: null, nearest: null, similarity: null, detail: got.detail };
-      const texts: Array<[QuoteCheck["where"], string]> = [];
-      if (got.abstract) texts.push([got.kind === "arxiv" ? "arxiv-abstract" : "crossref-abstract", got.abstract]);
-      if (got.title) texts.push([got.kind === "arxiv" ? "arxiv-title" : "crossref-title", got.title]);
-      if (!texts.length) return { ...base, status: "no-abstract", where: null, nearest: null, similarity: null, detail: null };
+      // sources/0.1 rule 4: a work named in words whose title the index contradicts is another work.
+      if (work?.title && got.title) {
+        const agree = titleAgreement(work.title, got.title);
+        if (agree !== null && agree < WRONG_WORK_BELOW) return { ...base, status: "wrong-work", where: `${got.kind}-title`, nearest: got.title.slice(0, 300), similarity: Math.round(agree * 1000) / 1000, detail: `registered as "${work.title.slice(0, 200)}"` };
+      }
+      const texts: Array<[QuoteWhere, string]> = [];
+      if (got.abstract) texts.push([`${got.kind}-abstract`, got.abstract]);
+      if (got.title) texts.push([`${got.kind}-title`, got.title]);
+      if (!texts.length) return { ...base, status: "no-abstract", where: null, nearest: null, similarity: null, detail: got.detail ?? null };
       let best: { where: QuoteCheck["where"]; m: ReturnType<typeof matchQuote> } | null = null;
       for (const [where, text] of texts) {
         const m = matchQuote(quote, text);
@@ -136,31 +162,137 @@ export class QuoteScout {
     }
   }
 
-  private async fetchSource(source: string): Promise<{ ok: true; kind: "arxiv" | "crossref"; abstract: string | null; title: string | null } | { ok: false; status: "unresolvable" | "error"; detail: string }> {
-    const ua = `ecdysis-quote-scout/0.1 (https://ecdysis.me; mailto:${this.o.contact ?? "replies@ecdysis.me"})`;
-    const m = source.match(/^(arxiv|doi):(.+)$/i);
-    if (!m) return { ok: false, status: "unresolvable", detail: "not an arxiv: or doi: source" };
-    const kind = m[1]!.toLowerCase(), id = m[2]!.trim();
-    if (kind === "arxiv") {
-      const bare = id.replace(/^arxiv:/i, "").replace(/v\d+$/, "");
-      const res = await this.fetchImpl(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(bare)}&max_results=1`, { headers: { "user-agent": ua, accept: "application/atom+xml" } });
-      if (!res.ok) return res.status >= 500 ? { ok: false, status: "error", detail: `arXiv ${res.status}` } : { ok: false, status: "unresolvable", detail: `arXiv ${res.status}` };
-      const xml = await res.text();
-      const entry = xml.match(/<entry>([\s\S]*?)<\/entry>/)?.[1];
-      if (!entry) return { ok: false, status: "unresolvable", detail: "arXiv returned no entry for that id" };
-      const title = tag(entry, "title");
-      const summary = tag(entry, "summary");
-      // A malformed id comes back as an entry titled "Error" whose summary says so; an unknown id as a feed with no entry.
-      if (!summary || /^Error$/i.test(title ?? "")) return { ok: false, status: "unresolvable", detail: summary ? `arXiv: ${summary.slice(0, 120)}` : "arXiv knows no such paper" };
-      return { ok: true, kind: "arxiv", abstract: summary, title };
+  private async fetchSource(source: string): Promise<{ ok: true; kind: QuoteIndex; abstract: string | null; title: string | null; detail?: string } | { ok: false; status: "unresolvable" | "error"; detail: string }> {
+    const ua = `ecdysis-quote-scout/0.2 (https://ecdysis.me; mailto:${this.o.contact ?? "replies@ecdysis.me"})`;
+    const parsed = parseSource(source);
+    if (!parsed.ok) return { ok: false, status: "unresolvable", detail: `not a source in sources/0.1's spelling: ${parsed.error}`.slice(0, 200) };
+    const { scheme, id } = parsed;
+    const get = (url: string, accept: string, extra: Record<string, string> = {}) => this.fetchImpl(url, { headers: { "user-agent": ua, accept, ...extra } });
+    const page = async (url: string, abstractRe: RegExp, titleRe: RegExp | null): Promise<{ ok: true; kind: QuoteIndex; abstract: string | null; title: string | null } | { ok: false; status: "unresolvable" | "error"; detail: string }> => {
+      const res = await get(url, "text/html");
+      if (res.status === 404) return { ok: false, status: "unresolvable", detail: `the proceedings page is not there (${url.slice(0, 120)})` };
+      if (!res.ok) return { ok: false, status: res.status >= 500 ? "error" : "unresolvable", detail: `the proceedings page answered ${res.status}` };
+      const html = await res.text();
+      const a = html.match(abstractRe)?.[1];
+      const t = metaContent(html, "citation_title") ?? (titleRe ? html.match(titleRe)?.[1] ?? null : null);
+      return { ok: true, kind: "proceedings", abstract: a ? stripTags(a) || null : null, title: t ? stripTags(t) || null : null };
+    };
+    switch (scheme) {
+      case "arxiv": {
+        const res = await get(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}&max_results=1`, "application/atom+xml");
+        if (!res.ok) return res.status >= 500 ? { ok: false, status: "error", detail: `arXiv ${res.status}` } : { ok: false, status: "unresolvable", detail: `arXiv ${res.status}` };
+        const xml = await res.text();
+        const entry = xml.match(/<entry>([\s\S]*?)<\/entry>/)?.[1];
+        if (!entry) return { ok: false, status: "unresolvable", detail: "arXiv returned no entry for that id" };
+        const title = tag(entry, "title");
+        const summary = tag(entry, "summary");
+        // A malformed id comes back as an entry titled "Error" whose summary says so; an unknown id as a feed with no entry.
+        if (!summary || /^Error$/i.test(title ?? "")) return { ok: false, status: "unresolvable", detail: summary ? `arXiv: ${summary.slice(0, 120)}` : "arXiv knows no such paper" };
+        return { ok: true, kind: "arxiv", abstract: summary, title };
+      }
+      case "doi": {
+        const res = await get(`https://api.crossref.org/works/${encodeURIComponent(id)}`, "application/json");
+        if (res.status === 404) return { ok: false, status: "unresolvable", detail: "Crossref knows no such DOI" };
+        if (!res.ok) return { ok: false, status: "error", detail: `Crossref ${res.status}` };
+        const body = (await res.json().catch(() => null)) as { message?: { abstract?: string; title?: string[] } } | null;
+        if (!body?.message) return { ok: false, status: "error", detail: "Crossref answered without a work" };
+        const title = body.message.title?.[0] ? stripTags(body.message.title[0]) : null;
+        if (body.message.abstract) return { ok: true, kind: "crossref", abstract: stripTags(body.message.abstract), title };
+        // No abstract deposited with Crossref: Europe PMC's record of the same DOI, then OpenAlex's (sources/0.1 rule 3).
+        const epmc = await this.europePmc(`DOI:"${id}"`, ua);
+        if (epmc?.abstract) return { ok: true, kind: "europepmc", abstract: epmc.abstract, title: epmc.title ?? title };
+        const oa = await this.openAlex(`doi:${id}`, ua);
+        if (oa?.abstract) return { ok: true, kind: "openalex", abstract: oa.abstract, title: oa.title ?? title };
+        return { ok: true, kind: "crossref", abstract: null, title };
+      }
+      case "pmid":
+      case "pmcid": {
+        const epmc = await this.europePmc(scheme === "pmid" ? `EXT_ID:${id} AND SRC:MED` : `PMCID:${id}`, ua);
+        if (epmc === null) return { ok: false, status: "error", detail: "Europe PMC did not answer" };
+        if (!epmc.found) return { ok: false, status: "unresolvable", detail: `Europe PMC knows no such ${scheme === "pmid" ? "PubMed" : "PubMed Central"} record` };
+        return { ok: true, kind: "europepmc", abstract: epmc.abstract, title: epmc.title };
+      }
+      case "openreview": {
+        for (const api of ["https://api2.openreview.net", "https://api.openreview.net"]) {
+          const res = await get(`${api}/notes?id=${encodeURIComponent(id)}`, "application/json");
+          if (res.status === 403) return { ok: true, kind: "openreview", abstract: null, title: null, detail: "OpenReview asked for a challenge the scout cannot answer" };
+          if (!res.ok) continue;
+          const body = (await res.json().catch(() => null)) as { notes?: Array<{ content?: Record<string, unknown> }> } | null;
+          const c = body?.notes?.[0]?.content;
+          if (!c) continue;
+          const val = (v: unknown): string | null => typeof v === "string" ? v : v && typeof v === "object" && typeof (v as { value?: unknown }).value === "string" ? (v as { value: string }).value : null;
+          return { ok: true, kind: "openreview", abstract: val(c["abstract"]) ? stripTags(val(c["abstract"])!) : null, title: val(c["title"]) ? stripTags(val(c["title"])!) : null };
+        }
+        return { ok: false, status: "unresolvable", detail: "OpenReview knows no such forum" };
+      }
+      case "acl": return page(`https://aclanthology.org/${id}/`, /class="card-body acl-abstract"[^>]*>[\s\S]*?<span>([\s\S]*?)<\/span>/, /<h2[^>]*id="title"[^>]*>([\s\S]*?)<\/h2>/);
+      case "pmlr": return page(`https://proceedings.mlr.press/${id}.html`, /<div id="abstract"[^>]*>([\s\S]*?)<\/div>/, /<h1>([\s\S]*?)<\/h1>/);
+      case "jmlr": return page(`https://jmlr.org/papers/${id}.html`, /<p class="abstract">([\s\S]*?)<\/p>/, /<h2>([\s\S]*?)<\/h2>/);
+      case "neurips": {
+        const [year, hash] = id.split("/");
+        const base = `https://proceedings.neurips.cc/paper_files/paper/${year}/hash/${hash}-Abstract`;
+        const tries = Number(year) >= 2022 ? [`${base}-Conference.html`, `${base}-Datasets_and_Benchmarks.html`, `${base}.html`] : [`${base}.html`];
+        let last: Awaited<ReturnType<typeof page>> = { ok: false, status: "unresolvable", detail: "the proceedings page is not there" };
+        for (const url of tries) {
+          last = await page(url, /class="paper-abstract">\s*(?:<p>)?([\s\S]*?)<\/p>/, null);
+          if (last.ok || last.status === "error") return last;
+        }
+        return last;
+      }
+      case "openalex": {
+        const oa = await this.openAlex(id, ua);
+        if (oa === null) return { ok: false, status: "error", detail: "OpenAlex did not answer" };
+        if (!oa.found) return { ok: false, status: "unresolvable", detail: "OpenAlex knows no such work" };
+        return { ok: true, kind: "openalex", abstract: oa.abstract, title: oa.title };
+      }
+      case "isbn": return { ok: true, kind: "proceedings", abstract: null, title: null, detail: "a book (isbn:) has no open text the scout can read: the quote is its registrant's word (sources/0.1)" };
+      case "cite": return { ok: true, kind: "proceedings", abstract: null, title: null, detail: "a work no index names (cite:) has no open text the scout can read: the quote is its registrant's word (sources/0.1)" };
     }
-    const res = await this.fetchImpl(`https://api.crossref.org/works/${encodeURIComponent(id)}`, { headers: { "user-agent": ua, accept: "application/json" } });
-    if (res.status === 404) return { ok: false, status: "unresolvable", detail: "Crossref knows no such DOI" };
-    if (!res.ok) return { ok: false, status: "error", detail: `Crossref ${res.status}` };
-    const body = (await res.json().catch(() => null)) as { message?: { abstract?: string; title?: string[] } } | null;
-    if (!body?.message) return { ok: false, status: "error", detail: "Crossref answered without a work" };
-    return { ok: true, kind: "crossref", abstract: body.message.abstract ? stripTags(body.message.abstract) : null, title: body.message.title?.[0] ? stripTags(body.message.title[0]) : null };
   }
+
+  /** Europe PMC's first hit for a query: null if it did not answer. */
+  private async europePmc(query: string, ua: string): Promise<{ found: boolean; abstract: string | null; title: string | null } | null> {
+    const res = await this.fetchImpl(`https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(query)}&resultType=core&format=json&pageSize=1`, { headers: { "user-agent": ua, accept: "application/json" } });
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => null)) as { resultList?: { result?: Array<{ abstractText?: string; title?: string }> } } | null;
+    const hit = body?.resultList?.result?.[0];
+    if (!hit) return { found: false, abstract: null, title: null };
+    return { found: true, abstract: hit.abstractText ? stripTags(hit.abstractText) || null : null, title: hit.title ? stripTags(hit.title) || null : null };
+  }
+
+  /** OpenAlex's record of a work ("W…", or "doi:…"): its abstract (rebuilt from the inverted index) and title; null if it did not answer. */
+  private async openAlex(key: string, ua: string): Promise<{ found: boolean; abstract: string | null; title: string | null } | null> {
+    const k = this.o.openAlexKey?.trim();
+    const res = await this.fetchImpl(`https://api.openalex.org/works/${key.startsWith("doi:") ? `doi:${encodeURIComponent(key.slice(4))}` : encodeURIComponent(key)}?select=title,display_name,abstract_inverted_index`,
+      { headers: { "user-agent": ua, accept: "application/json", ...(k ? { authorization: `Bearer ${k}` } : {}) } });
+    if (res.status === 404) return { found: false, abstract: null, title: null };
+    if (!res.ok) return null;
+    const w = (await res.json().catch(() => null)) as { title?: string; display_name?: string; abstract_inverted_index?: Record<string, number[]> | null } | null;
+    if (!w) return null;
+    return { found: true, abstract: invertedAbstract(w.abstract_inverted_index ?? null), title: (w.title ?? w.display_name ?? "").trim() || null };
+  }
+}
+
+/** An abstract from OpenAlex's inverted index: each word at each of its positions, in order. */
+export function invertedAbstract(inv: Record<string, number[]> | null): string | null {
+  if (!inv || typeof inv !== "object") return null;
+  const at: string[] = [];
+  for (const [word, positions] of Object.entries(inv)) {
+    if (!Array.isArray(positions)) continue;
+    for (const p of positions) if (Number.isInteger(p) && p >= 0 && p < 20000) at[p] = word;
+  }
+  const text = at.filter((w) => typeof w === "string").join(" ").trim();
+  return text || null;
+}
+
+/** A <meta name="…" content="…"> value, whichever order and quoting its attributes have. */
+export function metaContent(html: string, name: string): string | null {
+  const re = new RegExp(`<meta\\b[^>]*\\bname=["']?${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?[^>]*>`, "i");
+  const tagText = html.match(re)?.[0];
+  if (!tagText) return null;
+  const c = tagText.match(/\bcontent=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+  const v = c ? (c[1] ?? c[2] ?? c[3] ?? "") : "";
+  return v ? decodeEntities(v).replace(/\s+/g, " ").trim() : null;
 }
 
 function tag(xml: string, name: string): string | null {
@@ -220,15 +352,24 @@ function lcs(a: string[], b: string[]): number {
   return prev[b.length]!;
 }
 
+/** Each place the scout reads, in a reader's words. */
+const WHERE_WORDS: Record<QuoteWhere, string> = {
+  "arxiv-abstract": "arXiv abstract", "arxiv-title": "arXiv title", "crossref-abstract": "publisher's abstract", "crossref-title": "publisher's title",
+  "europepmc-abstract": "PubMed abstract (Europe PMC)", "europepmc-title": "PubMed title (Europe PMC)", "openalex-abstract": "OpenAlex abstract",
+  "openalex-title": "OpenAlex title", "openreview-abstract": "OpenReview abstract", "openreview-title": "OpenReview title",
+  "proceedings-abstract": "proceedings page's abstract", "proceedings-title": "proceedings page's title",
+};
+
 /** The sentence a claim page shows under a registered quote. */
 export function quoteCheckWords(c: QuoteCheck | null): string {
   if (!c) return "The quote has not yet been checked against its source.";
   const when = c.checkedAt.slice(0, 10);
   switch (c.status) {
-    case "verified": return `Quote verified against the ${c.where === "arxiv-abstract" ? "arXiv abstract" : c.where === "arxiv-title" ? "arXiv title" : c.where === "crossref-abstract" ? "publisher's abstract" : "publisher's title"} on ${when}.`;
+    case "verified": return `Quote verified against the ${WHERE_WORDS[c.where ?? "crossref-abstract"] ?? "source's abstract"} on ${when}.`;
     case "mismatch": return `The quote differs from the source's ${c.where?.endsWith("title") ? "title" : "abstract"} (${Math.round((c.similarity ?? 0) * 100)}% of its words found in order, checked ${when}); the stewards have been told.`;
     case "not-in-abstract": return `The quote is not in the source's abstract (checked ${when}); it may be from the body of the paper, which is not checked here.`;
-    case "no-abstract": return `The source publishes no abstract to check the quote against (checked ${when}).`;
+    case "no-abstract": return /registrant's word/.test(c.detail ?? "") ? `The source has no open text to check the quote against (a book, or a work no index names): the quote is its registrant's word, signed (sources/0.1; checked ${when}).` : `The source publishes no abstract to check the quote against (checked ${when}).`;
+    case "wrong-work": return `The source names another work: its index gives the title ${JSON.stringify(c.nearest ?? "")}, not the one registered (checked ${when}); the stewards have been told.`;
     case "unresolvable": return `The source could not be resolved (checked ${when}); the stewards have been told.`;
     default: return `The source could not be reached (checked ${when}); it will be tried again.`;
   }
