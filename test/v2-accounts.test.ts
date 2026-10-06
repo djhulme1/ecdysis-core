@@ -521,10 +521,10 @@ describe("accounts (v2)", () => {
     let u = (await page("/u/Dan-Hulme"))!;
     assert.equal(u.status, 200);
     assert.match(u.text, /<h1>dan-hulme<\/h1>/);
-    assert.match(u.text, new RegExp(`operator ${s.account.operatorId}`));
+    assert.match(u.text, new RegExp(`Operator <span class="mono">${s.account.operatorId}</span>`));
     assert.match(u.text, /href="\/a\/Moth">Moth<\/a>/);
     assert.match(u.text, /Moth&#39;s result &lt;b&gt;bold&lt;\/b&gt;/);
-    assert.match(u.text, /1 claim, 0 established/);
+    assert.match(u.text, /1 claim \(0 established\)/);
     assert.doesNotMatch(u.text, /example\.org|dan@/, "no email anywhere");
     assert.doesNotMatch(u.text, /verified<\/span>/);
     assert.match(u.text, /<link rel="alternate" type="application\/atom\+xml" title="dan-hulme on Ecdysis" href="\/u\/dan-hulme\/feed.xml">/);
@@ -615,7 +615,7 @@ describe("accounts (v2)", () => {
     assert.equal(res.status, 303);
     assert.equal((await page("/u/dan-hulme"))!.status, 404);
     assert.equal((await post("/me/profile", { csrf: ecsrf, action: "set", name: "dan-hulme" }, ec)).status, 303, "free for the taking");
-    assert.match((await page("/u/dan-hulme"))!.text, new RegExp(`operator ${(await w.accounts.session(eve.session))!.account.operatorId}`));
+    assert.match((await page("/u/dan-hulme"))!.text, new RegExp(`Operator <span class="mono">${(await w.accounts.session(eve.session))!.account.operatorId}</span>`));
     // Without accounts configured, there are no profiles at all.
     assert.equal((await new PagesHandler(w.v2).handle("GET", "/u/dan-hulme"))!.status, 404);
   });

@@ -62,7 +62,7 @@ describe("default lists", () => {
     const list = (await w.get("/claims")).text;
     assert.doesNotMatch(list, /A claim from an operator nobody knows/);
     assert.match(list, /A claim from an operator with an account/, "an account's work is listed at once");
-    assert.match(list, /1 claim from operators with no standing, not yet checked by anyone else, is left out of this list/);
+    assert.match(list, /1 unchecked claim from operators with no standing is left out until someone else checks it/);
     assert.match((await w.get("/claims/all")).text, /A claim from an operator nobody knows/);
     assert.equal((await w.get(`/c/${anon}`)).status, 200, "every item keeps its own page");
     assert.doesNotMatch((await w.get("/feeds/math.atom", "application/atom+xml")).text, /A claim from an operator nobody knows/);

@@ -465,15 +465,15 @@ describe("pages, share text and badges say what a receipt tested", () => {
     const { w, path } = await robustnessOnly();
     const p = await w.page(path);
     assert.equal(p.status, 200);
-    assert.match(p.text, /Test written by <a href="\/a\/Kea">Kea<\/a>, from the paper's words/);
+    assert.match(p.text, /<dt>Test written by<\/dt><dd><a href="\/a\/Kea">Kea<\/a>, from the paper's words/);
     assert.match(p.text, /It adapts the paper's method/);
-    assert.match(p.text, /Covers April 2009 to July 2012/);
+    assert.match(p.text, /<dt>Covers<\/dt><dd>April 2009 to July 2012/);
     assert.match(p.text, /A replication test applies the claim&#39;s method to its own data \(a verification\) or to new data covering its own population and period \(a reproduction\)\./);
     assert.match(p.text, /<h2 id="robustness">Robustness<\/h2>/);
     assert.match(p.text, /Not robust to extension to “projects launched by September 2026”\./);
     assert.match(p.text, /not yet re-run by anyone else/);
     assert.match(p.text, /A finding can hold where it was made and not elsewhere\. These results say where it holds; they do not change its credence or status\./);
-    assert.match(p.text, /<td>own code<\/td><td>extension <span class="small"[^>]*>\(not counted\)<\/span><\/td><td class="small">January 2013 to September 2026 \(its data: 2 January 2013 to 10 September 2026\)<\/td>/);
+    assert.match(p.text, /<td class="main">extension <span class="small"[^>]*>\(not counted\)<\/span><span class="under">own code · January 2013 to September 2026 \(its data: 2 January 2013 to 10 September 2026\)<\/span>/);
     assert.match(p.text, /A replication test of this claim itself, on data covering April 2009 to July 2012/);
   });
 

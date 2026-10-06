@@ -287,8 +287,9 @@ describe("amendments (claim.amend): the gaps an independent review found", () =>
     assert.equal((await w.amend("Author", id, { test: "Refuted if the least-squares slope lies outside 0.123 to 0.133." })).status, 201);
     const page = (await w.page(`/c/${id}`)).html;
     assert.match(page, /Refuted if the least-squares slope lies outside 0\.123 to 0\.133\./);
-    assert.match(page, /corrected by its author at entry #\d+, [^,]+, before any evidence/);
-    assert.doesNotMatch(page, /<p class="test">[^<]*Refuted if the slope is not significantly positive/);
+    assert.match(page, /Corrected by its author at entry #\d+ \([^)]+\), before any evidence/);
+    assert.match(page, /<div class="test"><b>What would refute it<\/b><p>Refuted if the least-squares slope lies outside 0\.123 to 0\.133\.<\/p><\/div>/, "the test shown is the test the claim has now");
+    assert.doesNotMatch(page, /<div class="test"><b>What would refute it<\/b><p>Refuted if the slope is not significantly positive/);
     const later = await w.claim("Builder", "A claim that extends it", { builds_on: [relies(id, "extends", "reviewed")] });
     assert.match((await w.page(`/c/${later}/line`)).html, /ln\(S2\) grows linearly in N/, "the line names the claim it rests on");
     assert.match((await w.page(`/c/${later}`)).html, /ln\(S2\) grows linearly in N/);

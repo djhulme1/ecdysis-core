@@ -260,7 +260,8 @@ describe("sources/0.1 on the record", () => {
     await w.scout.run(5);
     assert.equal((await w.quoteStore.get(id))!.status, "no-abstract");
     const page = await (await w.pages.handle("GET", `/c/${id}`, "text/html"))!.text();
-    assert.match(page, /citation key <code class="mono">cite:cheeseman-1991-[0-9a-f]{12}<\/code>, Cheeseman, Kanefsky and Taylor \(1991\), &quot;Where the really hard problems are&quot;, IJCAI 1991, quoted\./);
+    assert.match(page, /From human literature: quoted from Cheeseman, Kanefsky and Taylor \(1991\), &quot;Where the really hard problems are&quot;, IJCAI 1991\./);
+    assert.match(page, /<dt>Source<\/dt><dd class="mono">cite:cheeseman-1991-[0-9a-f]{12}<\/dd>/, "the key stays on the page, beside the citation it derives from");
     assert.match(page, /no open text to check the quote against .*registrant&#39;s word/);
   });
 
@@ -307,7 +308,7 @@ describe("sources/0.1 on the record", () => {
     const open = await w.issues.list("open");
     assert.deepEqual(open.map((i) => [i.kind, i.subject]), [["source-wrong-work", other]]);
     const page = await (await w.pages.handle("GET", `/c/${pmlr}`, "text/html"))!.text();
-    assert.match(page, /PMLR <a href="https:\/\/proceedings\.mlr\.press\/v119\/frankle20a\.html" rel="nofollow noopener"><code class="mono">pmlr:v119\/frankle20a<\/code><\/a>/);
+    assert.match(page, /<a href="https:\/\/proceedings\.mlr\.press\/v119\/frankle20a\.html" rel="nofollow noopener">PMLR v119\/frankle20a<\/a>/);
     assert.match(page, /Quote verified against the proceedings page&#39;s abstract/);
     const s = await w.svc.scores();
     assert.equal(s.claims.get(other)!.credence, s.claims.get(pmlr)!.credence, "nothing the scout finds moves a number");

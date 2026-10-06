@@ -65,6 +65,8 @@ const FIELD_FEED = /^\/feeds\/([a-z]{2,10})\.atom$/;
 /** Share links (a 302 to the platform's compose page) and live badges, by kind. */
 const SHARE = /^\/s\/(x|bsky|li)\/(claim|agent)\/(.{1,120})$/;
 const BADGE = /^\/badge\/(claim|agent)\/(.{1,120})\.svg$/;
+/** A page whose search and filter form submits to the page itself (GET, script-free): the same headers, with form-action 'self'. */
+export const FORM_PAGE_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-security-policy": PAGE_HEADERS["content-security-policy"]!.replace("form-action 'none'", "form-action 'self'") };
 const SVG_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-type": "image/svg+xml; charset=utf-8", "cache-control": "public, max-age=300", "content-security-policy": "default-src 'none'" };
 const TEXT_404: Record<string, string> = { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" };
 const FEED_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-type": "application/atom+xml; charset=utf-8", "cache-control": "public, max-age=300" };
@@ -214,7 +216,7 @@ export class PagesHandler {
   }
 
   /** Serve a page, or null when the path is not one. `accept` decides whether "/" is a page (browsers) or the JSON index (agents, curl). */
-  async handle(method: string, pathIn: string, accept = "", probe = false): Promise<Response | null> {
+  async handle(method: string, pathIn: string, accept = "", probe = false, search = ""): Promise<Response | null> {
     if (method !== "GET" && method !== "HEAD") return null;
     // A link may carry a percent-encoded colon (/c/ecd%3A…); the page is the same. Decoded once; a malformed escape is left alone.
     let path = pathIn;
@@ -252,7 +254,7 @@ export class PagesHandler {
       const name = um[1]!.toLowerCase();
       if (!account) return um[2] ? new Response(method === "HEAD" ? null : "Not found", { status: 404, headers: { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } }) : html(404, missingProfilePageV2());
       if (um[2]) return xml(await this.feeds.profile(name, account.operatorId));
-      return html(200, profilePageV2(await this.profile(name, account.operatorId)));
+      return new Response(method === "HEAD" ? null : profilePageV2({ ...(await this.profile(name, account.operatorId)), params: new URLSearchParams(search) }), { status: 200, headers: FORM_PAGE_HEADERS });
     }
     if (path === "/" && accept.includes("text/html")) return html(200, landingPageV2(await this.landing(site)));
     if (path === "/people" || path === "/start" || path === "/join") return html(200, peoplePageV2({ host: site, mcpUrl: mcpUrlFor(host) }));
@@ -273,7 +275,8 @@ export class PagesHandler {
     if (path === "/governance") return html(200, governancePageV2(this.o.governance ? await this.governance(this.o.governance) : await this.governanceStatic()));
     if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     // The default list leaves out unchecked work from operators with no standing (core/v2/visibility.ts); /claims/all lists everything in view.
-    if (path === "/claims" || path === "/claims/all") return html(200, claimsPageV2(await this.claims(path === "/claims/all")));
+    // The claims table searches, filters and sorts with a GET form that submits to the page itself, so its form-action is 'self'.
+    if (path === "/claims" || path === "/claims/all") return new Response(method === "HEAD" ? null : claimsPageV2({ ...(await this.claims(path === "/claims/all")), params: new URLSearchParams(search) }), { status: 200, headers: FORM_PAGE_HEADERS });
     const cm = path.match(CLAIM_PAGE);
     if (cm) {
       const ref = cm[1]!;
@@ -290,14 +293,19 @@ export class PagesHandler {
     }
     if (path === "/map") {
       const r = await this.v2.record();
-      return html(200, mapPageV2({ ...(await this.v2.mapView(25)), next: await this.v2.directionList(10), unsettled: await this.v2.unsettled(20), computedFrom: r.head }));
+      const view = { ...(await this.v2.mapView(25)), next: await this.v2.directionList(10), unsettled: await this.v2.unsettled(20) };
+      // The claims' own words beside their ids, for every claim the page names.
+      const refs = [...view.unchecked, ...view.loadBearing, ...view.underPressure, ...view.needsCapability, ...view.cleared].map((c) => c.ref).concat(view.next.flatMap((a) => (a.ref ? [a.ref] : [])), view.unsettled.map((u) => u.claim));
+      const texts = Object.fromEntries([...new Set(refs)].map((ref) => [ref, claimText(r, ref)] as const));
+      return html(200, mapPageV2({ ...view, texts, computedFrom: r.head }));
     }
     if (path === "/leaderboard") {
       const board = await this.v2.leaderboardView(100, 15);
       const s = await this.v2.scores();
-      const claims: Record<string, { status: string; credence: number }> = {};
-      for (const i of board.audit) { const c = s.claims.get(i.claim); if (c) claims[i.claim] = { status: c.status, credence: c.credence }; }
-      return html(200, leaderboardPageV2({ ...board, claims }));
+      const claims: Record<string, { status: string; credence: number; text?: string }> = {};
+      const r = await this.v2.record();
+      for (const i of board.audit) { const c = s.claims.get(i.claim); if (c) claims[i.claim] = { status: c.status, credence: c.credence, text: claimText(r, i.claim) }; }
+      return html(200, leaderboardPageV2({ ...board, claims, computedFrom: r.head }));
     }
     if (path === "/observatory") return html(200, observatoryPageV2(await this.observatory()));
     if (path === "/kit") return html(200, kitPageV2({ host, protocol: skillMdV2(host, this.o.logPublicKey ?? null), rawUrl: RAW_PROTOCOL_URL }));
@@ -313,7 +321,7 @@ export class PagesHandler {
     const moved = PAGE_MOVES[path] ?? paperEraMove(path) ?? (v1Only ? (this.o.archive && /^\/[A-Za-z0-9/_.:%-]*$/.test(path) ? `${this.o.archive}${path}` : "/") : null);
     if (moved) return new Response(null, { status: 301, headers: { ...PAGE_HEADERS, location: moved } });
     const am = path.match(AGENT);
-    if (am) { const a = await this.agent(am[1]!); return a ? html(200, agentPageV2(a)) : html(404, missingPageV2("agent")); }
+    if (am) { const a = await this.agent(am[1]!); return a ? new Response(method === "HEAD" ? null : agentPageV2({ ...a, params: new URLSearchParams(search) }), { status: 200, headers: FORM_PAGE_HEADERS }) : html(404, missingPageV2("agent")); }
     return null;
   }
 
@@ -336,13 +344,23 @@ export class PagesHandler {
 
   private async landing(site: string) {
     const r = await this.v2.record();
-    const latest = [...r.native.values()].filter((c) => !isHeld(r, c.id) && inDefaultLists(r, [c.id], c.operatorId)).sort((a, b) => b.seq - a.seq)[0] ?? null;
+    const s = await this.v2.scores();
+    // The newest claims in the default lists, from human literature and published here alike, and every claim's place on the ruler.
+    const inView = r.claims.filter((c) => !isHeld(r, c.ref) && inDefaultLists(r, [c.ref], c.external ? (c.registrant ?? "") : c.authorOperator));
+    const recent = [...inView].sort((a, b) => b.seq - a.seq).slice(0, 5).map((c) => {
+      const n = r.native.get(c.ref);
+      const x = r.external.get(c.ref);
+      const sc = s.claims.get(c.ref);
+      return { id: c.ref, text: claimText(r, c.ref), status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5, source: x?.source ?? null, agent: n?.handle ?? x?.handle ?? null, external: !!x, ts: n?.ts ?? x?.ts ?? "" };
+    });
     return {
       host: site,
       constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() },
       logPublicKey: this.o.logPublicKey ?? null,
       counts: { claims: r.claims.filter((c) => !isHeld(r, c.ref)).length, external: [...r.external.keys()].filter((id) => !isHeld(r, id)).length, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted" && !c.disowned).length, agents: r.agents.size },
-      latest: latest ? { id: latest.id, text: latest.text, agent: latest.handle, field: latest.field, ts: latest.ts } : null,
+      latest: recent[0] ? { id: recent[0].id, text: recent[0].text, agent: recent[0].agent ?? "", field: r.native.get(recent[0].id)?.field ?? "", ts: recent[0].ts } : null,
+      recent,
+      credences: inView.map((c) => ({ credence: s.claims.get(c.ref)?.credence ?? 0.5, status: s.claims.get(c.ref)?.status ?? "unchecked" })),
       archive: this.o.archive && /^https:\/\/[a-z0-9.-]+\.ecdysis\.me\/?$/.test(this.o.archive) ? this.o.archive.replace(/\/$/, "") : null,
     };
   }
@@ -361,14 +379,14 @@ export class PagesHandler {
     const gen = generations(scored, identifiedFoundations(r));
     return {
       all, unlisted: inView.length - listed.length,
-      claims: [...listed].sort((a, b) => b.seq - a.seq).slice(0, 200).map((c) => {
+      claims: [...listed].sort((a, b) => b.seq - a.seq).map((c) => {
         const n = r.native.get(c.ref);
         const x = r.external.get(c.ref);
         const sc = s.claims.get(c.ref);
         return {
           id: c.ref, text: claimText(r, c.ref), external: !!x, kind: sc?.kind ?? c.kind ?? "empirical", field: n?.field ?? (x ? r.observations.get(x.source.toLowerCase())?.field ?? null : null),
           agent: n?.handle ?? null, source: x?.source ?? null, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5, stakes: sc?.stakes ?? 0,
-          restsOn: linesIn(c.ref), restedOnBy: linesOut(c.ref), at: n?.ts ?? x?.ts ?? null,
+          restsOn: linesIn(c.ref), restedOnBy: linesOut(c.ref), at: n?.ts ?? x?.ts ?? null, seq: c.seq,
         };
       }),
       graph: this.graphOf(r, s),
@@ -544,16 +562,16 @@ export class PagesHandler {
       reliability: s.track.reliability.get(handle) ?? 0.5, credit: s.track.credit.get(handle) ?? 0,
       reports: s.track.reports.filter((x) => x.agent === handle && x.resolved !== null).length,
       lapses: r.lapses.get(handle) ?? 0, checkKeys: a.checkKeys.length, retired: a.revokedAt !== null, voided: r.voidedOperators.has(a.operatorId), managed: a.managed,
-      claims: mine.map((c) => ({ id: c.id, text: c.text, field: c.field, ts: c.ts, status: s.claims.get(c.id)?.status ?? "unchecked", kind: s.claims.get(c.id)?.kind ?? "empirical" })),
+      claims: mine.map((c) => ({ id: c.id, text: c.text, field: c.field, ts: c.ts, status: s.claims.get(c.id)?.status ?? "unchecked", kind: s.claims.get(c.id)?.kind ?? "empirical", credence: s.claims.get(c.id)?.credence ?? 0.5, stakes: s.claims.get(c.id)?.stakes ?? 0, seq: c.seq })),
       registered: [...r.external.entries()].filter(([id, e]) => e.handle === handle && !isHeld(r, id)).sort(([, x], [, y]) => y.seq - x.seq)
-        .map(([id, e]) => ({ id, text: e.quote, source: e.source, ts: e.ts, status: s.claims.get(id)?.status ?? "unchecked", credence: s.claims.get(id)?.credence ?? 0.5 })),
+        .map(([id, e]) => ({ id, text: e.quote, source: e.source, ts: e.ts, status: s.claims.get(id)?.status ?? "unchecked", credence: s.claims.get(id)?.credence ?? 0.5, stakes: s.claims.get(id)?.stakes ?? 0, kind: s.claims.get(id)?.kind ?? "empirical", seq: e.seq })),
       links: [...r.links.values()].filter((l) => l.handle === handle && !l.disowned && !isHeld(r, l.id) && !isHeld(r, l.from) && !isHeld(r, l.to)).sort((x, y) => y.seq - x.seq)
-        .map((l) => ({ id: l.id, from: l.from, to: l.to, rel: l.rel, ts: l.ts, withdrawn: l.withdrawn !== null })),
-      receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed" && !isHeld(r, c.id)).sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, tests: testsWords(c), counted: c.replicationTest })),
-      reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle && !isHeld(r, e.claim)).map((e) => ({ claim: e.claim, forecast: r.forecasts.get(`${e.claim}|${handle}`) ?? 0.5 })),
+        .map((l) => ({ id: l.id, from: l.from, to: l.to, rel: l.rel, ts: l.ts, withdrawn: l.withdrawn !== null, fromText: claimText(r, l.from), toText: claimText(r, l.to) })),
+      receipts: [...r.checks.values()].filter((c) => c.handle === handle && c.stage !== "committed" && !isHeld(r, c.id)).sort((x, y) => y.seq - x.seq).map((c) => ({ id: c.id, target: c.target, kind: c.kind, outcome: c.outcome, stage: c.stage, crossMatch: c.crossMatch, disowned: c.disowned, tests: testsWords(c), counted: c.replicationTest, targetText: claimText(r, c.target) })),
+      reviews: r.evidence.filter((e) => e.kind === "review" && e.agent === handle && !isHeld(r, e.claim)).map((e) => ({ claim: e.claim, forecast: r.forecasts.get(`${e.claim}|${handle}`) ?? 0.5, text: claimText(r, e.claim) })),
       findings: r.findings.filter((f) => f.oddAgent === handle).map((f) => ({ id: f.id, verdict: f.verdict, inForce: f.inForce, reversed: f.reversed, decidedAt: f.decidedAt })),
-      attempts: [...r.attempts.values()].filter((x) => x.handle === handle && !x.declared && !r.held.has(x.id) && !isHeld(r, x.claim)).sort((x, y) => y.seq - x.seq).map((x) => ({ claim: x.claim, blocker: x.blocker, filedAt: x.ts, cleared: x.cleared !== null, disowned: x.disowned })),
-      clears: r.clears.filter((x) => x.handle === handle && !isHeld(r, x.claim)).sort((x, y) => y.seq - x.seq).map((x) => ({ claim: x.claim, blocker: x.blocker, at: x.ts })),
+      attempts: [...r.attempts.values()].filter((x) => x.handle === handle && !x.declared && !r.held.has(x.id) && !isHeld(r, x.claim)).sort((x, y) => y.seq - x.seq).map((x) => ({ claim: x.claim, blocker: x.blocker, filedAt: x.ts, cleared: x.cleared !== null, disowned: x.disowned, text: claimText(r, x.claim) })),
+      clears: r.clears.filter((x) => x.handle === handle && !isHeld(r, x.claim)).sort((x, y) => y.seq - x.seq).map((x) => ({ claim: x.claim, blocker: x.blocker, at: x.ts, text: claimText(r, x.claim) })),
     };
   }
 
@@ -600,7 +618,7 @@ export class PagesHandler {
         handle, families: a.families, reliability: s.track.reliability.get(handle) ?? 0.5, managed: a.managed, retired: a.revokedAt !== null,
         claims: claims.filter((c) => c.handle === handle).length, receipts: receipts.filter((c) => c.handle === handle).length,
       })),
-      claims: claims.slice(0, 200).map((c) => ({ id: c.id, text: c.text, agent: c.handle, field: c.field, ts: c.ts, status: s.claims.get(c.id)?.status ?? "unchecked", kind: s.claims.get(c.id)?.kind ?? "empirical" })),
+      claims: claims.map((c) => ({ id: c.id, text: c.text, agent: c.handle, field: c.field, ts: c.ts, status: s.claims.get(c.id)?.status ?? "unchecked", kind: s.claims.get(c.id)?.kind ?? "empirical", credence: s.claims.get(c.id)?.credence ?? 0.5, stakes: s.claims.get(c.id)?.stakes ?? 0, seq: c.seq })),
       counts: { claims: claims.length, established: claims.filter((c) => s.claims.get(c.id)?.status === "established").length, receipts: receipts.length },
     };
   }
@@ -691,11 +709,15 @@ export class PagesHandler {
   private graphOf(r: V2Record, s: ScoresV2): { nodes: GraphNode[]; edges: GraphEdge[]; omitted: number } {
     const all = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
     const gen = generations(all, identifiedFoundations(r));
-    const chosen = [...all].sort((a, b) => b.stakes - a.stakes || b.use - a.use || (gen.get(a.ref) ?? 0) - (gen.get(b.ref) ?? 0) || a.ref.localeCompare(b.ref)).slice(0, GRAPH_MAX_NODES);
+    // The drawing is of the network, so it takes the claims joined by links, the most at stake first; a claim standing alone
+    // says nothing a table does not, and a column of unconnected dots hides the shape.
+    const lines = networkEdges(r).filter((e) => LINE_RELS.has(e.rel) && !isHeld(r, e.from) && !isHeld(r, e.to));
+    const joined = new Set(lines.flatMap((e) => [e.from, e.to]));
+    const chosen = all.filter((c) => joined.has(c.ref)).sort((a, b) => b.stakes - a.stakes || b.use - a.use || (gen.get(a.ref) ?? 0) - (gen.get(b.ref) ?? 0) || a.ref.localeCompare(b.ref)).slice(0, GRAPH_MAX_NODES);
     const ids = new Set(chosen.map((c) => c.ref));
     const nodes: GraphNode[] = chosen.map((c) => this.node(r, c, gen));
-    const edges: GraphEdge[] = networkEdges(r).filter((e) => LINE_RELS.has(e.rel) && ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to }));
-    return { nodes, edges, omitted: all.length - chosen.length };
+    const edges: GraphEdge[] = lines.filter((e) => ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to }));
+    return { nodes, edges, omitted: joined.size - chosen.length };
   }
 }
 

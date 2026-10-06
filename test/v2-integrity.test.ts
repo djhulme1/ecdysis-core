@@ -465,9 +465,9 @@ describe("a claim corrected once, before any evidence", () => {
     assert.equal(r.amendments.get(c1)!.wasKind, "empirical");
     const page = await (await w.page(`/c/${c1}`))!.text();
     assert.match(page, /unsupported premise or a logical gap/);
-    assert.match(page, /corrected by its author at entry #\d+/);
+    assert.match(page, /Corrected by its author at entry #\d+/);
     assert.match(page, /kind empirical → conceptual/);
-    assert.match(page, /test was "The quantity lies outside the interval/);
+    assert.match(page, /the test was “The quantity lies outside the interval/);
     // A receipt on it is now refused as on any conceptual claim; an argument is taken.
     const arg = await w.svc.fileArgument(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "argument.file", claim: c1, stance: "refutes", grounds: "unsupported-premise", text: ARG_TEXT, confidence: 0.7 }));
     assert.equal(arg.status, 201, JSON.stringify(arg.body));

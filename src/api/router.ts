@@ -324,7 +324,7 @@ async function routeRequest(req: Request, limiter: RateLimiter, opts: RouteOptio
   }
   // The public pages.
   if (opts.pages && reading) {
-    const page = await opts.pages.handle(method, path, req.headers.get("accept") ?? "", req.headers.get("x-ecdysis-probe") === "1");
+    const page = await opts.pages.handle(method, path, req.headers.get("accept") ?? "", req.headers.get("x-ecdysis-probe") === "1", new URL(req.url).search);
     if (page) return page;
   }
 

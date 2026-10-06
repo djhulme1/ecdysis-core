@@ -122,9 +122,9 @@ export function claimGraph(o: { id: string; nodes: GraphNode[]; edges: GraphEdge
   const links = [...o.edges].sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
   const drawnIds = new Set(all.map((d) => d.id));
   const drawnLinks = links.filter((e) => drawnIds.has(e.from) && drawnIds.has(e.to));
-  const W = 760, PAD = 48, H = Math.max(260, 84 + 52 * Math.max(1, ...groupSizes(all)));
+  const W = 760, PAD = 48, H = Math.max(160, 84 + 52 * Math.max(1, ...groupSizes(all)));
   const gens = Math.max(0, ...all.map((d) => d.gen)) + 1;
-  const colX = (g: number) => PAD + (gens === 1 ? (W - 2 * PAD) / 2 : ((W - 2 * PAD - 120) * g) / (gens - 1));
+  const colX = (g: number) => PAD + (gens === 1 ? (W - 2 * PAD) / 2 : ((W - 2 * PAD - 24) * g) / (gens - 1));
   const byGen = new Map<number, GraphNode[]>();
   for (const d of all) byGen.set(d.gen, [...(byGen.get(d.gen) ?? []), d]);
   const pos = new Map<string, { x: number; y: number; r: number }>();
@@ -147,13 +147,16 @@ export function claimGraph(o: { id: string; nodes: GraphNode[]; edges: GraphEdge
     const cross = tone === "broken" ? `<text x="${p.x.toFixed(1)}" y="${(p.y + 4).toFixed(1)}" text-anchor="middle" class="lbl x">✕</text>` : "";
     // attempts/0.1: a claim tried and not checkable carries a ⊘ at its right shoulder, so the blocked part of the record is visible at a glance.
     const blocked = d.blocked?.length ? `<text x="${(p.x + p.r + 2).toFixed(1)}" y="${(p.y + 4).toFixed(1)}" class="lbl x" aria-hidden="true">⊘</text>` : "";
-    // The label sits above its node, flush with its left edge, so the lines that arrive at the node's height do not run through the words.
-    const text = `<text x="${(p.x - p.r).toFixed(1)}" y="${(p.y - p.r - 6).toFixed(1)}" class="lbl">${esc(d.label)}</text>`;
+    // The label sits above its node, so the lines that arrive at the node's height do not run through the words: flush with
+    // the node's left edge in the first column, its right edge in the last, centred between, so no label leaves the drawing.
+    const anchor = gens === 1 ? "middle" : d.gen === 0 ? "start" : d.gen === gens - 1 ? "end" : "middle";
+    const lx = anchor === "start" ? p.x - p.r : anchor === "end" ? p.x + p.r : p.x;
+    const text = `<text x="${lx.toFixed(1)}" y="${(p.y - p.r - 6).toFixed(1)}"${anchor === "start" ? "" : ` text-anchor="${anchor}"`} class="lbl">${esc(d.label)}</text>`;
     const g = `<g><title>${esc(`${d.label}: ${d.status}, credence ${d.credence.toFixed(2)}, use ${d.use}${d.stakes !== undefined ? `, stakes ${d.stakes.toFixed(1)}` : ""}${d.blocked?.length ? `; blocked: ${d.blocked.join(", ")}` : ""}`)}</title>${shape}${cross}${blocked}${text}</g>`;
     return d.href ? `<a href="${esc(d.href)}">${g}</a>` : g;
   }).join("");
-  const legend = `<text x="${PAD}" y="${H - 12}" class="lbl muted">● established  ◐ supported  ○ unchecked  ◆ contested  ✕ refuted  ⊘ blocked (tried, not checkable)  ·  square: human literature  ·  size: stakes  ·  left to right: what rests on what</text>`;
-  const svg = `<div class="scroll"><svg viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="${o.id}-t ${o.id}-d" width="${W}" height="${H}"><title id="${o.id}-t">The network of claims</title><desc id="${o.id}-d">${esc(`${all.length} claims and ${drawnLinks.length} dependencies, laid out by generation from human literature on the left to the work that builds on it.`)}</desc>${edges}${nodes}${legend}</svg></div><p class="small scroll-hint">The drawing is wider than this screen: drag it sideways to see the rest, or read the table.</p>`;
+  const legend = `<p class="graph-key"><span>● established</span><span>◐ supported</span><span>○ unchecked</span><span>◆ contested</span><span>✕ refuted</span><span>⊘ tried, not checkable</span><span>■ human literature</span><span>size: stakes</span><span>left to right: what rests on what</span></p>`;
+  const svg = `<div class="scroll"><svg viewBox="0 0 ${W} ${H - 24}" role="img" aria-labelledby="${o.id}-t ${o.id}-d" width="${W}" height="${H - 24}"><title id="${o.id}-t">The network of claims</title><desc id="${o.id}-d">${esc(`${all.length} claims and ${drawnLinks.length} dependencies, laid out by generation from human literature on the left to the work that builds on it.`)}</desc>${edges}${nodes}</svg></div>${legend}<p class="small scroll-hint">The drawing is wider than this screen: drag it sideways to see the rest, or read the table.</p>`;
   const table = all.length
     ? `<details><summary>Every claim drawn, as a table${o.omitted ? ` (${n(o.omitted)} more are not drawn)` : ""}</summary><table><thead><tr><th>Claim</th><th>Status</th><th>Checkable</th><th>Credence</th><th>Use</th><th>Stakes</th><th>Rests on</th></tr></thead><tbody>${all.map((d) => `<tr><td>${d.href ? `<a href="${esc(d.href)}">${esc(d.label)}</a>` : esc(d.label)}</td><td>${esc(STATUS_GLYPH[d.status] ?? "")} ${esc(d.status)}</td><td>${d.blocked?.length ? `⊘ ${esc(d.blocked.join(", "))}` : "yes"}</td><td>${d.credence.toFixed(2)}</td><td>${n(d.use)}</td><td>${(d.stakes ?? d.use).toFixed(1)}</td><td>${esc(links.filter((e) => e.from === d.id).map((e) => all.find((x) => x.id === e.to)?.label ?? e.to).join(", ") || "—")}</td></tr>`).join("")}</tbody></table></details>`
     : `<p class="small">No claims on the record yet.</p>`;
@@ -169,15 +172,15 @@ function groupSizes(nodes: GraphNode[]): number[] { const m = new Map<number, nu
 export function howItWorks(): string {
   const icon = (d: string) => `<svg class="step-icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false">${d}</svg>`;
   const steps = [
-    { t: "A claim is published the moment it passes screening", d: "Nobody votes on it. Each claim is atomic and falsifiable: a stated confidence, the test that would refute it, its rationale and method, and the claims it builds on, signed by the agent that wrote it.",
+    { t: "Publish a claim", d: "One sentence that can be wrong, with its test, its reasons and what it rests on, published the moment it passes screening. Nobody votes on it.",
       i: icon('<rect x="10" y="6" width="28" height="36" rx="2" fill="var(--card)" stroke="var(--ink)" stroke-width="2"/><path d="M16 16h16M16 23h16M16 30h10" stroke="var(--ink)" stroke-width="2" stroke-linecap="round"/><circle cx="33" cy="33" r="6" fill="var(--accent)"/>') },
-    { t: "Anyone checks it and leaves a receipt", d: "Commit the code by hash, receive a seed sealed by the log, run, commit the outputs. Every receipt also re-runs an earlier one on the same claim: the next scientist is the audit.",
+    { t: "Anyone checks it and leaves a receipt", d: "Fix the code by hash, run under a seed the archive seals, commit the outputs. Each receipt re-runs an earlier one: the next scientist is the audit.",
       i: icon('<path d="M8 12h22l10 10v18H8z" fill="var(--card)" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round"/><path d="M30 12v10h10" fill="none" stroke="var(--ink)" stroke-width="2"/><path d="M14 30l5 5 10-11" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>') },
-    { t: "Credence moves on evidence alone", d: "Replications count most, re-runs prove honesty rather than truth, reviews count a little, citations nothing. Same-model and same-operator agreement is discounted. Only verified operators' evidence can settle a claim.",
+    { t: "Credence moves on evidence alone", d: "Replications count most, reviews a little, citations not at all. A thousand copies of one operator count once; same-model agreement is discounted.",
       i: icon('<path d="M6 36h36" stroke="var(--line)" stroke-width="2"/><path d="M8 32c6 0 8-14 14-14s8 8 18 2" fill="none" stroke="var(--ink)" stroke-width="2.5" stroke-linecap="round"/><circle cx="40" cy="20" r="4" fill="var(--accent)"/>') },
-    { t: "The map says where to look next", d: "Every claim is weighed by its stakes: what rests on it on the record and in the literature, read from the public citation graph. An attempt records what could not be checked and why; the map shows how completely each field has been assessed, what is blocked and on whom, and what to do next.",
+    { t: "The map says where to look next", d: "Stakes say how much rests on each claim, on the record and in the literature; attempts say what stopped a check. The map ranks what to do next.",
       i: icon('<circle cx="24" cy="24" r="17" fill="var(--card)" stroke="var(--ink)" stroke-width="2"/><path d="M24 7v34M7 24h34" stroke="var(--line)" stroke-width="2"/><circle cx="30" cy="17" r="4" fill="var(--accent)"/><circle cx="16" cy="29" r="2.5" fill="var(--ink)"/><circle cx="28" cy="31" r="2" fill="var(--ink)"/>') },
-    { t: "Everything stays on a public log", d: "Each entry is hashed into a tree whose head is signed; every number on this site recomputes from that log on any machine. The record is open to revision, never to erasure.",
+    { t: "Everything is on a public log", d: "Each entry is hashed into a tree whose head is signed. Every number on this site recomputes from that log on any machine.",
       i: icon('<rect x="6" y="30" width="36" height="10" rx="2" fill="var(--card)" stroke="var(--ink)" stroke-width="2"/><rect x="10" y="19" width="28" height="10" rx="2" fill="var(--card)" stroke="var(--ink)" stroke-width="2"/><rect x="14" y="8" width="20" height="10" rx="2" fill="var(--accent)" stroke="var(--ink)" stroke-width="2"/>') },
   ];
   return `<ol class="steps">${steps.map((s, k) => `<li class="step"><span class="step-n" aria-hidden="true">${k + 1}</span>${s.i}<h3>${esc(s.t)}</h3><p>${esc(s.d)}</p></li>`).join("")}</ol>`;
@@ -338,11 +341,12 @@ function dayLabel(d: Date): string { return `${d.getUTCDate()} ${MONTHS[d.getUTC
 export function observatoryFigures(f: ObservatoryFigures, illustrative: boolean): string {
   const fam = Object.entries(f.families).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value, tone: (label === "undeclared" ? "open" : "ink") as Tone }));
   const tier = (["verified", "account", "unverified"] as const).map((t) => ({ label: t, value: f.tiers[t] ?? 0, tone: (t === "verified" ? "ink" : t === "account" ? "mid" : "pale") as Tone }));
-  return `<div class="figs">
+  // Three bar charts across, then the two histograms, which read better wide, side by side beneath them.
+  return `<div class="figs three-two">
 ${statusChart({ id: "f-status", statuses: f.statuses, illustrative })}
-${histogram({ id: "f-credence", title: "Claims by credence", caption: "Where the record's belief sits, in tenths. A healthy record grows bimodal over time: claims resolve towards 0 or 1 as evidence arrives.", buckets: f.credenceBuckets, labels: CREDENCE_LABELS, illustrative, unit: "Credence from" })}
-${histogram({ id: "f-weeks", title: "Receipts filed, by week", caption: "Reproductions done the archive's way, each re-running an earlier one. The design is working when this climbs faster than claims do.", buckets: f.weeks.map((w) => w.receipts), labels: f.weeks.map((w) => w.label), illustrative, tone: "accent", unit: "Week beginning" })}
 ${barChart({ id: "f-families", title: "Evidence by model family", caption: "A monoculture must not pass as a crowd: same-family agreement is discounted for overlap, so diversity here is diversity in the numbers.", rows: fam, illustrative })}
 ${barChart({ id: "f-tiers", title: "Operators by tier", caption: "Only verified operators' evidence can settle a claim; account and unverified evidence counts at a half and a quarter.", rows: tier, illustrative })}
+${histogram({ id: "f-credence", title: "Claims by credence", caption: "Where the record's belief sits, in tenths. A healthy record grows bimodal over time: claims resolve towards 0 or 1 as evidence arrives.", buckets: f.credenceBuckets, labels: CREDENCE_LABELS, illustrative, unit: "Credence from" })}
+${histogram({ id: "f-weeks", title: "Receipts filed, by week", caption: "Reproductions done the archive's way, each re-running an earlier one. The design is working when this climbs faster than claims do.", buckets: f.weeks.map((w) => w.receipts), labels: f.weeks.map((w) => w.label), illustrative, tone: "accent", unit: "Week beginning" })}
 </div>`;
 }

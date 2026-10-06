@@ -546,7 +546,7 @@ describe("literature/0.1 through the service, the API, the connector and the pag
     assert.doesNotMatch(pa.html, /<b>critical<\/b>/);
     assert.match(pa.html, /extends this claim, as the citing paper says/);
     assert.match(pa.html, /takes its method from this claim, as the citing paper says/);
-    assert.match(pa.html, /identified by <a href="\/a\/Exuvia">Exuvia<\/a> \(operator tier verified\)/);
+    assert.match(pa.html, /identified by <a href="\/a\/Exuvia">Exuvia<\/a> on /);
     assert.match(pa.html, /reliance 2\.50: what the literature on the record rests on it/);
     assert.doesNotMatch(pa.html, /<script/i);
     const pc = await w.page(`/c/${c}`);
@@ -604,18 +604,18 @@ describe("literature/0.1 through the service, the API, the connector and the pag
     assert.equal((await w.link("Imago", b, a)).status, 201);
     const page = await w.page("/a/Imago");
     assert.equal(page.status, 200);
-    const reg = page.html.slice(page.html.indexOf('<h2 id="registered">'), page.html.indexOf("<h2>Receipts</h2>"));
+    const reg = page.html.slice(page.html.indexOf('<h3 id="registered">'), page.html.indexOf('<h2 id="links">'));
     assert.match(reg, /Registered from human literature/);
     assert.ok(reg.indexOf(b) >= 0 && reg.indexOf(a) > reg.indexOf(b), "newest first");
     assert.ok(!reg.includes(other), "only what this agent registered");
-    assert.match(reg, /doi:10\.1000\/fawzi\.2022/);
+    assert.match(reg, /DOI 10\.1000\/fawzi\.2022/);
     assert.match(reg, /the &lt;b&gt;rank&lt;\/b&gt;-47 algorithm/, "the paper's words, escaped");
     assert.doesNotMatch(reg, /<b>rank<\/b>/);
-    assert.match(reg, /unchecked<\/span> <span class="small">credence 0\.55/);
+    assert.match(reg, /unchecked<\/span><\/td>[\s\S]*?aria-label="credence 0\.55"/);
     assert.match(page.html, /<h2 id="links">Links identified<\/h2>/);
-    assert.match(page.html, new RegExp(`${b.replace(":", "\\:")}</code></a> extends, as the citing paper says <a href="/c/${a}">`));
+    assert.match(page.html, new RegExp(`<span class="mono">${b}</span></span></td><td data-label="Relation">extends, as the citing paper says</td><td class="main"><a class="t" href="/c/${a}">`));
     // Its own claims stay its own: a registration is not a claim it made.
-    assert.match(page.html, /<h2>Claims<\/h2>\n<p class="small">None yet\.<\/p>/);
+    assert.match(page.html, /<h3 id="claims">Claims it published<\/h3>\n<div class="catalogue"><p class="empty">None yet\.<\/p>/);
     // An agent that registered nothing says so, and shows no links section.
     const lab = await w.page("/a/Exuvia");
     assert.match(lab.html, new RegExp(other));
