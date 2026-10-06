@@ -11,6 +11,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fetchInput, isPublicAddress, prepareInputs, urlProblem, type RunnerInput } from "../scripts/runner/inputs.mjs";
@@ -186,8 +187,17 @@ describe("the runner's input policy", () => {
 describe("the runner's inputs", { skip: !hasGit && "git is not available" }, () => {
   const payload = Buffer.from("campaign,goal,pledged\n1,100,99\n2,100,250\n".repeat(50));
   const hits: string[] = [];
+  const encodings: string[] = [];
   const server = createServer((req, res) => {
     hits.push(req.url ?? "");
+    encodings.push(String(req.headers["accept-encoding"] ?? ""));
+    // As raw.githubusercontent.com does: gzip when the client accepts it, with the compressed length.
+    if (req.url === "/github") {
+      if (/gzip/.test(String(req.headers["accept-encoding"] ?? ""))) { const z = gzipSync(payload); res.writeHead(200, { "content-length": String(z.length), "content-encoding": "gzip" }); res.end(z); return; }
+      res.writeHead(200, { "content-length": String(payload.length) }); res.end(payload); return;
+    }
+    // A host that encodes whatever it is asked.
+    if (req.url === "/always-gzip") { const z = gzipSync(payload); res.writeHead(200, { "content-length": String(z.length), "content-encoding": "gzip" }); res.end(z); return; }
     if (req.url === "/data") { res.writeHead(200, { "content-length": String(payload.length), "content-type": "text/csv" }); res.end(payload); return; }
     if (req.url === "/long") { res.writeHead(200, { "content-type": "text/csv" }); res.write(payload); res.write(Buffer.from("and more than was declared\n")); res.end(); return; }
     if (req.url === "/away") { res.writeHead(302, { location: `http://127.0.0.2:${port}/data` }); res.end(); return; }
@@ -221,6 +231,14 @@ describe("the runner's inputs", { skip: !hasGit && "git is not available" }, () 
       assert.match(String(long), /more than the declared/);
       const sized = await fetchInput(input({ bytes: payload.length + 1, name: "sized" }), join(cache, "y"), o);
       assert.match(String(sized), /the source says/);
+      // The bytes as mounted are what is declared: the runner asks for them unencoded, and a host that encodes them
+      // anyway is judged on the decoded bytes, not on its compressed length.
+      assert.equal(await fetchInput(input({ url: `http://127.0.0.1:${port}/github`, name: "github" }), join(cache, "g"), o), null);
+      assert.equal(encodings[hits.lastIndexOf("/github")], "identity");
+      assert.equal(sha(readFileSync(join(cache, "g"))), sha(payload));
+      assert.equal(await fetchInput(input({ url: `http://127.0.0.1:${port}/always-gzip`, name: "always" }), join(cache, "a"), o), null);
+      assert.equal(sha(readFileSync(join(cache, "a"))), sha(payload));
+      assert.match(String(await fetchInput(input({ url: `http://127.0.0.1:${port}/always-gzip`, name: "short", bytes: payload.length - 1 }), join(cache, "s"), o)), /more than the declared/);
       // A redirect within the host is followed; one to another host is refused.
       assert.equal(await fetchInput(input({ url: `http://127.0.0.1:${port}/here`, name: "here" }), join(cache, "z"), o), null);
       assert.match(String(await fetchInput(input({ url: `http://127.0.0.1:${port}/away`, name: "away" }), join(cache, "w"), o)), /may not leave 127\.0\.0\.1/);

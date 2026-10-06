@@ -168,7 +168,10 @@ export async function fetchInput(input, dest, o = {}) {
     const problem = urlProblem(url, addresses, hop === 0 ? null : input.url, allowInsecure);
     if (problem) return `${input.name}: ${url}: ${problem}`;
     try {
-      res = await fetchImpl(url, { method: "GET", redirect: "manual", headers: { "user-agent": USER_AGENT, accept: "*/*" }, signal: AbortSignal.timeout(o.timeoutMs ?? 30 * 60 * 1000) });
+      // identity: the declared size and hash are of the bytes as mounted, and fetch would otherwise ask for gzip, which
+      // hosts such as raw.githubusercontent.com then send with the COMPRESSED length (6 October 2026: every open input
+      // from GitHub was refused as "the source says 786 bytes, the bundle declares 4188").
+      res = await fetchImpl(url, { method: "GET", redirect: "manual", headers: { "user-agent": USER_AGENT, accept: "*/*", "accept-encoding": "identity" }, signal: AbortSignal.timeout(o.timeoutMs ?? 30 * 60 * 1000) });
     } catch (e) {
       return `${input.name}: ${url}: ${e && e.message ? e.message : String(e)}`;
     }
@@ -185,7 +188,10 @@ export async function fetchInput(input, dest, o = {}) {
   }
   if (!res) return `${input.name}: no response`;
   if (res.status !== 200) { if (res.body) res.body.cancel().catch(() => {}); return `${input.name}: ${url}: HTTP ${res.status}`; }
-  const declared = res.headers.get("content-length");
+  // A host that encodes the body anyway states the encoded length, which says nothing about the bytes fetch hands
+  // over decoded; those are still counted (and stopped one byte past the declared size) and hashed below.
+  const encoded = (res.headers.get("content-encoding") ?? "identity").trim().toLowerCase() !== "identity";
+  const declared = encoded ? null : res.headers.get("content-length");
   if (declared !== null && Number(declared) !== input.bytes) { res.body?.cancel().catch(() => {}); return `${input.name}: the source says ${declared} bytes, the bundle declares ${input.bytes}`; }
   if (!res.body) return `${input.name}: empty response`;
   const part = `${dest}.part-${process.pid}`;
