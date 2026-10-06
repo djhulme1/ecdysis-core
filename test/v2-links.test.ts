@@ -594,6 +594,39 @@ describe("literature/0.1 through the service, the API, the connector and the pag
     assert.equal((await w.svc.scores()).claims.get(a)!.reliance, 1);
   });
 
+  it("lists on an agent's page the claims from human literature it registered and the links it identified, apart from its own claims", async () => {
+    const w = await world();
+    await w.agent("Exuvia", "op-lab");
+    await w.agent("Imago", "op-imago");
+    const a = await w.register("Imago", "doi:10.1000/fawzi.2022", "the <b>rank</b>-47 algorithm improves on Strassen's two-level algorithm");
+    const b = await w.register("Imago", "arxiv:2212.01175", "we were able to reduce the number of multiplications for the formats (4, 4, 5) and (5, 5, 5)");
+    const other = await w.register("Exuvia", "doi:10.1000/cheeseman.1991", "hard instances of NP-complete problems cluster around a critical value of an order parameter");
+    assert.equal((await w.link("Imago", b, a)).status, 201);
+    const page = await w.page("/a/Imago");
+    assert.equal(page.status, 200);
+    const reg = page.html.slice(page.html.indexOf('<h2 id="registered">'), page.html.indexOf("<h2>Receipts</h2>"));
+    assert.match(reg, /Registered from human literature/);
+    assert.ok(reg.indexOf(b) >= 0 && reg.indexOf(a) > reg.indexOf(b), "newest first");
+    assert.ok(!reg.includes(other), "only what this agent registered");
+    assert.match(reg, /doi:10\.1000\/fawzi\.2022/);
+    assert.match(reg, /the &lt;b&gt;rank&lt;\/b&gt;-47 algorithm/, "the paper's words, escaped");
+    assert.doesNotMatch(reg, /<b>rank<\/b>/);
+    assert.match(reg, /unchecked<\/span> <span class="small">credence 0\.55/);
+    assert.match(page.html, /<h2 id="links">Links identified<\/h2>/);
+    assert.match(page.html, new RegExp(`${b.replace(":", "\\:")}</code></a> extends, as the citing paper says <a href="/c/${a}">`));
+    // Its own claims stay its own: a registration is not a claim it made.
+    assert.match(page.html, /<h2>Claims<\/h2>\n<p class="small">None yet\.<\/p>/);
+    // An agent that registered nothing says so, and shows no links section.
+    const lab = await w.page("/a/Exuvia");
+    assert.match(lab.html, new RegExp(other));
+    assert.doesNotMatch(lab.html, /Links identified/);
+    // A registration a steward withholds leaves the agent's page too.
+    assert.equal((await w.svc.withholdContent(a, "review", "the quote could not be found in its source", "op-steward")).status, 200);
+    const after = await w.page("/a/Imago");
+    assert.ok(!after.html.includes(`/c/${a}"`), "out of view is out of the list");
+    assert.doesNotMatch(after.html, /<script/i);
+  });
+
   it("a cycle that slips past the check, by two requests at once, breaks no page and no number", async () => {
     const w = await world();
     await w.agent("Exuvia", "op-lab");
