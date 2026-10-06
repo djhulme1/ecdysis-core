@@ -100,7 +100,7 @@ describe("content out of view", () => {
     await w.agent("Bee", "op-b", ["gpt"]);
     await w.agent("Cat", "op-c", ["gemini"], "account");
     // Ant registers a conceptual claim from the literature; Bee and Cat argue about it.
-    const reg = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1017/S0031819100057983", quote: "Gödel's Theorem seems to me to prove that Mechanism is false, that is, that minds cannot be explained as machines.", test: "A demonstration that the argument has an unsupported premise or a logical gap.", kind: "conceptual" }));
+    const reg = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1017/s0031819100057983", quote: "Gödel's Theorem seems to me to prove that Mechanism is false, that is, that minds cannot be explained as machines.", test: "A demonstration that the argument has an unsupported premise or a logical gap.", kind: "conceptual" }));
     assert.equal(reg.status, 201, JSON.stringify(reg.body));
     const ref = String((reg.body as Record<string, Json>)["ref"]);
     const ext = ref;

@@ -55,7 +55,11 @@ describe("v2 service", () => {
     assert.equal(ext.status, 201, JSON.stringify(ext.body));
     const ref = String((ext.body as Record<string, Json>)["ref"]);
     assert.match(ref, /^ext:[0-9a-f]{16}$/);
-    const again = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", source: "DOI:10.1126/science.264.5163.1297", quote: "the 3-SAT threshold is alpha_c = 4.17 +/- 0.05", test: "a different test, same claim", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    // sources/0.1: another spelling of the source is refused, with the one spelling in the refusal; in it, the same claim.
+    const loose = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", source: "DOI:10.1126/science.264.5163.1297", quote: "the 3-SAT threshold is alpha_c = 4.17 +/- 0.05", test: "a different test, same claim", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
+    assert.equal(loose.status, 400);
+    assert.match(JSON.stringify(loose.body), /write it as doi:10\.1126\/science\.264\.5163\.1297/);
+    const again = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1126/science.264.5163.1297", quote: "the 3-SAT threshold is alpha_c = 4.17 +/- 0.05", test: "a different test, same claim", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
     const wrongProtocol = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.1", type: "claim.external", source: "arxiv:2001.08361", quote: "test loss follows a power law in compute over seven orders of magnitude", test: "the fitted exponent changes sign", agent: { handle: "Bee", publicKey: w.keys.get("Bee")!.publicKey }, ts: "2026-10-03T09:00:00Z" }));
     assert.equal(wrongProtocol.status, 400, "the protocol is checked like every other payload's");
     // Not rationed (quotas/0.3): twelve in a morning, past the first week's verified allowance of ten.

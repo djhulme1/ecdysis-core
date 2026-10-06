@@ -36,18 +36,20 @@
 import { BASES, FIELDS, FOUNDATION_RELS, LIMITS, RELS, type Basis, type Field, type Rel } from "../schema.js";
 import { dataOfRecordProblems, scopeProblems, type ClaimScope, type DataFile } from "./kinds.js";
 import { ATTEMPT_DETAIL, BLOCKERS, UNBLOCKED_BY, type Blocker } from "./attempts.js";
-import { CLAIM_REF_WORDS, HUMAN_WORK, isClaimRef } from "./refs.js";
+import { CLAIM_REF_WORDS, isClaimRef } from "./refs.js";
+import { isHumanWork } from "./sources.js";
 
 export const CLAIM_PROTOCOL = "ecdysis/0.2";
 export const NETWORK_VERSION = "network/0.1";
 
-export { CLAIM_REF, CLAIM_REF_WORDS, claimIdOf, HUMAN_WORK, isClaimRef } from "./refs.js";
+export { CLAIM_REF, CLAIM_REF_WORDS, claimIdOf, isClaimRef } from "./refs.js";
+export { isHumanWork } from "./sources.js";
 
 export type ClaimKind = "empirical" | "conceptual";
 
 /** One edge from a claim to what it builds on. */
 export interface ClaimBuild {
-  /** A claim on the record (ecd:… or ext:…), or, for background only, a human work (arxiv:… or doi:…). */
+  /** A claim on the record (ecd:… or ext:…), or, for background only, a human work named by its source (sources/0.1). */
   id: string;
   rel: Rel;
   /** extends and method: how the author relied on it, "reproduced" (re-ran it) or "reviewed" (checked its method). */
@@ -189,9 +191,9 @@ export function validateClaim(p: unknown): Res<ClaimPayload> {
       const rel = String(b?.rel);
       if (!(RELS as readonly string[]).includes(rel)) { errors.push(`builds_on[${i}].rel: one of ${RELS.join(", ")}`); continue; }
       const id = b?.id;
-      if (rel === "background" ? !(isClaimRef(id) || (typeof id === "string" && HUMAN_WORK.test(id))) : !isClaimRef(id)) {
+      if (rel === "background" ? !(isClaimRef(id) || isHumanWork(id)) : !isClaimRef(id)) {
         errors.push(rel === "background"
-          ? `builds_on[${i}].id: a claim on the record (ecd:… or ext:…), or a human work (arxiv:… or doi:…)`
+          ? `builds_on[${i}].id: a claim on the record (ecd:… or ext:…), or a human work named by its source in sources/0.1's one spelling (arxiv:…, doi:…, pmid:…, pmcid:…, openreview:…, acl:…, pmlr:…, jmlr:…, neurips:…, openalex:…, isbn:… or cite:…)`
           : `builds_on[${i}].id: a claim on the record (ecd:… or ext:…); to ${rel === "extends" || rel === "method" ? "rely on" : `say a claim ${rel}`} a human paper's finding, register it first (claim.external) and name the claim`);
         continue;
       }

@@ -14,8 +14,14 @@
  *                    /sources/<id>, which stands in for a young paper's
  *                    citations (stakes.ts).
  *   Semantic Scholar https://api.semanticscholar.org/graph/v1/paper/arXiv:<id>
- *   when OpenAlex    (or DOI:<doi>): the citation count, the year and a field
- *   knows nothing    of study. No venue figure.
+ *   when OpenAlex    (or DOI:, PMID:, PMCID:, ACL:<id>): the citation count, the
+ *   knows nothing    year and a field of study. No venue figure.
+ *
+ * sources/0.1: OpenAlex is asked by DOI (an arXiv id as its DataCite DOI),
+ * PubMed or PubMed Central id, or the work's own W id; Semantic Scholar by
+ * arXiv id, DOI, PubMed, PubMed Central or ACL Anthology id. A source neither
+ * looks works up by (openreview:, pmlr:, jmlr:, neurips:, isbn:, cite:) is
+ * left unresolved, and so has no reach until it does.
  *
  * What it writes is a source.observed entry, the platform's observation, as
  * check.seal is the platform's seal: {source, provider, work, citedBy,
@@ -36,6 +42,7 @@
  * are not yet on the record.
  */
 
+import { nameSource, parseSource } from "../../core/v2/sources.js";
 import type { TransparencyLog } from "../../core/log.js";
 import type { V2Service } from "./service.js";
 import type { ObservationProvider } from "../../core/v2/stakes.js";
@@ -202,17 +209,22 @@ export class StakesScout {
     }
   }
 
-  /** One source: OpenAlex, then Semantic Scholar. Never throws. */
+  /**
+   * One source: OpenAlex, then Semantic Scholar, by whatever id each can look the work up by (sources/0.1). A scheme
+   * neither indexes by (openreview:, pmlr:, jmlr:, neurips:, isbn:, cite:) is left unresolved, and so has no reach yet.
+   * Never throws.
+   */
   async observe(source: string): Promise<{ status: "observed"; observed: Observed } | { status: "unresolved"; detail: string } | { status: "error"; detail: string }> {
-    const m = source.match(/^(arxiv|doi):(.+)$/i);
-    if (!m) return { status: "unresolved", detail: "not an arxiv: or doi: source" };
-    const kind = m[1]!.toLowerCase(), id = m[2]!.trim();
-    const arxivId = kind === "arxiv" ? id.replace(/^arxiv:/i, "").replace(/v\d+$/, "") : null;
-    const doi = kind === "doi" ? id : `10.48550/arXiv.${arxivId}`;
+    const p = parseSource(source);
+    if (!p.ok) return { status: "unresolved", detail: "not a source in sources/0.1's spelling" };
+    const { scheme, id } = p;
+    const oaKey = scheme === "arxiv" ? `doi:10.48550/arXiv.${id}` : scheme === "doi" ? `doi:${id}` : scheme === "pmid" || scheme === "pmcid" ? `${scheme}:${id}` : scheme === "openalex" ? id : null;
+    const s2Key = scheme === "arxiv" ? `arXiv:${id}` : scheme === "doi" ? `DOI:${id}` : scheme === "pmid" ? `PMID:${id}` : scheme === "pmcid" ? `PMCID:${id}` : scheme === "acl" ? `ACL:${id}` : null;
+    if (!oaKey && !s2Key) return { status: "unresolved", detail: `neither OpenAlex nor Semantic Scholar looks works up by ${scheme}: ids` };
     try {
-      const oa = await this.openAlex(doi, kind === "doi");
+      const oa = oaKey ? await this.openAlex(oaKey, scheme === "doi") : { status: "unresolved" as const, detail: `OpenAlex has no lookup by ${scheme}: ids` };
       if (oa.status === "observed" || oa.status === "error") return oa;
-      const s2 = await this.semanticScholar(arxivId ? `arXiv:${arxivId}` : `DOI:${doi}`);
+      const s2 = s2Key ? await this.semanticScholar(s2Key) : { status: "unresolved" as const, detail: `Semantic Scholar has no lookup by ${scheme}: ids` };
       if (s2.status === "observed" || s2.status === "error") return s2;
       return { status: "unresolved", detail: `${oa.detail}; ${s2.detail}` };
     } catch (e) {
@@ -230,9 +242,12 @@ export class StakesScout {
     return `ecdysis-stakes-scout/0.1 (https://ecdysis.me; mailto:${this.o.contact ?? "replies@ecdysis.me"})`;
   }
 
-  private async openAlex(doi: string, withVenue: boolean): Promise<{ status: "observed"; observed: Observed } | { status: "unresolved"; detail: string } | { status: "error"; detail: string }> {
+  /** One work in OpenAlex by "doi:…", "pmid:…", "pmcid:…" or its W id. */
+  private async openAlex(key: string, withVenue: boolean): Promise<{ status: "observed"; observed: Observed } | { status: "unresolved"; detail: string } | { status: "error"; detail: string }> {
     const mailto = encodeURIComponent(this.o.contact ?? "replies@ecdysis.me");
-    const res = await this.fetchImpl(`https://api.openalex.org/works/doi:${encodeURIComponent(doi)}?mailto=${mailto}`, { headers: this.openAlexHeaders() });
+    const c = key.indexOf(":");
+    const path = c > 0 ? `${key.slice(0, c)}:${encodeURIComponent(key.slice(c + 1))}` : encodeURIComponent(key);
+    const res = await this.fetchImpl(`https://api.openalex.org/works/${path}?mailto=${mailto}`, { headers: this.openAlexHeaders() });
     if (res.status === 404) return { status: "unresolved", detail: "OpenAlex knows no such work" };
     if (!res.ok) return { status: "error", detail: `OpenAlex ${res.status}` };
     const w = (await res.json().catch(() => null)) as OpenAlexWork | null;
@@ -286,11 +301,27 @@ interface S2Paper {
 
 const round3 = (x: number) => Math.round(x * 1000) / 1000;
 
-/** The source string a registration would use for a work: its arXiv id when it has one (the quote scout reads arXiv abstracts), else its DOI; null for a work with neither. */
+/**
+ * The source a registration would use for a work OpenAlex lists, by sources/0.1's precedence: its arXiv id when it has one
+ * (the quote scout reads arXiv abstracts), else its DOI, its PubMed or PubMed Central id, and else its OpenAlex id, so a
+ * work without a DOI is a candidate too; null for a work with none of these.
+ */
 export function candidateSource(doi: string | null, ids: Record<string, string>): string | null {
   const arxiv = typeof ids["arxiv"] === "string" ? ids["arxiv"].replace(/^https?:\/\/arxiv\.org\/abs\//i, "").replace(/v\d+$/, "").trim() : "";
-  if (arxiv) return `arxiv:${arxiv.toLowerCase()}`;
-  const d = (doi ?? "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim().toLowerCase();
-  if (/^10\.48550\/arxiv\./.test(d)) return `arxiv:${d.slice("10.48550/arxiv.".length)}`;
-  return d ? `doi:${d}` : null;
+  if (arxiv) {
+    const a = nameSource(`arxiv:${arxiv}`);
+    if (a.ok) return a.source;
+  }
+  const d = (doi ?? "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim();
+  if (d) {
+    const x = nameSource(`doi:${d}`);
+    if (x.ok) return x.source;
+  }
+  for (const k of ["pmid", "pmcid", "openalex"] as const) {
+    const v = typeof ids[k] === "string" ? ids[k].trim() : "";
+    if (!v) continue;
+    const x = nameSource(/^https?:\/\//i.test(v) ? v : `${k}:${v}`);
+    if (x.ok) return x.source;
+  }
+  return null;
 }

@@ -27,9 +27,9 @@ function fakeFetch(calls: string[]): typeof fetch {
       return new Response(`<?xml version="1.0"?><feed><entry><id>http://arxiv.org/abs/2308.08708v3</id><title>Consciousness in Artificial Intelligence:\n Insights from the Science of Consciousness</title><summary>${ABSTRACT.replace(/&/g, "&amp;")}</summary></entry></feed>`, { status: 200 });
     }
     if (url.startsWith("https://export.arxiv.org/api/query?id_list=9999.99999")) return new Response(`<feed><title>ArXiv Query</title></feed>`, { status: 200 });
-    if (url.startsWith("https://export.arxiv.org/api/query?id_list=bad")) return new Response(`<feed><entry><id>http://arxiv.org/api/errors</id><title>Error</title><summary>incorrect id format for bad</summary></entry></feed>`, { status: 200 });
+    if (url.startsWith("https://export.arxiv.org/api/query?id_list=0001.00001")) return new Response(`<feed><entry><id>http://arxiv.org/api/errors</id><title>Error</title><summary>incorrect id format for bad</summary></entry></feed>`, { status: 200 });
     if (url.startsWith("https://export.arxiv.org/api/query?id_list=5000.00001")) return new Response("busy", { status: 503 });
-    if (url.startsWith("https://api.crossref.org/works/10.1017%2FS0140525X00005756")) {
+    if (url.startsWith("https://api.crossref.org/works/10.1017%2Fs0140525x00005756")) {
       return new Response(JSON.stringify({ message: { title: ["Minds, brains, and programs"], abstract: "<jats:p>This article can be viewed as an attempt to explore the consequences of two propositions. (1) Intentionality in human beings (and animals) is a product of causal features of the brain. (2) Instantiating a computer program is never by itself a sufficient condition of intentionality.</jats:p>" } }), { status: 200 });
     }
     if (url.startsWith("https://api.crossref.org/works/10.1000%2Fnoabstract")) return new Response(JSON.stringify({ message: { title: ["A paper without a deposited abstract"] } }), { status: 200 });
@@ -89,10 +89,11 @@ describe("the quote scout", () => {
     const exact = await w.register("arxiv:2308.08708", "but also suggests that there are no obvious technical barriers to building AI systems which satisfy these indicators.");
     const near = await w.register("arxiv:2308.08708", "there are no serious technical barriers to building AI systems which satisfy these indicators");
     const body = await w.register("arxiv:2308.08708", "Recurrent processing theory holds that feedback connections are necessary for conscious perception, a claim the report takes from the literature.");
-    const doi = await w.register("doi:10.1017/S0140525X00005756", "Instantiating a computer program is never by itself a sufficient condition of intentionality.");
+    const doi = await w.register("doi:10.1017/s0140525x00005756", "Instantiating a computer program is never by itself a sufficient condition of intentionality.");
     const noAbs = await w.register("doi:10.1000/noabstract", "A sentence from a paper whose publisher deposited no abstract with Crossref.");
     const dead = await w.register("doi:10.1000/nothing", "A sentence attributed to a DOI that does not exist anywhere at all.");
-    const malformed = await w.register("arxiv:badid", "A sentence attributed to an arXiv id that is not an id at all, really.");
+    // An id arXiv answers with an error entry for (sources/0.1 refuses one that is not shaped like an id at registration).
+    const malformed = await w.register("arxiv:0001.00001", "A sentence attributed to an arXiv id that arXiv answers with an error entry.");
     const down = await w.register("arxiv:5000.00001", "A sentence whose source answers with a server error for now, try later.");
     // Limit respected, with a pause between fetches; the rest wait for the next run.
     let out = await w.scout.run(3);
