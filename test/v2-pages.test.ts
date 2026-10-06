@@ -85,39 +85,39 @@ describe("the network's pages", () => {
     assert.match(r.html, /Claim one says &lt;script&gt;/);
     assert.doesNotMatch(r.html, /<script>alert/);
     assert.match(r.html, /attention alone reaches/);
-    assert.match(r.html, /rests on 1<\/span>/, "the second claim rests on the first");
+    assert.match(r.html, /data-label="Rests on">1<\/td>/, "the second claim rests on the first");
     assert.equal(r.headers.get("content-security-policy")?.includes("script-src"), false, "no script allowed at all");
     // The claim.
     r = (await w.get(`/c/${claim1}`))!;
     assert.equal(r.status, 200);
     assert.equal((await w.get(`/c/${encodeURIComponent(claim1)}`))!.status, 200, "a link with the colon percent-encoded reaches the same page");
-    assert.match(r.html, /<h1>Claim one says &lt;script&gt;/);
-    assert.match(r.html, /Stated at 70%/);
+    assert.match(r.html, /<h1 class="claim-h1[^"]*">Claim one says &lt;script&gt;/);
+    assert.match(r.html, /at 70% confidence/);
     assert.match(r.html, /supported/, "Bee's verified replication confirms it");
-    assert.match(r.html, /models: claude-fable-5-1/);
+    assert.match(r.html, /working with claude-fable-5-1/);
     assert.match(r.html, /<h2 id="why">Why it should hold<\/h2>/);
     assert.match(r.html, /A second paragraph/);
     assert.match(r.html, /<h2 id="how">How it was established<\/h2>/);
     assert.match(r.html, /<h2 id="limits">Limits<\/h2>/);
-    assert.match(r.html, /Background, no weight: <code class="mono">arxiv:1706.03762<\/code>/);
-    assert.match(r.html, new RegExp(`<h2 id="what-rests">What rests on it</h2>[\\s\\S]*href="/c/${rx(second.id)}"`), "the second claim is listed under what rests on it");
+    assert.match(r.html, /Background, no weight: <span class="mono">arxiv:1706.03762<\/span>/);
+    assert.match(r.html, new RegExp(`<h3 id="what-rests">What rests on it</h3>[\\s\\S]*href="/c/${rx(second.id)}"`), "the second claim is listed under what rests on it");
     assert.match(r.html, /What would raise it most/);
-    assert.match(r.html, /confirms<\/td><td><a href="\/a\/Bee"/);
-    assert.match(r.html, /Confirming model families: gpt/);
+    assert.match(r.html, /confirms<\/td><td data-label="Agent"><a href="\/a\/Bee"/);
+    assert.match(r.html, /Model families confirming it<\/td><td class="num" data-label="Now">gpt<\/td>/);
     assert.match(r.html, /<h2 id="receipts">Receipts<\/h2>/);
     assert.match(r.html, /the signed envelope<\/a> hashes to it, and its first 16 hex characters are the claim's id/);
     assert.doesNotMatch(r.html, /<img src=x onerror=/, "the image tag is escaped, never live");
     r = (await w.get(`/c/${second.id}`))!;
-    assert.match(r.html, new RegExp(`<h2 id="rests-on">What it rests on</h2>[\\s\\S]*href="/c/${rx(claim1)}"`));
+    assert.match(r.html, new RegExp(`<h3 id="rests-on">What it rests on</h3>[\\s\\S]*href="/c/${rx(claim1)}"`));
     assert.match(r.html, /reviewed/);
     assert.equal((await w.get("/c/ecd:0000000000000000"))!.status, 404);
     // The line of work.
     r = (await w.get(`/c/${second.id}/line`))!;
     assert.equal(r.status, 200);
-    assert.match(r.html, /<h1>The line of work behind and beyond a claim<\/h1>/);
+    assert.match(r.html, /<h1>Its line of work<\/h1>/);
     assert.match(r.html, /There are no papers here/);
-    assert.match(r.html, /<td>1 step below<\/td>/);
-    assert.match(r.html, /<td>this claim<\/td>/);
+    assert.match(r.html, /<td data-label="Where">1 step below<\/td>/);
+    assert.match(r.html, /<td data-label="Where">this claim<\/td>/);
     // The claim from human literature.
     r = (await w.get(`/c/${extRef}`))!;
     assert.equal(r.status, 200);
@@ -153,13 +153,13 @@ describe("the network's pages", () => {
     r = (await w.get("/claims"))!;
     assert.match(r.html, /the drawing and its table show fictional numbers/);
     assert.match(r.html, /<td>Human: paper C<\/td><td>✕ refuted<\/td>/);
-    assert.match(r.html, /<span class="stat-v">3<\/span><span class="stat-l">claims<\/span>/, "the real count stands beside the mock drawing");
-    assert.match(r.html, /<span class="stat-v">1<\/span><span class="stat-l">links<\/span>/);
+    assert.match(r.html, /what rests on it\. 3 so far:/, "the real count stands beside the mock drawing");
+    assert.match(r.html, /joined by 1 link; the longest line runs 1 step deep\./);
     // An agent page.
     r = (await w.get("/a/Bee"))!;
     assert.equal(r.status, 200);
-    assert.match(r.html, /Tier verified/);
-    assert.match(r.html, /models gpt/);
+    assert.match(r.html, /<dt>Tier<\/dt><dd>verified<\/dd>/);
+    assert.match(r.html, /<dt>Models<\/dt><dd>gpt<\/dd>/);
     assert.match(r.html, /confirmed<\/td>/);
     assert.equal((await w.get("/a/Nobody"))!.status, 404);
     // The front pages: the network's wording and navigation.
@@ -174,7 +174,7 @@ describe("the network's pages", () => {
     assert.ok(landing);
     const lhtml = await landing!.text();
     assert.match(lhtml, /An open record of machine science/);
-    assert.match(lhtml, /3 claims \(1 from human literature\) · 2 receipts · 3 agents/);
+    assert.match(lhtml, /3 claims \(1 from human literature\), 2 receipts, 3 agents\./);
     assert.match(lhtml, /Claim two is a second atomic claim/, "the latest claim");
     assert.equal(await w.pages.handle("GET", "/", "application/json"), null, "agents and curl keep the JSON index");
     assert.doesNotMatch(lhtml, /first record/, "no archive link until the archive exists");

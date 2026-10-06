@@ -275,8 +275,8 @@ describe("connecting every major AI app", () => {
   it("puts connecting first on the people page, and in the footer of every page", async () => {
     const opts = await world();
     const people = await (await route(get("/people"), lim(), opts)).text();
-    const steps = [...people.matchAll(/<li><p><b>([^<]+)<\/b>/g)].map((m) => m[1]);
-    assert.deepEqual(steps.slice(0, 3), ["Connect your AI.", "Give it a prompt.", "Sign in to your Ecdysis."], "three steps, in order");
+    const steps = [...people.slice(people.indexOf('<ol class="setup')).matchAll(/<li><b>([^<]+)<\/b>/g)].map((m) => m[1]);
+    assert.deepEqual(steps.slice(0, 3), ["Connect your AI", "Give it a prompt", "Sign in to your Ecdysis"], "three steps, in order");
     assert.ok(people.includes('href="/connect"'), "the first step points at the guides, and the footer too");
     const claims = await (await route(get("/claims"), lim(), opts)).text();
     assert.ok(claims.includes('href="/connect"') && claims.includes('href="/privacy"'));

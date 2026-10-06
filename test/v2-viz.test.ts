@@ -69,7 +69,7 @@ describe("figures", () => {
     assert.match(a, /<td>B<\/td><td>○ unchecked<\/td><td>⊘ data-unavailable<\/td><td>0\.50<\/td><td>0<\/td><td>0\.0<\/td><td>ecd:0000000000000000, A<\/td>/, "a foundation not drawn is still named in the table; a blocked claim says so and what blocks it");
     assert.match(a, /<td>✕ refuted<\/td><td>yes<\/td><td>0\.10<\/td><td>2<\/td><td>13\.3<\/td>/, "stakes are a column of their own, beside use");
     assert.match(a, /<text [^>]*class="lbl x" aria-hidden="true">⊘<\/text>/, "a blocked claim is marked ⊘ in the drawing");
-    assert.match(a, /⊘ blocked \(tried, not checkable\)/, "and the legend says what the mark means");
+    assert.match(a, /⊘ tried, not checkable/, "and the legend says what the mark means");
     assert.match(a, /size: stakes/, "the legend says what size means");
     assert.match(a, /<desc id="g-d">3 claims and 2 dependencies/);
     assert.match(a, /<div class="scroll"><svg viewBox="0 0 760 /, "the drawing scrolls sideways on a phone instead of shrinking its words");
@@ -115,7 +115,7 @@ describe("figures", () => {
       calibration: [{ bucket: "70–90%", stated: 10, established: 2, refuted: 1 }],
       credences: [0.95, 0.9, 0.7, 0.72, 0.65, ...new Array(17).fill(0.5), 0.45, 0.2],
       receiptResults: ["2026-10-02T00:00:00Z", "2026-10-01T00:00:00Z", "2026-09-20T00:00:00Z"],
-      graph: { nodes: [{ id: "ecd:aaaaaaaaaaaaaaaa", label: "A", external: false, status: "supported", use: 1, credence: 0.7, gen: 0, href: "/c/ecd:aaaaaaaaaaaaaaaa" }], edges: [], omitted: 23 },
+      graph: { nodes: [{ id: "ecd:aaaaaaaaaaaaaaaa", label: "A", external: false, status: "supported", use: 1, credence: 0.7, gen: 0, href: "/c/ecd:aaaaaaaaaaaaaaaa" }, { id: "ecd:bbbbbbbbbbbbbbbb", label: "B", external: false, status: "unchecked", use: 0, credence: 0.5, gen: 1, href: "/c/ecd:bbbbbbbbbbbbbbbb" }], edges: [{ from: "ecd:bbbbbbbbbbbbbbbb", to: "ecd:aaaaaaaaaaaaaaaa" }], omitted: 23 },
       now,
     };
     const html = observatoryPageV2(d).split("<main")[1]!;
@@ -130,11 +130,11 @@ describe("figures", () => {
     assert.match(html, /<div class="stat"><span class="stat-v">0\.78<\/span><span class="stat-l">receipts per claim published here<\/span>/, "one on the right side is not");
     assert.match(html, /<figure class="fig wide graph" id="f-graph">/);
     assert.match(html, /\(23 more are not drawn\)/);
-    assert.match(html, /<td>70–90%<\/td><td>10<\/td><td>2<\/td><td>1<\/td>/);
+    assert.match(html, /<td class="main">70–90%<\/td><td class="num" data-label="Claims">10<\/td><td class="num" data-label="Established">2<\/td><td class="num" data-label="Refuted">1<\/td>/);
     assert.doesNotMatch(html, /<script/);
-    const g = claimsPageV2({ claims: [{ id: "ecd:aaaaaaaaaaaaaaaa", text: "A", external: false, kind: "empirical", field: "ml", agent: "Ant", source: null, status: "supported", credence: 0.7, stakes: 1, restsOn: 0, restedOnBy: 1, at: now }], all: false, unlisted: 0, graph: d.graph, totals: { claims: 24, external: 3, edges: 20, maxGen: 4, deepUnchecked: 2 } }).split("<main")[1]!;
+    const g = claimsPageV2({ claims: [{ id: "ecd:aaaaaaaaaaaaaaaa", text: "A", external: false, kind: "empirical", field: "ml", agent: "Ant", source: null, status: "supported", credence: 0.7, stakes: 1, restsOn: 0, restedOnBy: 1, at: now, seq: 1 }], all: false, unlisted: 0, graph: d.graph, totals: { claims: 24, external: 3, edges: 20, maxGen: 4, deepUnchecked: 2 } }).split("<main")[1]!;
     assert.doesNotMatch(g, /Illustrative|mock|fictional/i);
-    assert.match(g, /<div class="stat warn"><span class="stat-v">2<\/span><span class="stat-l">deep and unchecked<\/span>/);
+    assert.match(g, /<span class="status risk">deep and unchecked<\/span> 2 claims sit three or more steps from a root with no independent check/);
     assert.match(g, /<a href="\/c\/ecd:aaaaaaaaaaaaaaaa"><g>/);
   });
 

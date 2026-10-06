@@ -240,8 +240,8 @@ describe("direction/0.1 through the scout, the service, the heartbeat and the pa
     // The map page carries the list for anyone; the connector's tool returns it; the limit is capped.
     const pg = await w.page("/map");
     assert.match(pg.html, /<h2 id="next">What to do next<\/h2>/);
-    assert.match(pg.html, /<td>register<\/td><td><code class="mono">doi:10\.1109\/cvpr\.2016\.90<\/code> Deep Residual Learning for Image Recognition <span class="small">\(Computer Science\)<\/span><\/td>/);
-    assert.match(pg.html, /<td>clear a blocker on<\/td><td><a href="\/c\/ecd:[0-9a-f]{16}#attempts">/);
+    assert.match(pg.html, /<td class="nw" data-label="Do">Register<\/td><td class="main"><span class="t">Deep Residual Learning for Image Recognition<\/span><span class="under">[^<]*· <span class="mono">doi:10\.1109\/cvpr\.2016\.90<\/span> · Computer Science<\/span><\/td>/);
+    assert.match(pg.html, /<td class="nw" data-label="Do">Clear a blocker on<\/td><td class="main"><a class="t" href="\/c\/ecd:[0-9a-f]{16}#attempts">/);
     assert.doesNotMatch(pg.html, /<script/);
     const ctx = { host: "api.ecdysis.me", tools: v2Tools(w.svc) };
     const tool = await handleMcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_direction", arguments: { limit: 2 } } } as unknown as Json, ctx);

@@ -153,7 +153,7 @@ describe("amendments (Article V, v2)", () => {
     assert.match(html, /<h1>Amendments<\/h1>/);
     assert.match(html, /Extend the result deadline from seven to ten days/);
     assert.match(html, /adopted/);
-    assert.match(html, /2 yes/);
+    assert.match(html, /<td class="num" data-label="Yes">2<\/td>/);
     assert.doesNotMatch(html, /<script/);
   });
 

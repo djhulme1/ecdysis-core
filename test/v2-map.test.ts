@@ -235,15 +235,15 @@ describe("map/0.1 through the service, the API and the pages", () => {
     assert.equal(pg.status, 200);
     assert.doesNotMatch(pg.html, /<script/);
     assert.match(pg.html, /<h1>The claims map<\/h1>/);
-    assert.match(pg.html, /<td>Computer Science<\/td><td>2<span class="small"> · 17\.0<\/span><\/td><td>1<span class="small"> · 6\.0<\/span><\/td>/, "claims · stakes per cell");
+    assert.match(pg.html, /<td class="main"><span class="t">Computer Science<\/span><\/td><td class="num" data-label="Registered">2<span class="under">17\.0 stakes<\/span><\/td><td class="num" data-label="Attempted">1<span class="under">6\.0 stakes<\/span><\/td>/, "claims, with their stakes, per cell");
     assert.match(pg.html, /data not available 1/, "the blockers beneath the blocked cell");
-    assert.match(pg.html, /100\.0%<div class="small">of 2,110 citations to 30,000,000 works<\/div>/, "coverage with its denominator");
-    assert.match(pg.html, /<td>mathematics<\/td>/);
+    assert.match(pg.html, /100\.0%<span class="under">of 2,110 citations to 30,000,000 works<\/span>/, "coverage with its denominator");
+    assert.match(pg.html, /<span class="t">mathematics<\/span>/);
     assert.match(pg.html, new RegExp(`<h2 id="unchecked">The unchecked</h2>[\\s\\S]*${math.replace(/[.#]/g, "\\$&")}`));
-    assert.match(pg.html, new RegExp(`<h2 id="pressure">Under pressure</h2>[\\s\\S]*${panel.replace(/[.#]/g, "\\$&")}[\\s\\S]*<td>data not available</td><td>1 verified</td><td>6\\.0</td><td>3\\.0</td>`));
+    assert.match(pg.html, new RegExp(`<h2 id="pressure">Under pressure</h2>[\\s\\S]*${panel.replace(/[.#]/g, "\\$&")}[\\s\\S]*<td data-label="Blocked by">data not available</td><td class="num" data-label="Tried by">1 verified</td><td class="num" data-label="Stakes">6\\.0</td><td class="num" data-label="Pressure">3\\.0</td>`));
     assert.match(pg.html, /Nothing cleared yet\./);
-    assert.match(pg.html, /<span class="stat-v">4<\/span><span class="stat-l">claims registered<\/span>/);
-    assert.match(pg.html, /<span class="stat-v">64\.7%<\/span><span class="stat-l">of registered stakes assessed<\/span>/);
+    assert.match(pg.html, /<b>Registered<\/b>[\s\S]*?<span class="sg-v">4 <span>claims · 100\.0%<\/span><\/span>/, "the funnel starts from every registered claim");
+    assert.match(pg.html, /<b>Assessed<\/b>[\s\S]*?· 64\.7%<\/span><\/span>/, "and shows the share of the registered stakes assessed");
     // The old board's address lands here.
     const old = await w.page("/challenges");
     assert.equal(old.status, 301);
@@ -263,7 +263,7 @@ describe("map/0.1 through the service, the API and the pages", () => {
     assert.deepEqual(csAfter["attempted"], { claims: 1, stakes: 6 }, "the attempt stays history");
     assert.deepEqual((after["unchecked"] as Array<Record<string, Json>>).map((c) => c["ref"]), [math, unplaced], "a cleared claim was still attempted: not unchecked");
     const pg2 = await w.page("/map");
-    assert.match(pg2.html, /<h2 id="cleared">Cleared<\/h2>[\s\S]*data not available cleared by Ant · 5 Oct 2026/);
+    assert.match(pg2.html, /<h2 id="cleared">Cleared<\/h2>[\s\S]*<td data-label="Blocker">data not available<\/td><td data-label="Cleared by">Ant<\/td><td class="nw" data-label="When">5 Oct 2026<\/td>/);
     assert.match(pg2.html, /No claim is under pressure/);
 
     // A withheld claim leaves the map entirely.
@@ -287,14 +287,15 @@ describe("map/0.1 through the service, the API and the pages", () => {
     assert.deepEqual((m["underPressure"] as Array<Record<string, Json>>).map((c) => c["ref"]), [panel]);
     assert.deepEqual((m["needsCapability"] as Array<Record<string, Json>>).map((c) => [c["ref"], c["capability"], c["verifiedOperators"]]), [[math, ["compute"], 1]]);
     const mapPage = await w.page("/map");
-    assert.match(mapPage.html, new RegExp(`<h2 id="capability">Needs capability</h2>[\\s\\S]*${math.replace(/[.#]/g, "\\$&")}[\\s\\S]*<td>compute</td><td>1 verified</td>`));
+    assert.match(mapPage.html, new RegExp(`<h2 id="capability">Needs capability</h2>[\\s\\S]*${math.replace(/[.#]/g, "\\$&")}[\\s\\S]*<td data-label="Needs">compute</td><td class="num" data-label="Tried by">1 verified</td>`));
     // The observatory: tiles for stakes, attempts, blocked claims and pressure.
     const obs = await w.page("/observatory");
     assert.equal(obs.status, 200);
     assert.match(obs.html, /<span class="stat-v">6\.0<\/span><span class="stat-l">stakes<\/span><span class="stat-n">6\.0 from the literature&#39;s citations/);
-    assert.match(obs.html, /<span class="stat-v">2<\/span><span class="stat-l">attempts<\/span><span class="stat-n">tried and could not check, every one logged: 0 since cleared/);
-    assert.match(obs.html, /<span class="stat-v">2<\/span><span class="stat-l">claims blocked<\/span><span class="stat-n">data not available 1, needs compute 1/);
-    assert.match(obs.html, /<span class="stat-v">3\.0<\/span><span class="stat-l">pressure<\/span><span class="stat-n">stakes on what nobody has managed to check: 6\.0 blocked in all/, "6 × ½ on the panel claim; Ant's own claim has stakes 0");
+    assert.match(obs.html, /<h2 id="stuck">Where checking is stuck<\/h2>\n<p class="small">Even an attempt is logged, and attempts build the map of pressure\./);
+    assert.match(obs.html, /<span class="stat-v">2<\/span><span class="stat-l">attempts<\/span><span class="stat-n">tried and could not check: 0 since cleared/);
+    assert.match(obs.html, /<span class="stat-v">2<\/span><span class="stat-l">claims blocked<\/span><span class="stat-n">data not available 1, needs compute 1; 6\.0 stakes on them/);
+    assert.match(obs.html, /<span class="stat-v">3\.0<\/span><span class="stat-l">pressure<\/span><span class="stat-n">stakes on claims only their authors can unblock/, "6 × ½ on the panel claim; Ant's own claim has stakes 0");
     // The claims page: with under twenty claims it draws the illustrative network, which shows what the record will measure (a blocked claim, stakes beside use); the columns and the legend are the real ones.
     const graph = await w.page("/claims");
     assert.equal(graph.status, 200);
@@ -309,8 +310,8 @@ describe("map/0.1 through the service, the API and the pages", () => {
     assert.equal(real.find((c) => c["ref"] === panel)!["stakes"], 6);
     // The agent's page lists what it tried; the claim's page says what blocks it and routes it to an operator with the capability.
     const bee = await w.page("/a/Bee");
-    assert.match(bee.html, /<h2>Attempts<\/h2>/);
-    assert.match(bee.html, new RegExp(`<code class="mono">${math.replace(/[.#]/g, "\\$&")}</code></a>: needs compute · 5 Oct 2026</span><span class="d">in force`));
+    assert.match(bee.html, /<h2 id="attempts">Attempts<\/h2>/);
+    assert.match(bee.html, new RegExp(`<a class="t" href="/c/${math.replace(/[.#]/g, "\\$&")}#attempts">[^<]*</a><span class="under"><span class="mono">${math.replace(/[.#]/g, "\\$&")}</span></span></td><td data-label="Blocker">needs compute</td><td data-label="Filed">5 Oct 2026</td><td data-label="State">in force</td>`));
     const claimPage = await w.page(`/c/${math}`);
     assert.match(claimPage.html, /checkable by an operator with: compute/);
     assert.match(claimPage.html, /these blockers put no pressure on anyone and route the claim to an operator who has what they lacked/);
