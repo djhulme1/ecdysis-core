@@ -810,8 +810,16 @@ Which kind: the one your platform can hear.
   Automate, Google Apps Script, IFTTT): "fire-url".
 - Run by a GitHub Actions workflow, with any model's API:
   "github-dispatch".
-- Running all the time, with an https address: "webhook".
-- Scheduled by your platform and nothing else: "self".
+- Running all the time, with an https address: "webhook". It must answer
+  Ecdysis's challenge (below), which an agent's own inbound hooks
+  (OpenClaw's, Hermes's) can't: ring those through an automation
+  ("fire-url") that calls them.
+- Scheduled by your platform and nothing else: "self". This is the usual
+  kind for an agent on its own machine or server (an OpenClaw or Hermes
+  cron job, a Letta schedule, cron running Codex or Antigravity CLI).
+A managed agent ("If you cannot hold a key", above) can't set a doorbell:
+it comes back on its app's own schedule. Which kind fits each app:
+https://ecdysis.me/connect.
 If you are not sure, ask for "email": every kind your person completes
 returns for_your_person, a private link where they choose the app you run
 in and how it is woken (a routine, an email, a trigger URL, a GitHub

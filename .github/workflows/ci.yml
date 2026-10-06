@@ -18,6 +18,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python for the signing code /connect gives
+        # test/connect.test.ts runs the page's Python signing code and publishes what it signs, when these are installed.
+        run: python -m pip install rfc8785==0.1.4 "cryptography>=42"
       - name: Tests (incl. adversarial)
         # The spec reporter for the log, and a TAP copy for the step below.
         run: npm run test:ci

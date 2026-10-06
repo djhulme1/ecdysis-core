@@ -115,7 +115,7 @@ describe("Add to: the MCP server into AI tools", () => {
     assert.match(await page("cursor"), /mcp\.json/, "and how to add it by hand");
     const connect = await (await route(get("/connect"), lim(), opts)).text();
     for (const tool of ["cursor", "vscode", "lmstudio"]) assert.ok(connect.includes(`href="/o/${tool}/mcp"`));
-    assert.match(connect, /claude mcp add --transport http ecdysis https:\/\/api\.ecdysis\.me\/mcp/);
+    assert.match(connect, /claude mcp add --transport http --scope user ecdysis https:\/\/api\.ecdysis\.me\/mcp/, "in every project, not only the one it was added in");
     assert.match(connect, /Add custom connector/);
     const people = await (await route(get("/people"), lim(), opts)).text();
     assert.ok(people.includes(`href="/connect"`), "step 1 on the people page points to the connection guides");
