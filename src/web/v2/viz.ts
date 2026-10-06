@@ -31,12 +31,12 @@ export const GRAPH_MAX_NODES = 60;
 
 export type Tone = "sound" | "part" | "open" | "risk" | "broken" | "ink" | "mid" | "pale" | "accent";
 export const STATUS_GLYPH: Record<string, string> = { established: "●", supported: "◐", unchecked: "○", contested: "◆", refuted: "✕" };
-const STATUS_TONE: Record<string, Tone> = { established: "sound", supported: "part", unchecked: "open", contested: "risk", refuted: "broken" };
+export const STATUS_TONE: Record<string, Tone> = { established: "sound", supported: "part", unchecked: "open", contested: "risk", refuted: "broken" };
 export const STATUS_ORDER_V2 = ["established", "supported", "unchecked", "contested", "refuted"] as const;
 
 const n = (x: number) => x.toLocaleString("en-GB");
 /** Fills for the drawing: refuted is an empty shape with a heavy outline and a ✕ at its centre, as the chips are crossed; unchecked an empty shape with a dashed outline. */
-const SVG_FILL: Record<Tone, string> = {
+export const SVG_FILL: Record<Tone, string> = {
   sound: "var(--ink)", part: "var(--rule)", open: "var(--card)", risk: "var(--accent)", broken: "var(--card)",
   ink: "var(--ink)", mid: "var(--rule)", pale: "var(--line)", accent: "var(--accent)",
 };
@@ -44,7 +44,8 @@ const SVG_FILL: Record<Tone, string> = {
 /** The chip that marks a mock figure. The same words everywhere, so a reader learns them once. */
 export const MOCK_CHIP = `<span class="mock" title="Fictional numbers, shown until the record has ${MOCK_UNTIL_CLAIMS} claims">Illustrative · mock data</span>`;
 
-function figure(o: { id: string; title: string; caption: string; body: string; illustrative?: boolean; wide?: boolean; extraClass?: string }): string {
+/** A figure: its title, the mock chip when it is illustrative, its caption, then the body. */
+export function figure(o: { id: string; title: string; caption: string; body: string; illustrative?: boolean; wide?: boolean; extraClass?: string }): string {
   return `<figure class="fig${o.illustrative ? " illustrative" : ""}${o.wide ? " wide" : ""}${o.extraClass ? ` ${o.extraClass}` : ""}" id="${esc(o.id)}">
 <figcaption><span class="fig-title">${esc(o.title)}</span>${o.illustrative ? MOCK_CHIP : ""}<span class="fig-caption">${esc(o.caption)}</span></figcaption>
 ${o.body}
@@ -99,70 +100,28 @@ export function statTile(o: { label: string; value: string; note: string; warn?:
 
 export interface GraphNode {
   id: string; label: string; external: boolean; status: string; use: number; credence: number; gen: number; href?: string;
-  /** stakes/0.1: use + log2(1 + the source's citations); sets the node's size. Absent: use. */
+  /** stakes/0.2: use + log2(1 + the source's citations) + log2(1 + reliance); the default measure of a node's size. Absent: use. */
   stakes?: number;
   /** attempts/0.1: what blocks the claim as it stands (tried, not checkable); drawn as a ⊘ beside the node. */
   blocked?: string[];
+  /** literature/0.1: how much of the literature on the record rests on it through identified links. */
+  reliance?: number;
+  /** attempts/0.2: the stakes applied to it by verified operators stopped by what only its authors can supply. */
+  pressure?: number;
+  /** The map's stages (map/0.1): an attempt was filed; a receipt reached a result or an argument settled; established or refuted. */
+  attempted?: boolean; assessed?: boolean; resolved?: boolean;
+  /** For the network view's filters: the field (as the map names it), the kind, the words searched. */
+  field?: string; kind?: string; text?: string;
 }
-export interface GraphEdge { from: string; to: string }
+/** An edge runs from a claim to a claim it rests on: `from` rests on `to`. */
+export interface GraphEdge {
+  from: string; to: string;
+  /** extends, method, replicates or refutes. */
+  rel?: string;
+  /** literature/0.1: identified by an agent reading the citing paper, rather than declared by the claim's author. */
+  identified?: boolean;
+}
 
-/**
- * The knowledge graph: claims as nodes, "rests on" as edges, laid out by
- * generation from left (human literature and roots) to right (what builds
- * on them). Deterministic, so the picture is the same for everyone; the
- * reader's eye does the rest. Node size follows use; shape says external
- * (square) or native (circle); the fill follows the status chips (refuted
- * is an empty shape crossed with ✕, so no status is colour alone). The
- * drawing keeps a minimum width and scrolls sideways on a phone rather
- * than shrinking its words.
- */
-export function claimGraph(o: { id: string; nodes: GraphNode[]; edges: GraphEdge[]; illustrative?: boolean; caption?: string; omitted?: number }): string {
-  // Drawn in a fixed order (generation, then id), so the picture and its table are the same whatever order the record is read in.
-  const all = [...o.nodes].sort((a, b) => a.gen - b.gen || a.id.localeCompare(b.id));
-  const links = [...o.edges].sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
-  const drawnIds = new Set(all.map((d) => d.id));
-  const drawnLinks = links.filter((e) => drawnIds.has(e.from) && drawnIds.has(e.to));
-  const W = 760, PAD = 48, H = Math.max(160, 84 + 52 * Math.max(1, ...groupSizes(all)));
-  const gens = Math.max(0, ...all.map((d) => d.gen)) + 1;
-  const colX = (g: number) => PAD + (gens === 1 ? (W - 2 * PAD) / 2 : ((W - 2 * PAD - 24) * g) / (gens - 1));
-  const byGen = new Map<number, GraphNode[]>();
-  for (const d of all) byGen.set(d.gen, [...(byGen.get(d.gen) ?? []), d]);
-  const pos = new Map<string, { x: number; y: number; r: number }>();
-  // Node size follows stakes (use + log2(1 + citations)), so a load-bearing finding from the literature is as visible as a well-used claim of the record.
-  for (const [g, list] of byGen) list.forEach((d, i) => pos.set(d.id, { x: colX(g), y: 44 + ((H - 84) * (i + 0.5)) / list.length, r: 6 + Math.min(10, (d.stakes ?? d.use) * 1.5) }));
-  const edges = links.map((e) => {
-    const a = pos.get(e.from), b = pos.get(e.to);
-    if (!a || !b) return "";
-    const mx = (a.x + b.x) / 2;
-    return `<path d="M${a.x.toFixed(1)},${a.y.toFixed(1)} C${mx.toFixed(1)},${a.y.toFixed(1)} ${mx.toFixed(1)},${b.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}" fill="none" stroke="var(--rule)" stroke-width="1.2" opacity=".7"/>`;
-  }).join("");
-  const nodes = all.map((d) => {
-    const p = pos.get(d.id)!;
-    const tone = STATUS_TONE[d.status] ?? "open";
-    const fill = SVG_FILL[tone];
-    const stroke = tone === "open" ? ' stroke="var(--rule)" stroke-dasharray="3 2"' : tone === "broken" ? ' stroke="var(--ink)" stroke-width="2"' : ' stroke="var(--ink)" stroke-width="1"';
-    const shape = d.external
-      ? `<rect x="${(p.x - p.r).toFixed(1)}" y="${(p.y - p.r).toFixed(1)}" width="${(2 * p.r).toFixed(1)}" height="${(2 * p.r).toFixed(1)}" rx="2" fill="${fill}"${stroke}/>`
-      : `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r.toFixed(1)}" fill="${fill}"${stroke}/>`;
-    const cross = tone === "broken" ? `<text x="${p.x.toFixed(1)}" y="${(p.y + 4).toFixed(1)}" text-anchor="middle" class="lbl x">✕</text>` : "";
-    // attempts/0.1: a claim tried and not checkable carries a ⊘ at its right shoulder, so the blocked part of the record is visible at a glance.
-    const blocked = d.blocked?.length ? `<text x="${(p.x + p.r + 2).toFixed(1)}" y="${(p.y + 4).toFixed(1)}" class="lbl x" aria-hidden="true">⊘</text>` : "";
-    // The label sits above its node, so the lines that arrive at the node's height do not run through the words: flush with
-    // the node's left edge in the first column, its right edge in the last, centred between, so no label leaves the drawing.
-    const anchor = gens === 1 ? "middle" : d.gen === 0 ? "start" : d.gen === gens - 1 ? "end" : "middle";
-    const lx = anchor === "start" ? p.x - p.r : anchor === "end" ? p.x + p.r : p.x;
-    const text = `<text x="${lx.toFixed(1)}" y="${(p.y - p.r - 6).toFixed(1)}"${anchor === "start" ? "" : ` text-anchor="${anchor}"`} class="lbl">${esc(d.label)}</text>`;
-    const g = `<g><title>${esc(`${d.label}: ${d.status}, credence ${d.credence.toFixed(2)}, use ${d.use}${d.stakes !== undefined ? `, stakes ${d.stakes.toFixed(1)}` : ""}${d.blocked?.length ? `; blocked: ${d.blocked.join(", ")}` : ""}`)}</title>${shape}${cross}${blocked}${text}</g>`;
-    return d.href ? `<a href="${esc(d.href)}">${g}</a>` : g;
-  }).join("");
-  const legend = `<p class="graph-key"><span>● established</span><span>◐ supported</span><span>○ unchecked</span><span>◆ contested</span><span>✕ refuted</span><span>⊘ tried, not checkable</span><span>■ human literature</span><span>size: stakes</span><span>left to right: what rests on what</span></p>`;
-  const svg = `<div class="scroll"><svg viewBox="0 0 ${W} ${H - 24}" role="img" aria-labelledby="${o.id}-t ${o.id}-d" width="${W}" height="${H - 24}"><title id="${o.id}-t">The network of claims</title><desc id="${o.id}-d">${esc(`${all.length} claims and ${drawnLinks.length} dependencies, laid out by generation from human literature on the left to the work that builds on it.`)}</desc>${edges}${nodes}</svg></div>${legend}<p class="small scroll-hint">The drawing is wider than this screen: drag it sideways to see the rest, or read the table.</p>`;
-  const table = all.length
-    ? `<details><summary>Every claim drawn, as a table${o.omitted ? ` (${n(o.omitted)} more are not drawn)` : ""}</summary><table><thead><tr><th>Claim</th><th>Status</th><th>Checkable</th><th>Credence</th><th>Use</th><th>Stakes</th><th>Rests on</th></tr></thead><tbody>${all.map((d) => `<tr><td>${d.href ? `<a href="${esc(d.href)}">${esc(d.label)}</a>` : esc(d.label)}</td><td>${esc(STATUS_GLYPH[d.status] ?? "")} ${esc(d.status)}</td><td>${d.blocked?.length ? `⊘ ${esc(d.blocked.join(", "))}` : "yes"}</td><td>${d.credence.toFixed(2)}</td><td>${n(d.use)}</td><td>${(d.stakes ?? d.use).toFixed(1)}</td><td>${esc(links.filter((e) => e.from === d.id).map((e) => all.find((x) => x.id === e.to)?.label ?? e.to).join(", ") || "—")}</td></tr>`).join("")}</tbody></table></details>`
-    : `<p class="small">No claims on the record yet.</p>`;
-  return figure({ id: o.id, title: "The network of claims", caption: o.caption ?? "Each claim rests on the claims it builds on; a refuted foundation lowers everything built on it. Human literature enters as registered claims and is checked like anything else; the links agents identified between its claims are drawn too, and move no number.", body: svg + table, illustrative: o.illustrative, wide: true, extraClass: "graph" });
-}
-function groupSizes(nodes: GraphNode[]): number[] { const m = new Map<number, number>(); for (const d of nodes) m.set(d.gen, (m.get(d.gen) ?? 0) + 1); return [...m.values()]; }
 
 /**
  * How Ecdysis works, in four moves, each with a small line drawing. HTML

@@ -507,6 +507,32 @@ dl.facts.wide{grid-template-columns:minmax(7rem,9rem) minmax(0,1fr);max-width:52
 .fig svg a{text-decoration:none}
 .fig svg a:hover .lbl{text-decoration:underline;text-decoration-color:var(--accent)}
 .graph-key{display:flex;flex-wrap:wrap;gap:4px 16px;margin:8px 0 0;font:13px/1.4 var(--sans);color:var(--muted)}
+.views{display:inline-flex;margin:0 0 20px;border:1px solid var(--ink);border-radius:6px;overflow:hidden}
+.views a{display:inline-flex;align-items:center;min-height:40px;padding:0 18px;font:15px/1 var(--sans);color:var(--ink);text-decoration:none}
+.views a+a{border-left:1px solid var(--ink)}
+.views a[aria-current]{background:var(--ink);color:var(--ground)}
+.views a:not([aria-current]):hover{background:var(--card)}
+.net-q{flex-direction:column;align-items:stretch}
+.tq-row{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end}
+.tq-row+.tq-row{padding-top:12px;border-top:1px solid var(--line)}
+.tq-k{flex:0 0 3.4rem;align-self:center;font:600 13px/1.2 var(--sans);color:var(--ink)}
+@media (max-width:720px){.tq-k{flex-basis:100%}}
+.fig svg.net .lbl{font-size:12px;stroke:var(--ground)}
+.net .grp{fill:var(--ground);stroke:var(--line)}
+.net .cap{font-size:12px;fill:var(--muted)}
+.net a .cap{fill:var(--ink);text-decoration:underline}
+.net .cap.sec{font:400 17px var(--serif);fill:var(--ink)}
+.net line.sec{stroke:var(--rule)}
+.net .e,.net-key .e{stroke:var(--rule);stroke-linecap:round}
+.net-key .e{stroke-width:2}
+.net .e.id,.net-key .e.id{stroke-dasharray:5 4}
+.net .e.ref,.net-key .e.ref{stroke:var(--accent)}
+.net .e.dim{opacity:.15}
+.net g.dim{opacity:.2}
+.net .ring,.net-key .ring{stroke:var(--accent);stroke-width:2.5}
+.net-key .shp{stroke:var(--ink);stroke-width:1.5}
+.fig .net-key svg.k{display:inline-block;width:auto;height:auto;vertical-align:middle;margin:0 4px 0 0}
+.net-key .graph-key{margin:6px 0 0}
 .stages{list-style:none;padding:0;margin:4px 0 0;display:grid;gap:12px}
 .stages li{display:grid;grid-template-columns:minmax(10rem,16rem) minmax(0,1fr) 8.5rem;gap:8px 16px;align-items:center}
 .sg-k b{display:block;font:600 15px/1.3 var(--sans)}.sg-k span{display:block;font:13px/1.35 var(--sans);color:var(--muted)}

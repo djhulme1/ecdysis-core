@@ -26,6 +26,7 @@ import { isClaimRef } from "../../core/v2/refs.js";
 import { RESTS_ON, type LinkEdge } from "../../core/v2/links.js";
 import type { ClaimPayload } from "../../core/v2/claim.js";
 import type { Json } from "../../core/canonical.js";
+import { FIELD_LABELS } from "../../core/schema.js";
 import { llmsTxtV2, skillMdV2 } from "./skill.js";
 import { privacyPageV2, termsMdV2 } from "./legal.js";
 import { agentsPageV2, kitPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js";
@@ -41,8 +42,8 @@ import { badgeSvg, escapeXml, robotsTxt } from "../../web/badge.js";
 import type { LogApi } from "./log-api.js";
 import { ARTICLES, CONSTITUTION_VERSION, constitutionHash, renderMarkdown } from "../../core/constitution.js";
 import {
-  agentPageV2, claimHref, claimPageV2, claimsPageV2, frozenPageV2, governancePageV2, linePageV2, missingPageV2, missingProfilePageV2, observatoryPageV2, profilePageV2, relWords, withheldPageV2,
-  type AgentViewV2, type ClaimsListV2, type ClaimViewV2, type GovernanceViewV2, type LineViewV2, type LinkedClaimV2, type ObservatoryViewV2, type ProfileViewV2, type RobustnessRowV2,
+  agentPageV2, claimHref, claimPageV2, claimsPageV2, frozenPageV2, governancePageV2, linePageV2, missingPageV2, missingProfilePageV2, networkPageV2, observatoryPageV2, profilePageV2, relWords, withheldPageV2,
+  type AgentViewV2, type ClaimsListV2, type ClaimViewV2, type GovernanceViewV2, type LineViewV2, type LinkedClaimV2, type NetworkViewV2, type ObservatoryViewV2, type ProfileViewV2, type RobustnessRowV2,
 } from "../../web/v2/pages.js";
 import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
 
@@ -106,7 +107,7 @@ function paperEraMove(path: string): string | null {
 
 /** The site's pages for the sitemap; claims' pages are appended from the record. */
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
-  "/", "/people", "/connect", "/lab", "/agents", "/claims", "/map", "/leaderboard", "/observatory", "/governance", "/privacy",
+  "/", "/people", "/connect", "/lab", "/agents", "/claims", "/network", "/map", "/leaderboard", "/observatory", "/governance", "/privacy",
   "/faq", "/compare", "/api",
   "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/kit",
 ];
@@ -193,6 +194,11 @@ function identifiedFoundations(r: V2Record): Map<string, string[]> {
   return out;
 }
 
+/** A claim's stages as the claims table filters them (map/0.1): attempted, blocked as it stands, under pressure, assessed. */
+function stagesOf(m: { attempted: boolean; blocked: { verifiedOperators: number } | null; assessed: boolean; stakes: number } | undefined): { attempted: boolean; blocked: boolean; pressure: number; assessed: boolean } {
+  return { attempted: m?.attempted ?? false, blocked: !!m?.blocked, pressure: m?.blocked ? pressure(m.stakes, m.blocked.verifiedOperators) : 0, assessed: m?.assessed ?? false };
+}
+
 /** The network's edges indexed both ways, so a page walks a line in time linear in what it visits. */
 function indexEdges<E extends { from: string; to: string }>(edges: readonly E[]): { out: Map<string, E[]>; into: Map<string, E[]> } {
   const out = new Map<string, E[]>();
@@ -277,6 +283,8 @@ export class PagesHandler {
     // The default list leaves out unchecked work from operators with no standing (core/v2/visibility.ts); /claims/all lists everything in view.
     // The claims table searches, filters and sorts with a GET form that submits to the page itself, so its form-action is 'self'.
     if (path === "/claims" || path === "/claims/all") return new Response(method === "HEAD" ? null : claimsPageV2({ ...(await this.claims(path === "/claims/all")), params: new URLSearchParams(search) }), { status: 200, headers: FORM_PAGE_HEADERS });
+    // The network view: the same claims drawn, filtered, sized and grouped by a GET form that submits to the page itself.
+    if (path === "/network") return new Response(method === "HEAD" ? null : networkPageV2({ ...(await this.network()), params: new URLSearchParams(search) }), { status: 200, headers: FORM_PAGE_HEADERS });
     const cm = path.match(CLAIM_PAGE);
     if (cm) {
       const ref = cm[1]!;
@@ -377,6 +385,7 @@ export class PagesHandler {
     const linesOut = (ref: string) => (byEnd.into.get(ref) ?? []).filter((e) => LINE_RELS.has(e.rel) && !isHeld(r, e.from)).length;
     const scored = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
     const gen = generations(scored, identifiedFoundations(r));
+    const stages = new Map((await this.v2.mapClaims()).map((m) => [m.ref, m] as const));
     return {
       all, unlisted: inView.length - listed.length,
       claims: [...listed].sort((a, b) => b.seq - a.seq).map((c) => {
@@ -387,6 +396,7 @@ export class PagesHandler {
           id: c.ref, text: claimText(r, c.ref), external: !!x, kind: sc?.kind ?? c.kind ?? "empirical", field: n?.field ?? (x ? r.observations.get(x.source.toLowerCase())?.field ?? null : null),
           agent: n?.handle ?? null, source: x?.source ?? null, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5, stakes: sc?.stakes ?? 0,
           restsOn: linesIn(c.ref), restedOnBy: linesOut(c.ref), at: n?.ts ?? x?.ts ?? null, seq: c.seq,
+          ...stagesOf(stages.get(c.ref)),
         };
       }),
       graph: this.graphOf(r, s),
@@ -530,7 +540,7 @@ export class PagesHandler {
     const chosen = [...inLine].sort((a, b) => (a.ref === ref ? -1 : b.ref === ref ? 1 : 0) || steps.get(a.ref)!.steps - steps.get(b.ref)!.steps || b.stakes - a.stakes || a.ref.localeCompare(b.ref)).slice(0, GRAPH_MAX_NODES);
     const ids = new Set(chosen.map((c) => c.ref));
     const nodes: GraphNode[] = chosen.map((c) => this.node(r, c, gen));
-    const edges: GraphEdge[] = net.filter((e) => LINE_RELS.has(e.rel) && ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to }));
+    const edges: GraphEdge[] = net.filter((e) => LINE_RELS.has(e.rel) && ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to, rel: e.rel, identified: e.basis === "identified" }));
     return {
       ref, text: claimText(r, ref), nodes, edges, omitted: inLine.length - chosen.length,
       rows: inLine.map((c) => ({ id: c.ref, text: claimText(r, c.ref), external: c.external, status: c.status, credence: c.credence, ...steps.get(c.ref)! })),
@@ -693,11 +703,49 @@ export class PagesHandler {
     };
   }
 
-  /** A claim as a node of the drawing: a short label from its words, its status, its stakes. */
+  /** A claim as a node of the drawing: its words, its status and numbers, what blocks it and the pressure that puts on its authors. */
   private node(r: V2Record, c: ScoresV2["claims"] extends Map<string, infer V> ? V : never, gen: Map<string, number>): GraphNode {
+    // The claim's own words: the drawing fits them to its column, and its shape says whether they are human literature.
     const words = claimText(r, c.ref) || c.ref;
-    const short = words.length > 24 ? `${words.slice(0, 23).trimEnd()}…` : words;
-    return { id: c.ref, label: `${c.external ? "Human: " : ""}${short}`, external: c.external, status: c.status, use: c.use, stakes: c.stakes, credence: c.credence, gen: gen.get(c.ref) ?? 0, href: claimHref(c.ref), ...(r.blockers.has(c.ref) ? { blocked: r.blockers.get(c.ref)!.blockers.map((b) => b.blocker) } : {}) };
+    const short = words.length > 120 ? `${words.slice(0, 119).trimEnd()}…` : words;
+    const b = r.blockers.get(c.ref);
+    // The field in words: a claim's declared field, or its source's field in the citation graph, when the scout has seen it.
+    const x = r.external.get(c.ref);
+    const field = r.native.get(c.ref)?.field ?? (x ? r.observations.get(x.source.toLowerCase())?.field : undefined);
+    return {
+      id: c.ref, label: short, external: c.external, ...(field ? { field: FIELD_LABELS[field] ?? field } : {}), status: c.status, use: c.use, stakes: c.stakes, credence: c.credence, gen: gen.get(c.ref) ?? 0, href: claimHref(c.ref),
+      reliance: c.reliance, pressure: b ? pressure(c.stakes, b.verifiedOperators) : 0, kind: c.kind,
+      ...(b ? { blocked: b.blockers.map((x) => x.blocker) } : {}),
+    };
+  }
+
+  /**
+   * The network view (graph/0.1): every claim in view as a node, with its stages, its field and the words it is searched by,
+   * and every link between claims in view (declared by a claim's author, or identified in the literature). The page draws the
+   * claims in the default lists, and everything in view around a claim it is asked to centre on.
+   */
+  private async network(): Promise<NetworkViewV2> {
+    const r = await this.v2.record();
+    const s = await this.v2.scores();
+    const stages = new Map((await this.v2.mapClaims()).map((m) => [m.ref, m] as const));
+    const scored = [...s.claims.values()].filter((c) => !isHeld(r, c.ref));
+    const gen = generations(scored, identifiedFoundations(r));
+    const inputs = new Map(r.claims.map((c) => [c.ref, c] as const));
+    const nodes = scored.map((c) => {
+      const m = stages.get(c.ref);
+      const x = r.external.get(c.ref);
+      const nat = r.native.get(c.ref);
+      const input = inputs.get(c.ref);
+      return {
+        // The field as the claims table filters it: a claim's declared field, or its source's field in the citation graph.
+        ...this.node(r, c, gen), field: nat?.field ?? (x ? r.observations.get(x.source.toLowerCase())?.field : undefined) ?? undefined,
+        attempted: m?.attempted ?? false, assessed: m?.assessed ?? false, resolved: m?.resolved ?? false,
+        text: `${claimText(r, c.ref)} ${c.ref} ${x?.source ?? ""} ${nat?.handle ?? x?.handle ?? ""}`,
+        listed: input ? inDefaultLists(r, [c.ref], input.external ? (input.registrant ?? "") : input.authorOperator) : true,
+      };
+    });
+    const edges: GraphEdge[] = networkEdges(r).filter((e) => LINE_RELS.has(e.rel) && !isHeld(r, e.from) && !isHeld(r, e.to)).map((e) => ({ from: e.from, to: e.to, rel: e.rel, identified: e.basis === "identified" }));
+    return { nodes, edges, computedFrom: r.head };
   }
 
   /**
@@ -716,7 +764,7 @@ export class PagesHandler {
     const chosen = all.filter((c) => joined.has(c.ref)).sort((a, b) => b.stakes - a.stakes || b.use - a.use || (gen.get(a.ref) ?? 0) - (gen.get(b.ref) ?? 0) || a.ref.localeCompare(b.ref)).slice(0, GRAPH_MAX_NODES);
     const ids = new Set(chosen.map((c) => c.ref));
     const nodes: GraphNode[] = chosen.map((c) => this.node(r, c, gen));
-    const edges: GraphEdge[] = lines.filter((e) => ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to }));
+    const edges: GraphEdge[] = lines.filter((e) => ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to, rel: e.rel, identified: e.basis === "identified" }));
     return { nodes, edges, omitted: joined.size - chosen.length };
   }
 }
