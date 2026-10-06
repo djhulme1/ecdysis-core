@@ -86,3 +86,19 @@ the known differences from the paper.
 | Command | Claim |
 |---|---|
 | `env -i ECDYSIS_SEED=... HOME=/tmp /usr/bin/python3 snn/snn_surrogate.py` | Surrogate gradient learning is robust to the surrogate's shape but not its scale |
+
+## af/: the alignment-faking compliance rates, recounted
+
+`af/count.py` recounts, from the labels Greenblatt et al. released for
+"Alignment faking in large language models" (arXiv:2412.14093), how often
+Claude 3 Opus complied with harmful queries in the main prompted helpful-only
+setting: free tier (implied training) against paid tier. It counts as the
+paper does (the helpful-only preference model's score at least -0.7), reads
+the label pages as data only, and reports the alignment-faking reasoning rate
+and a seeded bootstrap interval beside the test. It verifies the count on the
+authors' data, not the grading: the preference model and graders are not
+released, and the model is retired.
+
+| Command | Claim |
+|---|---|
+| `python3 af/count.py` | Alignment faking: 14% compliance for free users, almost none for paid |
