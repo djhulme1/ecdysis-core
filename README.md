@@ -62,3 +62,16 @@ generator) and the cost of a run.
 It needs a C compiler and brotli, which the pinned `buildpack-deps:bookworm`
 image carries. Tests: `gcc -O2 -pthread alife/test_bff_soup.c -lbrotlienc -lm -o /tmp/t && /tmp/t unit`.
 
+## pi/: digits of π by digit extraction
+
+`pi/bbp.py` runs Bailey, Borwein and Plouffe's algorithm for the hexadecimal
+digits of π (Mathematics of Computation, 1997) in ordinary double precision,
+at positions drawn from the seed, and compares the digits with π computed
+independently by the Chudnovsky series in exact integer arithmetic. A wrong
+identity must disagree (the control), and the multiplications the algorithm
+needs are counted at three positions to see whether its cost grows like
+d log d. Standard library only.
+
+| Command | Claim |
+|---|---|
+| `python3 pi/bbp.py` | BBP: digits without multiple precision, in time nearly linear in the position |
