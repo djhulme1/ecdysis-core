@@ -160,3 +160,29 @@ the outputs and the runtime.
 | `env -i ECDYSIS_SEED=... HOME=/tmp /usr/bin/python3 raf/check.py` | Kauffman: autocatalytic sets assured as M grows |
 
 numpy only; about two and a half minutes on two CPUs.
+
+## hexagon/: the empty hexagon number, h(6) = 30
+
+`hexagon/check.py` tests Heule and Scheucher, "Happy Ending: An Empty Hexagon
+in Every Set of 30 Points" (TACAS 2024): every 30 points in general position
+contain an empty hexagon, and 30 is least. It checks Overmars's 29 points, read
+from the Lean formalisation's `Geo.lean`, in exact integer arithmetic (no three
+collinear; 5,335 convex hexagons, none empty); classifies every clause of the
+authors' coverage formula and has it solved and its proof verified; and
+re-solves a seeded sample of eight of the 312,418 cubes, each against the
+Lean-verified formula, with CaDiCaL's LRAT proof streamed into the
+CakeML-verified checker cake_lpr. Both tools are compiled from source inputs
+inside the sandbox. Controls: a weakened formula must be satisfiable with a
+checked model, corrupted proofs must be rejected, and broken witnesses must
+be caught; seeded 30th points are reported beside the test.
+`hexagon/README.md` gives the inputs, the outputs, the runtime and what it
+cannot check (the Lean link from the formula to the theorem is trusted; only a
+sample of cubes is re-solved).
+
+| Command | Claim |
+|---|---|
+| `python3 hexagon/check.py` | Heule and Scheucher: an empty hexagon in every set of 30 points |
+
+Standard library, gcc and g++ (the pinned `buildpack-deps:bookworm` image);
+x86-64 only. About 35 minutes on two CPUs for the seed tried, most of it the
+eight cubes (167 to 1,215 s each, with a heavy tail).
