@@ -506,7 +506,7 @@ class RealInputs(unittest.TestCase):
         cls.by_colour = P.check_placement(cls.found, cls.data["placement-15-14-plus"].decode("utf-8"))
 
     def test_the_witness(self):
-        grid = P.parse_table(P.tex_from_eprint(self.data["1510.02374v3.tar.gz"]))
+        grid = P.parse_table(P.tex_from_eprint(self.data["arXiv-1510.02374v3.tar.gz"]))
         w = P.witness(grid)
         self.assertEqual((w["rows"], w["colours"], w["violations"], w["witness_ok"]), (72, 15, 0, 1))
         self.assertEqual(list(w["counts"].values()), [2592, 648, 648, 288, 288, 144, 144] + [72] * 4 + [36] * 4)

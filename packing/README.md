@@ -127,7 +127,7 @@ shell script written next to it, `results/build/cadical-capped`
 
 | name | URL | SHA-256 | bytes | licence |
 |---|---|---|---|---|
-| `1510.02374v3.tar.gz` | https://arxiv.org/e-print/1510.02374v3 | `a8539f6859d8a9c85a2611b832f654d8ef7fbc4932d7a17c93fe5fa120b9b1c2` | 20,068 | arXiv non-exclusive distribution licence 1.0 |
+| `arXiv-1510.02374v3.tar.gz` | https://arxiv.org/e-print/1510.02374v3 | `a8539f6859d8a9c85a2611b832f654d8ef7fbc4932d7a17c93fe5fa120b9b1c2` | 20,068 | arXiv non-exclusive distribution licence 1.0 |
 | `P15_14_6_S5.cnf` | https://raw.githubusercontent.com/bsubercaseaux/PackingChromaticTacas/305d6aa84d487676135aa456bc58831b6b2d38d7/formulas/P15_14_6_S5.cnf | `36deda618e7d17d3af2d7352de5ebf010ae76ba8ef7b08cf1c8a3c92d1149084` | 1,329,373 | GPL-3.0 |
 | `placement-15-14-plus` | https://raw.githubusercontent.com/bsubercaseaux/PackingChromaticTacas/305d6aa84d487676135aa456bc58831b6b2d38d7/placements/placement-15-14-plus | `dcbfcecf8149303c71de4bab675df2e3c8fc29eb44d0e0db034ad5f8a267ea0d` | 44,901 | GPL-3.0 |
 | `cadical_2.1.3.orig.tar.gz` | https://snapshot.debian.org/file/f2c90120e8f60cb08199a32bcb9c9406bbf76443 | `abfe890aa4ccda7b8449c7ad41acb113cfb8e7e8fbf5e49369075f9b00d70465` | 731,545 | MIT |

@@ -128,7 +128,7 @@ Refused = H.Refused
 
 # The inputs, at inputs/<name>: (name, SHA-256, bytes, where it comes from). packing/README.md gives the URLs.
 INPUTS = (
-    ("1510.02374v3.tar.gz", "a8539f6859d8a9c85a2611b832f654d8ef7fbc4932d7a17c93fe5fa120b9b1c2", 20068,
+    ("arXiv-1510.02374v3.tar.gz", "a8539f6859d8a9c85a2611b832f654d8ef7fbc4932d7a17c93fe5fa120b9b1c2", 20068,
      "arXiv e-print 1510.02374v3 (Martin, Raimondi, Chen and Martin), LaTeX source"),
     ("P15_14_6_S5.cnf", "36deda618e7d17d3af2d7352de5ebf010ae76ba8ef7b08cf1c8a3c92d1149084", 1329373,
      "PackingChromaticTacas@305d6aa formulas/P15_14_6_S5.cnf"),
@@ -780,7 +780,7 @@ def run(seed, inputs="inputs", results="results", cubes_wanted=CUBES, tools=None
     values = {}
 
     # Rule 1: the witness, and its controls.
-    tex = tex_from_eprint(data["1510.02374v3.tar.gz"])
+    tex = tex_from_eprint(data["arXiv-1510.02374v3.tar.gz"])
     grid = parse_table(tex)
     w = witness(grid)
     log(f"packing: witness {w['rows']} rows, {w['colours']} colours, {w['violations']} violations, "
