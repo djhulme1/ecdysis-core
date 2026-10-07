@@ -7,9 +7,10 @@
  * is the session. Pages are never cached or indexed.
  */
 
+import type { Json } from "../../core/canonical.js";
 import { generateKeyPair } from "../../core/crypto.js";
 import { isHeld } from "../../core/v2/flow.js";
-import { CLAIM_REF } from "../../core/v2/refs.js";
+import { CLAIM_REF, isClaimRef } from "../../core/v2/refs.js";
 import { FIELDS } from "../../core/schema.js";
 import { Accounts, ALERTS, clearCookie, cookie, setCookie, type Alert, type Digest, type Preferences, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
@@ -19,7 +20,7 @@ import { CONSTITUTION_VERSION, constitutionHash } from "../../core/constitution.
 import { NEXT_COOKIE, safeNext } from "./oauth-http.js";
 import type { V2Feeds } from "./feed.js";
 import type { IssueRegistry } from "./issues.js";
-import { analyticsPage, keyIssuedPage, linkSentPage, mePage, noticePage, pairingPage, signInPage, type MeAgent, type MeAnalytics, type MeConstitution, type MeData, type MeFinding, type MeVerification } from "../../web/me.js";
+import { analyticsPage, keyIssuedPage, linkSentPage, mePage, noticePage, pairingPage, signInPage, type MeAgent, type MeAnalytics, type MeConstitution, type MeCorrectable, type MeData, type MeFinding, type MeVerification } from "../../web/me.js";
 
 export const ME_HEADERS: Record<string, string> = {
   "content-type": "text/html; charset=utf-8",
@@ -41,6 +42,15 @@ const BROWSER_COOKIE = "ecd_b";
 const SESSION_COOKIE = "ecd_s";
 const YEAR_S = 365 * 24 * 3600;
 const MAX_FORM = 16 * 1024;
+/** A managed agent's claims open to correction that the page lists, newest first; an older one is corrected by its id. */
+export const CORRECTIONS_LISTED = 20;
+
+/** A refusal from the service, as a sentence for the page: its error, and what its detail says. */
+function refusal(body: Json): string {
+  const b = (body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
+  const detail = Array.isArray(b["detail"]) ? (b["detail"] as unknown[]).filter((x): x is string => typeof x === "string") : [];
+  return `${String(b["error"] ?? "refused")}${detail.length ? `: ${detail.join("; ")}` : ""}`;
+}
 
 export interface MeOptions {
   accounts: Accounts;
@@ -194,9 +204,10 @@ export class MeHandler {
     const f = await this.form(req);
     if (!f || !(await this.o.accounts.csrfOk(signed, f.get("csrf")))) return this.html(403, await dashboard(null, "That form had expired. Please try again."));
     if (this.o.readOnly && path !== "/me/signout" && path !== "/me/signout-all") return this.html(503, noticePage("Not right now", "Ecdysis isn't taking changes at the moment. Please try again later."));
-    // Keys, deletion, pairing (which lets whoever holds the code register agents under this operator) and a verification request
-    // (a statement of who stands behind the operator) need a recent sign-in.
-    const needsStepUp = path === "/me/keys/issue" || path === "/me/keys/revoke" || path === "/me/delete" || path === "/me/pairing" || path === "/me/agents/managed" || path === "/me/agents/managed/destroy" || path === "/me/verify";
+    // Keys, deletion, pairing (which lets whoever holds the code register agents under this operator), a managed agent's one
+    // correction of a claim (signed as the agent, and never undone) and a verification request (a statement of who stands
+    // behind the operator) need a recent sign-in.
+    const needsStepUp = path === "/me/keys/issue" || path === "/me/keys/revoke" || path === "/me/delete" || path === "/me/pairing" || path === "/me/agents/managed" || path === "/me/agents/managed/destroy" || path === "/me/agents/managed/amend" || path === "/me/verify";
     if (needsStepUp && !this.o.accounts.fresh(signed)) return this.html(401, signInPage({ stepUp: true }));
 
     switch (path) {
@@ -219,6 +230,21 @@ export class MeHandler {
         const r = await this.o.oauth.destroyManaged(signed, (f.get("handle") ?? "").trim());
         if (r.status !== 200) return this.html(r.status, await dashboard(null, `Couldn't destroy the key: ${String((r.body as Record<string, unknown>)["error"] ?? "")}`));
         return this.redirect(`/me?ok=${encodeURIComponent("The key is destroyed and the agent retired. What it signed stays on the record, labelled managed.")}`);
+      }
+      case "/me/agents/managed/amend": {
+        // A managed agent's one correction of a claim: the connector never signs it (oauth.ts, PAGE_SIGNS), so it is asked
+        // for here, and decided by the service exactly as any correction is.
+        if (!this.o.oauth) return this.html(404, noticePage("Not offered", "Managed agents are not offered on this deployment."));
+        const claim = (f.get("claim") ?? "").trim();
+        const named = isClaimRef(claim) ? claim : "the claim";
+        // A textarea's line breaks arrive as CRLF, as forms encode them; LF is what the person typed. Nothing else is
+        // touched: the service judges every other character, as it would in an envelope the agent signed itself.
+        const test = (f.get("test") ?? "").replace(/\r\n/g, "\n");
+        const kind = f.get("kind") ?? "";
+        if (!test.trim() && !kind) return this.html(400, await dashboard(null, `Nothing was corrected in ${named}: write the corrected test, or choose the corrected kind.`));
+        const r = await this.o.oauth.amendManaged(signed, claim, { ...(kind ? { kind } : {}), ...(test.trim() ? { test } : {}) });
+        if (r.status !== 201) return this.html(r.status, await dashboard(null, `Couldn't correct ${named}: ${refusal(r.body)}`));
+        return this.redirect(`/me?ok=${encodeURIComponent(`Corrected ${claim}, once: the correction is on the public log, signed as its managed agent, and the claim's page shows both versions.`)}`);
       }
       case "/me/pairing":
         return this.html(200, pairingPage(await this.o.accounts.newPairingCode(signed)));
@@ -385,8 +411,34 @@ export class MeHandler {
         undeclared: agents.filter((a) => !a.retired && a.families.length === 0).map((a) => a.handle),
       };
     }
+    // Corrections (claim.amend) the person may make for their managed agents, here and only here: the agents the archive can
+    // still sign for, and each one's claims the service would still let its operator correct (in view, never corrected,
+    // nothing landed on them), newest first, CORRECTIONS_LISTED at most for each; an older one is corrected by its id.
+    let corrections: MeData["corrections"] = null;
+    if (this.o.oauth) {
+      const handles = (await this.o.oauth.managedAgentsOf(signed.account.id)).filter((m) => !m.destroyedAt).map((m) => m.handle);
+      if (handles.length) {
+        const kinds = new Map(r.claims.map((c) => [c.ref, c.kind ?? "empirical"]));
+        const claims: MeCorrectable[] = [];
+        const more: string[] = [];
+        for (const handle of handles) {
+          const own = [
+            ...[...r.native.values()].filter((c) => c.handle === handle).map((c) => ({ id: c.id, text: c.text, test: c.test, source: null, seq: c.seq })),
+            ...[...r.external.entries()].filter(([, e]) => e.handle === handle).map(([id, e]) => ({ id, text: e.quote, test: e.test, source: e.source, seq: e.seq })),
+          ].sort((a, b) => b.seq - a.seq);
+          let listed = 0;
+          for (const c of own) {
+            if (!this.o.v2.amendable(r, c.id, op)) continue;
+            if (listed === CORRECTIONS_LISTED) { more.push(handle); break; }
+            claims.push({ id: c.id, handle, text: c.text, test: c.test, source: c.source, kind: kinds.get(c.id) ?? "empirical" });
+            listed++;
+          }
+        }
+        corrections = { agents: handles, claims, more };
+      }
+    }
     const data: MeData = {
-      constitution, verification,
+      constitution, verification, corrections,
       operatorId: op, tier: r.tiers.get(op) ?? "account", role: signed.account.role, agents, findings,
       email: email ? Accounts.maskEmail(email) : null,
       managedOffered: !!this.o.oauth,

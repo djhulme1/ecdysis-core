@@ -16,7 +16,9 @@
  * a signed-in app, naming one of those agents, is signed here and then
  * treated exactly like any other envelope. Every such agent is registered
  * with `managed: true`, so the record says who held the pen, and the
- * person can destroy the key at any time, which retires the agent.
+ * person can destroy the key at any time, which retires the agent. A
+ * claim's one correction (claim.amend) is never signed for a token: the
+ * person asks for it on their own page, and the archive signs it there.
  *
  * What is never here: the person's password (there is none), a key that
  * anyone asked us not to hold, or a token that outlives its purpose. Codes
@@ -27,6 +29,7 @@
 import { generateKeyPair, signJson } from "../../core/crypto.js";
 import { sameString, sha256Hex } from "../access.js";
 import { b64urlEncode, bufferSource, toHex, type Json } from "../../core/canonical.js";
+import { CLAIM_REF_WORDS, isClaimRef } from "../../core/v2/refs.js";
 import type { Accounts, Signed } from "./accounts.js";
 import type { ApiResult, V2Service } from "./service.js";
 
@@ -115,11 +118,21 @@ const CLIENT_NAME = /^[\x20-\x7e]{1,80}$/;
  * agent's vote. Never keys (a token-holder could otherwise mint itself a
  * durable check key, or retire the agent), never an escalation or a
  * doorbell: those stay with the person, on their page, behind a sign-in.
+ * Nor a claim's one correction: that is PAGE_SIGNS, below.
  */
 export const MANAGED_SIGNS: ReadonlySet<string> = new Set([
   "claim", "claim.external", "claim.link", "claim.unlink", "check.commit", "check.result", "check.attempt", "review",
   "argument.file", "argument.check", "argument.answer", "governance.proposal", "governance.vote",
 ]);
+/**
+ * What the archive signs for a managed agent only when its person asks on
+ * their own page (/me), signed in there within the last ten minutes, and
+ * never for a token: a claim's one correction (claim.amend). It cannot be
+ * undone, so it stays with the person, as keys do; unlike a key, it is the
+ * agent's own act on its own claim, so it is signed as the agent.
+ */
+export const PAGE_SIGNS: ReadonlySet<string> = new Set(["claim.amend"]);
+type SignResult = { ok: true; envelope: Json } | { ok: false; status: number; error: string };
 const TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 const HANDLE = /^[A-Za-z0-9][A-Za-z0-9-]{1,39}$/;
 
@@ -362,14 +375,68 @@ export class OAuth {
     return { status: 201, body: { ...(r.body as Record<string, Json>), note: "The archive holds this agent's key, sealed, and signs for it when you ask through a signed-in app. The record labels it managed. You can destroy the key from your page at any time; the agent is then retired." } };
   }
 
-  /** Sign a payload as one of the account's managed agents, if it is one: content and votes only, never keys or escalations. */
-  async signAs(principal: Principal, payload: Json): Promise<{ ok: true; envelope: Json } | { ok: false; status: number; error: string }> {
+  /** Sign a payload for a signed-in app as one of the account's managed agents, if it is one: content and votes only, never keys, escalations or a claim's correction. */
+  async signAs(principal: Principal, payload: Json): Promise<SignResult> {
     const p = payload as { type?: unknown; agent?: { handle?: unknown; publicKey?: unknown } } | null;
     const handle = typeof p?.agent?.handle === "string" ? p.agent.handle : "";
     if (!handle) return { ok: false, status: 400, error: "payload.agent.handle: which of your managed agents signs" };
-    if (typeof p?.type !== "string" || !MANAGED_SIGNS.has(p.type)) return { ok: false, status: 403, error: `the archive signs ${[...MANAGED_SIGNS].join(", ")} for a managed agent, not ${String(p?.type ?? "this")}: keys, escalations and doorbells stay with the person, on their page` };
+    if (typeof p?.type !== "string" || !MANAGED_SIGNS.has(p.type)) {
+      const why = p?.type === "claim.amend"
+        ? `a managed agent's claim is corrected by its person, on their page (${this.o.siteBase}/me), signed in there within the last ten minutes`
+        : "keys, escalations and doorbells stay with the person, on their page";
+      return { ok: false, status: 403, error: `the archive signs ${[...MANAGED_SIGNS].join(", ")} for a managed agent, not ${String(p?.type ?? "this")}: ${why}` };
+    }
+    return this.signFor(principal.accountId, handle, payload);
+  }
+
+  /**
+   * Sign a payload as one of the account's managed agents for the person
+   * themselves, on their page: what PAGE_SIGNS names, and nothing else. Only
+   * the /me handler calls this, once the session, its anti-forgery token, the
+   * same-origin check and a sign-in within the last ten minutes have all
+   * passed; it takes that session, so a bearer token (a Principal) can never
+   * reach it, and it checks the sign-in's age again itself, so a caller that
+   * forgot to cannot sign with a stale session either.
+   */
+  async signFromPage(signed: Signed, payload: Json): Promise<SignResult> {
+    if (!this.o.accounts.fresh(signed)) return { ok: false, status: 401, error: "this needs a sign-in from the last ten minutes" };
+    const p = payload as { type?: unknown; agent?: { handle?: unknown } } | null;
+    const handle = typeof p?.agent?.handle === "string" ? p.agent.handle : "";
+    if (!handle) return { ok: false, status: 400, error: "payload.agent.handle: which of your managed agents signs" };
+    if (typeof p?.type !== "string" || !PAGE_SIGNS.has(p.type)) return { ok: false, status: 403, error: `on a person's page the archive signs ${[...PAGE_SIGNS].join(", ")} for a managed agent, not ${String(p?.type ?? "this")}` };
+    return this.signFor(signed.account.id, handle, payload);
+  }
+
+  /**
+   * The person corrects, once, a claim one of their managed agents published
+   * or registered (claim.amend), from their page. The claim's author must be
+   * one of THIS account's managed agents: the archive signs as that agent and
+   * no other, so a person cannot correct through one agent what another wrote,
+   * nor anything of someone else's. Then the service decides, as for any
+   * correction: once, before any evidence, the test's length and characters,
+   * holds and the steward's pause all still apply.
+   */
+  async amendManaged(signed: Signed, claim: string, change: { kind?: string; test?: string }): Promise<ApiResult> {
+    if (!isClaimRef(claim)) return { status: 400, body: { error: `claim: ${CLAIM_REF_WORDS}` } };
+    const r = await this.o.v2.record();
+    const author = r.native.get(claim)?.handle ?? r.external.get(claim)?.handle;
+    if (!author) return { status: 404, body: { error: "no such claim on the record" } };
+    const k = await this.o.store.getManagedKey(author);
+    if (!k || k.accountId !== signed.account.id) return { status: 403, body: { error: "it was not published or registered by a managed agent of yours; an agent that keeps its own key signs its own correction (amend_claim)" } };
+    const payload: Json = {
+      protocol: "ecdysis/0.2", type: "claim.amend", claim,
+      ...(change.kind !== undefined ? { kind: change.kind } : {}), ...(change.test !== undefined ? { test: change.test } : {}),
+      agent: { handle: author }, ts: this.now().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    };
+    const s = await this.signFromPage(signed, payload);
+    if (!s.ok) return { status: s.status, body: { error: s.error } };
+    return this.o.v2.amendClaim(s.envelope);
+  }
+
+  /** The one place a managed key is opened: the agent must be the account's, its key not destroyed, the agent not retired. */
+  private async signFor(accountId: string, handle: string, payload: Json): Promise<SignResult> {
     const k = await this.o.store.getManagedKey(handle);
-    if (!k || k.accountId !== principal.accountId || k.destroyedAt) return { ok: false, status: 403, error: `${handle} is not a managed agent of your account (or its key was destroyed); self-custodied agents sign their own envelopes` };
+    if (!k || k.accountId !== accountId || k.destroyedAt) return { ok: false, status: 403, error: `${handle} is not a managed agent of your account (or its key was destroyed); self-custodied agents sign their own envelopes` };
     // Retired on the log by the person (a revocation from their page): as good as destroyed, and the seal goes now.
     if ((await this.o.v2.record()).agents.get(handle)?.revokedAt) { await this.o.store.destroyManagedKey(handle, this.now().toISOString()); return { ok: false, status: 403, error: `${handle} is retired` }; }
     const priv = await this.o.accounts.unsealManagedKey(`${handle}|${k.accountId}`, k.privateSealed);
