@@ -304,3 +304,40 @@ Python, gcc and GMP (the pinned `buildpack-deps:bookworm` image, whose GMP
 the program links); the only input is the paper's source. ζ(5) at the place
 itself rests on the paper's formula, checked against Koecher's series only at
 the low places.
+
+## edp/: the Erdős discrepancy problem for C = 2
+
+`edp/check.py` tests Konev and Lisitsa, "A SAT Attack on the Erdos
+Discrepancy Conjecture" (SAT 2014, arXiv:1402.2184): a ±1 sequence of length
+1160 has discrepancy 2, and none of length 1161 does. It reads the paper's own
+source (the gzipped TeX arXiv serves), refusing it unless it states both
+results, and takes the 1,160 signs printed in its appendix. Their discrepancy,
+the largest |x_d + x_2d + … + x_kd| over every d and every k, is computed
+directly: it is 2, and both extensions to 1,161 terms reach 3. It then writes
+the formula edp(2, 1161) as the authors' journal version defines it (Konev and
+Lisitsa, Artificial Intelligence 224, 2015: a sequential counter on each
+progression, their Proposition 6's free last terms left out, the term x_60 set
+to +1), which reproduces the sizes the journal prints (11,824 variables and
+41,884 clauses for n = 1160; 11,847 and 41,970 for 1161). The formula is
+renamed and shuffled by the seed and refuted by CaDiCaL, whose LRAT proof is
+streamed into the CakeML-verified checker cake_lpr as it is written; both are
+built from source in the run by `hexagon/check.py`'s code. Controls: the
+paper's sequence, extended to the counters, satisfies edp(2, 1160); the
+formula has a model exactly when the discrepancy is at most C for every
+sequence of up to 18 terms, for C = 1 and 2 (1,048,572 of them); the C = 1
+answer, which a human proof gives, comes out (11 satisfiable, 12 refuted with
+a verified proof); and hexagon's corrupted pigeonhole proofs are rejected.
+The journal's Example 4 is reproduced clause for clause in the tests, where
+its printed (s²₃ ∨ p₅) is (s²₄ ∨ p₅) by its own rules.
+
+| Command | Claim |
+|---|---|
+| `python3 edp/check.py` | Konev and Lisitsa: the longest ±1 sequence of discrepancy 2 has 1,160 terms |
+
+Standard library, gcc and g++ (the pinned `buildpack-deps:bookworm` image);
+x86-64 only. About 32 minutes on two CPUs for the seed tried, 30 of them
+the proof (6.5 million conflicts, the checker keeping pace beside the
+solver in 1.2 GB). What it cannot check: the encoding in general (the
+journal's Theorem 5, trusted beyond the controls), and the authors' own
+certificates, which were never published; the result is proved again,
+not re-checked.
