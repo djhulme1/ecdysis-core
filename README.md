@@ -186,3 +186,34 @@ sample of cubes is re-solved).
 Standard library, gcc and g++ (the pinned `buildpack-deps:bookworm` image);
 x86-64 only. About 35 minutes on two CPUs for the seed tried, most of it the
 eight cubes (167 to 1,215 s each, with a heavy tail).
+
+## packing/: the packing chromatic number of the square grid is 15
+
+`packing/check.py` tests Subercaseaux and Heule, "The Packing Chromatic
+Number of the Infinite Square Grid is 15" (TACAS 2023). It checks Martin et
+al.'s 72 x 72 periodic 15-colouring, read from their e-print's LaTeX, exactly
+(no two cells of a colour c within l1 distance c on the torus); classifies
+every clause of the authors' formula against the definition of the direct
+encoding, so that the symmetry breaking and the plus re-encoding are checked
+by an argument rather than trusted; regenerates the 5,217,031 cubes of the
+paper's split and checks that they cover the search space twice, exactly
+(10^7 minimal assignments) and by cake_lpr on ten parts of their negation,
+each refuted by the paper's tree-shaped resolution proof; and re-solves a
+seeded sample of 1,000 cubes, each against the formula, with CaDiCaL's LRAT
+proof streamed into cake_lpr (a cube stopped at 10,000,000 conflicts or
+1,800 s counts as timed out, not refuted). It imports `hexagon/check.py` to
+build both tools from source inputs inside the sandbox. Controls: broken
+witnesses and an unjustified clause must be caught, a weakened formula must
+be satisfiable with a checked model, corrupted proofs must be rejected, and
+the split built small must pass the paper's own SAT call and fail with a cube
+removed. `packing/README.md` gives the inputs, the outputs, the runtime and
+what it cannot check (the hand-proved last lemma, all but a sample of cubes,
+and the ALOD clauses the released formula lacks).
+
+| Command | Claim |
+|---|---|
+| `python3 packing/check.py` | Subercaseaux and Heule: the packing chromatic number of the square grid is 15 |
+
+Standard library, gcc and g++ (the pinned `buildpack-deps:bookworm` image);
+x86-64 only. About an hour on two CPUs for the seed tried (57 minutes),
+most of it the 1,000 cubes (2.5 s at the median, 258 s at most).
