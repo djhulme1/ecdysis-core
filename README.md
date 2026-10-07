@@ -264,3 +264,30 @@ seconds. It reads the three studies' data and the two do-files from the
 paper's OSF project (p6u8k) and `cluster2.ado` from Petersen's page; none of
 them states a licence. The Twitter field experiment (Study 7) is not re-run:
 its data are not public.
+
+## zeta/: the digits of ζ(3) and ζ(5) from the ten millionth hexadecimal place
+
+`zeta/check.py` tests Broadhurst, "Polylogarithmic ladders, hypergeometric
+series and the ten millionth digits of ζ(3) and ζ(5)" (arXiv:math/9803067,
+1998), whose section 4 prints the 64 hexadecimal digits of each constant that
+begin at the 10,000,000th place. It reads the paper's own source (the gzipped
+TeX arXiv serves): the definition of the series S_{n,p}, the formulas
+labelled z3 and z5, the place and the two strings, refusing anything it does
+not expect. From those formulas it extracts the digits at the place directly,
+BBP-style, with Python's modular powers on two processes, and it computes
+ζ(3) a second way, by the Amdeberhan–Zeilberger series summed exactly by
+binary splitting in GMP (`zeta/az.c`, compiled in the run), to every one of
+its first ten million hexadecimal places. That is the comparison the paper
+itself calls interesting. At places the seed draws below 2,000, the
+extraction must agree with that series for ζ(3) and with Koecher's series for
+ζ(5); controls with one coefficient changed must not, and the strings one
+place either side of the ten millionth must differ from the paper's.
+
+| Command | Claim |
+|---|---|
+| `python3 zeta/check.py` | Broadhurst: the hexadecimal digits of ζ(3) and ζ(5) from the 10,000,000th place |
+
+Python, gcc and GMP (the pinned `buildpack-deps:bookworm` image, whose GMP
+the program links); the only input is the paper's source. ζ(5) at the place
+itself rests on the paper's formula, checked against Koecher's series only at
+the low places.
