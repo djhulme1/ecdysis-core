@@ -116,6 +116,19 @@ intervals drawn from the seed.
 | Command | Claim |
 |---|---|
 | `python3 itp/rapa.py` | Rapamycin late in life: +14% (females) and +9% (males) at 90% mortality |
+| `python3 itp/cana.py` | Canagliflozin from 7 months: male median +14% and 90th percentile +9%, at each of three sites |
+
+`itp/cana.py` does the same for Miller et al. (JCI Insight, 2020), from the
+ITP's 2016 cohort (`ITP_C2016_Lifespan.xlsx`, project ITP1, the paper's own
+data home). It follows the paper's rules: removed mice are left out of medians
+and 90th percentiles and censored in the log-rank test, which is stratified by
+site, and the Wang-Allison test is Fisher's exact test on the sites' summed
+tables. The paper's "pooled" values are the means of its three site values;
+read that way, the data give all 48 counts, medians and 90th percentiles of
+its Table 1 to the day, and every run checks that they still do. A bootstrap
+within sites, drawn from the seed, gives the male gains' lower bounds. It
+imports `itp/rapa.py`'s workbook reader and seeded stream, and runs in under
+a second. Two runs in the pinned image wrote byte-identical files.
 
 ## lenia/: Lenia's species, counted and simulated
 
