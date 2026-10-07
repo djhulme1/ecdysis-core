@@ -117,6 +117,7 @@ intervals drawn from the seed.
 |---|---|
 | `python3 itp/rapa.py` | Rapamycin late in life: +14% (females) and +9% (males) at 90% mortality |
 | `python3 itp/cana.py` | Canagliflozin from 7 months: male median +14% and 90th percentile +9%, at each of three sites |
+| `python3 itp/e2.py` | 17-α-estradiol from 16 or 20 months: male median +19% and +11%, 90th percentile +7% and +5% |
 
 `itp/cana.py` does the same for Miller et al. (JCI Insight, 2020), from the
 ITP's 2016 cohort (`ITP_C2016_Lifespan.xlsx`, project ITP1, the paper's own
@@ -129,6 +130,18 @@ its Table 1 to the day, and every run checks that they still do. A bootstrap
 within sites, drawn from the seed, gives the male gains' lower bounds. It
 imports `itp/rapa.py`'s workbook reader and seeded stream, and runs in under
 a second. Two runs in the pinned image wrote byte-identical files.
+
+`itp/e2.py` reads the same workbook for Harrison et al. (Aging Cell, 2021):
+17-α-estradiol at 14.4 ppm started late, at 16 or at 20 months, in the same
+cohort's males. It uses `itp/cana.py`'s rules and tests, and checks each kept
+row against its group's design in the workbook's own columns (dose and start
+age). The data give all nine male numbers of the paper's Table 1; its Table 2
+prints site medians that agree in five places of nine (its controls, 752, 826
+and 799, average 792 where Table 1 prints 787; the data give 749, 814 and 799,
+as Miller et al.'s Table 1 does for the same mice), and the log-rank p from 20
+months comes out 0.0064 where Table 1 prints 0.007. The verdict rests on the
+four pooled gains: +18.5% and +10.6% in the median, +7.0% and +5.4% at the
+90th percentile.
 
 ## lenia/: Lenia's species, counted and simulated
 
