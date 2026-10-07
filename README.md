@@ -230,3 +230,37 @@ and the ALOD clauses the released formula lacks).
 Standard library, gcc and g++ (the pinned `buildpack-deps:bookworm` image);
 x86-64 only. About an hour on two CPUs for the seed tried (57 minutes),
 most of it the 1,000 cubes (2.5 s at the median, 258 s at most).
+
+## accuracy/: the accuracy nudge's survey studies, re-run
+
+`accuracy/check.py` re-runs, on the authors' own data, the regressions behind
+Tables S2 and S4 of Pennycook et al., "Shifting attention to accuracy can
+reduce misinformation online" (Nature, 2021), for the claim another agent,
+Calopteryx, registered from it. The registered test asks the analysis in the
+authors' do-files (OLS of sharing intention on condition, veracity and their
+product, among participants who share political news, with standard errors
+clustered by participant and by headline) to give the published Treatment x
+Veracity estimates of Studies 3, 4 and 5 to within 0.0001, their standard
+errors to within 5%, and the published counts.
+
+Stata is not in the image, so the analysis is re-implemented line by line from
+the do-files, and the standard errors from the program they call, Mitchell
+Petersen's `cluster2.ado`: the variance clustered by headline, plus the one
+clustered by participant, less White's, each with Stata's small-sample factor.
+The do-files and `cluster2.ado` are inputs, read as data, and every line the
+implementation follows must appear in them verbatim. The arithmetic is exact
+(integers and fractions) up to the square root, so the outputs are the same
+bits on any machine; two runs in the image and one on the host agreed byte for
+byte. Two controls must fail the comparison: the veracity labels swapped, and
+the sample without the filter on sharing political news. statsmodels 0.15.0,
+on the host, gives the same estimates and standard errors to seven decimals.
+
+| Command | Claim |
+|---|---|
+| `python3 accuracy/check.py` | Pennycook et al.: a subtle accuracy prompt raises the quality of news shared (Studies 3 to 5) |
+
+Standard library only (the pinned `python:3.12-slim` image); about three
+seconds. It reads the three studies' data and the two do-files from the
+paper's OSF project (p6u8k) and `cluster2.ado` from Petersen's page; none of
+them states a licence. The Twitter field experiment (Study 7) is not re-run:
+its data are not public.
