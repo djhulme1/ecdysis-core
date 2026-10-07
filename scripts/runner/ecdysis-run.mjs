@@ -42,6 +42,10 @@ import { join, resolve } from "node:path";
 import { inputProblems, parseSupplied, prepareInputs, DEFAULT_TOTAL_CAP } from "./inputs.mjs";
 
 const MAX_OUTPUTS = 20;
+// A replication test of a claim with a period also reports period_from and period_to, the span its data cover. The archive
+// counts them beside the twenty, never against them (PERIOD_OUTPUTS in src/core/v2/kinds.ts), and so does the runner.
+const PERIOD_OUTPUTS = new Set(["period_from", "period_to"]);
+const counted = (names) => names.filter((n) => !PERIOD_OUTPUTS.has(n)).length;
 const MAX_OUTPUTS_BYTES = 64 * 1024;
 const NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
 const HEX = /^[0-9a-f]{64}$/;
@@ -74,7 +78,7 @@ function readBundle(path) {
   if (b.image !== undefined && (typeof b.image !== "string" || !/^sha256:[0-9a-f]{64}$/.test(b.image))) errors.push('image: "sha256:<64 hex>"');
   if (b.imageRef !== undefined && (typeof b.imageRef !== "string" || !/^[a-z0-9][a-z0-9._\/-]{0,200}@sha256:[0-9a-f]{64}$/.test(b.imageRef) || (b.image && !b.imageRef.endsWith(`@${b.image}`)))) errors.push("imageRef: <registry/name>@<the pinned digest>");
   if (typeof b.run !== "string" || b.run.length < 1 || b.run.length > 500) errors.push("run: the command");
-  if (!Array.isArray(b.outputs) || b.outputs.length < 1 || b.outputs.length > MAX_OUTPUTS) errors.push(`outputs: 1 to ${MAX_OUTPUTS} declared outputs`);
+  if (!Array.isArray(b.outputs) || b.outputs.length < 1 || counted(b.outputs.map((o) => o?.name)) > MAX_OUTPUTS) errors.push(`outputs: 1 to ${MAX_OUTPUTS} declared outputs, besides period_from and period_to`);
   else for (const o of b.outputs) {
     if (!o || typeof o.name !== "string" || !NAME.test(o.name)) errors.push("outputs[].name: a letter then letters, digits, _ . -");
     if (o?.tolerance !== undefined && !(typeof o.tolerance === "number" && o.tolerance >= 0)) errors.push("outputs[].tolerance: a number >= 0");
@@ -218,7 +222,7 @@ function readOutputs(dir) {
   try { o = JSON.parse(readFileSync(p, "utf8")); } catch (e) { fail(4, `results/outputs.json is not JSON: ${e.message}`); }
   if (!o || typeof o !== "object" || Array.isArray(o)) fail(4, "results/outputs.json must be a flat object");
   const keys = Object.keys(o);
-  if (keys.length > MAX_OUTPUTS) fail(4, `more than ${MAX_OUTPUTS} outputs`);
+  if (counted(keys) > MAX_OUTPUTS) fail(4, `more than ${MAX_OUTPUTS} outputs besides period_from and period_to`);
   for (const k of keys) {
     const v = o[k];
     if (!NAME.test(k)) fail(4, `output name not allowed: ${k}`);

@@ -92,6 +92,46 @@ describe("the reference runner", { skip: !hasGit && "git is not available" }, ()
     }
   });
 
+  it("counts period_from and period_to beside the twenty outputs, as the archive does", () => {
+    // A replication test of a claim with a period reports the span its data cover as period_from and period_to, which the
+    // archive counts apart from the twenty outputs. Twenty outputs and the two period values must run; a twenty-first
+    // output of any other name must not, whether declared in the bundle or written by the run.
+    const dir = mkdtempSync(join(tmpdir(), "ecdysis-bundle-"));
+    const work = mkdtempSync(join(tmpdir(), "ecdysis-runner-"));
+    try {
+      const twenty = Array.from({ length: 20 }, (_, i) => `"o${i + 1}": ${i + 1}`).join(", ");
+      writeFileSync(join(dir, "run.sh"), `#!/bin/sh\nset -e\nmkdir -p results\n` +
+        `if [ "$1" = "extra" ]; then printf '{${twenty}, "o21": 21}\\n' > results/outputs.json; ` +
+        `else printf '{${twenty}, "period_from": 20171004, "period_to": 20190502}\\n' > results/outputs.json; fi\n`);
+      sh("git", ["init", "-q", "-b", "main"], dir);
+      sh("git", ["add", "."], dir);
+      sh("git", ["commit", "-q", "-m", "bundle"], dir);
+      const commit = sh("git", ["rev-parse", "HEAD"], dir).stdout.trim();
+      const declared = Array.from({ length: 20 }, (_, i) => ({ name: `o${i + 1}`, tolerance: 0 }));
+      const bundle = { repo: `file://${dir}`, commit, run: "sh run.sh", outputs: [...declared, { name: "period_from" }, { name: "period_to" }], runtimeMinutes: 1 };
+      const bpath = join(work, "bundle.json");
+      writeFileSync(bpath, JSON.stringify(bundle));
+      const ok = runner(["--bundle", bpath, "--seed", "a".repeat(64), "--no-container", "--allow-file-repo"]);
+      assert.equal(ok.status, 0, ok.err);
+      const out = JSON.parse(ok.out) as Record<string, number>;
+      assert.equal(out["period_from"], 20171004);
+      assert.equal(out["o20"], 20);
+      // The run writes a twenty-first output of another name: refused after the run.
+      writeFileSync(join(work, "extra.json"), JSON.stringify({ ...bundle, run: "sh run.sh extra" }));
+      const extra = runner(["--bundle", join(work, "extra.json"), "--seed", "a".repeat(64), "--no-container", "--allow-file-repo"]);
+      assert.equal(extra.status, 4, extra.err);
+      assert.match(extra.err, /more than 20 outputs/);
+      // The bundle declares a twenty-first output of another name: refused before anything runs.
+      writeFileSync(join(work, "declared.json"), JSON.stringify({ ...bundle, outputs: [...declared, { name: "o21" }] }));
+      const many = runner(["--bundle", join(work, "declared.json"), "--seed", "a".repeat(64), "--no-container", "--allow-file-repo"]);
+      assert.equal(many.status, 3, many.err);
+      assert.match(many.err, /1 to 20 declared outputs, besides period_from and period_to/);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses an outputs file that is not an ordinary file: a bundle cannot make the runner read the host's files", () => {
     // The bundle plants results/outputs.json as a symlink to a file on the host. Read, it would be reported to the archive as the
     // run's outputs; the runner reads results on the host, so it checks the file itself, not its contents, first.
