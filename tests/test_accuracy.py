@@ -220,7 +220,8 @@ class RealData(unittest.TestCase):
         self.assertEqual((self.out["period_from"], self.out["period_to"]), (20171004, 20190502))
         self.assertEqual(self.out["published_matched"], 15)
         self.assertEqual(self.out["test_passed"], 1)
-        self.assertEqual(self.out["unique_pairs"], 1)
+        self.assertTrue(all(self.detail["studies"][f"s{s}"]["unique_pairs"] for s in (3, 4, 5)))
+        self.assertEqual(len(self.out), 20)                  # the reference runner reads at most 20
 
     def test_statsmodels_agrees(self):
         # statsmodels 0.15.0 on the host: OLS, one-way clustered (use_correction, df_correction) by headline and by
@@ -228,7 +229,7 @@ class RealData(unittest.TestCase):
         for study, (est, s) in {3: (0.0529429, 0.0107609), 4: (0.0648046, 0.0146652), 5: (0.0542344, 0.0156668)}.items():
             self.assertAlmostEqual(self.out[f"s{study}_estimate"], est, places=7)
             self.assertAlmostEqual(self.out[f"s{study}_se"], s, places=7)
-        self.assertAlmostEqual(self.out["s3_se_participant_only"], 0.0111396, places=7)
+        self.assertAlmostEqual(self.detail["studies"]["s3"]["se_participant_only"], 0.0111396, places=7)
 
     def test_the_controls_fail(self):
         self.assertEqual(self.out["controls_passed"], 2)

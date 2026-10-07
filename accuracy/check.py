@@ -50,7 +50,7 @@ any seed existed; the seed is not used, as the analysis has no randomness.
    published_matched counts the 15 values that agree.
 8. Controls, each of which must fail the comparison: the veracity labels swapped (the estimate changes sign), and
    the sample without the filter on sharing political news (the counts change). controls_passed counts those that
-   fail as they must. Beside them, Study 3's standard error clustered by participant alone.
+   fail as they must. detail.json gives, beside them, each study's standard error clustered by participant alone.
 9. The period the data cover, as the archive asks of a claim with a period: period_from is the earliest start date
    and period_to the latest end date (YYYYMMDD) of the participants in the three regressions, read from each file's
    start and end columns (in Study 3's file, Qualtrics's legacy names V8 and V9), dates written month/day/year with
@@ -63,8 +63,8 @@ What it cannot check:
   last printed digit is the evidence that they are the same;
 - whether the effect would recur in new samples: this re-runs the authors' analysis on their own data.
 
-Writes results/outputs.json (the 20 values a receipt carries, with period_from and period_to beside them) and
-results/detail.json (every value computed).
+Writes results/outputs.json (18 values, and period_from and period_to: 20 in all, the most the reference runner
+reads) and results/detail.json (every value computed, with whether every (headline, participant) pair was unique).
 """
 
 import csv
@@ -366,8 +366,6 @@ def run(inputs="inputs", results="results"):
     detail["controls"] = controls
     out["published_matched"] = matched
     out["controls_passed"] = sum(1 for c in controls.values() if c["fails_everywhere"])
-    out["s3_se_participant_only"] = round(detail["studies"]["s3"]["se_participant_only"], 7)
-    out["unique_pairs"] = int(all(detail["studies"][f"s{s}"]["unique_pairs"] for s in PUBLISHED))
     out["test_passed"] = int(all_ok)
     out["period_from"] = min(detail["studies"][f"s{s}"]["first_start"] for s in PUBLISHED)
     out["period_to"] = max(detail["studies"][f"s{s}"]["last_end"] for s in PUBLISHED)
