@@ -51,6 +51,10 @@ any seed existed; the seed is not used, as the analysis has no randomness.
 8. Controls, each of which must fail the comparison: the veracity labels swapped (the estimate changes sign), and
    the sample without the filter on sharing political news (the counts change). controls_passed counts those that
    fail as they must. Beside them, Study 3's standard error clustered by participant alone.
+9. The period the data cover, as the archive asks of a claim with a period: period_from is the earliest start date
+   and period_to the latest end date (YYYYMMDD) of the participants in the three regressions, read from each file's
+   start and end columns (in Study 3's file, Qualtrics's legacy names V8 and V9), dates written month/day/year with
+   an optional time; anything else is refused.
 
 What it cannot check:
 - the field experiment on Twitter (Study 7), whose data are not public, and any study the test does not name: of the
@@ -59,7 +63,8 @@ What it cannot check:
   last printed digit is the evidence that they are the same;
 - whether the effect would recur in new samples: this re-runs the authors' analysis on their own data.
 
-Writes results/outputs.json (the 20 values a receipt carries) and results/detail.json (every value computed).
+Writes results/outputs.json (the 20 values a receipt carries, with period_from and period_to beside them) and
+results/detail.json (every value computed).
 """
 
 import csv
@@ -120,6 +125,7 @@ REQUIRED = {
 # The published values the registered test quotes: estimate, SE, observations, participants, headlines.
 PUBLISHED = {3: (0.0529, 0.0108, 17417, 727, 24), 4: (0.0648, 0.0147, 18677, 780, 24), 5: (0.0542, 0.0157, 13340, 671, 20)}
 STUDIES = ((3, "Study_3_data.csv", 12), (4, "Study_4_data.csv", 12), (5, "Study_5_data.csv", 10))
+DATES = {3: ("v8", "v9"), 4: ("startdate", "enddate"), 5: ("startdate", "enddate")}   # start, end columns
 ESTIMATE_TOL, SE_REL_TOL = 0.0001, 0.05
 
 
@@ -162,6 +168,14 @@ def value(s):
         raise Refused(f"value {s!r} is not a number")
 
 
+def ymd(s):
+    """A date written month/day/year, with an optional time after a space, as a YYYYMMDD integer."""
+    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})( \d{1,2}:\d{2}(:\d{2})?)?", s.strip())
+    if not m or not (1 <= int(m.group(1)) <= 12 and 1 <= int(m.group(2)) <= 31):
+        raise Refused(f"date {s!r} is not month/day/year")
+    return int(m.group(3)) * 10000 + int(m.group(1)) * 100 + int(m.group(2))
+
+
 def read_csv(blob):
     text = blob.decode("utf-8-sig")
     rows = list(csv.reader(io.StringIO(text, newline="")))
@@ -178,10 +192,11 @@ def observations(blob, study, items, filter_political=True):
     """Rule 4: the long rows (x-defining fields, rating, participant, headline) of one study."""
     header, rows = read_csv(blob)
     col = {h: i for i, h in enumerate(header)}
-    for name in ["condition", "fb", "socialmedia_chk"] + [f"{s}{k}_3" for s in ("fake", "real") for k in range(1, items + 1)]:
+    for name in ["condition", "fb", "socialmedia_chk", *DATES[study]] + \
+            [f"{s}{k}_3" for s in ("fake", "real") for k in range(1, items + 1)]:
         if name not in col:
             raise Refused(f"study {study}: no column {name}")
-    out, missing_condition_kept, participants_dropped = [], 0, 0
+    out, missing_condition_kept, participants_dropped, starts, ends = [], 0, 0, [], []
     for p, r in enumerate(rows, start=1):
         chk, fb, cond = value(r[col["socialmedia_chk"]]), value(r[col["fb"]]), value(r[col["condition"]])
         if chk is None or fb == 2:
@@ -193,6 +208,7 @@ def observations(blob, study, items, filter_political=True):
             if study in (3, 4):
                 continue                      # xi's dummy is missing, so regress drops the rows
             missing_condition_kept += 1       # Stata: condition==3 is 0 when condition is missing
+        before = len(out)
         for k in range(1, items + 1):
             for real, stem in ((0, "fake"), (1, "real")):
                 rating = value(r[col[f"{stem}{k}_3"]])
@@ -202,7 +218,11 @@ def observations(blob, study, items, filter_political=True):
                     raise Refused(f"study {study}, participant {p}: rating {rating} outside 1..6")
                 headline = k + items * real + (24 if study == 3 else 0)
                 out.append({"cond": cond, "real": real, "rating": int(rating), "participant": p, "headline": headline})
-    return out, {"participants_dropped": participants_dropped, "missing_condition_kept": missing_condition_kept}
+        if len(out) > before:
+            starts.append(ymd(r[col[DATES[study][0]]]))
+            ends.append(ymd(r[col[DATES[study][1]]]))
+    return out, {"participants_dropped": participants_dropped, "missing_condition_kept": missing_condition_kept,
+                 "first_start": min(starts) if starts else None, "last_end": max(ends) if ends else None}
 
 
 def design(rows, study, swap_veracity=False):
@@ -330,6 +350,7 @@ def run(inputs="inputs", results="results"):
             "estimate_exact": f"{r['b'][2].numerator}/{r['b'][2].denominator}",
             "se_participant_only": r["se_participant_only"], "unique_pairs": r["unique_pairs"],
             "participants_dropped": r["participants_dropped"], "missing_condition_kept": r["missing_condition_kept"],
+            "first_start": r["first_start"], "last_end": r["last_end"],
             "published": PUBLISHED[study], "agrees": ok, "values_agreeing": m,
         }
     controls = {}
@@ -348,6 +369,8 @@ def run(inputs="inputs", results="results"):
     out["s3_se_participant_only"] = round(detail["studies"]["s3"]["se_participant_only"], 7)
     out["unique_pairs"] = int(all(detail["studies"][f"s{s}"]["unique_pairs"] for s in PUBLISHED))
     out["test_passed"] = int(all_ok)
+    out["period_from"] = min(detail["studies"][f"s{s}"]["first_start"] for s in PUBLISHED)
+    out["period_to"] = max(detail["studies"][f"s{s}"]["last_end"] for s in PUBLISHED)
     os.makedirs(results, exist_ok=True)
     with open(os.path.join(results, "outputs.json"), "w", encoding="ascii") as fh:
         json.dump(out, fh, indent=2, sort_keys=True)

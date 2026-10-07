@@ -28,11 +28,14 @@ def table(header, rows):
     return out.getvalue().encode("utf-8")
 
 
-def study_csv(participants, items=2):
-    """participants: list of (condition, fb, socialmedia_chk, fake ratings, real ratings), as strings."""
-    header = ["Condition", "FB", "SocialMedia_Chk"] + [f"Fake{k}_3" for k in range(1, items + 1)] + \
-             [f"Real{k}_3" for k in range(1, items + 1)]
-    return table(header, [[c, fb, chk] + list(fk) + list(rl) for c, fb, chk, fk, rl in participants])
+def study_csv(participants, items=2, dates=None):
+    """participants: list of (condition, fb, socialmedia_chk, fake ratings, real ratings), as strings; dates gives
+    each participant's (start, end), by default 10/4/2017 for both."""
+    header = ["Condition", "FB", "SocialMedia_Chk", "V8", "V9", "StartDate", "EndDate"] + \
+             [f"Fake{k}_3" for k in range(1, items + 1)] + [f"Real{k}_3" for k in range(1, items + 1)]
+    dates = dates or [("10/4/2017 8:47", "10/4/2017 8:55")] * len(participants)
+    return table(header, [[c, fb, chk, st, en, st, en] + list(fk) + list(rl)
+                          for (c, fb, chk, fk, rl), (st, en) in zip(participants, dates)])
 
 
 class Algebra(unittest.TestCase):
@@ -135,6 +138,22 @@ class Sample(unittest.TestCase):
             A.design([{"cond": 3.0, "real": 0}], 4)
 
 
+class Period(unittest.TestCase):
+    def test_dates_and_the_span_of_the_participants_used(self):
+        self.assertEqual(A.ymd("10/4/2017 8:47"), 20171004)
+        self.assertEqual(A.ymd("4/30/2019"), 20190430)
+        self.assertEqual(A.ymd(" 12/31/2018 23:59:59 "), 20181231)
+        for bad in ("2017-10-04", "13/1/2017", "10/4/17", "", "10/4/2017T08:47"):
+            with self.subTest(bad=bad), self.assertRaises(A.Refused):
+                A.ymd(bad)
+        blob = study_csv([("1", "1", "1", ("1", "2"), ("3", "4")),        # used
+                          ("1", "1", "2", ("1", "2"), ("3", "4")),        # filtered out: its dates do not count
+                          ("2", "1", "1", ("", ""), ("", ""))],           # no rating: its dates do not count
+                         dates=[("11/28/2017", "11/29/2017"), ("1/1/2010", "1/1/2030"), ("1/1/2011", "1/1/2031")])
+        _, info = A.observations(blob, 4, 2)
+        self.assertEqual((info["first_start"], info["last_end"]), (20171128, 20171129))
+
+
 class Refusals(unittest.TestCase):
     def test_non_numeric_and_out_of_range_values(self):
         for bad in (("x", "1", "1", ("1", "1"), ("1", "1")), ("1", "1", "1", ("7", "1"), ("1", "1")),
@@ -198,6 +217,7 @@ class RealData(unittest.TestCase):
         cls.tmp.cleanup()
 
     def test_the_published_values(self):
+        self.assertEqual((self.out["period_from"], self.out["period_to"]), (20171004, 20190502))
         self.assertEqual(self.out["published_matched"], 15)
         self.assertEqual(self.out["test_passed"], 1)
         self.assertEqual(self.out["unique_pairs"], 1)
