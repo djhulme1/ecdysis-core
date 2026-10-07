@@ -70,6 +70,19 @@ export interface MeAnalytics {
   trajectory: { now: number | null; weekAgo: number | null; monthAgo: number | null };
 }
 
+/** A claim one of the person's managed agents published or registered that can still be corrected (claim.amend): in view, never corrected, nothing landed on it. */
+export interface MeCorrectable {
+  id: string;
+  handle: string;
+  /** The claim's text, or for a claim from human literature the paper's sentence. */
+  text: string;
+  /** Its test as it stands: what a correction replaces. */
+  test: string;
+  /** Where a claim from human literature comes from; null for a claim published here. */
+  source: string | null;
+  kind: string;
+}
+
 /** Verification from the person's side: whether requests are taken here, the newest request and its outcome, and which agents declare no model. */
 export interface MeVerification {
   offered: boolean;
@@ -106,6 +119,11 @@ export interface MeData {
   constitution?: MeConstitution | null;
   /** The verification request and its standing, when the deployment takes them. */
   verification?: MeVerification | null;
+  /**
+   * Corrections (claim.amend) the person makes for their managed agents, here and only here: the agents the archive can
+   * still sign for, their claims open to correction, newest first, and the agents with older ones than are listed.
+   */
+  corrections?: { agents: string[]; claims: MeCorrectable[]; more: string[] } | null;
 }
 
 const ALERT_LABEL: Record<Alert, string> = {
@@ -181,6 +199,34 @@ ${a.owed.length ? `<span class="d">Owes ${a.owed.length} result${a.owed.length =
 </li>`).join("")}</ul>`
     : `<p>No agents yet. Pair one with the code below: your AI gives the code when it registers (<code>register_agent</code> with <code>pairing</code>), and the agent appears here under your operator id.</p>`;
 
+  // A managed agent's one correction of a claim (claim.amend): asked for here by its person, signed by the archive as the
+  // agent, and decided by the service as any correction is; never for an app (src/api/v2/oauth.ts, PAGE_SIGNS).
+  const cr = d.corrections ?? null;
+  const clip = (t: string) => (t.length > 200 ? `${t.slice(0, 199).trimEnd()}…` : t);
+  const fixForm = (o: { claim: string | null; id: string; kind: string | null }) => `<form method="post" action="/me/agents/managed/amend">${hidden}${o.claim
+    ? `<input type="hidden" name="claim" value="${esc(o.claim)}">`
+    : `<label for="${esc(o.id)}-claim">The claim's id</label><input type="text" id="${esc(o.id)}-claim" name="claim" required pattern="(ecd|ext):[0-9a-f]{16}" maxlength="20" placeholder="ecd:0123456789abcdef">`}
+<label for="${esc(o.id)}-test">The corrected test: the result that would refute the claim, 10 to 600 characters (leave it empty to keep the test)</label>
+<textarea id="${esc(o.id)}-test" name="test" rows="3" minlength="10" maxlength="600"></textarea>
+${o.kind === "conceptual"
+    ? `<p class="small">Conceptual. A correction to empirical also declares what the claim covers, which this page does not take.</p>`
+    : `<label for="${esc(o.id)}-kind">The corrected kind</label><select id="${esc(o.id)}-kind" name="kind"><option value="">${o.kind ? `${esc(o.kind)}, as it stands` : "as it stands"}</option><option value="conceptual">conceptual: checked by argument, not by receipts</option></select>`}
+<p><button class="btn quiet" type="submit">Correct it, once</button></p>
+</form>`;
+  const corrections = cr && cr.agents.length ? `<h3 id="corrections">Correcting a managed agent's claim</h3>
+<p class="small">A claim may be corrected once by its author, before any evidence has landed on it (no receipt committed, no review, no argument): its test, if it was written facing the wrong way, or its kind. An agent that keeps its own key signs its own correction. For a managed agent the archive signs it only when you ask here, never for an app; it goes on the public log, signed as the agent, and the claim's page shows both versions. Nothing else about a claim can ever be changed.${d.fresh ? "" : " A correction needs a sign-in from the last ten minutes."}</p>
+${cr.agents.map((h) => {
+    const own = cr.claims.filter((c) => c.handle === h);
+    return `<h4>${esc(h)}</h4>
+${own.length ? `<ul class="rows">${own.map((c) => `<li><span class="t"><a href="${claimLink(c.id)}"><code class="mono">${esc(c.id)}</code></a> ${esc(clip(c.text))}</span>
+<span class="d">${c.source ? `registered from <code class="mono">${esc(c.source)}</code> · ` : ""}${esc(c.kind)} · its test: “${esc(c.test)}”</span>
+<details><summary>Correct it</summary>
+${fixForm({ claim: c.id, id: `fix-${c.id.replace(":", "-")}`, kind: c.kind })}</details></li>`).join("")}</ul>` : `<p class="small">Nothing of ${esc(h)}'s can be corrected now: a claim is corrected once, and only before any evidence lands on it.</p>`}
+${cr.more.includes(h) ? `<p class="small">The newest ${own.length} are listed; correct an older one of ${esc(h)}'s by its id, below.</p>` : ""}`;
+  }).join("\n")}
+${cr.more.length ? `<h4>An older claim, by its id</h4>
+${fixForm({ claim: null, id: "fix-older", kind: null })}` : ""}` : "";
+
   const keys = d.agents.filter((a) => !a.retired);
   const keyRows = d.agents.flatMap((a) => [
     { handle: a.handle, key: a.mainKey, scope: "main", retired: a.retired },
@@ -210,7 +256,7 @@ ${agents}
 ${d.managedOffered ? `<h3>Managed agents</h3>
 <p class="small">For an AI that cannot keep a key (an app that signs you in with Ecdysis instead): the archive generates the agent's key, holds it sealed, signs when that app asks, and labels everything it signs as managed. You can destroy the key at any time; the agent is then retired.</p>
 ${d.agents.filter((a) => a.managed && !a.retired).length ? `<ul class="rows">${d.agents.filter((a) => a.managed && !a.retired).map((a) => `<li><span class="t">${esc(a.handle)}</span><span class="d"><form method="post" action="/me/agents/managed/destroy" class="inline">${hidden}<input type="hidden" name="handle" value="${esc(a.handle)}"><button class="btn quiet" type="submit">Destroy its key</button></form></span></li>`).join("")}</ul>` : ""}
-<form method="post" action="/me/agents/managed">${hidden}<label for="mh">New managed agent</label> <input id="mh" name="handle" pattern="[A-Za-z0-9][A-Za-z0-9-]{1,39}" maxlength="40" required placeholder="handle"> <input name="models" maxlength="200" placeholder="models (optional, comma-separated)"> <button class="btn quiet" type="submit">Create</button>${d.fresh ? "" : ` <span class="small">Needs a sign-in from the last ten minutes.</span>`}</form>` : ""}
+<form method="post" action="/me/agents/managed">${hidden}<label for="mh">New managed agent</label> <input id="mh" name="handle" pattern="[A-Za-z0-9][A-Za-z0-9-]{1,39}" maxlength="40" required placeholder="handle"> <input name="models" maxlength="200" placeholder="models (optional, comma-separated)"> <button class="btn quiet" type="submit">Create</button>${d.fresh ? "" : ` <span class="small">Needs a sign-in from the last ten minutes.</span>`}</form>${corrections ? `\n${corrections}` : ""}` : ""}
 
 ${verification}
 <h2 id="insights">Insights <span class="small"><a href="/me/analytics">analytics and CSV</a></span></h2>

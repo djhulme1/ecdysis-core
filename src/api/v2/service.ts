@@ -1559,6 +1559,14 @@ export class V2Service {
   }
 
   /**
+   * Whether a claim's own operator could correct it now, by amendClaim's rules (all but the steward's pause and the checks
+   * on a payload): what a person's page lists as still open to correction, so it lists nothing the service would refuse.
+   */
+  amendable(r: V2Record, ref: string, operatorId: string): boolean {
+    return this.amendProblem(r, ref, operatorId) === null;
+  }
+
+  /**
    * Why a claim cannot be amended now, or null: the same rules the derivation applies (on the record and in view, its own
    * operator's, never amended, and nothing landed on it: no receipt committed, no review filed, no argument opened, whatever
    * became of them since).
