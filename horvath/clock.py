@@ -173,6 +173,9 @@ def read_example(path, names):
     return header[1:], M
 
 
+MISSING = ("", "NA", "NaN", "nan", "null", "NULL")       # how series matrices write a missing value
+
+
 def read_series(path, names):
     """A GEO series matrix, streamed: the samples' characteristics and their values for the calibration probes
     (NaN where missing or absent)."""
@@ -208,8 +211,12 @@ def read_series(path, names):
             seen[i] = True
             for j, v in enumerate(parts[1:]):
                 v = v.strip('"')
-                if v not in ("", "NA", "null", "NaN"):
+                if v in MISSING:
+                    continue
+                try:
                     M[i, j] = float(v)
+                except ValueError:
+                    raise Refused(f"{path}: {parts[0]} has the value {v!r}") from None
     per_sample = []
     for j in range(len(samples)):
         d = {}

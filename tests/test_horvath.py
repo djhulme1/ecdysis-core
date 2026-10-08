@@ -93,7 +93,7 @@ class Series(unittest.TestCase):
     def test_read(self):
         with tempfile.TemporaryDirectory() as d:
             path = self.write(d, series_text([["age: 40", "age: 61.5"], ["tissue: Saliva", "tissue: Saliva"]],
-                                             [("cgA", 0.5, 0.6), ("cgX", 0.1, 0.2), ("cgB", "", 0.7)]))
+                                             [("cgA", 0.5, 0.6), ("cgX", 0.1, 0.2), ("cgB", "NULL", 0.7)]))
             samples, metas, M, absent = C.read_series(path, ["cgA", "cgB", "cgC"])
             self.assertEqual(samples, ["GSM1", "GSM2"])
             self.assertEqual(metas[1], {"age": "61.5", "tissue": "Saliva"})
@@ -106,6 +106,9 @@ class Series(unittest.TestCase):
             twice = self.write(d, series_text([["age: 40", "age: 41"]], [("cgA", 0.5, 0.6), ("cgA", 0.5, 0.6)]))
             with self.assertRaises(C.Refused):
                 C.read_series(twice, ["cgA"])
+            odd = self.write(d, series_text([["age: 40", "age: 41"]], [("cgA", 0.5, "x0.6")]))
+            with self.assertRaises(C.Refused):
+                C.read_series(odd, ["cgA"])
         self.assertRaises(C.Refused, C.age_of, {"age": "40s"}, "x")
         self.assertRaises(C.Refused, C.age_of, {}, "x")
 
