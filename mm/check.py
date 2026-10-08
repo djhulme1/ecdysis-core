@@ -16,6 +16,9 @@ results/outputs.json:
                4x4 decomposition over the complex numbers.
   dps          Dumas, Pernet & Sedoglavic (arXiv:2506.13242): the 48-product
                rational 4x4 algorithm, as its L, R and P matrices.
+  symflips     Moosbauer & Poole, "Flip graphs with symmetry and new matrix
+               multiplication schemes" (arXiv:2502.04514): the 5x5 scheme in 93
+               products and the 6x6 in 153, over the integers and modulo 2.
   selftest     the checker on Strassen's scheme and on broken copies of it.
 
 Every scheme is checked three ways.
@@ -339,6 +342,86 @@ def read_flips(data, n, m, p):
     return scheme
 
 
+# Moosbauer & Poole's files write the same products as the .exp format, a, b and c, with c_ki for the
+# output entry C_ik, but in four spellings: factors joined by "*" or written side by side (with or
+# without spaces), coefficients written "2*b14" or "2 b31", a factor that is a bare variable, and whole
+# products negated as -( ... ). This reader takes all of them, and nothing else.
+SYM_TERM = re.compile(r"([+-]?)\s*(?:(\d+)\s*\*?\s*)?([abc])(\d)(\d)")
+SYM_BARE = re.compile(r"(?:(\d+)\s*\*?\s*)?[abc]\d\d")
+
+
+def sym_form(body, letter, rows, cols):
+    """One linear form, every character accounted for: {index: coefficient}."""
+    out, seen = {}, 0
+    for t in SYM_TERM.finditer(body):
+        sign, coef, var, i, j = t.groups()
+        i, j = int(i) - 1, int(j) - 1
+        if var != letter or not (0 <= i < rows and 0 <= j < cols):
+            raise ValueError(f"unexpected {var}{i + 1}{j + 1} in a {letter}-factor: {body!r}")
+        c = (int(coef) if coef else 1) * (-1 if sign == "-" else 1)
+        out[i * cols + j] = out.get(i * cols + j, 0) + c
+        seen += 1
+    if seen == 0 or re.sub(r"\s+", "", SYM_TERM.sub("", body)):
+        raise ValueError(f"cannot read the factor {body!r}")
+    return out
+
+
+def sym_factors(s):
+    """The factors of one product, in order: [(sign, body)], each a parenthesised form or a bare variable."""
+    out, i = [], 0
+    while i < len(s):
+        if s[i] in " \t*":
+            i += 1
+            continue
+        sign = 1
+        if s[i] in "+-":
+            sign = -1 if s[i] == "-" else 1
+            i += 1
+            while i < len(s) and s[i] in " \t":
+                i += 1
+        if i < len(s) and s[i] == "(":
+            j = closing(s, i)
+            if j < 0:
+                raise ValueError(f"unbalanced parentheses: {s!r}")
+            out.append((sign, s[i + 1:j]))
+            i = j + 1
+            continue
+        m = SYM_BARE.match(s, i)
+        if not m:
+            raise ValueError(f"cannot read a factor at {s[i:i + 20]!r}")
+        out.append((sign, m.group(0)))
+        i = m.end()
+    return out
+
+
+def read_symflips(data, n):
+    """An n x n scheme in Moosbauer & Poole's files: one product per line, in any of their spellings."""
+    scheme = []
+    for line in data.decode("ascii").splitlines():
+        s, sign = line.strip(), 1
+        if not s:
+            continue
+        if s.startswith("-(") and closing(s, 1) == len(s) - 1 and len(sym_factors(s[2:-1])) == 3:
+            s, sign = s[2:-1].strip(), -1
+        parts = sym_factors(s)
+        if len(parts) != 3:
+            raise ValueError(f"not a product of three factors: {line!r}")
+        for (_, body), letter in zip(parts, "abc"):
+            if not re.search(letter, body):
+                raise ValueError(f"factors out of order in {line!r}")
+        (su, bu), (sv, bv), (sw, bw) = parts
+        u = {k: sign * su * x for k, x in sym_form(bu, "a", n, n).items()}
+        v = {k: sv * x for k, x in sym_form(bv, "b", n, n).items()}
+        w = {k: sw * x for k, x in sym_form(bw, "c", n, n).items()}
+        scheme.append(tuple(columns([u, v, w])))
+    return scheme
+
+
+def mod2(scheme):
+    """The scheme with every coefficient reduced modulo 2 (zeros dropped)."""
+    return [tuple({k: x % 2 for k, x in f.items() if x % 2} for f in t) for t in scheme]
+
+
 def read_npy_int64(data):
     """An .npy array of little-endian 64-bit integers in C order: (shape, flat values)."""
     if data[:6] != b"\x93NUMPY":
@@ -538,6 +621,39 @@ def run_dps(seed):
     return out, wrong == 0 and pw == 0 and products <= 48 and odd == 0 and out["not_rational"] == 0
 
 
+SYMFLIPS = [  # (output prefix, integer scheme, its sha256, the F2 scheme, its sha256, n, products claimed, the bound improved)
+    ("s555_93", "sym555m93_lifted.txt", "dee43421176b9404cb409db20447af04f0b861d8a4d4bd4ad05e9e98c718bf46",
+     "sym555m93.txt", "89b86d46243b2245bd6197cd0967fdb5b7c0da0de9ea2fd2b3f5ec2f74c9b804", 5, 93, 97),
+    ("s666_153", "sym666m153_lifted.txt", "4c925abd939bf55c72fe777a0a0a30734b321742829144cbe054024f6ee8e802",
+     "sym666m153.txt", "4043f707842257e74f745e426fa1f9687753a870870bd7f377918469b5345b8b", 6, 153, 160),
+]
+
+
+def run_symflips(seed):
+    """The test: each integer scheme passes every Brent equation over Z (so over every field), with at most
+    the claimed number of products and fewer than the bound the paper improves on, and the probes agree.
+    Beside it: each F2 file checked modulo 2, and whether it is the integer scheme reduced modulo 2, term
+    by term."""
+    out, lines, probe_wrong, controls, ok = {}, [], 0, [], True
+    for prefix, zname, zsha, fname, fsha, n, claimed, bound in SYMFLIPS:
+        z = read_symflips(input_bytes(zname, zsha), n)
+        f = read_symflips(input_bytes(fname, fsha), n)
+        products, wrong, pw, cw, ls = assess(prefix, z, n, n, n, "Z", seed)
+        out[f"{prefix}_products"] = products
+        out[f"{prefix}_wrong"] = wrong
+        out[f"{prefix}_f2_wrong"] = wrong_entries(f, n, n, n, "F2")
+        out[f"{prefix}_f2_same"] = sum(1 for a, b in zip(mod2(z), mod2(f)) if a == b) if len(z) == len(f) else -1
+        out[f"{prefix}_max_coefficient"] = max(abs(x) for t in z for d in t for x in d.values())
+        probe_wrong += pw
+        controls.append(cw)
+        lines += ls
+        ok = ok and wrong == 0 and products <= claimed and products < bound
+    out["probe_wrong"] = probe_wrong
+    out["control_wrong_min"] = min(controls)
+    out["probe_digest"] = digest(lines)
+    return out, ok and probe_wrong == 0
+
+
 def run_selftest(seed):
     s = strassen()
     good = wrong_entries(s, 2, 2, 2, "Z")
@@ -549,7 +665,7 @@ def run_selftest(seed):
 
 
 RUNS = {"flips": run_flips, "alphatensor": run_alphatensor, "alphaevolve": run_alphaevolve, "dps": run_dps,
-        "selftest": run_selftest}
+        "symflips": run_symflips, "selftest": run_selftest}
 
 
 def main(argv):

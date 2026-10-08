@@ -32,11 +32,20 @@ an input is executed.
 | `python3 mm/check.py flips` | Kauers & Moosbauer: (4,4,5) and (5,5,5) | `solutions/*.exp`, jakobmoosbauer/flips |
 | `python3 mm/check.py alphaevolve` | AlphaEvolve: 4 × 4 complex in 48 | `mathematical_results.ipynb`, google-deepmind/alphaevolve_results |
 | `python3 mm/check.py dps` | Dumas, Pernet & Sedoglavic: 4 × 4 rational in 48 | `data/4x4x4_48_rational_*.sms`, jgdumas/plinopt |
+| `python3 mm/check.py symflips` | Moosbauer & Poole: 5 × 5 in 93 and 6 × 6 in 153 over every field | `schemes/{555m93,666m153}{,_lifted}.txt`, jakobmoosbauer/symmetric-flips |
 
 Each run writes `results/outputs.json`: the number of products, the entries
 that differ from the tensor (0 for a correct scheme), the probe's mismatches
 and the digest of its products (which depends on the seed), the controls,
 and `test_passed`, which applies the claim's registered test to those numbers.
+
+Moosbauer & Poole's files spell their products four ways (factors joined by
+`*` or written side by side, coefficients as `2*b14` or `2 b31`, bare
+variables, whole products negated as `-( … )`), with `c_ki` standing for the
+output entry `C_ik` as in the flip graph files; `read_symflips` reads all of
+them and refuses anything else. The integer schemes are checked over Z, which
+makes them hold over every field; the F₂ files are checked modulo 2 and
+compared with the integer ones reduced modulo 2, term by term.
 
 The data stay with their authors, under their licences; the receipts fetch
 them at pinned commits and never copy them here.

@@ -42,6 +42,43 @@ def flips_text(scheme, n, m, p, negate=()):
     return ("\n".join(lines) + "\n").encode("ascii")
 
 
+def sym_text(scheme, n, style, negate=(), transpose_c=False):
+    """A scheme in one of Moosbauer & Poole's spellings: "star" ((...)*(...)*(...), CR CR LF line ends),
+    "space" ((... + ...) (...) (...), coefficients "2 b31", one-variable factors bare, CRLF, no final
+    newline) or "juxt" ((...)(...)(...), "2*b14", bare variables). The products in negate are written
+    -( ... ) with the first factor negated inside, so they mean the same product. transpose_c writes c_ik
+    where the format has c_ki, to show the reading would then fail."""
+    sep = {"star": "*", "space": " ", "juxt": ""}[style]
+    coef = {"star": "*", "space": " ", "juxt": "*"}[style]
+    plus, minus = (" + ", " - ") if style == "space" else ("+", "-")
+
+    def form(d, letter, sign=1, cols=n):
+        items = [(idx, x * sign) for idx, x in sorted(d.items())]
+        names = []
+        for idx, x in items:
+            i, j = divmod(idx, cols)
+            if letter == "c" and transpose_c:
+                i, j = j, i
+            names.append((x, f"{letter}{i + 1}{j + 1}"))
+        if style != "star" and len(names) == 1 and names[0][0] == 1:
+            return names[0][1]
+        out = ""
+        for k, (x, name) in enumerate(names):
+            body = ("" if abs(x) == 1 else f"{abs(x)}{coef}") + name
+            out += ("-" if x < 0 else "") + body if k == 0 else (minus if x < 0 else plus) + body
+        return "(" + out + ")"
+
+    lines = []
+    for r, (u, v, w) in enumerate(scheme):
+        if r in negate:
+            lines.append("-(" + sep.join([form(u, "a", -1), form(v, "b"), form(w, "c")]) + ")")
+        else:
+            lines.append(sep.join([form(u, "a"), form(v, "b"), form(w, "c")]))
+    if style == "star":
+        return ("\r\r\n".join(lines) + "\r\r\n").encode("ascii")
+    return "\r\n".join(lines).encode("ascii")
+
+
 def npz(key, scheme, rows):
     """An .npz holding u, v, w stacked as one (3, rows, R) array of little-endian int64, as AlphaTensor's."""
     rank = len(scheme)
@@ -181,6 +218,30 @@ class Formats(unittest.TestCase):
         with self.assertRaises(ValueError):
             C.read_sms(b"1 1 R\n2 1 1\n0 0 0\n")
 
+    def test_symmetric_flips_files_read_back_in_every_spelling(self):
+        s = C.strassen()
+        for style in ("star", "space", "juxt"):
+            with self.subTest(style=style):
+                got = C.read_symflips(sym_text(s, 2, style, negate=(1, 4)), 2)
+                self.assertEqual(got, [tuple(C.columns(list(t))) for t in s])
+                self.assertEqual(C.wrong_entries(got, 2, 2, 2, "Z"), 0)
+
+    def test_symmetric_flips_coefficients_and_the_transposed_c(self):
+        self.assertEqual(C.sym_form("2 b31 - b11", "b", 3, 3), {6: 2, 0: -1})
+        self.assertEqual(C.sym_form("-2*b14+b12", "b", 4, 4), {3: -2, 1: 1})
+        self.assertEqual(C.read_symflips(b"2*a12 (b21) -c11", 2), [({1: 2}, {2: 1}, {0: -1})])
+        wrong = C.read_symflips(sym_text(C.strassen(), 2, "juxt", transpose_c=True), 2)
+        self.assertGreater(C.wrong_entries(wrong, 2, 2, 2, "Z"), 0)      # c_ki is C_ik: reading it as C_ki fails
+
+    def test_symmetric_flips_refuses_what_it_cannot_read(self):
+        for bad in (b"(a11+x22)(b11)(c11)", b"(a11)(b11)", b"(b11)(a11)(c11)", b"(a11(b11)(c11)",
+                    b"(a11)(b11)(c11)(c22)", b"(a13)(b11)(c11)", b"(a11)(b11)(c11) junk"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                C.read_symflips(bad, 2)
+
+    def test_mod2_reduces_and_drops_zeros(self):
+        self.assertEqual(C.mod2([({0: 2, 1: -1}, {2: 3}, {3: 1})]), [({1: 1}, {2: 1}, {3: 1})])
+
 
 class Inputs(unittest.TestCase):
     def test_an_input_that_is_not_the_committed_bytes_is_refused(self):
@@ -196,6 +257,28 @@ class Inputs(unittest.TestCase):
                     C.input_bytes("x", hashlib.sha256(b"other").hexdigest())
             finally:
                 os.chdir(here)
+
+
+def sym_inputs():
+    d = os.environ.get("MM_INPUTS") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "inputs")
+    return d if all(os.path.isfile(os.path.join(d, x[1])) and os.path.isfile(os.path.join(d, x[3])) for x in C.SYMFLIPS) else None
+
+
+@unittest.skipUnless(sym_inputs(), "Moosbauer & Poole's files are not at inputs/ (or MM_INPUTS)")
+class SymmetricFlipsReleased(unittest.TestCase):
+    def test_the_released_schemes(self):
+        here = os.getcwd()
+        os.chdir(os.path.join(sym_inputs(), ".."))
+        try:
+            if os.path.basename(sym_inputs().rstrip("/")) != "inputs":
+                self.skipTest("the files must sit in a directory named inputs")
+            out, passed = C.run_symflips(SEED)
+        finally:
+            os.chdir(here)
+        self.assertTrue(passed)
+        self.assertEqual((out["s555_93_products"], out["s555_93_wrong"], out["s666_153_products"], out["s666_153_wrong"]),
+                         (93, 0, 153, 0))
+        self.assertEqual((out["s555_93_f2_same"], out["s666_153_f2_same"]), (93, 153))
 
 
 if __name__ == "__main__":
