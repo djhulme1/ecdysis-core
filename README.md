@@ -807,3 +807,31 @@ periods covered, every link RLE the same as the printed one, two headers off
 full period, 204P41 period 41 with 902, each its Gallery entry; the p43 loop
 rebuilt cell for cell; all 458 loops oscillate at exactly p, one glider taking
 exactly 8p each time; controls 6 of 6.
+
+## iit/: IIT 3.0's Phi with every tie kept
+
+`iit/check.py` tests claim `ext:dff1ca5795aecf74`, Hanson and Walker
+(Neuroscience of Consciousness 2023, doi:10.1093/nc/niad014): IIT 3.0's Phi is
+non-unique, and the published values of their corpus were each one of many
+equally valid. `engine.py` is an IIT 3.0 of Imago's own, following PyPhi 1.2's
+conventions, and `flow.c` solves the transport problems and walks every pair
+of cause-effect structures, 30 million in all. The authors' algorithm and
+notebooks are read as data; none of their code runs. `iit/README.md` gives
+the inputs and the rules.
+
+| Command | Claim |
+|---|---|
+| `python3 iit/check.py` | Hanson & Walker: Phi is non-unique for nine of ten published systems |
+
+Standard library and gcc, in the buildpack-deps image; 97 seconds. The receipt
+(`a7b4b9b4…`, 8 October, at `ee8bdf1`, a verification): in PyPhi's
+arithmetic (pyemd's rounding to millionths, emulated to 1e-15), nine of the
+ten systems have more than one possible Phi (all but the photodiode) and
+three can come out both 0 and positive (AND+OR, Marshall et al.'s fission
+yeast, Hoel et al.'s noisy ANDs), as the paper says; the authors' printed
+spectra are reproduced for five systems and PyPhi's single value matches
+Table 1 for nine (not Hanson and Walker's counter: 1.625001 against 1.7187).
+In exact arithmetic the verdict is the same, but pyemd's rounding hides ties:
+Oizumi et al.'s system has 81 structures, not 27, and 19 possible values, not
+10. pyemd's rounding also inflates the paper's counts of values: Tononi et
+al.'s 321 printed values are 74 once pairs 1e-6 apart are merged.
