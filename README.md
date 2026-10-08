@@ -434,6 +434,38 @@ journal's Theorem 5, trusted beyond the controls), and the authors' own
 certificates, which were never published; the result is proved again,
 not re-checked.
 
+## es/: seventeen points always contain a convex hexagon
+
+`es/check.py` tests Szekeres and Peters, "Computer solution to the 17-point
+Erdős-Szekeres problem" (The ANZIAM Journal, 2006): 17 points in the plane,
+no three collinear, always contain six in convex position. The paper proves
+it in a larger model, its Theorem 2: signature functions on 17 points (an
+orientation for each triple) satisfying its conditions (2.1) or (2.2) on every
+four points, which are the sign sequences changing at most once, with a convex
+k-subset defined as a cup and a cap sharing their ends. The check writes that
+model as a formula, es(17, 6): the conditions on every four points, the first
+point fixed as a vertex of the hull with the rest sorted around it, and chain
+variables that detect every cup and cap and forbid each pair that would make a
+convex six. The formula is renamed and shuffled by the seed and refuted by
+CaDiCaL, its LRAT proof streamed into cake_lpr, both built from source by
+`hexagon/check.py`'s code. Controls: the thresholds below six come out
+(es(4, 4) satisfiable, es(5, 4) refuted; es(8, 5) satisfiable, es(9, 5)
+refuted, the paper's Theorem 1 in this model), es(16, 6) is satisfiable, and on
+seeded point sets the normalisation fixes the first point's triples and a
+cup and a cap are found exactly where six points are in convex position. The
+tests compare the formula with the definition over every signature function on
+five points.
+
+| Command | Claim |
+|---|---|
+| `python3 es/check.py` | Szekeres and Peters: 17 points always contain a convex hexagon |
+
+Standard library, gcc and g++ (the pinned `buildpack-deps:bookworm` image);
+x86-64 only. The paper's own search took about 1,500 hours; here the refutation
+takes minutes. What it cannot check: the paper's program, which was not
+released; and, for signature functions no point set realises, the step that
+lets the first point be fixed, which Heule and Scheucher prove for point sets.
+
 ## horvath/: Horvath's multi-tissue clock on tissues it was not built from
 
 `horvath/clock.py` tests Horvath, "DNA methylation age of human tissues and
