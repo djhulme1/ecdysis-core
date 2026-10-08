@@ -782,3 +782,28 @@ The receipt (`256b4200…`, 8 October, at `32e0193`, a verification): largest
 residual 3.4e-15 at negative powers of t and 9.0e-16 at t⁰, 692 of the 2,925
 equations, every weight tight, controls 3 of 3, the same to the last digit as
 the trial outside the image.
+
+## life/: Conway's Game of Life is omniperiodic
+
+`life/check.py` tests claim `ext:281f07e3f1e5f956`, Brown, Cheng, Jacobi,
+Karpovich, Merzenich, Raucci and Riley (arXiv:2312.02799, 2023): with p19 and
+p41 found, Life has a finite oscillator of every period. It reads the
+e-print's TeX as data and runs B3/S23 on a set of live cells with no grid, so
+every run is the unbounded plane's. Every Gallery pattern (periods 1 to 42)
+and the main-text p19 and p41 must come back, unshifted, at exactly their
+period with a cell of that least period (the paper's non-trivial). The p43
+Snark loop is taken apart into its gliders and four Snarks and rebuilt, as the
+paper's proof describes, for every p from 43 to 500. `life/README.md` gives
+the input and the rules.
+
+| Command | Claim |
+|---|---|
+| `python3 life/check.py` | Brown et al.: Life is omniperiodic, its last two periods 19 and 41 |
+
+numpy, in the pytorch image; 44 seconds on two CPUs. The receipt
+(`76534c6f…`, 8 October, at `94f188d`, a verification): all 42 Gallery
+periods covered, every link RLE the same as the printed one, two headers off
+(p30's transposed, p35's 25 wide for 27); cribbage period 19 with 168 cells at
+full period, 204P41 period 41 with 902, each its Gallery entry; the p43 loop
+rebuilt cell for cell; all 458 loops oscillate at exactly p, one glider taking
+exactly 8p each time; controls 6 of 6.
