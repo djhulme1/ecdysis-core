@@ -121,6 +121,15 @@ against finite differences. The verdict asks the CNN to beat the best SVM by
 at least 16 points, and no count-only classifier to reach 71.4%. A run takes
 about 90 minutes on two cores.
 
+The receipt (`b5f59701…`, 8 October) found the paper's four SVMs right on
+57.1%, 53.0%, 52.8% and 61.7% of the 2,264 test digits (the paper prints 56.0,
+48.3, 46.7 and 60.0); the best count-only classifier of the list 62.0% (an RBF
+SVM, C = 10, on the counts); and the CNN 88.0% (the paper prints 92.4%), its
+weights kept from epoch 11 of 16 at 97.7% on the validation tenth. The margin
+is 26.3 points. A container restart cut the first sealed run off at epoch 3;
+the run under the same seal gave the same counts and the same validation
+accuracy at every epoch both reached.
+
 ## af/: the alignment-faking compliance rates, recounted
 
 `af/count.py` recounts, from the labels Greenblatt et al. released for
