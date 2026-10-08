@@ -605,3 +605,41 @@ x86-64 only. The authors' run took about 35,000 CPU hours (two minutes a
 cube on average); here the sample takes about half an hour and the verified
 cover about seven minutes. What it cannot check: the cubes not drawn, and
 the authors' own proofs, which were checked as they were made and not kept.
+
+## alchemy/: AlChemy's three levels, in the authors' own code
+
+`alchemy/check.py` tests Fontana and Buss, "What would be conserved if 'the
+tape were played twice'?" (PNAS 1994): in AlChemy, a flow reactor of
+lambda-terms, (i) hypercycles of self-reproducing objects arise, (ii) with
+self-replication barred, self-maintaining organisations arise, and (iii)
+such organisations can combine into higher-order ones. Its input is the
+authors' distribution (`AlChemy.tar.gz`, from Fontana's page), compiled by
+the run with the changes Mathis et al. (2024) made for a modern compiler and
+its socket bound to localhost. The runs keep the archive's settings and the
+paper's limits (1,000 objects; 10,000 reduction steps and 4,000 characters),
+with free variables bound, as Mathis et al. inferred the original work did,
+and the generator at its archived depth of 10. Level 0: 11 runs with copy
+actions accepted, each judged taken over when every species left is a
+copying function of the rest. Level 1: 15 runs with copy actions barred,
+then five random objects injected in ten copies each, 30,000 collisions
+apart, as the paper's first perturbation schedule did; a run is organised
+when a self-maintaining set of at least three species with no copying
+function among them is there before the injections and after, the later
+one mostly (by objects) the earlier one's species. Level 2: every pair of
+organised runs (at most 45), mixed in a reactor of 3,000, combines when the
+self-maintaining whole keeps three or more of each organisation's species,
+holding a tenth or more of its objects each, and some collision between the
+two makes a member of the whole. Every action table comes from the
+archive's own pair mode. Controls: the paper's Figure 1 laws by the
+archive's reducer over 100 pairs; a self-maintaining subset worked by hand;
+copying functions found; a run repeated under its seed; the copy filter.
+
+| Command | Claim |
+|---|---|
+| `python3 alchemy/check.py` | Fontana and Buss: copiers take over unfiltered runs, organisations arise when copying is barred, and two can combine |
+
+Standard library and gcc (the pinned `buildpack-deps:bookworm` image). What
+it cannot check: the paper's own runs, whose seeds, lengths and generator
+settings were not published; other filters and boundary conditions; the
+paper's grammars and laws, since organisations are recognised here by
+self-maintenance and by the species they keep.
