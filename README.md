@@ -174,7 +174,11 @@ irregular at B, C and D (CV > 0.3); their rates, and B's and D's global
 frequencies, within 25% of the span of Table 1's simulation and theory
 values; and C's spectral peak under a tenth of B's. Controls on synthetic
 spikes check the measures. numpy, in the pytorch image; about four minutes on
-two CPUs, most of it point A (333 Hz, fully synchronous).
+two CPUs, most of it point A (333 Hz, fully synchronous). The receipt
+(`b8dc8911…`, 8 October, at `27ffcf8`, a reproduction): A 333.5 Hz with CV
+0.0007; B 59.6 Hz, CV 0.85, global frequency 184 Hz; C 37.8 Hz, CV 0.41, its
+spectral peak 0.036 of B's; D 6.1 Hz, CV 0.63, global frequency 24 Hz; all ten
+conditions met, controls 4 of 4.
 
 | Command | Claim |
 |---|---|
