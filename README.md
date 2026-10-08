@@ -372,3 +372,32 @@ years, largest 0.003, where his software imputed missing values by KNN).
 Python with numpy and scipy (the pinned `jupyter/scipy-notebook` image); the
 inputs are three of the paper's additional files and five GEO series
 matrices (1.1 GB). About two minutes on two CPUs.
+
+## bdc/: the binary determinantal complexity of the 3 × 3 permanent is 7
+
+`bdc/check.py` tests the lower bound of Hüttenhain and Ikenmeyer, "Binary
+determinantal complexity" (Linear Algebra Appl. 504, 2016): no square matrix
+of size at most 6 whose entries are 0, 1 and the nine variables has
+determinant per3. A support of such a matrix needs determinant 6, so sizes
+up to 5 fall to the largest 0/1 determinants (1, 1, 2, 3, 5), computed here
+by an exact enumeration. On size 6, every set of six distinct rows with two
+ones or more is enumerated with its minors carried exactly row by row:
+129,360 sets have determinant ±6 and two ones in every column, in 263
+classes under row and column permutations, the paper's count from nauty.
+On each class the nine variables are placed by the paper's stepwise
+reconstruction, done exactly: the sets a single variable can occupy (where
+the determinant becomes 2y + 4), the pairs two variables can occupy, and at
+every depth the whole determinant compared with per3 as polynomials, with no
+random evaluation and no use of per3's symmetries. 248,031 placements are
+tried and none completes. The same machinery finds Grenet's 7 × 7 matrix on
+its support (72 placements, one for each symmetry of per3), the paper's
+3 × 3 matrix for per2, and confirms all 463 matrices of the paper's 7 × 7
+output, Grenet's being the only sparse one.
+
+| Command | Claim |
+|---|---|
+| `python3 bdc/check.py` | Hüttenhain and Ikenmeyer: writing per3 as a determinant of zeros, ones and variables needs a 7 × 7 matrix |
+
+Python with numpy (the pinned `jupyter/scipy-notebook` image); the input is
+the paper's ancillary output-ptest-on-7x7.txt (133 kB), read only for the
+controls. About a minute on two CPUs.
