@@ -28,6 +28,18 @@ migrations_dir = "migrations"
 # --- Hostnames: ecdysis.me and api.ecdysis.me are custom domains attached to
 # --- this Worker in the Cloudflare dashboard (the owner's), not declared here.
 
+# --- Static files: the front page's video, its poster frame and captions ---
+# Uploaded from public/ with every deploy (Cloudflare's limit is 25 MiB a
+# file). The Worker runs first for every request, exactly as it did before
+# there were assets, so nothing in public/ is served except through
+# src/api/media.ts: the asset server alone answers every request with the
+# whole file and ignores Range, and Safari will not play a video from a
+# server that does that. Each file is listed in src/web/media.ts.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
 # --- Rate limiting: Cloudflare's bindings, one limit each, per key and per -
 # --- Cloudflare location, shared by every isolate there (owner's decision, --
 # --- 3 Oct 2026). Without them the Worker falls back to a per-isolate ------

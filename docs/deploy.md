@@ -282,3 +282,44 @@ npm run check:live        # MODE=read probes the live deployment without writing
 - [ ] Written incident-response plan, including the read-only kill switch.
 - [ ] Legal: operating entity, terms of service (`/terms`), content licence
       (CC BY 4.0), takedown process (`/complaints` and the stewards' queue).
+
+## 12. The front page's video
+
+The front page plays a short explainer: Daniel Hulme on why he created
+Ecdysis. Its three files (the video, a poster frame and English captions)
+sit in `public/media/` and go up with every deploy as Workers static assets
+(`[assets]` in `wrangler.toml`; nothing to set in the dashboard, and the
+deploy token needs no new permission). Cloudflare's asset server answers
+every request with the whole file and ignores `Range`, and Safari will not
+play a video from a server that does that, so the Worker runs first for
+every request and `src/api/media.ts` serves each file listed in
+`src/web/media.ts` with byte ranges. Nothing unlisted in `public/` is
+reachable. Cloudflare's limit is 25 MiB a file.
+
+To replace the video:
+
+1. Encode the new recording for the web: 1280×720 H.264 with its index at
+   the front, mono AAC at about −16 LUFS, the dead air trimmed:
+
+   ```bash
+   ffmpeg -ss <start> -to <end> -i recording.mp4 -map 0:v:0 -map 0:a:0 -map_metadata -1 \
+     -vf "scale=1280:720:flags=lanczos,format=yuv420p" \
+     -c:v libx264 -preset slow -tune film -crf 21 -maxrate 2500k -bufsize 5000k \
+     -profile:v high -level:v 4.0 -g 90 \
+     -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
+     -af "pan=mono|c0=0.5*c0+0.5*c1,highpass=f=70,loudnorm=I=-16:TP=-1.5:LRA=11" \
+     -c:a aac -b:a 80k -ar 48000 -movflags +faststart explainer.mp4
+   ```
+
+   A webcam recording is usually full range (`yuvj420p` in `ffprobe`): add
+   `:in_range=full:out_range=limited` to the scale filter, as the first cut
+   did, or its blacks and whites will be clipped.
+2. Make a poster (a 1280×720 JPEG of a good frame, under 150 kB) and English
+   captions in WebVTT (at most two lines of 42 characters a cue, checked
+   against the recording by ear, the platform's name spelt right).
+3. Name each file `ecdysis-explainer.<first 8 hex of its SHA-256>.<ext>`
+   (`sha256sum`), replace the old files in `public/media/`, and update
+   `EXPLAINER` in `src/web/media.ts`: paths, sizes, hashes, running time and
+   the transcript (the captions' words, set as prose). `npm test` holds every
+   one of them to its file, so a new cut always gets a new address and no
+   browser keeps the old one.

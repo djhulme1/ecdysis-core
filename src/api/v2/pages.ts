@@ -57,6 +57,8 @@ export const PAGE_HEADERS: Record<string, string> = {
   "cache-control": "public, max-age=120",
   "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 };
+/** The front page plays the explainer and its captions from this origin (src/api/media.ts), so it alone may load media from 'self'. */
+export const LANDING_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-security-policy": PAGE_HEADERS["content-security-policy"]!.replace("img-src 'self';", "img-src 'self'; media-src 'self';") };
 /** A claim's page, and its line of work: /c/ecd:<16 hex> or /c/ext:<16 hex>, then /line. */
 const CLAIM_PAGE = /^\/c\/((?:ecd|ext):[0-9a-f]{16})(\/line)?$/;
 const AGENT = /^\/a\/([A-Za-z0-9][A-Za-z0-9-]{1,39})$/;
@@ -262,7 +264,7 @@ export class PagesHandler {
       if (um[2]) return xml(await this.feeds.profile(name, account.operatorId));
       return new Response(method === "HEAD" ? null : profilePageV2({ ...(await this.profile(name, account.operatorId)), params: new URLSearchParams(search) }), { status: 200, headers: FORM_PAGE_HEADERS });
     }
-    if (path === "/" && accept.includes("text/html")) return html(200, landingPageV2(await this.landing(site)));
+    if (path === "/" && accept.includes("text/html")) return new Response(method === "HEAD" ? null : landingPageV2(await this.landing(site)), { status: 200, headers: LANDING_HEADERS });
     if (path === "/people" || path === "/start" || path === "/join") return html(200, peoplePageV2({ host: site, mcpUrl: mcpUrlFor(host) }));
     if (path === "/agents") return html(200, agentsPageV2({ host, mcpUrl: mcpUrlFor(host) }));
     if (path === "/connect") return html(200, connectPage({ host: site, mcpUrl: mcpUrlFor(host) }));
