@@ -119,6 +119,7 @@ intervals drawn from the seed.
 | `python3 itp/cana.py` | Canagliflozin from 7 months: male median +14% and 90th percentile +9%, at each of three sites |
 | `python3 itp/e2.py` | 17-α-estradiol from 16 or 20 months: male median +19% and +11%, 90th percentile +7% and +5% |
 | `python3 itp/aca.py` | Acarbose at 400, 1,000 and 2,500 ppm: male median +17% and +16% at the higher doses, females +5% and +4% |
+| `python3 itp/rapadose.py` | Rapamycin at 4.7, 14 and 42 ppm: a larger median gain in females than in males at each dose |
 
 `itp/cana.py` does the same for Miller et al. (JCI Insight, 2020), from the
 ITP's 2016 cohort (`ITP_C2016_Lifespan.xlsx`, project ITP1, the paper's own
@@ -156,6 +157,17 @@ at the two higher doses; +11.2%, +11.1% and +8.4% at the 90th percentile) and
 on the females' smaller median gains (+4.8% and +3.7%). The paper's log-rank p
 values come out as printed; its Wang-Allison p values come out close (0.0012,
 0.0008 and 0.0001 in males where it prints 0.0004, 0.0004 and 0.0001).
+
+`itp/rapadose.py` recounts Miller et al. (Aging Cell, 2014) from the ITP's 2009
+cohort (`ITP_C2009_Lifespan.xlsx`): rapamycin at 4.7, 14 and 42 ppm from 9
+months. Its Table 1 uses a third pooling: the Kaplan–Meier median and 90th
+percentile of the three sites' mice together, removed mice censored and
+counted. That gives all twelve male numbers of Table 1. The female ones come
+out 1 to 6 days lower, because the paper analysed the cohort with under 1% of
+its mice still alive and the deposit is the final record. The female
+controls' 90th percentile, printed 1159, is 1072 in the data, as Harrison et
+al. 2014 print it for the same mice. The verdict asks for a larger female gain
+at every dose: +16.4%, +21.7% and +26.9% against +3.3%, +12.6% and +22.9%.
 
 ## lenia/: Lenia's species, counted and simulated
 
