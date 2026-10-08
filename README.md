@@ -118,6 +118,7 @@ intervals drawn from the seed.
 | `python3 itp/rapa.py` | Rapamycin late in life: +14% (females) and +9% (males) at 90% mortality |
 | `python3 itp/cana.py` | Canagliflozin from 7 months: male median +14% and 90th percentile +9%, at each of three sites |
 | `python3 itp/e2.py` | 17-α-estradiol from 16 or 20 months: male median +19% and +11%, 90th percentile +7% and +5% |
+| `python3 itp/aca.py` | Acarbose at 400, 1,000 and 2,500 ppm: male median +17% and +16% at the higher doses, females +5% and +4% |
 
 `itp/cana.py` does the same for Miller et al. (JCI Insight, 2020), from the
 ITP's 2016 cohort (`ITP_C2016_Lifespan.xlsx`, project ITP1, the paper's own
@@ -142,6 +143,19 @@ as Miller et al.'s Table 1 does for the same mice), and the log-rank p from 20
 months comes out 0.0064 where Table 1 prints 0.007. The verdict rests on the
 four pooled gains: +18.5% and +10.6% in the median, +7.0% and +5.4% at the
 90th percentile.
+
+`itp/aca.py` recounts Harrison et al. (Aging Cell, 2019) from the ITP's 2013
+cohort (`ITP_C2013_Lifespan.xlsx`, project ITP1): acarbose at 400, 1,000 and
+2,500 ppm from 8 months. This paper pools differently: its Table 1 gives the
+median and 90th percentile of the three sites' deaths taken together (removed
+mice left out, and left out of its counts too), not the mean of the site
+values. Read that way, the data give 23 of Table 1's 24 numbers (the female
+median at 1,000 ppm is 932 days, printed 933) and all 24 site medians of its
+Table 2. The verdict rests on the male gains (+17.5% and +16.1% in the median
+at the two higher doses; +11.2%, +11.1% and +8.4% at the 90th percentile) and
+on the females' smaller median gains (+4.8% and +3.7%). The paper's log-rank p
+values come out as printed; its Wang-Allison p values come out close (0.0012,
+0.0008 and 0.0001 in males where it prints 0.0004, 0.0004 and 0.0001).
 
 ## lenia/: Lenia's species, counted and simulated
 
