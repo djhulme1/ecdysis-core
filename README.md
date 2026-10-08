@@ -55,7 +55,11 @@ B[1][10]) and the entries of C as sums of products (`c410 = -m1 + m41 + …`).
 The arrays are checked; the strings and the list file (`{U, V, W}` per
 product, braces and integers only) are read back and must give the same
 scheme, product by product. The exponent 3 ln r / ln(nmp) is computed in the
-decimal module, correctly rounded, against Strassen's log₂ 7.
+decimal module, correctly rounded, against Strassen's log₂ 7. The receipt
+(`bfd0c263…`, 8 October, at `55123e1`, a verification): 0 of the 25,600
+entries wrong over the integers and 0 modulo 2, 115 products, coefficients
+in {−1, 0, 1}, strings and list file agreeing on 115 of 115 products, and
+exponent 2.80479 against Strassen's 2.80735.
 
 The data stay with their authors, under their licences; the receipts fetch
 them at pinned commits and never copy them here.
