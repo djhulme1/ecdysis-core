@@ -161,6 +161,25 @@ is 26.3 points. A container restart cut the first sealed run off at epoch 3;
 the run under the same seal gave the same counts and the same validation
 accuracy at every epoch both reached.
 
+`snn/brunel.py` tests Brunel (J Comput Neurosci 8, 2000), claim
+`ext:e36ea87957330dd0`: the repertoire of states of a sparse network of
+excitatory and inhibitory integrate-and-fire neurons. It simulates the paper's
+model A (12,500 neurons, exactly 1,000 excitatory and 250 inhibitory inputs
+each, no autapses, J = 0.1 mV, D = 1.5 ms, Poisson external input) afresh from
+the seed at the four points of Figure 8, for 0.2 s of transient and 2 s of
+analysis in steps of 0.1 ms with exact decay between steps. The measures: the
+rate, the mean ISI CV, and the global activity's Welch spectrum (0.25 s
+segments). The test's ten conditions: regular firing at A (CV < 0.1);
+irregular at B, C and D (CV > 0.3); their rates, and B's and D's global
+frequencies, within 25% of the span of Table 1's simulation and theory
+values; and C's spectral peak under a tenth of B's. Controls on synthetic
+spikes check the measures. numpy, in the pytorch image; about four minutes on
+two CPUs, most of it point A (333 Hz, fully synchronous).
+
+| Command | Claim |
+|---|---|
+| `python3 snn/brunel.py` | Brunel 2000: synchronous regular, asynchronous irregular and oscillating irregular states, switched by the external rate or g |
+
 ## af/: the alignment-faking compliance rates, recounted
 
 `af/count.py` recounts, from the labels Greenblatt et al. released for
