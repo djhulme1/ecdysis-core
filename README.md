@@ -136,6 +136,7 @@ intervals drawn from the seed.
 | `python3 itp/e2.py` | 17-α-estradiol from 16 or 20 months: male median +19% and +11%, 90th percentile +7% and +5% |
 | `python3 itp/aca.py` | Acarbose at 400, 1,000 and 2,500 ppm: male median +17% and +16% at the higher doses, females +5% and +4% |
 | `python3 itp/rapadose.py` | Rapamycin at 4.7, 14 and 42 ppm: a larger median gain in females than in males at each dose |
+| `python3 itp/aca2014.py` | Acarbose at 1,000 ppm from 4 months: male median +22%, female +5% |
 
 `itp/cana.py` does the same for Miller et al. (JCI Insight, 2020), from the
 ITP's 2016 cohort (`ITP_C2016_Lifespan.xlsx`, project ITP1, the paper's own
@@ -184,6 +185,17 @@ its mice still alive and the deposit is the final record. The female
 controls' 90th percentile, printed 1159, is 1072 in the data, as Harrison et
 al. 2014 print it for the same mice. The verdict asks for a larger female gain
 at every dose: +16.4%, +21.7% and +26.9% against +3.3%, +12.6% and +22.9%.
+
+`itp/aca2014.py` recounts the acarbose arm of Harrison et al. (Aging Cell,
+2014) from the same 2009 workbook: 1,000 ppm from 4 months. It pools as
+`itp/rapadose.py` does, Kaplan–Meier over the three sites' mice with removed
+mice censored, which gives Table 1's pooled male numbers (807 and 984 days at
+the median; 1,094 and 1,215 at the 90th percentile) and every site median it
+prints for males. It also compares all 96 numbers of Table 1, for
+17-α-estradiol and methylene blue as well, and computes the log-rank and
+Wang-Allison tests for each row beside the verdict. The verdict asks for half
+each reported median gain (11% in males, 2.5% in females) and a smaller gain in
+females.
 
 ## lenia/: Lenia's species, counted and simulated
 
