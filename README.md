@@ -104,7 +104,12 @@ both by binary splitting, which must agree. The test asks every step from
 n = 1 to 16 to at least double the digits. Controls: Brent's two tables
 (arXiv:1802.07558), his bounds, and two sequences that must fail the doubling,
 the iteration with b₀ moved by 10⁻³⁰ and Archimedes' polygons. Standard
-library only (the decimal module).
+library only (the decimal module). The receipt (`d17e4e12…`, 8 October, at
+`9a55031`, about four minutes): the correct digits of π₁ to π₁₇ are 2, 8,
+18, 40, 83, 170, 344, 693, 1,392, 2,789, 5,582, 11,171, 22,347, 44,701,
+89,409, 178,824 and 357,655, each step at least doubling them (by 2 at
+n = 2, by 3 to 7 elsewhere); Brent's tables 10 of 10 and 35 of 36 as printed
+(his n = 1 lower ratio is 0.99965620542, printed 0.999656206).
 
 ## snn/: surrogate gradients in spiking networks
 
