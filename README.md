@@ -730,3 +730,28 @@ at `250c39d`, a verification): 553 distinct points over √1, √3, √5, √11,
 out; the formula equal to Heule's; no 4-colouring, the proof verified by
 cake_lpr; a proper 5-colouring; his DRAT proof RUP up to the refutation
 (18,791 lemmas); controls 6 of 6.
+
+## laser/: a 42-term border rank expression for a Kronecker square
+
+`laser/check.py` tests claim `ext:2e5c68861be8e2e9`, Conner, Huang and Landsberg (Foundations of
+Computational Mathematics 23, 2023; arXiv:2009.11391): the border rank of the
+Kronecker square of the q = 4 skew cousin of the Coppersmith-Winograd tensor,
+T_skewcw,4 in C⁵ ⊗ C⁵ ⊗ C⁵, is at most 42, against 64 for the square of its
+border rank. The paper prints its expression in full, 42 matrices m_s(t) in
+36 complex numbers and ζ = e^(2πi/12), and marks the theorem as shown only
+numerically (largest error 4.4e-15). The check reads the e-print's TeX as
+data, refusing anything but the factors the expression uses, builds the
+tensor from the paper's own definition (which the TeX must state as coded
+here), and expands Σ m_s(t)^⊗3 coefficient by coefficient: every coefficient
+at a negative power of t must vanish, and the t⁰ coefficient must be the
+Kronecker square, each to within 1e-12. It also counts the equations as the
+paper does (692 of 2,925). Controls: z₀ moved by 1e-9, a matrix left out,
+and ζ of the wrong order must each fail.
+
+| Command | Claim |
+|---|---|
+| `python3 laser/check.py` | Conner, Huang & Landsberg: the border rank of T_skewcw,4's Kronecker square is at most 42 |
+
+Standard library; a quarter of a second. What it cannot check: whether an
+exact decomposition exists near the printed one (the paper found none), and
+the tensor's own border rank, 8, which the paper proves by border apolarity.
