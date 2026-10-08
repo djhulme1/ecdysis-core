@@ -675,6 +675,17 @@ settings were not published; other filters and boundary conditions; the
 paper's grammars and laws, since organisations are recognised here by
 self-maintenance and by the species they keep.
 
+The receipt (`6a309df9…`, 8 October, at `8f51e31`, run twice under the same
+seal after a container restart cut the first off; the second repeated the
+first's numbers exactly), the test **failed**: none of the 11 Level 0 runs
+was taken over by copying functions (2 to 638 species at the end), so part
+(i) fails; of the 15 Level 1 runs, 8 ended with a copier-free
+self-maintaining set of three or more species but only 5 kept it through the
+injections, so part (ii) fails (8 needed); of the 10 pairs of those 5 mixed at
+Level 2, 9 ended with one organisation dominating and 1 combined into a
+self-maintaining whole keeping both, so part (iii) holds. Controls 5 of 5;
+30,750,000 collisions; 94 minutes on two CPUs.
+
 ## itp/e2_2011.py: 17α-estradiol from 10 months in the ITP's 2011 cohort
 
 `itp/e2_2011.py` tests Strong et al., Aging Cell 15(5) 2016: "17-α-estradiol
@@ -713,4 +724,9 @@ Imago's own, beside the test. `udg/README.md` gives the inputs and the rules.
 | `python3 udg/check.py` | Heule 2018: several 553-vertex unit-distance graphs with chromatic number 5 |
 
 Standard library and gcc, in the buildpack-deps image; about four minutes on
-two CPUs, most of it building the tools.
+two CPUs, most of it building the tools. The receipt (`cb6338ca…`, 8 October,
+at `250c39d`, a verification): 553 distinct points over √1, √3, √5, √11,
+√15, √33, √55 and √165; all 2,722 edges exactly unit and no unit pair left
+out; the formula equal to Heule's; no 4-colouring, the proof verified by
+cake_lpr; a proper 5-colouring; his DRAT proof RUP up to the refutation
+(18,791 lemmas); controls 6 of 6.
