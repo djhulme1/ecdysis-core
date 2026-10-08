@@ -534,3 +534,39 @@ output, Grenet's being the only sparse one.
 Python with numpy (the pinned `jupyter/scipy-notebook` image); the input is
 the paper's ancillary output-ptest-on-7x7.txt (133 kB), read only for the
 controls. About a minute on two CPUs.
+
+## keller/: Keller's conjecture in dimension 7, the s = 6 proof sampled
+
+`keller/check.py` tests Brakensiek, Heule, Mackey and Narváez, "The
+Resolution of Keller's Conjecture" (IJCAR 2020, arXiv:1910.03740): no clique
+of size 128 in the Keller graphs G_{7,3}, G_{7,4} and G_{7,6}. Its inputs are
+the claim's data of record, the authors' formula for G_{7,6} after symmetry
+breaking (`s6.cnf`) and its 38,616 cubes (`s6.dnf`), from their Zenodo record
+3755117 (CC BY 4.0), and the paper's e-print. The check writes the paper's
+encoding afresh from its equations (1) to (7), with the authors' numbering:
+its sizes are the paper's Table 2, and the tests show, pair by pair for small
+n and s, that each pair's clauses can be satisfied exactly when the two
+vertices are adjacent. All 399,232 of its clauses are in `s6.cnf`; of the rest,
+the 19 units read back as the canonical vertices c_0 = (0,0,0,0,0,0,0),
+c_1 = (6,1,0,0,0,0,0) and c_3 = (6,7,*,*,1,1,1) that the paper's hand lemmas
+fix, and 4,224 clauses of symmetry breaking on c_2, c_3, c_19, c_35 and c_67
+rest on the authors' clausal proofs, which are not re-checked. The seed draws
+100 cubes; each is solved with the formula by CaDiCaL, its LRAT proof piped
+into cake_lpr (both built from source by `hexagon/check.py`'s code), and the
+negations of all the cubes are refuted the same way, so the cubes cover every
+assignment. G_{7,3} and G_{7,4} are induced subgraphs of G_{7,6} (keep
+0 .. s-1 and send s .. 2s-1 to 6 .. 5+s in each coordinate), so the s = 6
+case decides all three. The paper's 256-clique in G_{8,2}, read from its
+figure, is checked pair by pair, and it and its image in G_{8,6} satisfy the
+encoding for (8, 2) and (8, 6) with checked models.
+
+| Command | Claim |
+|---|---|
+| `python3 keller/check.py` | Brakensiek, Heule, Mackey and Narváez: no clique of 128 in G_{7,3}, G_{7,4} or G_{7,6} |
+
+Standard library, gcc and g++ (the pinned `buildpack-deps:bookworm` image);
+x86-64 only. The cubes took 81.85 CPU hours in the authors' runs (median
+0.36 s, the hardest 75 minutes); 100 of them take minutes here, rarely an
+hour. What it cannot check: the symmetry breaking (hand lemmas, one resting on
+Keller's conjecture in dimension 6, and clausal proofs); the cubes not drawn;
+and the reduction from cube tilings to the graphs, which is prior work.
