@@ -19,6 +19,10 @@ results/outputs.json:
   symflips     Moosbauer & Poole, "Flip graphs with symmetry and new matrix
                multiplication schemes" (arXiv:2502.04514): the 5x5 scheme in 93
                products and the 6x6 in 153, over the integers and modulo 2.
+  perminov     Perminov, "Fast Matrix Multiplication in Small Formats"
+               (arXiv:2603.02398): the 4x4x10 scheme in 115 products with
+               coefficients in {-1, 0, 1}, over the integers, from its JSON file,
+               with the file's own strings and its list file read back against it.
   selftest     the checker on Strassen's scheme and on broken copies of it.
 
 Every scheme is checked three ways.
@@ -654,6 +658,134 @@ def run_symflips(seed):
     return out, ok and probe_wrong == 0
 
 
+PERMINOV = (  # input name, sha256: the scheme as JSON, and the same scheme as a nested list
+    ("perm4x4x10_m115_ZT.json", "39a5275415e34b51a665749921f02aa5176954855ee0b60703a9d15b44d3c0b3"),
+    ("perm4x4x10_m115_ZT.m", "5f597423405761c1dd8dc1f6e8db27bc4fe984831f3d297a3b89d823d4536252"),
+)
+PERM_FORMAT, PERM_CLAIMED, PERM_PREVIOUS = (4, 4, 10), 115, 120   # the claim's format and rank; the paper's previous best
+PERM_VAR = re.compile(r"\s*([+-]?)\s*([a-z])(\d)(\d+)\s*")
+PERM_PRODUCT = re.compile(r"m(\d+)\s*=\s*\(([^()]*)\)\s*\*\s*\(([^()]*)\)")
+PERM_ELEMENT = re.compile(r"c(\d)(\d+)\s*=\s*(.*)")
+PERM_USE = re.compile(r"\s*([+-]?)\s*m(\d+)\s*")
+
+
+def perm_scheme(doc):
+    """Perminov's JSON: n = [n, m, p] (A is n x m, B is m x p), m the rank, and u, v, w one row of integers per
+    product, u over A row by row (i*m + j), v over B row by row (j*p + k) and w over C transposed (k*n + i): the
+    convention of this module. Returns (n, m, p, rank, scheme)."""
+    (n, m, p), rank = doc["n"], doc["m"]
+    U, V, W = doc["u"], doc["v"], doc["w"]
+    if not (len(U) == len(V) == len(W) == rank):
+        raise ValueError(f"u, v and w hold {len(U)}, {len(V)} and {len(W)} products, not {rank}")
+    for name, M, size in (("u", U, n * m), ("v", V, m * p), ("w", W, p * n)):
+        if any(len(row) != size for row in M):
+            raise ValueError(f"a row of {name} is not {size} long")
+        if not all(type(x) is int for row in M for x in row):
+            raise ValueError(f"a coefficient of {name} is not an integer")
+    scheme = [tuple(columns([dict(enumerate(U[r])), dict(enumerate(V[r])), dict(enumerate(W[r]))])) for r in range(rank)]
+    return n, m, p, rank, scheme
+
+
+def perm_form(body, letter, rows, cols):
+    """One linear form of Perminov's strings, every character accounted for: {index: coefficient}. Indices are
+    1-based and written together, the row one digit (b110 is B[1][10]); coefficients are signs alone."""
+    out, pos, body = {}, 0, body.strip()
+    while pos < len(body):
+        t = PERM_VAR.match(body, pos)
+        if not t or t.end() == pos:
+            raise ValueError(f"cannot read the form {body!r}")
+        sign, var, i, j = t.groups()
+        i, j = int(i) - 1, int(j) - 1
+        if var != letter or not (0 <= i < rows and 0 <= j < cols) or (pos > 0 and not sign):
+            raise ValueError(f"unexpected term {t.group(0)!r} in an {letter}-form: {body!r}")
+        out[i * cols + j] = out.get(i * cols + j, 0) + (-1 if sign == "-" else 1)
+        pos = t.end()
+    return {k: x for k, x in out.items() if x}
+
+
+def perm_strings(doc, n, m, p, rank):
+    """The scheme as the JSON's own strings spell it: u and v from "mR = (a-form) * (b-form)", w from the elements
+    "cIK = +-mR ...", c_IK being entry (I, K) of C = AB (w index (K-1)*n + I-1)."""
+    us, vs, ws = [None] * rank, [None] * rank, [{} for _ in range(rank)]
+    for s in doc["multiplications"]:
+        t = PERM_PRODUCT.fullmatch(s.strip())
+        if not t or not 1 <= int(t.group(1)) <= rank or us[int(t.group(1)) - 1] is not None:
+            raise ValueError(f"cannot read the product {s!r}")
+        r = int(t.group(1)) - 1
+        us[r], vs[r] = perm_form(t.group(2), "a", n, m), perm_form(t.group(3), "b", m, p)
+    for s in doc["elements"]:
+        t = PERM_ELEMENT.fullmatch(s.strip())
+        if not t:
+            raise ValueError(f"cannot read the element {s!r}")
+        i, k, body, pos = int(t.group(1)) - 1, int(t.group(2)) - 1, t.group(3).strip(), 0
+        if not (0 <= i < n and 0 <= k < p):
+            raise ValueError(f"no entry c{i + 1}{k + 1} in a {n} x {p} product")
+        while pos < len(body):
+            u = PERM_USE.match(body, pos)
+            if not u or u.end() == pos or not 1 <= int(u.group(2)) <= rank or (pos > 0 and not u.group(1)):
+                raise ValueError(f"cannot read the element {s!r}")
+            w = ws[int(u.group(2)) - 1]
+            w[k * n + i] = w.get(k * n + i, 0) + (-1 if u.group(1) == "-" else 1)
+            pos = u.end()
+    if any(x is None for x in us):
+        raise ValueError("a product has no string")
+    return [tuple(columns([us[r], vs[r], ws[r]])) for r in range(rank)]
+
+
+def perm_list(data, n, m, p):
+    """Perminov's list file: braces, commas and integers only, one {U, V, W} per product, U n x m (U[i][j] for
+    a_ij), V m x p (V[j][k] for b_jk), W p x n (W[k][i] for c_ik). Read as data: braces become brackets for the
+    JSON parser."""
+    text = data.decode("ascii")
+    if not re.fullmatch(r"[\s{},0-9-]*", text):
+        raise ValueError("the list file holds characters other than braces, commas and integers")
+    products = json.loads(text.replace("{", "[").replace("}", "]"))
+    scheme = []
+    for U, V, W in products:
+        if [len(U), len(V), len(W)] != [n, m, p] or any(len(x) != m for x in U) or any(len(x) != p for x in V) \
+                or any(len(x) != n for x in W):
+            raise ValueError("a product's matrices are not n x m, m x p and p x n")
+        u = {i * m + j: U[i][j] for i in range(n) for j in range(m)}
+        v = {j * p + k: V[j][k] for j in range(m) for k in range(p)}
+        w = {k * n + i: W[k][i] for k in range(p) for i in range(n)}
+        scheme.append(tuple(columns([u, v, w])))
+    return scheme
+
+
+def exponent(rank, n, m, p):
+    """(3 ln rank / ln nmp, log2 7) to 40 digits; the decimal module rounds both correctly, so they repeat anywhere."""
+    from decimal import Decimal, localcontext
+    with localcontext() as ctx:
+        ctx.prec = 40
+        return 3 * Decimal(rank).ln() / Decimal(n * m * p).ln(), Decimal(7).ln() / Decimal(2).ln()
+
+
+def run_perminov(seed):
+    """The test: the JSON's scheme passes every Brent equation of <4, 4, 10> over Z, with at most 115 products, all
+    coefficients in {-1, 0, 1}, fewer than the previous best of 120, and the probes agree. Beside it: the same check
+    modulo 2, the exponent against Strassen's, and how many products the JSON's own strings and the list file give
+    exactly as its arrays do."""
+    doc = json.loads(input_bytes(*PERMINOV[0]).decode("ascii"))
+    n, m, p, rank, scheme = perm_scheme(doc)
+    if (n, m, p) != PERM_FORMAT:
+        raise ValueError(f"the file is for {n}x{m}x{p}, not {PERM_FORMAT}")
+    products, wrong, pw, cw, lines = assess("perminov_4x4x10_z", scheme, n, m, p, "Z", seed)
+    coefficients = {x for t in scheme for d in t for x in d.values()} | {0}
+    strings = perm_strings(doc, n, m, p, rank)
+    listed = perm_list(input_bytes(*PERMINOV[1]), n, m, p)
+    e, strassen_e = exponent(products, n, m, p)
+    out = {"format": f"{n}x{m}x{p}", "products": products, "wrong": wrong, "entries": (n * m) * (m * p) * (p * n),
+           "wrong_mod2": wrong_entries(mod2(scheme), n, m, p, "F2"),
+           "max_coefficient": max(abs(x) for x in coefficients), "ternary": int(coefficients <= {-1, 0, 1}),
+           "strings_agree": sum(1 for a, b in zip(scheme, strings) if a == b),
+           "list_agree": sum(1 for a, b in zip(scheme, listed) if a == b) if len(listed) == rank else -1,
+           "probe_wrong": pw, "control_wrong": cw, "probe_digest": digest(lines),
+           "exponent": float(e.quantize(type(e)("0.000001"))), "below_strassen": int(e < strassen_e),
+           "below_previous": int(products < PERM_PREVIOUS)}
+    passed = wrong == 0 and pw == 0 and products <= PERM_CLAIMED and out["ternary"] == 1 and products < PERM_PREVIOUS
+    return out, passed
+
+
 def run_selftest(seed):
     s = strassen()
     good = wrong_entries(s, 2, 2, 2, "Z")
@@ -665,7 +797,7 @@ def run_selftest(seed):
 
 
 RUNS = {"flips": run_flips, "alphatensor": run_alphatensor, "alphaevolve": run_alphaevolve, "dps": run_dps,
-        "symflips": run_symflips, "selftest": run_selftest}
+        "symflips": run_symflips, "perminov": run_perminov, "selftest": run_selftest}
 
 
 def main(argv):

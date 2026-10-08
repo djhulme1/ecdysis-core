@@ -127,6 +127,41 @@ def strassen_lrp():
     return L, R, P
 
 
+def perm_doc(scheme, n, m, p):
+    """A scheme in Perminov's JSON layout: integer arrays u, v and w (w over C transposed), the products as strings
+    and the entries of C as sums of products; coefficients +-1, as his strings write them."""
+
+    def signed(terms):
+        out = "".join((" - " if x < 0 else " + ") + name for name, x in terms)
+        return out[3:] if out.startswith(" + ") else "-" + out[3:]
+
+    def form(d, letter, cols):
+        return signed([(f"{letter}{i + 1}{j + 1}", x) for (i, j), x in ((divmod(idx, cols), x) for idx, x in sorted(d.items()))])
+
+    mults = [f"m{r + 1} = ({form(u, 'a', m)}) * ({form(v, 'b', p)})" for r, (u, v, w) in enumerate(scheme)]
+    elements = [f"c{i + 1}{k + 1} = " + signed([(f"m{r + 1}", t[2][k * n + i]) for r, t in enumerate(scheme) if t[2].get(k * n + i)])
+                for i in range(n) for k in range(p)]
+    return {"n": [n, m, p], "m": len(scheme), "z2": False, "multiplications": mults, "elements": elements,
+            "u": [[t[0].get(a, 0) for a in range(n * m)] for t in scheme],
+            "v": [[t[1].get(b, 0) for b in range(m * p)] for t in scheme],
+            "w": [[t[2].get(c, 0) for c in range(p * n)] for t in scheme]}
+
+
+def perm_m(scheme, n, m, p):
+    """The same scheme as Perminov's list file: one {U, V, W} per product, W[k][i] the coefficient in c_ik."""
+
+    def mat(rows):
+        return "{" + ", ".join("{" + ", ".join(str(x) for x in r) + "}" for r in rows) + "}"
+
+    lines = []
+    for u, v, w in scheme:
+        U = [[u.get(i * m + j, 0) for j in range(m)] for i in range(n)]
+        V = [[v.get(j * p + k, 0) for k in range(p)] for j in range(m)]
+        W = [[w.get(k * n + i, 0) for i in range(n)] for k in range(p)]
+        lines.append("  {" + ", ".join([mat(U), mat(V), mat(W)]) + "}")
+    return ("{\n" + ",\n".join(lines) + "\n}\n").encode("ascii")
+
+
 class Checks(unittest.TestCase):
     def test_strassen_passes_over_every_ring(self):
         for ring in ("Z", "F2", "Q"):
@@ -243,6 +278,56 @@ class Formats(unittest.TestCase):
         self.assertEqual(C.mod2([({0: 2, 1: -1}, {2: 3}, {3: 1})]), [({1: 1}, {2: 1}, {3: 1})])
 
 
+class Perminov(unittest.TestCase):
+    def test_arrays_strings_and_list_read_back(self):
+        s = C.strassen()
+        doc = perm_doc(s, 2, 2, 2)
+        n, m, p, rank, scheme = C.perm_scheme(doc)
+        self.assertEqual((n, m, p, rank), (2, 2, 2, 7))
+        self.assertEqual(scheme, s)
+        self.assertEqual(C.wrong_entries(scheme, 2, 2, 2, "Z"), 0)
+        self.assertEqual(C.perm_strings(doc, 2, 2, 2, 7), s)
+        self.assertEqual(C.perm_list(perm_m(s, 2, 2, 2), 2, 2, 2), s)
+
+    def test_two_digit_columns(self):
+        self.assertEqual(C.perm_form("b110 - b210", "b", 4, 10), {9: 1, 19: -1})
+        doc = {"multiplications": ["m1 = (a11) * (b110)"], "elements": ["c110 = m1"]}
+        self.assertEqual(C.perm_strings(doc, 1, 1, 10, 1), [({0: 1}, {9: 1}, {9: 1})])
+
+    def test_what_differs_is_seen_and_what_cannot_be_read_is_refused(self):
+        s = C.strassen()
+        doc = perm_doc(s, 2, 2, 2)
+        doc["multiplications"][0] = doc["multiplications"][0].replace("a22", "a21")
+        self.assertNotEqual(C.perm_strings(doc, 2, 2, 2, 7)[0], s[0])
+        for bad in ("a1", "a11 a12", "a11 + b12", "a31", "2a11", "a11 * a12"):
+            with self.subTest(form=bad), self.assertRaises(ValueError):
+                C.perm_form(bad, "a", 2, 2)
+        for bad in (b"{ {{1}}, x }", b"{1, 2} + 3", b"{{{1}}, {{1}}}"):
+            with self.subTest(listing=bad), self.assertRaises(ValueError):
+                C.perm_list(bad, 2, 2, 2)
+
+    def test_shapes_and_integers_are_enforced(self):
+        doc = perm_doc(C.strassen(), 2, 2, 2)
+        for change in (lambda d: d["u"].pop(), lambda d: d["v"][0].append(0), lambda d: d["w"][1].__setitem__(0, 0.5),
+                       lambda d: d["u"][2].__setitem__(1, True)):
+            d = json.loads(json.dumps(doc))
+            change(d)
+            with self.assertRaises(ValueError):
+                C.perm_scheme(d)
+
+    def test_w_read_untransposed_fails(self):
+        doc = perm_doc(C.strassen(), 2, 2, 2)
+        doc["w"] = [[row[(c % 2) * 2 + c // 2] for c in range(4)] for row in doc["w"]]
+        self.assertGreater(C.wrong_entries(C.perm_scheme(doc)[4], 2, 2, 2, "Z"), 0)
+
+    def test_exponent_against_strassen(self):
+        e, strassen = C.exponent(115, 4, 4, 10)
+        self.assertTrue(str(e).startswith("2.80478992"))
+        self.assertLess(e, strassen)
+        self.assertGreater(C.exponent(116, 4, 4, 10)[0], strassen)
+        self.assertLess(abs(C.exponent(7, 2, 2, 2)[0] - strassen), 1e-35)
+
+
 class Inputs(unittest.TestCase):
     def test_an_input_that_is_not_the_committed_bytes_is_refused(self):
         with tempfile.TemporaryDirectory() as d:
@@ -279,6 +364,29 @@ class SymmetricFlipsReleased(unittest.TestCase):
         self.assertEqual((out["s555_93_products"], out["s555_93_wrong"], out["s666_153_products"], out["s666_153_wrong"]),
                          (93, 0, 153, 0))
         self.assertEqual((out["s555_93_f2_same"], out["s666_153_f2_same"]), (93, 153))
+
+
+def perm_inputs():
+    d = os.environ.get("MM_INPUTS") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "inputs")
+    return d if all(os.path.isfile(os.path.join(d, name)) for name, _ in C.PERMINOV) else None
+
+
+@unittest.skipUnless(perm_inputs(), "Perminov's files are not at inputs/ (or MM_INPUTS)")
+class PerminovReleased(unittest.TestCase):
+    def test_the_released_scheme(self):
+        if os.path.basename(perm_inputs().rstrip("/")) != "inputs":
+            self.skipTest("the files must sit in a directory named inputs")
+        here = os.getcwd()
+        os.chdir(os.path.join(perm_inputs(), ".."))
+        try:
+            out, passed = C.run_perminov(SEED)
+        finally:
+            os.chdir(here)
+        self.assertTrue(passed)
+        self.assertEqual((out["products"], out["wrong"], out["entries"], out["wrong_mod2"], out["ternary"]),
+                         (115, 0, 25600, 0, 1))
+        self.assertEqual((out["strings_agree"], out["list_agree"], out["below_strassen"], out["exponent"]),
+                         (115, 115, 1, 2.80479))
 
 
 if __name__ == "__main__":

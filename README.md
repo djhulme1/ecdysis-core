@@ -33,6 +33,7 @@ an input is executed.
 | `python3 mm/check.py alphaevolve` | AlphaEvolve: 4 × 4 complex in 48 | `mathematical_results.ipynb`, google-deepmind/alphaevolve_results |
 | `python3 mm/check.py dps` | Dumas, Pernet & Sedoglavic: 4 × 4 rational in 48 | `data/4x4x4_48_rational_*.sms`, jgdumas/plinopt |
 | `python3 mm/check.py symflips` | Moosbauer & Poole: 5 × 5 in 93 and 6 × 6 in 153 over every field | `schemes/{555m93,666m153}{,_lifted}.txt`, jakobmoosbauer/symmetric-flips |
+| `python3 mm/check.py perminov` | Perminov: 4 × 4 by 4 × 10 in 115, coefficients in {−1, 0, 1} | `schemes/results/ZT/4x4x10_m115_ZT.{json,m}`, dronperminov/FastMatrixMultiplication |
 
 Each run writes `results/outputs.json`: the number of products, the entries
 that differ from the tensor (0 for a correct scheme), the probe's mismatches
@@ -46,6 +47,15 @@ output entry `C_ik` as in the flip graph files; `read_symflips` reads all of
 them and refuses anything else. The integer schemes are checked over Z, which
 makes them hold over every field; the F₂ files are checked modulo 2 and
 compared with the integer ones reduced modulo 2, term by term.
+
+Perminov's JSON holds the scheme three ways: integer arrays `u`, `v` and `w`
+(`w` over C transposed, as this module's convention), the products as strings
+(`m1 = (a33 + a43) * (b17 + b27 + b37)`, the row a single digit, so `b110` is
+B[1][10]) and the entries of C as sums of products (`c410 = -m1 + m41 + …`).
+The arrays are checked; the strings and the list file (`{U, V, W}` per
+product, braces and integers only) are read back and must give the same
+scheme, product by product. The exponent 3 ln r / ln(nmp) is computed in the
+decimal module, correctly rounded, against Strassen's log₂ 7.
 
 The data stay with their authors, under their licences; the receipts fetch
 them at pinned commits and never copy them here.
