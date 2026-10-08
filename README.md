@@ -341,3 +341,34 @@ solver in 1.2 GB). What it cannot check: the encoding in general (the
 journal's Theorem 5, trusted beyond the controls), and the authors' own
 certificates, which were never published; the result is proved again,
 not re-checked.
+
+## horvath/: Horvath's multi-tissue clock on tissues it was not built from
+
+`horvath/clock.py` tests Horvath, "DNA methylation age of human tissues and
+cell types" (Genome Biology, 2013), against its test as corrected on 7
+October 2026: the published predictor, applied to healthy adult tissues it
+was not built from, must not fail in most of them, a tissue failing when its
+DNA methylation ages correlate with age below 0.7 or miss it by a median of
+more than 10 years. The units: saliva (GSE92767), dermis and epidermis
+(GSE51954), muscle (GSE50498, M-values turned into betas) and cortex
+(GSE66351, bulk tissue of controls), adults with a stated age only.
+
+The predictor is applied as the paper's tutorial applies it: the 21,368
+calibration probes, missing values replaced by the gold standard, Horvath's
+BMIQcalibration, then the 353 coefficients. `horvath/bmiq.py` ports that
+normalisation from R together with the R it depends on: the Mersenne Twister
+with set.seed(1) and sample()'s pre-3.6.0 rule, optim's Nelder-Mead and BFGS
+step for step, density() and R's long double sums. On the tutorial's example
+it agrees with Horvath's own R code (R 4.3.3) to 7e-11 in every normalised
+value, and two gates in every run check it: the tutorial's printed values
+(20 normalised values to 8 significant figures, 16 ages to 2) and Horvath's
+own ages for the 113 blood samples of GSE64495 (median difference 2e-8
+years, largest 0.003, where his software imputed missing values by KNN).
+
+| Command | Claim |
+|---|---|
+| `python3 horvath/clock.py` | Horvath: a predictor that estimates the DNA methylation age of most tissues |
+
+Python with numpy and scipy (the pinned `jupyter/scipy-notebook` image); the
+inputs are three of the paper's additional files and five GEO series
+matrices (1.1 GB). About two minutes on two CPUs.
