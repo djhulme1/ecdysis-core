@@ -662,4 +662,7 @@ site-stratified log-rank and Wang-Allison tests are reported beside it.
 |---|---|
 | `python3 itp/e2_2011.py` | Strong et al. 2016: 17α-estradiol at 14.4 ppm from 10 months extends median and maximal lifespan in males only |
 
-Standard library; under a second.
+Standard library; under a second. The receipt (`2b38ab28…`, 8 October, at
+`857db35`): males +18.7% in median (779.5 to 925.3 days) and +11.2% at the
+90th percentile (1,063.7 to 1,182.3); females +1.1% and −0.1%; Table 1's
+numbers 33 of 36.
