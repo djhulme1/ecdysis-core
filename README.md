@@ -643,3 +643,23 @@ it cannot check: the paper's own runs, whose seeds, lengths and generator
 settings were not published; other filters and boundary conditions; the
 paper's grammars and laws, since organisations are recognised here by
 self-maintenance and by the species they keep.
+
+## itp/e2_2011.py: 17α-estradiol from 10 months in the ITP's 2011 cohort
+
+`itp/e2_2011.py` tests Strong et al., Aging Cell 15(5) 2016: "17-α-estradiol
+at a threefold higher dose robustly extended both median and maximal
+lifespan, but still only in males." Its input is the cohort's workbook from
+the Mouse Phenome Database (`ITP_C2011_Lifespan.xlsx`), read with
+`itp/rapa.py`'s reader and `itp/cana.py`'s rules: medians and 90th
+percentiles of the deaths, removed mice left out, each the mean of the three
+site values, the rule that gives all 12 of the paper's Table 1 medians and
+its counts (three of its 90th percentiles follow some other rule). The male
+median must rise by at least 9.5% and the male 90th percentile by 6% (half
+the reported 19% and 12%), and neither female value by as much. The
+site-stratified log-rank and Wang-Allison tests are reported beside it.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/e2_2011.py` | Strong et al. 2016: 17α-estradiol at 14.4 ppm from 10 months extends median and maximal lifespan in males only |
+
+Standard library; under a second.
