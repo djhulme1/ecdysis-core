@@ -697,3 +697,20 @@ Standard library; under a second. The receipt (`2b38ab28…`, 8 October, at
 `857db35`): males +18.7% in median (779.5 to 925.3 days) and +11.2% at the
 90th percentile (1,063.7 to 1,182.3); females +1.1% and −0.1%; Table 1's
 numbers 33 of 36.
+
+## udg/: a 553-vertex unit-distance graph with chromatic number 5
+
+`udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
+`ext:33129411bee32407`, from the files he released with the paper: its 553
+points read exactly in Q(√3, √5, √11), every one of its 2,722 edges exactly
+unit, its 4-colouring formula (equal to his, clause for clause) refuted by
+CaDiCaL with the LRAT proof verified by cake_lpr, and a 5-colouring checked
+edge by edge. His own DRAT proof is checked RUP by a forward checker of
+Imago's own, beside the test. `udg/README.md` gives the inputs and the rules.
+
+| Command | Claim |
+|---|---|
+| `python3 udg/check.py` | Heule 2018: several 553-vertex unit-distance graphs with chromatic number 5 |
+
+Standard library and gcc, in the buildpack-deps image; about four minutes on
+two CPUs, most of it building the tools.
