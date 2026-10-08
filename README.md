@@ -86,6 +86,22 @@ the known differences from the paper.
 | Command | Claim |
 |---|---|
 | `env -i ECDYSIS_SEED=... HOME=/tmp /usr/bin/python3 snn/snn_surrogate.py` | Surrogate gradient learning is robust to the surrogate's shape but not its scale |
+| `python3 snn/shd.py` | The Spiking Heidelberg Digits: spike timing, not spike counts, is what classifies them well |
+
+`snn/shd.py` tests Cramer et al.'s (2022) claim that spike timing is essential
+on the Spiking Heidelberg Digits, from the two files the authors released
+(`shd_train.h5.gz` and `shd_test.h5.gz`, CC BY 4.0, read with h5py as data).
+It fits the paper's four SVMs (scikit-learn, on standardised per-channel spike
+counts) and a fixed list of other count-only classifiers, each tuned on a
+seeded tenth of the training set, and trains the paper's CNN on histograms of
+10 ms by 64 channel groups: an 11 × 11 convolution, three blocks of two 3 × 3
+convolutions with batch normalisation, then max-pooling and dropout, and a
+dense layer of 128. The CNN is written in numpy, with Keras 2.3's defaults
+where the paper is silent, because the pinned image has scikit-learn and
+h5py but no deep-learning framework; the tests check every layer's gradient
+against finite differences. The verdict asks the CNN to beat the best SVM by
+at least 16 points, and no count-only classifier to reach 71.4%. A run takes
+about 90 minutes on two cores.
 
 ## af/: the alignment-faking compliance rates, recounted
 
