@@ -5,6 +5,7 @@
  */
 
 import { BUCKET_LIMITS, MemoryRateLimiter, PER_ADDRESS_PER_MINUTE, route, type RateLimiter } from "./api/router.js";
+import { serveMedia, type AssetFetcher } from "./api/media.js";
 import { V2Cache, V2Service } from "./api/v2/service.js";
 import { LogApi } from "./api/v2/log-api.js";
 import { Accounts } from "./api/v2/accounts.js";
@@ -117,6 +118,11 @@ export interface Env {
    */
   RL_KEY?: RateLimitBinding;
   RL_MCP?: RateLimitBinding;
+  /**
+   * Workers static assets ([assets] in wrangler.toml): the files in public/, uploaded with every deploy. The Worker runs
+   * first for every request, so they are reachable only through src/api/media.ts, which answers byte ranges.
+   */
+  ASSETS?: AssetFetcher;
 }
 
 export function screenersFrom(env: Env): Screener[] {
@@ -498,6 +504,10 @@ export default {
   },
 
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // The site's media (the front page's video, its poster and captions) are static files: answered first, with byte
+    // ranges, before anything touches the record, the rate limits or the counters.
+    const media = await serveMedia(req, env.ASSETS);
+    if (media) return media;
     const store = new D1Store(env.DB);
     // A log key that does not match its pin freezes every write, as the kill switch would: nothing the pinned key cannot verify is ever signed.
     const keysAgree = await logKeysAgree(env);
