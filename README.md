@@ -85,6 +85,7 @@ d log d. Standard library only.
 |---|---|
 | `python3 pi/bbp.py` | BBP: digits without multiple precision, in time nearly linear in the position |
 | `python3 pi/alpha23.py` | Bailey and Crandall: the googol-th binary digit of α₂,₃ is 0 |
+| `python3 pi/agm.py` | Salamin: each step of the AGM iteration doubles the correct digits of π |
 
 `pi/alpha23.py` computes the binary digits of Stoneham's constant
 α₂,₃ = Σ 1/(3ᵏ 2^(3ᵏ)) from position 10¹⁰⁰ exactly: the 209 terms with
@@ -93,6 +94,17 @@ series below 2^(−5.7 × 10⁹⁹). A second route sums the series directly for
 first 2²⁰ digits and must agree at 28 positions, 16 of them drawn by the seed.
 It compares the ten hexadecimal digits from the googol-th with those Bailey and
 Crandall print (2205896E7B), and runs three controls. Under a second.
+
+`pi/agm.py` runs Brent's Algorithm GL, his statement of Salamin's AGM formula,
+for 17 steps at 360,000 significant digits (plus 50 guard digits, and again
+with 100: the correct digits must not move) and reads the correct digits of
+each lower approximation a²ₙ₊₁/sₙ exactly from the exponent of its error.
+π comes from the Chudnovskys' series and, independently, Ramanujan's of 1914,
+both by binary splitting, which must agree. The test asks every step from
+n = 1 to 16 to at least double the digits. Controls: Brent's two tables
+(arXiv:1802.07558), his bounds, and two sequences that must fail the doubling,
+the iteration with b₀ moved by 10⁻³⁰ and Archimedes' polygons. Standard
+library only (the decimal module).
 
 ## snn/: surrogate gradients in spiking networks
 
