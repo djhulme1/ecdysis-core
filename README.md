@@ -570,3 +570,38 @@ x86-64 only. The cubes took 81.85 CPU hours in the authors' runs (median
 hour. What it cannot check: the symmetry breaking (hand lemmas, one resting on
 Keller's conjecture in dimension 6, and clausal proofs); the cubes not drawn;
 and the reduction from cube tilings to the graphs, which is prior work.
+
+## ptn/: the boolean Pythagorean triples, the proof sampled
+
+`ptn/check.py` tests Heule, Kullmann and Marek, "Solving and Verifying the
+boolean Pythagorean Triples problem via Cube-and-Conquer" (SAT 2016,
+arXiv:1605.00723): {1, ..., 7824} splits into two parts with no Pythagorean
+triple in either, and {1, ..., 7825} does not. Its inputs are the validation
+files from the page the paper names: the encoding (`plain7825.cnf`), the
+formula the cubes split (`transformed.cnf`), the million first-level cubes
+(`million.cubes`), the 7824 encoding with its backbone (`backbone7824.cnf`)
+and, for a control, `bce7824.cnf`. The check writes the encoding afresh from
+the triples, in exact integers, and finds the authors' file equal to it, with
+the sizes the paper prints. `transformed.cnf` is one unit (2520) and
+otherwise clauses of the encoding, 14,672 of them on 3,745 variables as the
+paper prints; since the encoding is closed under negating every variable,
+its unsatisfiability gives the encoding's. The seed draws 20 cubes; each is
+solved with the formula by CaDiCaL, its LRAT proof piped into cake_lpr (both
+built from source by `hexagon/check.py`'s code). The cover is checked twice:
+as the paper's binary tree, merging sibling cubes until the empty cube is
+left (999,999 merges), and as the cubes' negations refuted with a verified
+proof. A partition of {1, ..., 7824} comes from the backbone file and is
+checked against every one of its 9,465 triples. Controls: the printed sizes;
+a removed clause found; the tree without a seeded cube is no cover; the
+cube the authors' log marks satisfiable for 7824 gives a checked model; a
+backbone number moved makes a triple monochromatic; damaged proofs rejected.
+
+| Command | Claim |
+|---|---|
+| `python3 ptn/check.py` | Heule, Kullmann and Marek: {1, ..., 7825} cannot be split into two parts free of Pythagorean triples, and 7825 is least |
+
+Standard library, gcc and g++ (the pinned `buildpack-deps:bookworm` image);
+x86-64 only. The authors' run took about 35,000 CPU hours (two minutes a
+cube on average); here the sample takes about half an hour and the verified
+cover about seven minutes. What it cannot check: the cubes not drawn, and
+the authors' own proofs, which were checked as they were made and not kept.
