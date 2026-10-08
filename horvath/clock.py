@@ -25,7 +25,8 @@ nothing here is random (R's set.seed(1), which the normalisation calls, is repro
    one). The sample is normalised by BMIQcalibration against the gold standard (horvath/bmiq.py, a port checked by
    rules 4 and 5). DNA methylation age = anti.trafo(intercept + sum of coefficient x normalised value) over the 353
    CpGs of Additional file 23, with anti.trafo(x) = 21 exp(x) - 1 for x < 0 and 21 x + 20 otherwise.
-2. The units. Chronological ages are the series' own "age" characteristic; a sample is kept if its age is at least 18.
+2. The units. Chronological ages are the series' own "age" characteristic; a sample is kept if its age is at least 18
+   (GSE51954 gives four donors' ages only as ">90"; with no age to compare, they are left out).
    saliva: GSE92767, tissue Saliva. dermis and epidermis: GSE51954, by its tissue characteristic. muscle: GSE50498
    (vastus lateralis of disease-free men), whose matrix holds M-values (it has values below 0 and above 1): beta =
    2^M / (1 + 2^M) before rule 1. cortex: GSE66351, cell type bulk and diagnosis CTRL. A unit fails when the Pearson
@@ -282,7 +283,10 @@ def signif2(x):
 # ---------------------------------------------------------------- the units
 
 def age_of(meta, path):
+    """The sample's age in years; None for an open-ended one (">90"), which has no age to compare with."""
     raw = meta.get("age")
+    if raw is not None and re.fullmatch(r">\d+", raw):
+        return None
     if raw is None or not re.fullmatch(r"\d+(\.\d+)?", raw):
         raise Refused(f"{path}: a sample's age is {raw!r}")
     return float(raw)
@@ -293,7 +297,7 @@ def units_from(series):
     out = {}
     def pick(g, test):
         samples, metas, _, _ = series[g]
-        cols = [j for j, m in enumerate(metas) if test(m) and age_of(m, g) >= ADULT]
+        cols = [j for j, m in enumerate(metas) if test(m) and (age_of(m, g) or 0) >= ADULT]
         return [samples[j] for j in cols], [age_of(metas[j], g) for j in cols], cols
     out["saliva"] = pick("GSE92767", lambda m: m.get("tissue") == "Saliva") + ("GSE92767",)
     out["dermis"] = pick("GSE51954", lambda m: m.get("tissue") == "dermis") + ("GSE51954",)

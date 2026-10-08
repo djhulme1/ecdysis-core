@@ -110,6 +110,7 @@ class Series(unittest.TestCase):
             with self.assertRaises(C.Refused):
                 C.read_series(odd, ["cgA"])
         self.assertRaises(C.Refused, C.age_of, {"age": "40s"}, "x")
+        self.assertIsNone(C.age_of({"age": ">90"}, "x"))
         self.assertRaises(C.Refused, C.age_of, {}, "x")
 
     def test_m_values(self):
@@ -120,7 +121,8 @@ class Series(unittest.TestCase):
             return ([f"S{i}" for i in range(len(metas))], metas, None, 0)
         series = {
             "GSE92767": fake([{"tissue": "Saliva", "age": "40"}, {"tissue": "Saliva", "age": "17"}]),
-            "GSE51954": fake([{"tissue": "dermis", "age": "25"}, {"tissue": "epidermis", "age": "70"}]),
+            "GSE51954": fake([{"tissue": "dermis", "age": "25"}, {"tissue": "epidermis", "age": "70"},
+                              {"tissue": "dermis", "age": ">90"}]),
             "GSE50498": fake([{"age": "20"}, {"age": "73"}]),
             "GSE66351": fake([{"cell type": "bulk", "diagnosis": "CTRL", "age": "80"},
                               {"cell type": "bulk", "diagnosis": "AD", "age": "81"},
