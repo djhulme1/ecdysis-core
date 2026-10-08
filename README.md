@@ -778,3 +778,7 @@ and ζ of the wrong order must each fail.
 Standard library; a quarter of a second. What it cannot check: whether an
 exact decomposition exists near the printed one (the paper found none), and
 the tensor's own border rank, 8, which the paper proves by border apolarity.
+The receipt (`256b4200…`, 8 October, at `32e0193`, a verification): largest
+residual 3.4e-15 at negative powers of t and 9.0e-16 at t⁰, 692 of the 2,925
+equations, every weight tight, controls 3 of 3, the same to the last digit as
+the trial outside the image.
