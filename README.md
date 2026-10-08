@@ -166,6 +166,26 @@ how far the results repeat on other machines.
 
 numpy only; about nine minutes on two CPUs.
 
+`lenia/expanded.py` tests the self-replication that Chan's "Lenia and
+Expanded Universe" (ALIFE 2020) reports in Lenia with many kernels and
+channels. It runs every pattern the author's later catalogue files as a
+replicator (Chakazul/Lenia at adfc542: two in `found/212.json`, one channel
+and two kernels; sixteen under the `found/233s.json` headings "reproduce" and
+"reproduce + emission", three channels and fifteen kernels), each alone in a
+256 × 256 periodic world under its stored rule for up to t = 500, and asks
+whether two separate parts each come to hold half the starting mass. The
+update is a port of LeniaNDKC.py's, and a control runs the author's own Board
+and Automaton classes, taken from LeniaNDKC.py and run without a display, to
+show the two agree bit for bit. The registered test counted 15 patterns
+where the file has 18 under its headings; both counts are reported.
+
+| Command | Claim |
+|---|---|
+| `python3 lenia/expanded.py` | Lenia and Expanded Universe: self-replication among the new phenomena |
+
+numpy and scipy (the pinned `jupyter/scipy-notebook` image); the inputs are
+the two pattern files and LeniaNDKC.py (1.2 MB).
+
 ## raf/: Kauffman's autocatalytic sets, in seeded instances
 
 `raf/check.py` tests Kauffman's "Autocatalytic sets of proteins" (Journal of
