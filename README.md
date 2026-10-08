@@ -75,6 +75,15 @@ d log d. Standard library only.
 | Command | Claim |
 |---|---|
 | `python3 pi/bbp.py` | BBP: digits without multiple precision, in time nearly linear in the position |
+| `python3 pi/alpha23.py` | Bailey and Crandall: the googol-th binary digit of α₂,₃ is 0 |
+
+`pi/alpha23.py` computes the binary digits of Stoneham's constant
+α₂,₃ = Σ 1/(3ᵏ 2^(3ᵏ)) from position 10¹⁰⁰ exactly: the 209 terms with
+3ᵏ ≤ 10¹⁰⁰ reduced modulo 3ᵏ and summed as one fraction, the rest of the
+series below 2^(−5.7 × 10⁹⁹). A second route sums the series directly for the
+first 2²⁰ digits and must agree at 28 positions, 16 of them drawn by the seed.
+It compares the ten hexadecimal digits from the googol-th with those Bailey and
+Crandall print (2205896E7B), and runs three controls. Under a second.
 
 ## snn/: surrogate gradients in spiking networks
 
