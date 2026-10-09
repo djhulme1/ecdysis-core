@@ -515,9 +515,9 @@ export default {
     }
     const store = new D1Store(env.DB);
     // The run is the handler's own promise, awaited, as well as handed to waitUntil. Work given to waitUntil alone is allowed
-    // only about thirty seconds once the handler has returned (Cloudflare's limits), and on 9 October 2026 the context
-    // writer, which runs last, read a paper or two each run and then stopped, the scouts' polite pauses having used the time;
-    // the promise a scheduled handler returns is awaited for up to fifteen minutes. The writers' budgets keep a run inside it.
+    // only about thirty seconds once the handler has returned (Cloudflare's limits); the promise a scheduled handler returns
+    // is awaited for up to fifteen minutes. The writers' budgets keep a run inside it. A run's requests are limited too, in
+    // number per invocation: no step may make one per claim (test/cron.test.ts).
     const run = (async () => {
       const at = new Date().toISOString();
       const started = Date.now();

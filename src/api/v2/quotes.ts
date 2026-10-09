@@ -67,6 +67,12 @@ export interface QuoteCheckStore {
   list(limit: number): Promise<QuoteCheck[]>;
   /** Every claim's status in one small read, however many there are (the lists mark quotes not found in their source). */
   statusIndex?(): Promise<Map<string, QuoteStatus>>;
+  /**
+   * Every claim's state in one read: what the scout needs to know which are due. One read a run, never one per claim: a
+   * read per claim made the cron's every run cost a request per claim on the record, and at 937 claims the run passed the
+   * Worker's limit on requests in one invocation (9 October 2026), so the context writer after it could read no abstract.
+   */
+  index(): Promise<Map<string, Pick<QuoteCheck, "status" | "attempts" | "checkedAt" | "detail">>>;
 }
 
 export class MemoryQuoteCheckStore implements QuoteCheckStore {
@@ -75,6 +81,7 @@ export class MemoryQuoteCheckStore implements QuoteCheckStore {
   async put(row: QuoteCheck) { this.rows.set(row.claim, { ...row }); }
   async list(limit: number) { return [...this.rows.values()].slice(0, limit); }
   async statusIndex() { return new Map([...this.rows.values()].map((r) => [r.claim, r.status] as const)); }
+  async index() { return new Map([...this.rows.values()].map((r) => [r.claim, { status: r.status, attempts: r.attempts, checkedAt: r.checkedAt, detail: r.detail }] as const)); }
 }
 
 /** Below this share of the quote's words, the nearest stretch is not the quote at all: the sentence is from elsewhere in the paper. */
@@ -114,10 +121,12 @@ export class QuoteScout {
     const r = await this.o.v2.record();
     const out = { checked: 0, verified: 0, mismatched: 0, unresolvable: 0, errors: 0 };
     const cutoff = this.now().getTime() - RETRY_MS;
+    // Every claim's state in one read, not one read per claim (see QuoteCheckStore.index).
+    const known = await this.o.store.index();
     for (const [id, x] of [...r.external.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
       if (out.checked >= limit) break;
       if (r.held.has(id)) continue; // out of view: nothing to check until it is back
-      const prev = await this.o.store.get(id);
+      const prev = known.get(id) ?? null;
       // A failure of the scout's own making is no attempt on the source: until 5 October (#64) every request failed on the
       // Worker with "Illegal invocation", spending claims' four attempts in a day. Those rows start again, at once.
       const ours = prev?.status === "error" && /Illegal invocation/.test(prev.detail ?? "");
