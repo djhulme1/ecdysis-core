@@ -29,7 +29,7 @@ import { parseSource } from "../../core/v2/sources.js";
 import { hashJson, type Json } from "../../core/canonical.js";
 import { runScreening, type Screener } from "../../core/hazard.js";
 import {
-  CONTEXT_VERSION, EXPLAINER_SYSTEM, EXPLANATION_TOOL, PAPER_LIMITS, explainerMessage, explanationProblems, topicWords,
+  CONTEXT_VERSION, EXPLAINER_SYSTEM, EXPLANATION_SCHEMA, PAPER_LIMITS, explainerMessage, explanationProblems, topicWords,
   type ExplainerMaterial, type Explanation, type PaperRecord,
 } from "../../core/v2/context.js";
 
@@ -110,8 +110,11 @@ export class MemoryContextStore implements ContextStore {
 
 /** A failure the writer records as the provider's or the account's, never the claim's (see ContextWriter.ask). */
 export function providerFailure(detail: string | null): boolean {
-  return !!detail && /^the model provider (refused the key|could not be reached|answered (429|5\d\d)\b|answered \d+: the account's credit balance is too low)/.test(detail);
+  return !!detail && (/^the model provider (refused the key|could not be reached|answered (429|5\d\d)\b|answered \d+: the account's credit balance is too low)/.test(detail) || RUN_SPENT.test(detail));
 }
+
+/** The Worker's limit on requests in one invocation, reached: the run's, never the claim's (9 October 2026, before #86). */
+const RUN_SPENT = /Too many subrequests/i;
 
 /**
  * Where a claim's summary stands, for anyone to read beside the claim (GET /v2/claims/<id>): written, refused by the
@@ -299,7 +302,13 @@ export class ContextWriter {
     try {
       text = await readSource(source, { fetchImpl: this.fetchImpl, userAgent: this.ua(), openAlexKey: this.o.openAlexKey ?? null });
     } catch (e) {
-      await keep({ status: "error", inputsHash: null, explanation: null, detail: `the source's index could not be read: ${String((e as Error)?.message ?? e)}` });
+      const detail = `the source's index could not be read: ${String((e as Error)?.message ?? e)}`;
+      // The run has used up its requests: nothing more can be fetched in it, and it is not the claim's doing.
+      if (RUN_SPENT.test(detail)) {
+        await keep({ status: "error", inputsHash: null, explanation: null, detail }, earlier);
+        return { stop: this.redact(detail) };
+      }
+      await keep({ status: "error", inputsHash: null, explanation: null, detail });
       return "errors";
     }
     if (!text.ok && text.status === "error") {
@@ -316,8 +325,13 @@ export class ContextWriter {
       },
       abstract,
     };
-    const inputsHash = await hashJson({ version: CONTEXT_VERSION, model: this.model, system: EXPLAINER_SYSTEM, tool: EXPLANATION_TOOL as unknown as Json, material: material as unknown as Json });
+    const inputsHash = await hashJson({ version: CONTEXT_VERSION, model: this.model, system: EXPLAINER_SYSTEM, schema: EXPLANATION_SCHEMA as unknown as Json, material: material as unknown as Json });
     const answer = await this.ask(material);
+    if (!answer.ok && answer.declined) {
+      // The model would not write it: asking again would not change its mind, so it is refused, not retried.
+      await keep({ status: "refused", inputsHash, explanation: null, detail: answer.detail });
+      return "refused";
+    }
     if (!answer.ok) {
       // The provider's failure or the account's (a refused key, no credit, a rate limit, an outage) is not this claim's: it
       // costs the claim no attempt and stops the run, so an outage costs one call a run, and the claim is tried on the next.
@@ -349,8 +363,8 @@ export class ContextWriter {
     return "written";
   }
 
-  /** The model, through Anthropic's Messages API, made to answer with the explain_claim tool. */
-  private async ask(material: ExplainerMaterial): Promise<{ ok: true; input: unknown } | { ok: false; detail: string; provider?: boolean; refused?: boolean }> {
+  /** The model, through Anthropic's Messages API, answering with JSON held to EXPLANATION_SCHEMA (a structured output). */
+  private async ask(material: ExplainerMaterial): Promise<{ ok: true; input: unknown } | { ok: false; detail: string; provider?: boolean; refused?: boolean; declined?: boolean }> {
     const key = this.o.anthropicKey!.trim();
     let res: Response;
     try {
@@ -360,8 +374,8 @@ export class ContextWriter {
         headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
           model: this.model, max_tokens: 1500, system: EXPLAINER_SYSTEM,
-          tools: [EXPLANATION_TOOL], tool_choice: { type: "tool", name: EXPLANATION_TOOL.name },
           messages: [{ role: "user", content: explainerMessage(material) }],
+          output_config: { format: { type: "json_schema", schema: EXPLANATION_SCHEMA } },
         }),
       });
     } catch (e) {
@@ -377,10 +391,16 @@ export class ContextWriter {
       const provider = res.status === 429 || res.status >= 500;
       return { ok: false, detail: `the model provider answered ${res.status}${type}`, provider, refused: !provider };
     }
-    const body = (await res.json().catch(() => null)) as { content?: Array<{ type?: string; name?: string; input?: unknown }>; stop_reason?: string } | null;
-    const block = body?.content?.find((b) => b?.type === "tool_use" && b?.name === EXPLANATION_TOOL.name);
-    if (!block) return { ok: false, detail: `no explanation in the answer${body?.stop_reason ? ` (it stopped: ${String(body.stop_reason).slice(0, 40)})` : ""}` };
-    return { ok: true, input: block.input };
+    const body = (await res.json().catch(() => null)) as { content?: Array<{ type?: string; text?: unknown }>; stop_reason?: string } | null;
+    const stopped = body?.stop_reason ? ` (it stopped: ${String(body.stop_reason).slice(0, 40)})` : "";
+    if (body?.stop_reason === "refusal") return { ok: false, detail: "the model declined to write it", declined: true };
+    const text = body?.content?.find((b) => b?.type === "text" && typeof b.text === "string")?.text as string | undefined;
+    if (!text) return { ok: false, detail: `no explanation in the answer${stopped}` };
+    try {
+      return { ok: true, input: JSON.parse(text) as unknown };
+    } catch {
+      return { ok: false, detail: `the answer was not the JSON asked for${stopped}` };
+    }
   }
 
   /** OpenAlex's record of a source's work, by whatever id OpenAlex looks works up by. Never throws for an answer it can read. */

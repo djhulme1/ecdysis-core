@@ -88,26 +88,29 @@ export const EXPLANATION_LIMITS = {
   terms: 3,
 } as const;
 
-/** The model is asked to fill this in, and nothing else (a forced tool call, so the answer is structured). */
-export const EXPLANATION_TOOL = {
-  name: "explain_claim",
-  description: "Record the plain-English context for one claim's page: what it means, what the paper found, and the technical terms in it.",
-  input_schema: {
-    type: "object",
-    properties: {
-      headline: { type: "string", description: "The claim in plain words: one sentence of at most 140 characters saying what the quoted sentence claims, as the paper states it, for a curious reader who is not a specialist. Keep the paper's hedges and scope (\"in mice\", \"in these surveys\"). A statement, not a question; no hype." },
-      gist: { type: "string", description: "The paper as a whole in one sentence of at most 220 characters: what it did or found, as its abstract states it. Empty if no abstract was given." },
-      did: { type: "string", description: "One or two sentences, at most 320 characters: what the authors did to reach this finding: the kind of study or method, who or what was studied, and where and when, as far as the abstract says. Empty if the abstract does not say." },
-      meaning: { type: "string", description: "Two to four sentences: what the claim means in the context of the paper, and why it would matter in the world if it holds. Do not repeat the headline. Describe it; never judge whether it is true." },
-      findings: { type: "array", maxItems: 3, items: { type: "string" }, description: "Up to three short points, one sentence each: the paper's main findings as its abstract states them. Empty if no abstract was given." },
-      terms: {
-        type: "array", maxItems: 3,
-        items: { type: "object", properties: { term: { type: "string" }, means: { type: "string" } }, required: ["term", "means"] },
-        description: "Up to three technical terms that appear in the quoted sentence, each with a one-sentence plain definition. Empty if it has none.",
-      },
+/**
+ * The JSON the model is asked to answer with, as a structured output (the Messages API's output_config.format): the API
+ * holds the answer to this schema. Not a forced tool call: Claude Sonnet 5.5 and Opus 5.5 refuse forced tool use with a 400
+ * (9 October 2026: every summary failed that way). Structured outputs take no maxItems, maxLength or the like, and every
+ * object must close with additionalProperties false, so the limits live in the descriptions here and are enforced, after
+ * the answer, by explanationProblems.
+ */
+export const EXPLANATION_SCHEMA = {
+  type: "object",
+  properties: {
+    headline: { type: "string", description: "The claim in plain words: one sentence of at most 140 characters saying what the quoted sentence claims, as the paper states it, for a curious reader who is not a specialist. Keep the paper's hedges and scope (\"in mice\", \"in these surveys\"). A statement, not a question; no hype." },
+    gist: { type: "string", description: "The paper as a whole in one sentence of at most 220 characters: what it did or found, as its abstract states it. Empty if no abstract was given." },
+    did: { type: "string", description: "One or two sentences, at most 320 characters: what the authors did to reach this finding: the kind of study or method, who or what was studied, and where and when, as far as the abstract says. Empty if the abstract does not say." },
+    meaning: { type: "string", description: "Two to four sentences: what the claim means in the context of the paper, and why it would matter in the world if it holds. Do not repeat the headline. Describe it; never judge whether it is true." },
+    findings: { type: "array", items: { type: "string" }, description: "At most three short points, one sentence each: the paper's main findings as its abstract states them. Empty if no abstract was given." },
+    terms: {
+      type: "array",
+      items: { type: "object", properties: { term: { type: "string" }, means: { type: "string" } }, required: ["term", "means"], additionalProperties: false },
+      description: "At most three technical terms that appear in the quoted sentence, each with a one-sentence plain definition. Empty if it has none.",
     },
-    required: ["headline", "gist", "did", "meaning", "findings", "terms"],
   },
+  required: ["headline", "gist", "did", "meaning", "findings", "terms"],
+  additionalProperties: false,
 } as const;
 
 /** The writer's instructions. The material it explains goes in a separate message, marked as data. */
@@ -138,7 +141,7 @@ export function explainerMessage(m: ExplainerMaterial): string {
     "<material>",
     JSON.stringify(m, null, 1),
     "</material>",
-    "Fill in explain_claim for this claim.",
+    "Answer with the JSON object the schema describes, for this claim.",
   ].join("\n");
 }
 
