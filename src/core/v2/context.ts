@@ -173,7 +173,10 @@ export function fieldPath(t: PaperRecord["topic"], fallback: string | null): str
 }
 
 const URLISH = /https?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|org|net|io|ai|me|co|uk|info|xyz|ly)\b(?:\/|\b)/i;
-const MARKUP = /[<>]|\*\*|__|`|^#{1,6}\s/m;
+// Markup is the start of a tag, a comment or a processing instruction (<b>, </p>, <!--, <?xml), or markdown's emphasis, code
+// or a heading. A comparison is not: "(<0.1 Hz)", "P < 10−3" and "> 50%" are how papers report what they found, and every value
+// is escaped wherever it is shown. Refusing every "<" refused summaries that quoted their paper faithfully (9 October 2026).
+const MARKUP = /<[A-Za-z\/!?]|\*\*|__|`|^#{1,6}\s/m;
 const HIDDEN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F​-‍⁠﻿­‪-‮⁦-⁩؜‎‏]|[\u{E0000}-\u{E007F}]/u;
 const BULLET = /^\s*(?:[-•*·]|\d+[.)])\s+/;
 

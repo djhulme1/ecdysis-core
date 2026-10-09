@@ -14,7 +14,10 @@
  *
  * Highest stakes first, so the claims most worth reading about are explained first, and a few a run: the back catalogue is
  * worked through within a day of the key being installed, and new claims within the hour. A claim is written again only
- * when the version of the instructions or the model changes; a refused summary is not retried until one of them does.
+ * when the version of the instructions or the model changes. A summary refused for its form (outside the limits: too long,
+ * markup) is asked for again after RETRY_MS, as a failed one is, up to MAX_ATTEMPTS in all: the model's slip, not the
+ * claim's, and a fresh answer usually fits. One the model declined, or screening did not pass, is not asked for again until
+ * the version or the model changes.
  *
  * Off the log, as the quote scout's results are: the paper's record and the summary are context, never evidence, and feed
  * no number. Safeguards, so nothing depends on anyone remembering: without ANTHROPIC_API_KEY nothing is written (the
@@ -115,6 +118,15 @@ export function providerFailure(detail: string | null): boolean {
 
 /** The Worker's limit on requests in one invocation, reached: the run's, never the claim's (9 October 2026, before #86). */
 const RUN_SPENT = /Too many subrequests/i;
+
+/**
+ * Whether a claim's summary may be asked for again after RETRY_MS, while it has attempts left: one that failed, or one
+ * refused for its form (outside the limits), which is the model's slip and usually fits at the next asking. Never one the
+ * model declined or screening refused: asking again would not change either.
+ */
+export function askAgain(row: Pick<ClaimContextRow, "status" | "detail">): boolean {
+  return row.status === "error" || (row.status === "refused" && /^outside the limits: /.test(row.detail ?? ""));
+}
 
 /**
  * Where a claim's summary stands, for anyone to read beside the claim (GET /v2/claims/<id>): written, refused by the
@@ -272,7 +284,8 @@ export class ContextWriter {
       const due = !row
         || row.version !== CONTEXT_VERSION
         || (row.status === "written" && row.model !== this.model)
-        || (row.status === "error" && (providerFailure(row.detail) || (row.attempts < MAX_ATTEMPTS && Date.parse(row.writtenAt) < t - RETRY_MS)));
+        || (row.status === "error" && providerFailure(row.detail))
+        || (askAgain(row) && row.attempts < MAX_ATTEMPTS && Date.parse(row.writtenAt) < t - RETRY_MS);
       if (!due) continue;
       const q = checks.get(c.id);
       if (!q || !EXPLAINABLE.has(q)) continue;
@@ -292,9 +305,10 @@ export class ContextWriter {
   }
 
   /** One claim's summary: read the abstract, ask the model, check what it says, screen it, keep it. */
-  private async writeOne(claim: string, source: string, quote: string, kind: "empirical" | "conceptual", paper: PaperRecord | null, prev: Pick<ClaimContextRow, "status" | "attempts" | "version"> | null): Promise<"written" | "refused" | "errors" | { stop: string }> {
+  private async writeOne(claim: string, source: string, quote: string, kind: "empirical" | "conceptual", paper: PaperRecord | null, prev: Pick<ClaimContextRow, "status" | "attempts" | "version" | "detail"> | null): Promise<"written" | "refused" | "errors" | { stop: string }> {
     const at = this.now().toISOString();
-    const earlier = prev && prev.status === "error" && prev.version === CONTEXT_VERSION ? prev.attempts : 0;
+    // Attempts add up while the claim is asked for again (askAgain), so MAX_ATTEMPTS bounds a failure and a refusal of form alike.
+    const earlier = prev && askAgain(prev) && prev.version === CONTEXT_VERSION ? prev.attempts : 0;
     const keep = async (row: Omit<ClaimContextRow, "claim" | "version" | "model" | "writtenAt" | "attempts">, attempts = earlier + 1) => {
       await this.o.store.putClaim({ claim, version: CONTEXT_VERSION, model: this.model, writtenAt: at, attempts, ...row, detail: row.detail ? this.redact(row.detail) : null });
     };
