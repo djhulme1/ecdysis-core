@@ -16,7 +16,7 @@ import { MemoryQuoteCheckStore, type QuoteStatus } from "../src/api/v2/quotes.js
 import { PagesHandler } from "../src/api/v2/pages.js";
 import { healthPage } from "../src/web/steward.js";
 import { ContextWriter, MemoryContextStore, MemoryLedger, paperRecordOf, providerFailure } from "../src/api/v2/context.js";
-import { CONTEXT_VERSION, EXPLAINER_SYSTEM, explanationProblems, fieldPath, standingWords, topicWords, type StandingInput } from "../src/core/v2/context.js";
+import { CONTEXT_VERSION, EXPLAINER_SYSTEM, EXPLANATION_SCHEMA, explanationProblems, fieldPath, standingWords, topicWords, type StandingInput } from "../src/core/v2/context.js";
 import type { Screener } from "../src/core/hazard.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
@@ -176,7 +176,8 @@ function fakeWorld(model: { answer: (body: Record<string, unknown>) => Response 
   return { calls, fetch: f };
 }
 
-const toolAnswer = (input: unknown) => new Response(JSON.stringify({ content: [{ type: "tool_use", id: "toolu_1", name: "explain_claim", input }], stop_reason: "tool_use" }), { status: 200 });
+/** The Messages API's answer to a structured-output request: the JSON in a text block. */
+const jsonAnswer = (input: unknown, stop = "end_turn") => new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(input) }], stop_reason: stop }), { status: 200 });
 
 async function world(o: { answer?: (body: Record<string, unknown>) => Response; key?: string | null; cap?: number; paused?: boolean; screeners?: Screener[]; model?: string } = {}) {
   const clock = { t: Date.UTC(2026, 9, 9, 8, 0, 0) };
@@ -188,10 +189,10 @@ async function world(o: { answer?: (body: Record<string, unknown>) => Response; 
   const store = new MemoryContextStore();
   const svc = new V2Service({ log, store: new MemoryV2Store(rows), logPrivateKey: logKey.privateKey, now, context: store });
   const quotes = new MemoryQuoteCheckStore();
-  const fake = fakeWorld({ answer: o.answer ?? (() => toolAnswer(GOOD)) });
+  const fake = fakeWorld({ answer: o.answer ?? (() => jsonAnswer(GOOD)) });
   const ledger = new MemoryLedger();
-  const writer = (over: { model?: string; key?: string | null; budgetMs?: number } = {}) => new ContextWriter({
-    store, v2: svc, quotes, fetchImpl: fake.fetch, now, pause: async () => {}, anthropicKey: over.key === undefined ? (o.key === undefined ? KEY : o.key) : over.key,
+  const writer = (over: { model?: string; key?: string | null; budgetMs?: number; fetchImpl?: typeof fetch } = {}) => new ContextWriter({
+    store, v2: svc, quotes, fetchImpl: over.fetchImpl ?? fake.fetch, now, pause: async () => {}, anthropicKey: over.key === undefined ? (o.key === undefined ? KEY : o.key) : over.key,
     model: over.model ?? o.model ?? null, paused: o.paused ?? false, dailyCap: o.cap ?? 1000, ledger, screeners: o.screeners ?? [],
     ...(over.budgetMs === undefined ? {} : { budgetMs: over.budgetMs }),
   });
@@ -220,10 +221,13 @@ describe("the context writer", () => {
     assert.ok(w.fake.calls.length > 0 && w.fake.calls.every((c) => c.signal), "every request it makes can time out, so none holds the cron");
     const ask = w.fake.calls.filter((c) => c.url.startsWith("https://api.anthropic.com/"));
     assert.equal(ask.length, 1);
-    const body = JSON.parse(ask[0]!.body) as { model: string; system: string; tool_choice: { type: string; name: string }; messages: Array<{ content: string }> };
+    const body = JSON.parse(ask[0]!.body) as { model: string; system: string; tools?: unknown; tool_choice?: unknown; output_config: { format: { type: string; schema: unknown } }; messages: Array<{ content: string }> };
     assert.equal(body.model, "claude-sonnet-5-5");
     assert.equal(body.system, EXPLAINER_SYSTEM);
-    assert.deepEqual(body.tool_choice, { type: "tool", name: "explain_claim" });
+    // A structured output, never a forced tool: Claude Sonnet 5.5 answers a forced tool call with a 400 (9 October 2026).
+    assert.deepEqual(body.output_config, { format: { type: "json_schema", schema: EXPLANATION_SCHEMA } });
+    assert.equal(body.tool_choice, undefined);
+    assert.equal(body.tools, undefined);
     assert.match(body.messages[0]!.content, /<material>[\s\S]*subtly shifting attention to accuracy[\s\S]*<\/material>/);
     assert.match(body.messages[0]!.content, /proliferation of false and misleading news/, "the abstract the source's index publishes");
     assert.doesNotMatch(ask[0]!.body, /IGNORE ALL PREVIOUS INSTRUCTIONS|nudge fails/, "the registrant's test never reaches the model");
@@ -258,8 +262,8 @@ describe("the context writer", () => {
     assert.equal(row.explanation!.headline, GOOD.headline);
     assert.equal(row.explanation!.did, GOOD.did);
     assert.equal(row.explanation!.gist, GOOD.gist);
-    const ask = JSON.parse(w.fake.calls.filter((c) => c.url.startsWith("https://api.anthropic.com/")).at(-1)!.body) as { tools: Array<{ input_schema: { required: string[] } }> };
-    assert.deepEqual(ask.tools[0]!.input_schema.required, ["headline", "gist", "did", "meaning", "findings", "terms"], "the model is asked for every field the page shows");
+    const ask = JSON.parse(w.fake.calls.filter((c) => c.url.startsWith("https://api.anthropic.com/")).at(-1)!.body) as { output_config: { format: { schema: { required: string[] } } } };
+    assert.deepEqual(ask.output_config.format.schema.required, ["headline", "gist", "did", "meaning", "findings", "terms"], "the model is asked for every field the page shows");
   });
 
   it("shows it on the claim page, escaped and labelled: the headline, the terms, the paper, why it matters and the story, with the standing from the record", async () => {
@@ -357,7 +361,7 @@ describe("the context writer", () => {
   });
 
   it("refuses an answer outside the limits, one that screening does not pass, and findings with no abstract to take them from", async () => {
-    const linky = await world({ answer: () => toolAnswer({ ...GOOD, meaning: `${GOOD.meaning} More at https://evil.example/x.` }) });
+    const linky = await world({ answer: () => jsonAnswer({ ...GOOD, meaning: `${GOOD.meaning} More at https://evil.example/x.` }) });
     const a = await linky.register("doi:10.1000/paper", QUOTE, "verified");
     assert.equal((await linky.writer().run()).refused, 1);
     assert.equal((await linky.store.getClaim(a))!.status, "refused");
@@ -372,12 +376,12 @@ describe("the context writer", () => {
     assert.equal((await bare.writer().run()).refused, 1);
     assert.match((await bare.store.getClaim(c))!.detail ?? "", /findings given without an abstract/);
     for (const [over, said] of [[{ findings: [], gist: "" }, /what the authors did given without an abstract/], [{ findings: [], did: "" }, /a gist of the paper given without an abstract/]] as const) {
-      const guessed = await world({ answer: () => toolAnswer({ ...GOOD, ...over }) });
+      const guessed = await world({ answer: () => jsonAnswer({ ...GOOD, ...over }) });
       const e = await guessed.register("doi:10.1000/bare", "a sentence from the body of a paper with no abstract anywhere", "no-abstract");
       assert.equal((await guessed.writer().run()).refused, 1);
       assert.match((await guessed.store.getClaim(e))!.detail ?? "", said, "a method or a gist with no abstract to take it from is invented");
     }
-    const noFindings = await world({ answer: () => toolAnswer({ ...GOOD, findings: [], did: "", gist: "" }) });
+    const noFindings = await world({ answer: () => jsonAnswer({ ...GOOD, findings: [], did: "", gist: "" }) });
     const d = await noFindings.register("doi:10.1000/bare", "a sentence from the body of a paper with no abstract anywhere", "no-abstract");
     await noFindings.writer().run();
     assert.equal((await noFindings.store.getClaim(d))!.explanation!.basis, "title");
@@ -421,6 +425,49 @@ describe("the context writer", () => {
     assert.match(html, /checks lapsed 1, sealed 0; alert emails 0, digests 0; quotes checked 6 \(verified 4, mismatched 0\); sources observed 2/);
     assert.match(html, /<h3>The context writer \(What this means\)<\/h3>\s*<p>Papers' records read 9 \(unresolved 3\); summaries written 0, refused 0, failed 1\. <span class="status broken">Off: the model provider refused the key<\/span>/);
     assert.match(html, /<a href="\/c\/ext:a88c57f27b9f7e03"><code class="mono">ext:a88c57f27b9f7e03<\/code><\/a><\/td><td><span class="status broken">failed<\/span><\/td><td class="small">the model provider refused the key \(401\)<\/td>/);
+  });
+
+  it("asks only for what structured outputs take: no length or count limits, and every object closed", () => {
+    // The API refuses a schema with these (a 400 for every claim): the limits live in the descriptions and explanationProblems.
+    const walk = (node: unknown, path: string): string[] => {
+      if (!node || typeof node !== "object") return [];
+      const o = node as Record<string, unknown>;
+      const out: string[] = [];
+      for (const k of ["maxItems", "maxLength", "minLength", "minimum", "maximum", "multipleOf", "pattern", "$ref"]) if (k in o) out.push(`${path}.${k}`);
+      if ("minItems" in o && Number(o["minItems"]) > 1) out.push(`${path}.minItems`);
+      if (o["type"] === "object" && o["additionalProperties"] !== false) out.push(`${path}: an object must close with additionalProperties false`);
+      for (const [k, v] of Object.entries(o)) if (v && typeof v === "object") out.push(...walk(v, `${path}.${k}`));
+      return out;
+    };
+    assert.deepEqual(walk(EXPLANATION_SCHEMA, "schema"), []);
+    assert.deepEqual([...EXPLANATION_SCHEMA.required].sort(), Object.keys(EXPLANATION_SCHEMA.properties).sort(), "every field asked for");
+  });
+
+  it("refuses what the model declines to write, and retries an answer that is not the JSON asked for", async () => {
+    const declined = await world({ answer: () => new Response(JSON.stringify({ content: [], stop_reason: "refusal" }), { status: 200 }) });
+    const a = await declined.register("doi:10.1000/paper", QUOTE, "verified");
+    assert.equal((await declined.writer().run()).refused, 1);
+    assert.deepEqual([(await declined.store.getClaim(a))!.status, (await declined.store.getClaim(a))!.detail], ["refused", "the model declined to write it"]);
+    const cut = await world({ answer: () => new Response(JSON.stringify({ content: [{ type: "text", text: '{"headline": "Prompting peo' }], stop_reason: "max_tokens" }), { status: 200 }) });
+    const b = await cut.register("doi:10.1000/paper", QUOTE, "verified");
+    assert.equal((await cut.writer().run()).errors, 1);
+    assert.deepEqual([(await cut.store.getClaim(b))!.status, (await cut.store.getClaim(b))!.detail], ["error", "the answer was not the JSON asked for (it stopped: max_tokens)"]);
+  });
+
+  it("stops the run, at no cost to the claim, once the Worker's requests for the run are spent", async () => {
+    const spent = await world();
+    const ids = [];
+    for (let i = 0; i < 2; i++) ids.push(await spent.register("doi:10.1000/paper", `${QUOTE} (${i})`, "verified"));
+    // The papers are read; then the run's requests run out as the first abstract is fetched.
+    await spent.writer({ key: null }).run();
+    const real = spent.fake.fetch;
+    spent.fake.fetch = (async () => { throw new Error("Too many subrequests by single Worker invocation."); }) as typeof fetch;
+    const out = await spent.writer({ fetchImpl: spent.fake.fetch }).run();
+    assert.deepEqual([out.errors, out.written, out.off], [1, 0, "the source's index could not be read: Too many subrequests by single Worker invocation."]);
+    const rows = [...spent.store.claims.values()];
+    assert.deepEqual(rows.map((r) => [r.attempts, r.status]), [[0, "error"]], "one claim tried, no attempt counted");
+    spent.fake.fetch = real;
+    assert.equal((await spent.writer({ fetchImpl: real }).run()).written, 2, "the next run writes both");
   });
 
   it("never lets the key out: sent to the provider alone, kept in no row, redacted from errors; a refused key stops the run", async () => {
