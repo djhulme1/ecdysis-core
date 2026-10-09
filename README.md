@@ -835,3 +835,40 @@ In exact arithmetic the verdict is the same, but pyemd's rounding hides ties:
 Oizumi et al.'s system has 81 structures, not 27, and 19 possible values, not
 10. pyemd's rounding also inflates the paper's counts of values: Tononi et
 al.'s 321 printed values are 74 once pairs 1e-6 apart are merged.
+
+## tms/: Toy Models of Superposition, the feature geometry
+
+`tms/check.py` tests claim `ext:bb8b3e91d84b94fe`, Elhage et al. (Transformer
+Circuits Thread 2022, arXiv:2209.10652): "a surprising connection to the
+geometry of uniform polytopes". It trains the released notebook's
+feature-geometry experiment afresh under the seed (the ReLU output model, 200
+features, 20 hidden dimensions, 20 sparsity levels from 1/(1-S) = 1 to 20,
+AdamW at 1e-3, batches of 1,024, 10,000 steps), each level on its own stream,
+and measures the dimensions per feature m/||W||_F^2 and each feature's
+dimensionality D_i as the notebook computes them. The notebook
+(`toy_models.ipynb` at `562710e`, MIT) is the input, read as data: every value
+the training follows must appear in its code verbatim, and its own Model and
+optimize, run on CPU from the same seed, agree with ours bit for bit. Its
+saved figures hold the authors' own run, and the same statistics are
+computed from them beside ours.
+
+| Command | Claim |
+|---|---|
+| `python3 tms/check.py --rule registered` | The test as registered (seq 1244) |
+| `python3 tms/check.py --rule corrected` | The correction proposed to Daniel on 9 October, if he files it |
+
+The registered test asks for half of the represented features to lie within
+0.02 of 1, 3/4, 2/3, 1/2, 2/5 or 3/8. The authors' own run fails it: 305 of
+1,155 (26%), because at the sparser levels the features spread continuously
+between about 0.15 and 0.3, which the paper never says they do not. The
+proposed correction asks instead for what the paper reports, distinct lines at
+its fractions: a line at 1/2 and one more at 3/4, 2/3, 2/5 or 3/8, a line being
+10 or more features within 0.005 of the fraction and at least twice as many as
+within 0.005 of either point 0.0125 away. The authors' run passes it (lines at
+1/2 and 2/5), and it passes none of 300 uniform spreads of the same size. No
+receipt is sealed until the test in force is settled.
+
+numpy-free PyTorch on CPU, single-threaded, with the AVX2 kernels fixed, in the
+pytorch image; about twelve minutes on two CPUs. Tests: `python3 -m unittest -v
+tms.test_check` from the lab's root, with the notebook at `inputs/` (or
+`TMS_INPUTS`).
