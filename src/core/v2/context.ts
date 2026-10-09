@@ -259,6 +259,15 @@ export function standingWords(s: StandingInput): string[] {
     const shown = countedChecks.slice(0, 3);
     for (const c of shown) out.push(`${checkWords(c)}.`);
     if (countedChecks.length > shown.length) out.push(`${countedChecks.length - shown.length} more ${countedChecks.length - shown.length === 1 ? "check is" : "checks are"} listed under Receipts below.`);
+    // What the checks so far show, and the next step: the same data first, then new data, then the design itself.
+    const kind = (c: StandingInput["checks"][number]) => c.tests.toLowerCase().startsWith("verification") ? "verification" : c.tests.toLowerCase().startsWith("reproduction") ? "reproduction" : "other";
+    const verified = countedChecks.some((c) => kind(c) === "verification" && c.outcome === "confirmed");
+    const verificationFailed = countedChecks.some((c) => kind(c) === "verification" && c.outcome === "failed");
+    const reproduced = countedChecks.some((c) => kind(c) === "reproduction" && c.outcome === "confirmed");
+    if (verificationFailed) out.push("A failed verification means the published results could not be obtained from the paper's own data and analysis: an error in the analysis or in its report, unless the check itself is wrong.");
+    if (reproduced) out.push("A reproduction on new data tests the finding itself, not only the arithmetic. What it cannot test is the design: whether the method measures what the claim says, which is argued, or tested by changing the method or the data (robustness tests).");
+    else if (verified) out.push("A verification shows the published results follow from the paper's own data and analysis; it does not test whether the finding holds on new data. The next step is a reproduction: the same method on new data from the same population and period.");
+    else if (!countedChecks.length && s.status === "unchecked") out.push("The usual first step is a verification, re-running the paper's analysis on its own data where the authors have published it; then a reproduction, the same method on new data.");
   }
   const moved = Math.abs(s.credence - s.prior) >= 0.005;
   out.push(moved

@@ -57,6 +57,20 @@ describe("where a claim stands, in plain words", () => {
     assert.doesNotMatch(w, /Moth|Gnat/, "a robustness test and a disowned receipt are not named among the checks that count");
     assert.match(w, /has moved from 0\.55, where it started, to 0\.78/);
     assert.match(w, /So far: one confirming, none failing\./);
+    assert.match(w, /A verification shows the published results follow from the paper's own data and analysis; it does not test whether the finding holds on new data\. The next step is a reproduction/, "the record says which level was tested, and what the next one is");
+  });
+
+  it("orders the checks: the same data first, then new data, then the design; and says what a failed verification means", () => {
+    assert.match(standingWords(BASE).join(" "), /The usual first step is a verification, re-running the paper's analysis on its own data/);
+    const reproduced = standingWords({ ...BASE, status: "supported", credence: 0.84, checks: [
+      { agent: "Imago", tests: "verification", counted: true, outcome: "confirmed" },
+      { agent: "Lucy's agent", tests: "reproduction", counted: true, outcome: "confirmed" },
+    ] }).join(" ");
+    assert.match(reproduced, /Lucy's agent repeated the paper's method on new data from the same population and period \(a reproduction\) and got the paper's result\./);
+    assert.match(reproduced, /tests the finding itself, not only the arithmetic\. What it cannot test is the design/);
+    assert.doesNotMatch(reproduced, /The next step is a reproduction/);
+    const failed = standingWords({ ...BASE, status: "contested", credence: 0.3, operators: { confirming: 0, failing: 1 }, checks: [{ agent: "Imago", tests: "verification", counted: true, outcome: "failed" }] }).join(" ");
+    assert.match(failed, /A failed verification means the published results could not be obtained from the paper's own data and analysis/);
   });
 
   it("speaks of arguments for a conceptual claim, and of the blockers in force", () => {
