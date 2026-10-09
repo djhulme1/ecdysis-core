@@ -14,6 +14,7 @@ import { generateKeyPair, signJson } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { MemoryQuoteCheckStore, type QuoteStatus } from "../src/api/v2/quotes.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
+import { healthPage } from "../src/web/steward.js";
 import { ContextWriter, MemoryContextStore, MemoryLedger, paperRecordOf } from "../src/api/v2/context.js";
 import { CONTEXT_VERSION, EXPLAINER_SYSTEM, explanationProblems, fieldPath, standingWords, topicWords, type StandingInput } from "../src/core/v2/context.js";
 import type { Screener } from "../src/core/hazard.js";
@@ -151,6 +152,7 @@ function fakeWorld(model: { answer: (body: Record<string, unknown>) => Response 
     if (url.startsWith("https://api.openalex.org/works/")) return new Response("not found", { status: 404 });
     if (url.startsWith("https://api.crossref.org/works/10.1000%2Fpaper")) return new Response(JSON.stringify({ message: { title: ["Shifting attention to accuracy"], abstract: `<jats:p>${ABSTRACT}</jats:p>` } }), { status: 200 });
     if (url.startsWith("https://api.crossref.org/works/10.1000%2Fbare")) return new Response(JSON.stringify({ message: { title: ["A paper with no abstract anywhere"] } }), { status: 200 });
+    if (url.startsWith("https://api.crossref.org/works/10.1000%2Fbroken")) return new Response("unavailable", { status: 503 });
     if (url.startsWith("https://www.ebi.ac.uk/")) return new Response(JSON.stringify({ resultList: { result: [] } }), { status: 200 });
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
@@ -327,6 +329,42 @@ describe("the context writer", () => {
     assert.match(await (await noFindings.pages.handle("GET", `/c/${d}`, "text/html"))!.text(), /no abstract was open to read/);
   });
 
+  it("says beside the claim why it has no summary: not yet tried, refused by the archive's checks, or failed and tried again", async () => {
+    const summaryOf = async (w: Awaited<ReturnType<typeof world>>, id: string) => ((((await w.svc.claim(id)).body as Record<string, Json>)["context"] as Record<string, Json>)["summary"] as Record<string, Json>);
+    const w = await world({ answer: () => new Response(JSON.stringify({ error: { type: "authentication_error" } }), { status: 401 }) });
+    const id = await w.register("doi:10.1000/paper", QUOTE, "verified");
+    assert.deepEqual(await summaryOf(w, id), { status: "not yet", at: null, attempts: 0, model: null, why: null });
+    assert.equal((await w.writer().run()).off, "the model provider refused the key (401)");
+    assert.deepEqual(await summaryOf(w, id), { status: "failed", at: w.now().toISOString(), attempts: 0, model: "claude-sonnet-5-5", why: "the model provider refused the key (401)" });
+    const blocker: Screener = { name: "test-classifier", screen: async () => [{ screener: "test-classifier", severity: 3, category: "test-category" }] };
+    const screened = await world({ screeners: [blocker] });
+    const b = await screened.register("doi:10.1000/paper", QUOTE, "verified");
+    await screened.writer().run();
+    const refused = await summaryOf(screened, b);
+    assert.equal(refused["status"], "refused");
+    assert.equal(refused["why"], "the archive's screening did not pass it", "never the screening's categories");
+    assert.doesNotMatch(JSON.stringify((await screened.svc.claim(b)).body), /test-category/);
+    const good = await world();
+    const c = await good.register("doi:10.1000/paper", QUOTE, "verified");
+    await good.writer().run();
+    assert.equal((await summaryOf(good, c))["status"], "written");
+    // The Health page lists the latest problems, newest first, with the writer's own note (the stewards' view).
+    assert.deepEqual((await w.store.recentProblems(5)).map((r) => [r.claim, r.status, r.detail]), [[id, "error", "the model provider refused the key (401)"]]);
+    assert.deepEqual(await good.store.recentProblems(5), []);
+  });
+
+  it("shows the stewards what the context writer did on the cron's last run, and what it refused or could not write", () => {
+    const html = healthPage({
+      sth: {}, logSize: 0, audit: null, switches: [],
+      cron: { at: "2026-10-09T09:31:00.000Z", value: { ok: true, lapsed: 1, quotesChecked: 6, quotesVerified: 4, sourcesObserved: 2, papersRead: 9, papersUnresolved: 3, summariesWritten: 0, summariesRefused: 0, contextErrors: 1, contextOff: "the model provider refused the key", seconds: 41 } },
+      contextProblems: [{ claim: "ext:a88c57f27b9f7e03", status: "error", detail: "the model provider refused the key (401)", at: "2026-10-09T09:32:10.000Z", attempts: 1 }],
+    }, null, null, null, new Date("2026-10-09T09:40:00.000Z"));
+    assert.match(html, /ran<\/span> 9 Oct 2026 UTC \(9 min ago\), taking 41 s\./);
+    assert.match(html, /checks lapsed 1, sealed 0; alert emails 0, digests 0; quotes checked 6 \(verified 4, mismatched 0\); sources observed 2/);
+    assert.match(html, /<h3>The context writer \(What this means\)<\/h3>\s*<p>Papers' records read 9 \(unresolved 3\); summaries written 0, refused 0, failed 1\. <span class="status broken">Off: the model provider refused the key<\/span>/);
+    assert.match(html, /<a href="\/c\/ext:a88c57f27b9f7e03"><code class="mono">ext:a88c57f27b9f7e03<\/code><\/a><\/td><td><span class="status broken">failed<\/span><\/td><td class="small">the model provider refused the key \(401\)<\/td>/);
+  });
+
   it("never lets the key out: sent to the provider alone, kept in no row, redacted from errors; a refused key stops the run", async () => {
     const leaky = await world({ answer: (b) => new Response(JSON.stringify({ error: { type: "overloaded_error", message: `bad request for key ${KEY}` } }), { status: 529 }) });
     const id = await leaky.register("doi:10.1000/paper", QUOTE, "verified");
@@ -338,17 +376,38 @@ describe("the context writer", () => {
     const kept = JSON.stringify([...leaky.store.claims.values(), ...leaky.store.sources.values(), leaky.ledger.v]);
     assert.ok(!kept.includes(KEY), "the key is in no row");
     for (const c of leaky.fake.calls) if (!c.url.startsWith("https://api.anthropic.com/")) assert.ok(!JSON.stringify(c).includes(KEY), `the key went to ${c.url}`);
-    // Retried after six hours, not before.
-    assert.equal((await leaky.writer().run()).errors, 0);
-    leaky.tick(7 * 3600 * 1000);
+    // The provider's trouble is not the claim's: it costs the claim no attempt, and the claim is tried again on the next run.
+    assert.equal(row.attempts, 0);
+    assert.equal(out.off, "the model provider answered 529 (overloaded_error)");
     assert.equal((await leaky.writer().run()).errors, 1);
-    assert.equal((await leaky.store.getClaim(id))!.attempts, 2);
-    // A key the provider refuses stops the run at once: one call, not one per claim.
+    assert.equal((await leaky.store.getClaim(id))!.attempts, 0);
+    // A failure of the claim's own (its source's index will not answer) costs an attempt, and waits six hours.
+    const broken = await world();
+    const b = await broken.register("doi:10.1000/broken", QUOTE, "verified");
+    assert.equal((await broken.writer().run()).errors, 1);
+    assert.equal((await broken.store.getClaim(b))!.attempts, 1);
+    assert.equal((await broken.writer().run()).errors, 0, "not before six hours");
+    broken.tick(7 * 3600 * 1000);
+    assert.equal((await broken.writer().run()).errors, 1);
+    assert.equal((await broken.store.getClaim(b))!.attempts, 2);
+    // A key the provider refuses, or an account with no credit, stops the run at once: one call, not one per claim.
     const refused = await world({ answer: () => new Response(JSON.stringify({ error: { type: "authentication_error" } }), { status: 401 }) });
     for (let i = 0; i < 3; i++) await refused.register("doi:10.1000/paper", `${QUOTE} (${i})`, "verified");
     const r = await refused.writer().run();
-    assert.equal(r.off, "the model provider refused the key");
+    assert.equal(r.off, "the model provider refused the key (401)");
     assert.equal(refused.fake.calls.filter((c) => c.url.includes("anthropic")).length, 1);
+    const poor = await world({ answer: () => new Response(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits." } }), { status: 400 }) });
+    for (let i = 0; i < 3; i++) await poor.register("doi:10.1000/paper", `${QUOTE} (${i})`, "verified");
+    const p = await poor.writer().run();
+    assert.equal(p.off, "the model provider answered 400: the account's credit balance is too low");
+    assert.equal(poor.fake.calls.filter((c) => c.url.includes("anthropic")).length, 1);
+    assert.ok(![...poor.store.claims.values()].some((x) => /Plans & Billing/.test(x.detail ?? "")), "the provider's own words are never kept");
+    // A request the provider refuses for this claim alone is the claim's: an attempt, and the run goes on.
+    const odd = await world({ answer: () => new Response(JSON.stringify({ error: { type: "invalid_request_error", message: "messages: too long" } }), { status: 400 }) });
+    for (let i = 0; i < 2; i++) await odd.register("doi:10.1000/paper", `${QUOTE} (${i})`, "verified");
+    const o = await odd.writer().run();
+    assert.deepEqual([o.errors, o.off], [2, null]);
+    assert.ok([...odd.store.claims.values()].every((x) => x.attempts === 1 && x.detail === "the model provider answered 400 (invalid_request_error)"));
   });
 
   it("shows no paper the index does not know, and gives a claim published here its standing alone", async () => {

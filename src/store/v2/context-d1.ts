@@ -49,6 +49,11 @@ export class D1ContextStore implements ContextStore {
     return new Map((rs.results ?? []).map((r) => [String(r["source"]), { status: String(r["status"]) as SourceRecordRow["status"], readAt: String(r["read_at"]), attempts: Number(r["attempts"] ?? 1) }] as const));
   }
 
+  async recentProblems(limit: number) {
+    const rs = await this.db.prepare("SELECT * FROM v2_claim_context WHERE status != 'written' ORDER BY written_at DESC, claim LIMIT ?1").bind(limit).all<Record<string, unknown>>();
+    return (rs.results ?? []).map((r) => this.claim(r));
+  }
+
   async claimIndex() {
     const rs = await this.db.prepare("SELECT claim, status, version, model, written_at, attempts FROM v2_claim_context").all<Record<string, unknown>>();
     return new Map((rs.results ?? []).map((r) => [String(r["claim"]), { status: String(r["status"]) as ClaimContextRow["status"], version: String(r["version"]), model: r["model"] ? String(r["model"]) : null, writtenAt: String(r["written_at"]), attempts: Number(r["attempts"] ?? 1) }] as const));

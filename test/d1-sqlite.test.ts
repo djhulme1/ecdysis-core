@@ -373,5 +373,11 @@ describe("the context store against SQLite, every migration applied", { skip: !s
     assert.deepEqual(await store.getClaim("ext:0123456789abcdef"), row);
     assert.deepEqual([...(await store.claimIndex()).entries()], [["ext:0123456789abcdef", { status: "written", version: "context/0.1", model: "claude-sonnet-5-5", writtenAt: row.writtenAt, attempts: 1 }]]);
     assert.deepEqual([...(await store.sourceIndex()).entries()], [["doi:10.1038/s41586-021-03344-2", { status: "read", readAt: record.readAt, attempts: 1 }]]);
+    // The Health page's list: refused and failed summaries only, newest first.
+    assert.deepEqual(await store.recentProblems(5), []);
+    await store.putClaim({ ...row, claim: "ext:00000000000000a1", status: "error", explanation: null, detail: "the model provider refused the key (401)", writtenAt: "2026-10-09T09:00:00.000Z" });
+    await store.putClaim({ ...row, claim: "ext:00000000000000a2", status: "refused", explanation: null, detail: "outside the limits: meaning: 950 characters, outside 60 to 900", writtenAt: "2026-10-09T09:05:00.000Z" });
+    assert.deepEqual((await store.recentProblems(5)).map((r) => [r.claim, r.status]), [["ext:00000000000000a2", "refused"], ["ext:00000000000000a1", "error"]]);
+    assert.equal((await store.recentProblems(1)).length, 1);
   });
 });
