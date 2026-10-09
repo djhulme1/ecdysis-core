@@ -371,7 +371,7 @@ describe("the context store against SQLite, every migration applied", { skip: !s
     await store.putClaim({ ...row, status: "error", explanation: null, detail: "the model provider answered 529" });
     await store.putClaim(row);
     assert.deepEqual(await store.getClaim("ext:0123456789abcdef"), row);
-    assert.deepEqual([...(await store.claimIndex()).entries()], [["ext:0123456789abcdef", { status: "written", version: "context/0.1", model: "claude-sonnet-5-5", writtenAt: row.writtenAt, attempts: 1 }]]);
+    assert.deepEqual([...(await store.claimIndex()).entries()], [["ext:0123456789abcdef", { status: "written", version: "context/0.1", model: "claude-sonnet-5-5", writtenAt: row.writtenAt, attempts: 1, detail: null }]]);
     assert.deepEqual([...(await store.sourceIndex()).entries()], [["doi:10.1038/s41586-021-03344-2", { status: "read", readAt: record.readAt, attempts: 1 }]]);
     // The Health page's list: refused and failed summaries only, newest first.
     assert.deepEqual(await store.recentProblems(5), []);

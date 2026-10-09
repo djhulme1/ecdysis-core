@@ -82,7 +82,7 @@ export interface ContextStore {
   /** Every source's state in one read, so a run never asks once per source. */
   sourceIndex(): Promise<Map<string, Pick<SourceRecordRow, "status" | "readAt" | "attempts">>>;
   /** Every claim's state in one read. */
-  claimIndex(): Promise<Map<string, Pick<ClaimContextRow, "status" | "version" | "model" | "writtenAt" | "attempts">>>;
+  claimIndex(): Promise<Map<string, Pick<ClaimContextRow, "status" | "version" | "model" | "writtenAt" | "attempts" | "detail">>>;
   /** The latest summaries refused or failed, newest first, for the Health page. */
   recentProblems(limit: number): Promise<ClaimContextRow[]>;
 }
@@ -95,10 +95,15 @@ export class MemoryContextStore implements ContextStore {
   async getClaim(claim: string) { const r = this.claims.get(claim); return r ? structuredClone(r) : null; }
   async putClaim(row: ClaimContextRow) { this.claims.set(row.claim, structuredClone(row)); }
   async sourceIndex() { return new Map([...this.sources.values()].map((r) => [r.source, { status: r.status, readAt: r.readAt, attempts: r.attempts }] as const)); }
-  async claimIndex() { return new Map([...this.claims.values()].map((r) => [r.claim, { status: r.status, version: r.version, model: r.model, writtenAt: r.writtenAt, attempts: r.attempts }] as const)); }
+  async claimIndex() { return new Map([...this.claims.values()].map((r) => [r.claim, { status: r.status, version: r.version, model: r.model, writtenAt: r.writtenAt, attempts: r.attempts, detail: r.detail }] as const)); }
   async recentProblems(limit: number) {
     return [...this.claims.values()].filter((r) => r.status !== "written").sort((a, b) => (a.writtenAt < b.writtenAt ? 1 : a.writtenAt > b.writtenAt ? -1 : a.claim < b.claim ? -1 : 1)).slice(0, limit).map((r) => structuredClone(r));
   }
+}
+
+/** A failure the writer records as the provider's or the account's, never the claim's (see ContextWriter.ask). */
+export function providerFailure(detail: string | null): boolean {
+  return !!detail && /^the model provider (refused the key|could not be reached|answered (429|5\d\d)\b|answered \d+: the account's credit balance is too low)/.test(detail);
 }
 
 /**
@@ -251,11 +256,12 @@ export class ContextWriter {
     for (const c of claims) {
       if (writes >= (limits.writes ?? 12)) break;
       const row = done.get(c.id);
-      // A failure that cost the claim no attempt (the provider's or the account's, attempts 0) is tried again on the next run.
+      // A failure of the provider's or the account's is not the claim's: tried again on the next run, however often it has
+      // happened (a run stops at the first such failure, so it costs one call a run), including those recorded before this rule.
       const due = !row
         || row.version !== CONTEXT_VERSION
         || (row.status === "written" && row.model !== this.model)
-        || (row.status === "error" && row.attempts < MAX_ATTEMPTS && (row.attempts === 0 || Date.parse(row.writtenAt) < t - RETRY_MS));
+        || (row.status === "error" && (providerFailure(row.detail) || (row.attempts < MAX_ATTEMPTS && Date.parse(row.writtenAt) < t - RETRY_MS)));
       if (!due) continue;
       const q = checks.get(c.id);
       if (!q || !EXPLAINABLE.has(q)) continue;

@@ -15,7 +15,7 @@ import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { MemoryQuoteCheckStore, type QuoteStatus } from "../src/api/v2/quotes.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
 import { healthPage } from "../src/web/steward.js";
-import { ContextWriter, MemoryContextStore, MemoryLedger, paperRecordOf } from "../src/api/v2/context.js";
+import { ContextWriter, MemoryContextStore, MemoryLedger, paperRecordOf, providerFailure } from "../src/api/v2/context.js";
 import { CONTEXT_VERSION, EXPLAINER_SYSTEM, explanationProblems, fieldPath, standingWords, topicWords, type StandingInput } from "../src/core/v2/context.js";
 import type { Screener } from "../src/core/hazard.js";
 import type { Json } from "../src/core/canonical.js";
@@ -381,6 +381,11 @@ describe("the context writer", () => {
     assert.equal(out.off, "the model provider answered 529 (overloaded_error)");
     assert.equal((await leaky.writer().run()).errors, 1);
     assert.equal((await leaky.store.getClaim(id))!.attempts, 0);
+    // Even one recorded before this rule, which counted attempts against the claim, is tried again on the next run.
+    await leaky.store.putClaim({ ...(await leaky.store.getClaim(id))!, attempts: 4, detail: "the model provider answered 400: the account's credit balance is too low" });
+    assert.equal((await leaky.writer().run()).errors, 1, "a provider's failure never uses up a claim's attempts");
+    assert.ok(providerFailure("the model provider refused the key (401)") && providerFailure("the model provider answered 529 (overloaded_error)") && providerFailure("the model provider could not be reached: timeout"));
+    assert.ok(!providerFailure("the model provider answered 404 (not_found_error)") && !providerFailure("the source's index could not be read: Crossref 503") && !providerFailure(null));
     // A failure of the claim's own (its source's index will not answer) costs an attempt, and waits six hours.
     const broken = await world();
     const b = await broken.register("doi:10.1000/broken", QUOTE, "verified");
