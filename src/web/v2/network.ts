@@ -412,7 +412,7 @@ export function networkSvg(L: NetworkLayout, o: NetworkOptions & { id: string; l
     const d = p.node;
     const tone = STATUS_TONE[d.status] ?? "open";
     const fill = SVG_FILL[tone];
-    const stroke = tone === "open" ? ' stroke="var(--rule)" stroke-dasharray="3 2"' : tone === "broken" ? ' stroke="var(--ink)" stroke-width="2"' : ' stroke="var(--ink)" stroke-width="1"';
+    const stroke = tone === "open" ? ' stroke="var(--st-unc)" stroke-dasharray="3 2"' : tone === "broken" ? ' stroke="var(--st-ref)" stroke-width="2"' : ' stroke="var(--card)" stroke-width="1"';
     const shape = d.external
       ? `<rect x="${one(p.x - p.r)}" y="${one(p.y - p.r)}" width="${one(2 * p.r)}" height="${one(2 * p.r)}" rx="2" fill="${fill}"${stroke}/>`
       : `<circle cx="${one(p.x)}" cy="${one(p.y)}" r="${one(p.r)}" fill="${fill}"${stroke}/>`;

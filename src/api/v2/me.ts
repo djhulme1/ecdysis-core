@@ -36,7 +36,7 @@ export const ME_HEADERS: Record<string, string> = {
   "strict-transport-security": "max-age=31536000; includeSubDomains",
   "cache-control": "no-store",
   "x-robots-tag": "noindex, nofollow",
-  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
 };
 const BROWSER_COOKIE = "ecd_b";
 const SESSION_COOKIE = "ecd_s";

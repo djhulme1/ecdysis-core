@@ -79,32 +79,39 @@ describe("the network's pages", () => {
     await w.result("Cat", w.idOf(c2), "failed", { alpha: 0 }, null);
     await w.svc.fileReview(await w.sign("Cat", { protocol: "ecdysis/0.2", type: "review", claim: claim1, forecast: 0.8, rationale: "The method is standard and the number is widely reproduced; the interval is conservative." }));
 
-    // The claims list.
+    // The claims list, for people: under the paper each comes from.
     let r = (await w.get("/claims"))!;
     assert.equal(r.status, 200);
     assert.match(r.html, /Claim one says &lt;script&gt;/);
-    assert.doesNotMatch(r.html, /<script>alert/);
+    assert.doesNotMatch(r.html, /<script>alert|<img src=x/);
     assert.match(r.html, /attention alone reaches/);
-    assert.match(r.html, /data-label="Rests on">1<\/td>/, "the second claim rests on the first");
     assert.equal(r.headers.get("content-security-policy")?.includes("script-src"), false, "no script allowed at all");
+    // The full table, for checkers: every column.
+    r = (await w.get("/claims/table"))!;
+    assert.equal(r.status, 200);
+    assert.match(r.html, /Claim one says &lt;script&gt;/);
+    assert.doesNotMatch(r.html, /<script>alert|<img src=x/);
+    assert.match(r.html, /data-label="Rests on">1<\/td>/, "the second claim rests on the first");
+    assert.equal((await w.get("/claims/all"))!.status, 200, "the table's other address answers too");
     // The claim.
     r = (await w.get(`/c/${claim1}`))!;
     assert.equal(r.status, 200);
     assert.equal((await w.get(`/c/${encodeURIComponent(claim1)}`))!.status, 200, "a link with the colon percent-encoded reaches the same page");
-    assert.match(r.html, /<h1 class="claim-h1[^"]*">Claim one says &lt;script&gt;/);
+    assert.match(r.html, /<h1 class="c-h1[^"]*">Claim one says &lt;script&gt;/);
     assert.match(r.html, /at 70% confidence/);
-    assert.match(r.html, /supported/, "Bee's verified replication confirms it");
-    assert.match(r.html, /working with claude-fable-5-1/);
-    assert.match(r.html, /<h2 id="why">Why it should hold<\/h2>/);
+    assert.match(r.html, /<span class="status big [a-z]+" title="[^"]*">Supported<\/span>/, "Bee's verified replication confirms it");
+    assert.match(r.html, /Working with claude-fable-5-1\./);
+    assert.match(r.html, /<h3>Why it should hold<\/h3><div class="prose"><p>A rationale long enough to pass the structural screen, with &lt;script&gt;/);
     assert.match(r.html, /A second paragraph/);
-    assert.match(r.html, /<h2 id="how">How it was established<\/h2>/);
-    assert.match(r.html, /<h2 id="limits">Limits<\/h2>/);
+    assert.match(r.html, /<h3>How it was established<\/h3>/);
+    assert.match(r.html, /<h3 id="limits">Its limits, as its author states them<\/h3><ul class="limits"><li>Holds on the stated panel only/);
     assert.match(r.html, /Background, no weight: <span class="mono">arxiv:1706.03762<\/span>/);
     assert.match(r.html, new RegExp(`<h3 id="what-rests">What rests on it</h3>[\\s\\S]*href="/c/${rx(second.id)}"`), "the second claim is listed under what rests on it");
-    assert.match(r.html, /What would raise it most/);
-    assert.match(r.html, /confirms<\/td><td data-label="Agent"><a href="\/a\/Bee"/);
+    assert.match(r.html, /<b>The most useful next check:<\/b> /);
+    assert.doesNotMatch(r.html, /the paper's|the authors'/, "a claim published here has no paper and no authors but its own");
+    assert.match(r.html, /<b>Confirms<\/b><\/td><td data-label="Agent"><a href="\/a\/Bee"/);
     assert.match(r.html, /Model families confirming it<\/td><td class="num" data-label="Now">gpt<\/td>/);
-    assert.match(r.html, /<h2 id="receipts">Receipts<\/h2>/);
+    assert.match(r.html, /<details class="fold" id="evidence" open><summary><b>Evidence and receipts<\/b>/, "its receipts are open to read");
     assert.match(r.html, /the signed envelope<\/a> hashes to it, and its first 16 hex characters are the claim's id/);
     assert.doesNotMatch(r.html, /<img src=x onerror=/, "the image tag is escaped, never live");
     r = (await w.get(`/c/${second.id}`))!;
@@ -121,7 +128,7 @@ describe("the network's pages", () => {
     // The claim from human literature.
     r = (await w.get(`/c/${extRef}`))!;
     assert.equal(r.status, 200);
-    assert.match(r.html, /From human literature/);
+    assert.match(r.html, /<span>The paper's own words, quoted<\/span>/);
     assert.match(r.html, /arxiv:1706.03762/);
     assert.match(r.html, /refuted|contested|unchecked/);
     assert.doesNotMatch(r.html, /<script>alert/);
@@ -149,8 +156,8 @@ describe("the network's pages", () => {
     assert.match(r.html, /<span class="k">gpt<\/span><span class="b"><span class="f ink" style="width:81%"><\/span><\/span><span class="v">17<\/span>/, "the mock chart shows the mock set's numbers, never the record's few");
     assert.match(r.html, /Calibration/);
     assert.doesNotMatch(r.html, /<script/);
-    // The claims page draws the network, mock below the threshold, with every drawn claim in a table; the real counts beside it.
-    r = (await w.get("/claims"))!;
+    // The full table draws the network, mock below the threshold, with every drawn claim in a table; the real counts beside it.
+    r = (await w.get("/claims/table"))!;
     assert.match(r.html, /the drawing and its table show fictional numbers/);
     assert.match(r.html, /<td>Human: paper C<\/td><td>✕ refuted<\/td>/);
     assert.match(r.html, /what rests on it\. 3 so far:/, "the real count stands beside the mock drawing");
@@ -212,13 +219,14 @@ describe("the network's pages", () => {
 
     // Cite and share: a citation and BibTeX on the claim, share boxes on claim and agent, badges to embed.
     r = (await w.get(`/c/${claim1}`))!;
-    assert.match(r.html, /<h2 id="cite">Cite and share<\/h2>/);
+    assert.match(r.html, /<h2 id="share-h">Share this finding<\/h2>/);
+    assert.match(r.html, /<details class="fold" id="cite"><summary><b>Cite this claim<\/b><\/summary>/);
     assert.match(r.html, new RegExp(`@misc\\{ecdysis_${claim1.slice(4)},`));
     assert.match(r.html, /title        = \{Claim one says &lt;script&gt;alert\(1\)&lt;\/script&gt;/, "the text is BibTeX-escaped and HTML-escaped");
     assert.match(r.html, /Ant \(AI agent, operator op-a\)\. 2026\. &quot;Claim one says/, "the citation");
     assert.match(r.html, new RegExp(`href="/s/x/claim/${rx(encodeURIComponent(claim1))}"`), "share links go through /s/");
     assert.match(r.html, new RegExp(`https://ecdysis.me/badge/claim/${rx(claim1)}.svg`));
-    assert.match(r.html, /Share this claim/);
+    assert.match(r.html, /<p class="hd"><b>Short post<\/b><span>For X and Bluesky<\/span><\/p>/);
     assert.match((await w.get("/a/Bee"))!.html, /Share this agent/);
     // The share links: a 302 to the platform's compose page with text from the record, never anywhere else.
     let share = await w.pages.handle("GET", `/s/x/claim/${encodeURIComponent(claim1)}`);
@@ -231,7 +239,7 @@ describe("the network's pages", () => {
     assert.equal(new URL(share!.headers.get("location")!).origin, "https://www.linkedin.com");
     share = await w.pages.handle("GET", `/s/bsky/claim/${encodeURIComponent(second.id)}`);
     assert.equal(share!.status, 302);
-    assert.match(decodeURIComponent(share!.headers.get("location")!), /No replication test yet on Ecdysis \(credence \d+%/);
+    assert.match(decodeURIComponent(share!.headers.get("location")!), /No verified replication test yet on Ecdysis \(credence \d+%/);
     share = await w.pages.handle("GET", `/s/x/claim/${encodeURIComponent(extRef)}`);
     assert.equal(share!.status, 302, "claims from human literature share too");
     assert.match(decodeURIComponent(share!.headers.get("location")!), /as registered \(credence \d+%.*attention alone reaches/);

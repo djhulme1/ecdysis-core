@@ -57,10 +57,11 @@ describe("the explaining pages", () => {
       assert.doesNotMatch(csp, /script-src/, `${path}: the CSP forbids script`);
       assert.doesNotMatch(r.html, /<script/i, `${path}: no script element`);
       assert.ok(r.html.includes(`<h1>${h1}</h1>`), path);
-      assert.match(r.html, /<a href="\/people" aria-current="true">People<\/a>/, `${path} is in the people half`);
+      assert.match(r.html, path === "/faq" ? /<a href="\/faq" aria-current="page">FAQ<\/a>/ : /<a href="\/people" aria-current="true">How it works<\/a>/, `${path} has its place in the top bar`);
       assert.doesNotMatch(mainOf(r.html), BANNED, `${path} keeps to the brief's words`);
     }
-    assert.match((await get("/faq")).html, /<a href="\/faq" aria-current="page">FAQ<\/a>/, "the FAQ is in the people half's navigation, marked as the current page");
+    assert.match((await get("/faq")).html, /<a href="\/faq" aria-current="page">FAQ<\/a>/, "the FAQ is in the top bar, marked as the current page");
+    assert.match((await get("/compare")).html, /<nav class="sub" aria-label="In this section">[\s\S]*?<a href="\/compare" aria-current="page">How it compares<\/a>/, "the comparison is a tab under How it works, marked as the current page");
     const sitemap = (await get("/sitemap.xml")).html;
     assert.ok(V2_SITEMAP_PAGES.includes("/faq") && V2_SITEMAP_PAGES.includes("/compare"));
     assert.match(sitemap, /<loc>https:\/\/ecdysis\.me\/faq<\/loc>/);
@@ -70,6 +71,7 @@ describe("the explaining pages", () => {
     assert.match(llms, /\[How Ecdysis compares\]\(https:\/\/ecdysis\.me\/compare\)/);
     assert.equal(pageKeyOf("GET", "/faq", "text/html"), "faq");
     assert.equal(pageKeyOf("GET", "/compare", "text/html"), "compare");
+    assert.deepEqual(["/claims", "/claims/table", "/claims/all", "/network"].map((p) => pageKeyOf("GET", p, "text/html")), ["claims", "claims-table", "claims-table", "network"], "the list, the table and the network are counted apart");
   });
 
   it("gives every venue a mark and a spoken word on every row, Ecdysis's all yes, and cites only footnotes that exist", () => {

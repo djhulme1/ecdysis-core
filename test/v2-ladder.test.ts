@@ -29,7 +29,7 @@ import {
 import { normalisePeriod, type ClaimScope } from "../src/core/v2/kinds.js";
 import { direct, type DirectionClaim } from "../src/core/v2/direction.js";
 import { ladderRungs, standingWords, type LadderInput } from "../src/core/v2/context.js";
-import { ladderList, meaningSection, plainTests, TEST_KINDS_DEFINITION } from "../src/web/v2/pages.js";
+import { ladderList, plainTests, TEST_KINDS_DEFINITION } from "../src/web/v2/pages.js";
 import { faqPageV2 } from "../src/web/v2/explain.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
 import type { Json } from "../src/core/canonical.js";
@@ -182,11 +182,11 @@ describe("the ladder in plain words", () => {
 
   it("draws the ladder on the page, escaped, and puts the plain words first wherever a test is named", () => {
     const html = ladderList([{ step: 1, label: "Same data, same method", name: "verification", state: "confirmed", words: "Got the paper's result: <b>Imago</b>." }]);
-    assert.match(html, /^<h3>How far it has been checked<\/h3><ol class="ladder"><li class="rung confirmed"><span class="mark" aria-hidden="true">✓<\/span>/);
-    assert.match(html, /<b>Same data, same method<\/b> <span class="small">\(verification; done: the result held\)<\/span><br>Got the paper&#39;s result: &lt;b&gt;Imago&lt;\/b&gt;\./);
+    assert.match(html, /^<h3 id="ladder">How far it has been checked<\/h3><ol class="ladder"><li class="rung confirmed"><span class="mark" aria-hidden="true">✓<\/span>/);
+    assert.match(html, /<b>Same data, same method<\/b><span class="name">verification · done: the result held<\/span><p>Got the paper&#39;s result: &lt;b&gt;Imago&lt;\/b&gt;\.<\/p>/);
     assert.equal(ladderList([]), "");
-    const section = meaningSection({ external: false, context: null, standing: ["Supported."], observed: null, ladder: ladderRungs({ world: true, external: false, checks: [], robustness: [], methodArguments: none }) } as never);
-    assert.match(section, /<h2 id="meaning">Where it stands, in plain words<\/h2><p class="standing">Supported\.<\/p><h3>How far it has been checked<\/h3>/);
+    const empty = ladderList(ladderRungs({ world: true, external: false, checks: [], robustness: [], methodArguments: none }));
+    assert.match(empty, /<li class="rung none"><span class="mark" aria-hidden="true">1<\/span><div><b>Same data, same method<\/b><span class="name">verification · not yet<\/span>/, "a rung not yet climbed shows its number");
     assert.equal(plainTests("verification"), "Same data, same method (verification)");
     assert.equal(plainTests("reproduction"), "New data, same method (reproduction)");
     assert.equal(plainTests("verification (re-run)"), "Same data, same method (verification (re-run))");
@@ -267,11 +267,12 @@ describe("the ladder on the service: direction, the claim's numbers and its page
     assert.equal(next?.test, "reproduction", "verified on its own data: new data next");
     assert.match(next!.how, /data: "new"/);
     let html = await w.page(`/c/${ref}`);
-    assert.match(html, /<h3>How far it has been checked<\/h3><ol class="ladder"><li class="rung confirmed">/);
-    assert.match(html, /<b>Same data, same method<\/b> <span class="small">\(verification; done: the result held\)<\/span><br>Got the paper&#39;s result: Lark\./);
-    assert.match(html, /<b>New data, same method<\/b> <span class="small">\(reproduction; not yet\)<\/span><br>Not yet: the same method on new data covering the claim&#39;s population and period\. Established needs one\./);
+    assert.match(html, /<h3 id="ladder">How far it has been checked<\/h3><ol class="ladder"><li class="rung confirmed">/);
+    assert.match(html, /<b>Same data, same method<\/b><span class="name">verification · done: the result held<\/span><p>Got the paper&#39;s result: Lark\.<\/p>/);
+    assert.match(html, /<b>New data, same method<\/b><span class="name">reproduction · not yet<\/span><p>Not yet: the same method on new data covering the claim&#39;s population and period\. Established needs one\.<\/p>/);
     assert.match(html, /Same data, same method \(verification\)/, "the receipts table leads with the plain words");
     assert.match(html, /Until one confirms it, it cannot be established, and each verification counts half\./);
+    assert.match(html, /<dt>Verified operators, not the registrant&#39;s<\/dt><dd>1 confirming: two, with two families of model and a reproduction among them, can establish it<\/dd>/);
 
     // Rung 2: Mole, on new data covering the same period; its receipt re-runs Lark's under its seed, and matches.
     w.tick(60_000);
@@ -283,7 +284,7 @@ describe("the ladder on the service: direction, the claim's numbers and its page
     assert.equal(afterTwo["reproductions"], 1);
     assert.ok(Number(afterTwo["credence"]) > Number(afterOne["credence"]));
     html = await w.page(`/c/${ref}`);
-    assert.match(html, /<b>New data, same method<\/b> <span class="small">\(reproduction; done: the result held\)<\/span><br>Got the paper&#39;s result: Mole\./);
+    assert.match(html, /<b>New data, same method<\/b><span class="name">reproduction · done: the result held<\/span><p>Got the paper&#39;s result: Mole\.<\/p>/);
     assert.match(html, /New data, same method \(reproduction\)/);
   });
 });

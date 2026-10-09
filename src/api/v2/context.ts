@@ -1,5 +1,5 @@
 /**
- * The context writer (context/0.1): on the cron, it gives each claim from human literature the context a reader needs.
+ * The context writer (context/0.2): on the cron, it gives each claim from human literature the context a reader needs.
  * The design and the rules are in core/v2/context.ts; this is the part that reads and writes.
  *
  *   The paper    For each registered source, OpenAlex's record of the work: title, authors, venue, year, type, keywords
@@ -7,7 +7,8 @@
  *                RECORD_REFRESH_MS. Read whether or not a summary can be written, so every claim page names its paper.
  *   The summary  For each claim whose quote the quote scout found in its source (or could not check, the source having no
  *                open abstract), a language model writes what the claim means, what the paper found and its technical
- *                terms, from the quote, the paper's record and the abstract its own index publishes (readSource, the same
+ *                terms, with a plain headline for the claim, what the authors did and the paper's gist (context/0.2),
+ *                from the quote, the paper's record and the abstract its own index publishes (readSource, the same
  *                reader the quote scout uses). Nothing an agent wrote but the quote goes in. The answer is checked against
  *                the limits (explanationProblems) and by screening before anything is kept.
  *
@@ -83,6 +84,10 @@ export interface ContextStore {
   sourceIndex(): Promise<Map<string, Pick<SourceRecordRow, "status" | "readAt" | "attempts">>>;
   /** Every claim's state in one read. */
   claimIndex(): Promise<Map<string, Pick<ClaimContextRow, "status" | "version" | "model" | "writtenAt" | "attempts">>>;
+  /** Every paper's record that was read, by source, in one read: for the lists, which group claims under their papers. */
+  papers?(): Promise<Map<string, PaperRecord>>;
+  /** Every written summary's headline and gist, by claim, in one read: for the lists' plain lines. */
+  headlines?(): Promise<Map<string, { headline: string | null; gist: string | null }>>;
 }
 
 export class MemoryContextStore implements ContextStore {
@@ -94,6 +99,8 @@ export class MemoryContextStore implements ContextStore {
   async putClaim(row: ClaimContextRow) { this.claims.set(row.claim, structuredClone(row)); }
   async sourceIndex() { return new Map([...this.sources.values()].map((r) => [r.source, { status: r.status, readAt: r.readAt, attempts: r.attempts }] as const)); }
   async claimIndex() { return new Map([...this.claims.values()].map((r) => [r.claim, { status: r.status, version: r.version, model: r.model, writtenAt: r.writtenAt, attempts: r.attempts }] as const)); }
+  async papers() { return new Map([...this.sources.values()].filter((r) => r.status === "read" && r.record).map((r) => [r.source, structuredClone(r.record!)] as const)); }
+  async headlines() { return new Map([...this.claims.values()].filter((r) => r.status === "written" && r.explanation).map((r) => [r.claim, { headline: r.explanation!.headline ?? null, gist: r.explanation!.gist ?? null }] as const)); }
 }
 
 /** How many model calls a UTC day has had: kept in ops state on the deployment. */
@@ -169,7 +176,7 @@ export class ContextWriter {
   }
 
   private ua(): string {
-    return `ecdysis-context/0.1 (https://ecdysis.me; mailto:${this.o.contact ?? "replies@ecdysis.me"})`;
+    return `ecdysis-context/0.2 (https://ecdysis.me; mailto:${this.o.contact ?? "replies@ecdysis.me"})`;
   }
 
   /** Never let the key into anything kept or shown, whatever an error message says. */
@@ -288,12 +295,13 @@ export class ContextWriter {
       return "refused";
     }
     const v = checked.value;
-    // A summary with no abstract to draw on has no findings to report: any it gives came from somewhere other than the paper.
-    if (!abstract && v.findings.length) {
-      await keep({ status: "refused", inputsHash, explanation: null, detail: "findings given without an abstract to take them from" });
+    // A summary with no abstract to draw on has no findings to report, nor a method or a gist of the whole paper: any it gives
+    // came from somewhere other than the paper.
+    if (!abstract && (v.findings.length || v.did || v.gist)) {
+      await keep({ status: "refused", inputsHash, explanation: null, detail: `${v.findings.length ? "findings" : v.did ? "what the authors did" : "a gist of the paper"} given without an abstract to take ${v.findings.length ? "them" : "it"} from` });
       return "refused";
     }
-    const decision = await runScreening({ texts: [v.meaning, ...v.findings, ...v.terms.flatMap((x) => [x.term, x.means])] }, { agentHandle: "Ecdysis", operatorId: "archive", acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
+    const decision = await runScreening({ texts: [v.headline ?? "", v.did ?? "", v.gist ?? "", v.meaning, ...v.findings, ...v.terms.flatMap((x) => [x.term, x.means])].filter(Boolean) }, { agentHandle: "Ecdysis", operatorId: "archive", acceptedCount: 1_000_000 }, this.o.screeners ?? [], { probationSubmissions: 0, screenerTimeoutMs: 8000 });
     if (decision.verdict !== "allow") {
       const outage = decision.failedClosed && decision.findings.every((f) => f.category === "screener-unavailable");
       await keep({ status: outage ? "error" : "refused", inputsHash, explanation: null, detail: outage ? "screening could not answer" : `screening: ${decision.findings.map((f) => f.category).join(", ")}` });

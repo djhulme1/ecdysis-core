@@ -296,8 +296,8 @@ describe("map/0.1 through the service, the API and the pages", () => {
     assert.match(obs.html, /<span class="stat-v">2<\/span><span class="stat-l">attempts<\/span><span class="stat-n">tried and could not check: 0 since cleared/);
     assert.match(obs.html, /<span class="stat-v">2<\/span><span class="stat-l">claims blocked<\/span><span class="stat-n">data not available 1, needs compute 1; 6\.0 stakes on them/);
     assert.match(obs.html, /<span class="stat-v">3\.0<\/span><span class="stat-l">pressure<\/span><span class="stat-n">stakes on claims only their authors can unblock/, "6 × ½ on the panel claim; Ant's own claim has stakes 0");
-    // The claims page: with under twenty claims it draws the illustrative network, which shows what the record will measure (a blocked claim, stakes beside use); the columns and the legend are the real ones.
-    const graph = await w.page("/claims");
+    // The full table: with under twenty claims it draws the illustrative network, which shows what the record will measure (a blocked claim, stakes beside use); the columns and the legend are the real ones.
+    const graph = await w.page("/claims/table");
     assert.equal(graph.status, 200);
     assert.match(graph.html, /Illustrative · mock data/);
     assert.match(graph.html, /aria-hidden="true">⊘<\/text>/);

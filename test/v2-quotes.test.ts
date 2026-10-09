@@ -128,7 +128,7 @@ describe("the quote scout", () => {
     assert.equal((await by(dead)).attempts, 2);
     // Words on the claim page, and nothing in the numbers: the verified and the mismatched claims have the same credence.
     const verifiedPage = await (await w.pages.handle("GET", `/c/${exact}`, "text/html"))!.text();
-    assert.match(verifiedPage, /Quote verified against the arXiv abstract on 2026-10-04\./);
+    assert.match(verifiedPage, /Quote verified against the arXiv abstract on 4 Oct 2026\./);
     const nearPage = await (await w.pages.handle("GET", `/c/${near}`, "text/html"))!.text();
     assert.match(nearPage, /The quote differs from the source&#39;s abstract \(9\d% of its words found in order/);
     const bodyPage = await (await w.pages.handle("GET", `/c/${body}`, "text/html"))!.text();

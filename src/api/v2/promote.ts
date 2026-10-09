@@ -105,7 +105,7 @@ export function claimShare(site: string, ref: string, text: string, score: Claim
   const url = `${site}/c/${ref}`;
   const families = score.families.length ? ` by ${score.families.join(", ")}` : "";
   // A re-run of the claim's own bundle is a verification that never sets a status: such a claim has no independent test yet.
-  const standing = score.status === "unchecked" && score.kind !== "conceptual" ? (o.reruns ? "No independent replication test yet" : "No replication test yet") : score.status;
+  const standing = score.status === "unchecked" && score.kind !== "conceptual" ? (o.reruns ? "No independent replication test yet" : "No verified replication test yet") : score.status;
   const decided = (o.robustness ?? []).filter((r) => r.outcome === "confirmed" || r.outcome === "failed");
   let robust = "";
   if (decided.length) {

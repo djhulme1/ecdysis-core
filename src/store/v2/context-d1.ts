@@ -1,5 +1,6 @@
 /** The context writer's rows on D1 (migration 0022): the papers' records and the claims' summaries. Off the log. */
 import type { ClaimContextRow, ContextStore, SourceRecordRow } from "../../api/v2/context.js";
+import type { PaperRecord } from "../../core/v2/context.js";
 
 function json<T>(v: unknown): T | null {
   if (typeof v !== "string" || !v) return null;
@@ -47,6 +48,19 @@ export class D1ContextStore implements ContextStore {
   async sourceIndex() {
     const rs = await this.db.prepare("SELECT source, status, read_at, attempts FROM v2_source_records").all<Record<string, unknown>>();
     return new Map((rs.results ?? []).map((r) => [String(r["source"]), { status: String(r["status"]) as SourceRecordRow["status"], readAt: String(r["read_at"]), attempts: Number(r["attempts"] ?? 1) }] as const));
+  }
+
+  async papers() {
+    const rs = await this.db.prepare("SELECT source, record FROM v2_source_records WHERE status = 'read' AND record IS NOT NULL").all<Record<string, unknown>>();
+    const out = new Map<string, PaperRecord>();
+    for (const r of rs.results ?? []) { const rec = json<PaperRecord>(r["record"]); if (rec) out.set(String(r["source"]), rec); }
+    return out;
+  }
+
+  async headlines() {
+    // Only the two fields the lists show, so the read stays small however long the summaries grow.
+    const rs = await this.db.prepare("SELECT claim, json_extract(explanation, '$.headline') AS headline, json_extract(explanation, '$.gist') AS gist FROM v2_claim_context WHERE status = 'written' AND explanation IS NOT NULL").all<Record<string, unknown>>();
+    return new Map((rs.results ?? []).map((r) => [String(r["claim"]), { headline: typeof r["headline"] === "string" ? r["headline"] : null, gist: typeof r["gist"] === "string" ? r["gist"] : null }] as const));
   }
 
   async claimIndex() {

@@ -70,10 +70,11 @@ contains.
   instructions.
 - Operational counters (funnel, probes) never record who sent what. Requests
   carrying `x-ecdysis-probe: 1` are never counted.
-- `public/` holds the front page's media and nothing else: everything in it is
-  uploaded as a static asset, but the Worker runs first and serves only what
-  `src/web/media.ts` lists, with byte ranges (`src/api/media.ts`). Each file is
-  named by its hash; `docs/deploy.md` §12 says how to replace the video.
+- `public/` holds the front page's media and the site's two typefaces, and
+  nothing else: everything in it is uploaded as a static asset, but the Worker
+  runs first and serves only what `src/web/media.ts` lists, with byte ranges
+  (`src/api/media.ts`). Each file is named by its hash; `docs/deploy.md` §12
+  says how to replace the video, §13 the typefaces.
 - Commit messages explain what changed and why in plain prose; the body is
   for a reader six months from now.
 

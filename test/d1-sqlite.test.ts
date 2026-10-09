@@ -373,5 +373,24 @@ describe("the context store against SQLite, every migration applied", { skip: !s
     assert.deepEqual(await store.getClaim("ext:0123456789abcdef"), row);
     assert.deepEqual([...(await store.claimIndex()).entries()], [["ext:0123456789abcdef", { status: "written", version: "context/0.1", model: "claude-sonnet-5-5", writtenAt: row.writtenAt, attempts: 1 }]]);
     assert.deepEqual([...(await store.sourceIndex()).entries()], [["doi:10.1038/s41586-021-03344-2", { status: "read", readAt: record.readAt, attempts: 1 }]]);
+    // The lists read every paper's record, and every summary's headline and gist, in one read each: only what was read and written.
+    await store.putSource({ source: "doi:10.1000/none", status: "unresolved", record: null, readAt: record.readAt, attempts: 1, detail: "OpenAlex knows no such work" });
+    assert.deepEqual([...(await store.papers()).entries()], [["doi:10.1038/s41586-021-03344-2", record]]);
+    const v2 = { ...explanation, headline: "Prompting people to think about accuracy improves the news they share.", did: null, gist: "A line on the paper as a whole.", version: "context/0.2" };
+    await store.putClaim({ ...row, claim: "ext:00000000000000aa", version: "context/0.2", explanation: v2 });
+    await store.putClaim({ ...row, claim: "ext:00000000000000bb", status: "refused", explanation: null, detail: "outside the limits" });
+    assert.deepEqual([...(await store.headlines()).entries()].sort(), [
+      ["ext:00000000000000aa", { headline: v2.headline, gist: v2.gist }],
+      ["ext:0123456789abcdef", { headline: null, gist: null }],
+    ], "a summary written before context/0.2 has neither; a refused one is not listed");
+  });
+
+  it("indexes the quote scout's findings by claim in one read", async () => {
+    const { D1QuoteCheckStore } = await import("../src/store/v2/quotes-d1.js");
+    const store = new D1QuoteCheckStore(d1Over(migrated()));
+    const at = "2026-10-09T08:00:00.000Z";
+    await store.put({ claim: "ext:00000000000000aa", status: "verified", where: "crossref-abstract", nearest: null, similarity: 1, checkedAt: at, attempts: 1, detail: null });
+    await store.put({ claim: "ext:00000000000000bb", status: "wrong-work", where: null, nearest: null, similarity: null, checkedAt: at, attempts: 1, detail: "the source names another work" });
+    assert.deepEqual([...(await store.statusIndex()).entries()].sort(), [["ext:00000000000000aa", "verified"], ["ext:00000000000000bb", "wrong-work"]]);
   });
 });

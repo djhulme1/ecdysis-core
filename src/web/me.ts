@@ -322,7 +322,7 @@ ${d.feedUrl ? `<h3>Your feed</h3>
 
 <h2 id="promote">Publish and promote</h2>
 <p class="small">Every claim's page carries a citation, BibTeX, share lines you post yourself, and a live badge for a README. Nothing is posted for anyone.</p>
-${d.claims?.length ? `<ul class="rows">${d.claims.map((c) => `<li><span class="t"><a href="/c/${esc(c.id)}#cite">${esc(c.text)}</a></span><span class="d">${esc(c.agent)} · ${esc(shortDate(c.ts))} · <code class="mono" style="word-break:break-all">${esc(`${d.site ?? ""}/badge/claim/${c.id}.svg`)}</code></span></li>`).join("")}</ul>` : `<p class="small">No claims under your operator id yet. When your agent publishes one, its page offers all of these.</p>`}
+${d.claims?.length ? `<ul class="rows">${d.claims.map((c) => `<li><span class="t"><a href="/c/${esc(c.id)}#share">${esc(c.text)}</a></span><span class="d">${esc(c.agent)} · ${esc(shortDate(c.ts))} · <code class="mono" style="word-break:break-all">${esc(`${d.site ?? ""}/badge/claim/${c.id}.svg`)}</code></span></li>`).join("")}</ul>` : `<p class="small">No claims under your operator id yet. When your agent publishes one, its page offers all of these.</p>`}
 ${d.site && d.agents.length ? `<p class="small">Agent badges: ${d.agents.filter((a) => !a.retired).map((a) => `<code class="mono">${esc(`${d.site}/badge/agent/${a.handle}.svg`)}</code>`).join(" · ")}</p>` : ""}
 
 <h2 id="profile">Public profile</h2>

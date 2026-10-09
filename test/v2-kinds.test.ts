@@ -470,18 +470,19 @@ describe("pages, share text and badges say what a receipt tested", () => {
     assert.match(p.text, /<dt>Covers<\/dt><dd>April 2009 to July 2012/);
     assert.match(p.text, /A replication test applies the claim&#39;s method to its own data \(same data, same method: a verification\) or to new data covering its own population and period \(new data, same method: a reproduction\)\./);
     assert.match(p.text, /On a claim about the world, a confirming verification counts half a confirming reproduction, and established needs a reproduction/);
-    assert.match(p.text, /<h2 id="robustness">Robustness<\/h2>/);
+    assert.match(p.text, /<h3 id="robustness">Robustness<\/h3>/);
     assert.match(p.text, /Not robust to extension to “projects launched by September 2026”\./);
     assert.match(p.text, /not yet re-run by anyone else/);
     assert.match(p.text, /A finding can hold where it was made and not elsewhere\. These results say where it holds; they do not change its credence or status\./);
     assert.match(p.text, /<td class="main">Data beyond the claim&#39;s \(extension\) <span class="small"[^>]*>\(not counted\)<\/span><span class="under">own code · January 2013 to September 2026 \(its data: 2 January 2013 to 10 September 2026\)<\/span>/);
-    assert.match(p.text, /A replication test of this claim itself, on data covering April 2009 to July 2012/);
+    assert.match(p.text, /<p class="c-lede">It has been tested only under changed conditions so far, which shows where a finding holds but does not count for or against it\.<\/p>/);
+    assert.match(p.text, /<b>The most useful next check:<\/b> a verification: re-running the authors&#39; analysis on their own data, which covers April 2009 to July 2012, where they have published it\./, "what is missing is a replication test of the claim's own period");
   });
 
   it("composes share text in the archive's words: no replication test yet, and robustness all or nothing", async () => {
     const { w, ref, id } = await robustnessOnly();
     let text = await shareOf(w, ref);
-    assert.match(text, /^⬜ No replication test yet on Ecdysis, as registered \(credence 55%\): "Projects that succeed/);
+    assert.match(text, /^⬜ No verified replication test yet on Ecdysis, as registered \(credence 55%\): "Projects that succeed/);
     assert.match(text, /" One robustness test is on its page\.\n/, "its number until another verified operator has re-run it");
     assert.doesNotMatch(text, /September 2026/, "no agent's words ever reach a share line");
     // Once another verified operator has re-run it, the line appears, in the archive's words.
@@ -517,8 +518,8 @@ describe("pages, share text and badges say what a receipt tested", () => {
     const VERDICT = /\b(refuted|failed replication|fails? to replicate|does not replicate|debunk\w*|wrong)\b/i;
     const p = await w.page(`/c/${ref}`);
     const chip = p.text.match(/<span class="status [a-z]+" title="[^"]*">[a-z]+<\/span>/)![0]!;
-    const block = p.text.slice(p.text.indexOf('<h2 id="robustness">'), p.text.indexOf("<h2>What would raise it most</h2>"));
-    const receipts = p.text.slice(p.text.indexOf('<h2 id="receipts">Receipts</h2>'), p.text.indexOf("<h2", p.text.indexOf('<h2 id="receipts">Receipts</h2>') + 5));
+    const block = p.text.slice(p.text.indexOf('<h3 id="robustness">'), p.text.indexOf("</details>", p.text.indexOf('<h3 id="robustness">')));
+    const receipts = p.text.slice(p.text.indexOf('<div id="receipts">'), p.text.indexOf('<h3 id="robustness">'));
     const s = (await w.svc.scoresFor(await w.svc.record())).claims.get(ref)!;
     const feed = new V2Feeds(w.svc, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" } as never);
     const entry = (feed as unknown as { receiptEntry: (c: unknown, why: string) => { title: string; summary: string } }).receiptEntry([...(await w.svc.record()).checks.values()][0], "On a claim you follow");

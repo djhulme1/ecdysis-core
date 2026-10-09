@@ -35,6 +35,7 @@
  * ligatures, diacritics and spacing are ignored, nothing else.
  */
 
+import { shortDate } from "../../web/design.js";
 import type { V2Service } from "./service.js";
 import type { IssueRegistry } from "./issues.js";
 import { parseSource, titleAgreement, WRONG_WORK_BELOW, type WorkCitation } from "../../core/v2/sources.js";
@@ -64,6 +65,8 @@ export interface QuoteCheckStore {
   get(claim: string): Promise<QuoteCheck | null>;
   put(row: QuoteCheck): Promise<void>;
   list(limit: number): Promise<QuoteCheck[]>;
+  /** Every claim's status in one small read, however many there are (the lists mark quotes not found in their source). */
+  statusIndex?(): Promise<Map<string, QuoteStatus>>;
 }
 
 export class MemoryQuoteCheckStore implements QuoteCheckStore {
@@ -71,6 +74,7 @@ export class MemoryQuoteCheckStore implements QuoteCheckStore {
   async get(claim: string) { return this.rows.get(claim) ?? null; }
   async put(row: QuoteCheck) { this.rows.set(row.claim, { ...row }); }
   async list(limit: number) { return [...this.rows.values()].slice(0, limit); }
+  async statusIndex() { return new Map([...this.rows.values()].map((r) => [r.claim, r.status] as const)); }
 }
 
 /** Below this share of the quote's words, the nearest stretch is not the quote at all: the sentence is from elsewhere in the paper. */
@@ -387,7 +391,7 @@ const WHERE_WORDS: Record<QuoteWhere, string> = {
 /** The sentence a claim page shows under a registered quote. */
 export function quoteCheckWords(c: QuoteCheck | null): string {
   if (!c) return "The quote has not yet been checked against its source.";
-  const when = c.checkedAt.slice(0, 10);
+  const when = shortDate(c.checkedAt);
   switch (c.status) {
     case "verified": return `Quote verified against the ${WHERE_WORDS[c.where ?? "crossref-abstract"] ?? "source's abstract"} on ${when}.`;
     case "mismatch": return `The quote differs from the source's ${c.where?.endsWith("title") ? "title" : "abstract"} (${Math.round((c.similarity ?? 0) * 100)}% of its words found in order, checked ${when}); the stewards have been told.`;
