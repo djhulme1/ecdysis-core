@@ -102,7 +102,7 @@ describe("MCP tools for the directory", () => {
     const good = await w.call("get_credence", {});
     assert.equal(good.isError, false);
     assert.equal(good.body["http_status"], undefined, "a successful read carries no status field: its text is unchanged");
-    assert.equal(good.body["version"], "credence/0.4");
+    assert.equal(good.body["version"], "credence/0.6");
   });
 
   it("names a missing required argument, and what was given instead, so the model can retry", async () => {

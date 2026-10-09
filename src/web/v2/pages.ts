@@ -21,7 +21,7 @@ import { credenceBucketsOf, MOCK_CHIP, MOCK_UNTIL_CLAIMS, mockFigures, observato
 import { claimGraph, NETWORK_MAX, type GroupBy, type LinesBy, type SizeBy } from "./network.js";
 import { applyQuery, catalogue, queryForm, queryHref, simpleTable, tableQuery, type FilterSpec, type QuerySpec, type TableQuery } from "./table.js";
 import { credenceStrip, neighbourhood, rulerLarge, rulerMini, type NeighbourClaim } from "./plates.js";
-import { CONTEXT_NOTE, fieldPath, topicWords, type Explanation, type PaperRecord } from "../../core/v2/context.js";
+import { CONTEXT_NOTE, fieldPath, topicWords, type Explanation, type PaperRecord, type Rung } from "../../core/v2/context.js";
 
 /** Cite and share: a citation and BibTeX (claims published here), the share box, and the badge to embed. Every value is escaped. */
 function promoteBlock(o: { citation?: string; bibtex?: string; share: ShareData; badge: string; page: string; what: string }): string {
@@ -49,8 +49,19 @@ const STATUS_MEANING_V2: Record<string, string> = {
   refuted: "replication tests from at least two verified operators failed, and its credence fell below 0.35",
 };
 
-/** The two kinds of test, defined once on every empirical claim's page (kinds/0.1; Clemens 2017). */
-export const TEST_KINDS_DEFINITION = "A replication test applies the claim's method to its own data (a verification) or to new data covering its own population and period (a reproduction). A robustness test changes the data or the method, and asks whether the finding holds under the change.";
+/** The two kinds of test, defined once on every empirical claim's page (kinds/0.1; Clemens 2017; the ladder, credence/0.6). */
+export const TEST_KINDS_DEFINITION = "A replication test applies the claim's method to its own data (same data, same method: a verification) or to new data covering its own population and period (new data, same method: a reproduction). A robustness test changes the data or the method, and asks whether the finding holds under the change. On a claim about the world, a confirming verification counts half a confirming reproduction, and established needs a reproduction: re-running the authors' analysis shows the arithmetic was right, not that the finding holds on new data.";
+
+/** What a receipt tested, plain words first and the technical name after (credence/0.6: the ladder's labels). */
+export function plainTests(words: string): string {
+  const w = words.toLowerCase();
+  if (w.startsWith("verification")) return `Same data, same method (${words})`;
+  if (w.startsWith("reproduction")) return `New data, same method (${words})`;
+  if (w.startsWith("reanalysis and extension")) return `Changed method, data beyond the claim's (${words})`;
+  if (w.startsWith("reanalysis")) return `Changed method (${words})`;
+  if (w.startsWith("extension")) return `Data beyond the claim's (${words})`;
+  return words.replace(/^./, (c) => c.toUpperCase());
+}
 /** The sentence that closes the robustness block. */
 export const ROBUSTNESS_CLOSE = "A finding can hold where it was made and not elsewhere. These results say where it holds; they do not change its credence or status.";
 
@@ -383,6 +394,8 @@ export interface ClaimViewV2 {
   context?: { paper: PaperRecord | null; explanation: Explanation | null } | null;
   /** context/0.1: where it stands, in plain sentences computed from the record (core/v2/context.ts standingWords). */
   standing?: string[];
+  /** credence/0.6: the checking ladder's three rungs, from the record (core/v2/context.ts ladderRungs); empty for a conceptual claim. */
+  ladder?: Rung[];
   /** The content id of a claim published here (its signed envelope's hash), and when it entered the record. */
   cid?: string | null;
   at: string | null;
@@ -456,12 +469,21 @@ const ABSTRACT_FROM: Record<string, string> = { arxiv: "arXiv", crossref: "the p
  * labelled as such), its terms, and where it stands in plain words (computed from the record, so never stale). Every value
  * is escaped. A claim published here has no paper, so it shows its standing alone.
  */
-export function meaningSection(c: Pick<ClaimViewV2, "external" | "context" | "standing" | "observed">): string {
+/** credence/0.6: the checking ladder as a short list: each rung in plain words, its technical name, and what has happened on it. */
+export function ladderList(rungs: readonly Rung[]): string {
+  if (!rungs.length) return "";
+  const mark: Record<Rung["state"], string> = { confirmed: "✓", failed: "✗", mixed: "◐", none: "○", listed: "●" };
+  const said: Record<Rung["state"], string> = { confirmed: "done: the result held", failed: "done: the result did not hold", mixed: "done: checks disagree", none: "not yet", listed: "something listed" };
+  return `<h3>How far it has been checked</h3><ol class="ladder">${rungs.map((r) => `<li class="rung ${r.state}"><span class="mark" aria-hidden="true">${mark[r.state]}</span><span class="rung-body"><b>${esc(r.label)}</b> <span class="small">(${esc(r.name)}; ${said[r.state]})</span><br>${esc(r.words)}</span></li>`).join("")}</ol>`;
+}
+
+export function meaningSection(c: Pick<ClaimViewV2, "external" | "context" | "standing" | "observed" | "ladder">): string {
   const paper = c.context?.paper ?? null;
   const ex = c.context?.explanation ?? null;
   const standing = c.standing ?? [];
+  const ladder = ladderList(c.ladder ?? []);
   if (!c.external) {
-    return standing.length ? `<section class="gloss" aria-labelledby="meaning"><h2 id="meaning">Where it stands, in plain words</h2><p class="standing">${esc(standing.join(" "))}</p></section>` : "";
+    return standing.length ? `<section class="gloss" aria-labelledby="meaning"><h2 id="meaning">Where it stands, in plain words</h2><p class="standing">${esc(standing.join(" "))}</p>${ladder}</section>` : "";
   }
   const about: string[] = [];
   if (paper && (paper.title || paper.venue)) {
@@ -481,6 +503,7 @@ export function meaningSection(c: Pick<ClaimViewV2, "external" | "context" | "st
     ex?.findings.length ? `<h3>What the paper found</h3><ul>${ex.findings.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : "",
     ex?.terms.length ? `<h3>Terms</h3><dl class="terms">${ex.terms.map((t) => `<dt>${esc(t.term)}</dt><dd>${esc(t.means)}</dd>`).join("")}</dl>` : "",
     standing.length ? `<h3>Where it stands on Ecdysis</h3><p class="standing">${esc(standing.join(" "))}</p>` : "",
+    ladder,
     ex
       ? `<p class="who">Written by ${esc(writerWords(ex.model))} on ${esc(shortDate(ex.writtenAt))} from ${ex.basis === "abstract" ? `the paper's abstract (as ${esc(ABSTRACT_FROM[ex.abstractFrom ?? ""] ?? "its index")} publishes it) and its OpenAlex record` : "the quoted sentence and the paper's title and record: no abstract was open to read"}. ${esc(CONTEXT_NOTE)} If it misreads the paper, <a href="/complaints">tell the stewards</a>.</p>`
       : `<p class="who">No plain-English summary of this claim has been written yet.${paper ? " The paper's details are OpenAlex's." : ""} Where it stands is computed from the record.</p>`,
@@ -569,7 +592,7 @@ ${c.evidence.length ? simpleTable<ClaimViewV2["evidence"][number]>({ rows: c.evi
   const receipts = `<h2 id="receipts">Receipts</h2>
 ${conceptual ? `<p class="small">A conceptual claim takes no receipts: there is no measurement to repeat. Its evidence is the arguments below.</p>` : c.receipts.length ? simpleTable<ClaimViewV2["receipts"][number]>({ rows: c.receipts, columns: [
     { label: "Receipt", cell: (r) => `<a href="/v2/receipts/${esc(r.id)}" title="${esc(r.id)}"><span class="mono">${esc(r.id.slice(0, 8))}</span></a>` },
-    { label: "Tests", kind: "main", cell: (r) => `${esc(r.tests ?? r.kind)}${r.counted === false ? ` <span class="small" title="A robustness test: listed above, never counted for or against the claim.">(not counted)</span>` : ""}<span class="under">${r.kind === "rerun" ? "re-run of its own bundle" : "own code"}${r.data ? ` · ${esc(r.data)}` : ""}</span>${r.others && r.others.matched + r.others.disagreed ? `<span class="under" title="Re-runs by operators not yet verified are shown here and count for nothing: only a verified operator's cross-check verifies or disputes a receipt.">Re-run ${r.others.matched + r.others.disagreed} more time${r.others.matched + r.others.disagreed === 1 ? "" : "s"} by operators not yet verified (${r.others.matched} matched, ${r.others.disagreed} disagreed): shown, not counted.</span>` : ""}${r.requires ? `<span class="under" title="This bundle reads ${r.requires} input${r.requires === 1 ? "" : "s"} that ${r.requires === 1 ? "is" : "are"} not open; ${r.auditable ? "a verified cross-check has matched it, so it counts in full" : "until a verified operator who holds the data cross-checks it, it counts at the unverified weight and settles nothing"}.">${r.auditable ? "Data held, audited." : "Data held, not yet audited."}</span>` : ""}` },
+    { label: "Tests", kind: "main", cell: (r) => `${esc(plainTests(r.tests ?? r.kind))}${r.counted === false ? ` <span class="small" title="A robustness test: listed above, never counted for or against the claim.">(not counted)</span>` : ""}<span class="under">${r.kind === "rerun" ? "re-run of its own bundle" : "own code"}${r.data ? ` · ${esc(r.data)}` : ""}</span>${r.others && r.others.matched + r.others.disagreed ? `<span class="under" title="Re-runs by operators not yet verified are shown here and count for nothing: only a verified operator's cross-check verifies or disputes a receipt.">Re-run ${r.others.matched + r.others.disagreed} more time${r.others.matched + r.others.disagreed === 1 ? "" : "s"} by operators not yet verified (${r.others.matched} matched, ${r.others.disagreed} disagreed): shown, not counted.</span>` : ""}${r.requires ? `<span class="under" title="This bundle reads ${r.requires} input${r.requires === 1 ? "" : "s"} that ${r.requires === 1 ? "is" : "are"} not open; ${r.auditable ? "a verified cross-check has matched it, so it counts in full" : "until a verified operator who holds the data cross-checks it, it counts at the unverified weight and settles nothing"}.">${r.auditable ? "Data held, audited." : "Data held, not yet audited."}</span>` : ""}` },
     { label: "Outcome", cell: (r) => (r.disowned ? "disowned" : esc(r.outcome ?? r.stage)) },
     { label: "Agent", cell: (r) => `<a href="/a/${esc(r.agent)}">${esc(r.agent)}</a>` },
     { label: "Its cross-check", cell: (r) => (r.crossMatch === null ? "—" : r.crossMatch ? "matched" : "disagreed") },

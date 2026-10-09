@@ -22,7 +22,7 @@ import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
 import { mapPageV2 } from "../../web/v2/map.js";
 import { leaderboardPageV2 } from "../../web/v2/leaderboard.js";
 import { BLOCKER_MEANING, pressure, type Blocker } from "../../core/v2/attempts.js";
-import { standingWords } from "../../core/v2/context.js";
+import { ladderRungs, standingWords } from "../../core/v2/context.js";
 import type { ContextStore } from "./context.js";
 import { isClaimRef } from "../../core/v2/refs.js";
 import { RESTS_ON, type LinkEdge } from "../../core/v2/links.js";
@@ -500,9 +500,16 @@ export class PagesHandler {
       const [src, row] = await Promise.all([this.o.context.getSource(x.source.toLowerCase()).catch(() => null), this.o.context.getClaim(ref).catch(() => null)]);
       context = { paper: src?.status === "read" ? src.record : null, explanation: row?.status === "written" ? row.explanation : null };
     }
+    const checks = receipts.filter((k) => k.outcome !== null && k.stage === "resulted").map((k) => ({ agent: k.agent, tests: k.tests ?? k.kind, counted: k.counted ?? false, outcome: k.outcome, disowned: k.disowned }));
+    // credence/0.6: the checking ladder, from the same checks, the robustness tests and the arguments about method.
+    const methodArgs = args.filter((a) => !a.disowned && (a.grounds === "methodological-flaw" || a.grounds === "statistical-insufficiency"));
+    const ladder = score.kind === "empirical" ? ladderRungs({
+      world: score.world, external: !!x, checks, robustness: robustness.map((rr) => ({ agent: rr.agent, outcome: rr.outcome })),
+      methodArguments: { upheld: methodArgs.filter((a) => a.status === "upheld").length, dismissed: methodArgs.filter((a) => a.status === "dismissed").length, open: methodArgs.filter((a) => a.status === "open").length },
+    }) : [];
     const standing = standingWords({
-      kind: score.kind, status: score.status, credence: score.credence, prior: score.prior, external: !!x, operators: score.operators,
-      checks: receipts.filter((k) => k.outcome !== null && k.stage === "resulted").map((k) => ({ agent: k.agent, tests: k.tests ?? k.kind, counted: k.counted ?? false, outcome: k.outcome, disowned: k.disowned })),
+      kind: score.kind, status: score.status, credence: score.credence, prior: score.prior, external: !!x, world: score.world, operators: score.operators,
+      checks,
       arguments: { upheld: score.arguments.upheld, dismissed: score.arguments.dismissed, open: score.arguments.open },
       blockers: (blocked?.blockers ?? []).filter((b) => !b.declared).map((b) => ({ blocker: b.blocker, meaning: BLOCKER_MEANING[b.blocker as Blocker] ?? b.blocker })),
     });
@@ -514,7 +521,7 @@ export class PagesHandler {
       rationale: payload?.rationale ?? null, method: payload?.method ?? null, caveats: payload?.caveats ?? [], artefacts: payload?.artefacts ?? [], models: payload?.models ?? [],
       restsOn, background, restedOnBy,
       amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, scope, registrant, robustness, promote,
-      arguments: args, attempts, blocked, observed, context, standing, cid: n?.cid ?? null, at: n?.ts ?? x?.ts ?? null, computedFrom: r.head,
+      arguments: args, attempts, blocked, observed, context, standing, ladder, cid: n?.cid ?? null, at: n?.ts ?? x?.ts ?? null, computedFrom: r.head,
     };
   }
 

@@ -200,6 +200,8 @@ export interface StandingInput {
   prior: number;
   /** A claim from human literature: its registrant's operator is not counted towards resolving it. */
   external: boolean;
+  /** credence/0.6: a claim about the world, whose finding new data can test. Absent: as for one. */
+  world?: boolean;
   /** Distinct verified operators whose replication tests confirm and fail it (the registrant's not counted). */
   operators: { confirming: number; failing: number };
   /** The receipts with a result, in view, oldest first: who filed it, what it tested (kinds/0.1's words), whether it counts, and how it came out. */
@@ -266,7 +268,8 @@ export function standingWords(s: StandingInput): string[] {
     const reproduced = countedChecks.some((c) => kind(c) === "reproduction" && c.outcome === "confirmed");
     if (verificationFailed) out.push("A failed verification means the published results could not be obtained from the paper's own data and analysis: an error in the analysis or in its report, unless the check itself is wrong.");
     if (reproduced) out.push("A reproduction on new data tests the finding itself, not only the arithmetic. What it cannot test is the design: whether the method measures what the claim says, which is argued, or tested by changing the method or the data (robustness tests).");
-    else if (verified) out.push("A verification shows the published results follow from the paper's own data and analysis; it does not test whether the finding holds on new data. The next step is a reproduction: the same method on new data from the same population and period.");
+    else if (verified && s.world === false) out.push("For a claim about an object defined by its construction (a scheme, a proof, a model, a simulation's ensemble), checking the object itself is the test; a reproduction runs the construction afresh.");
+    else if (verified) out.push("A verification shows the published results follow from the paper's own data and analysis; it does not test whether the finding holds on new data. The next step is a reproduction: the same method on new data from the same population and period. Until one confirms it, it cannot be established, and each verification counts half.");
     else if (!countedChecks.length && s.status === "unchecked") out.push("The usual first step is a verification, re-running the paper's analysis on its own data where the authors have published it; then a reproduction, the same method on new data.");
   }
   const moved = Math.abs(s.credence - s.prior) >= 0.005;
@@ -279,6 +282,76 @@ export function standingWords(s: StandingInput): string[] {
   }
   for (const b of s.blockers.slice(0, 2)) out.push(`An attempt to check it stopped: ${b.meaning}.`);
   return out;
+}
+
+/* ---------------------------------------------------------------------- */
+/* The checking ladder (credence/0.6)                                       */
+
+/** What ladderRungs reads: the claim's checks with a result, its robustness tests, and its arguments about method. */
+export interface LadderInput {
+  /** A claim about the world (credence/0.6 aboutTheWorld): new data can test its finding. */
+  world: boolean;
+  /** A claim from human literature, which has no author's stated confidence for an argument about method to weaken. */
+  external: boolean;
+  checks: StandingInput["checks"];
+  /** Robustness tests with a result, in view: each changes the data or the method (kinds/0.1); listed, never counted. */
+  robustness: Array<{ agent: string; outcome: string | null }>;
+  /** Arguments on methodological or statistical grounds, by status. */
+  methodArguments: { upheld: number; dismissed: number; open: number };
+}
+
+export interface Rung {
+  step: 1 | 2 | 3;
+  /** The rung in plain words, then its technical name. */
+  label: string;
+  name: string;
+  /** What has happened on it: confirmed, failed, both, nothing yet, or (the design) what is listed. */
+  state: "confirmed" | "failed" | "mixed" | "none" | "listed";
+  /** One line: who did what, or what would do it. */
+  words: string;
+}
+
+const names = (xs: string[]) => {
+  const u = [...new Set(xs)];
+  return u.length <= 2 ? u.join(" and ") : `${u.slice(0, 2).join(", ")} and ${u.length - 2} more`;
+};
+
+/**
+ * The three rungs of checking (Lucy, 9 October 2026), from the record: (1) the same data and method, a verification, which
+ * shows the reported results follow from the paper's data; (2) new data and the same method, a reproduction, which tests
+ * the finding; (3) the design, whether the method tests what the claim says: robustness tests (a changed method or data)
+ * and arguments on methodological grounds. Pure: the same record gives the same rungs.
+ */
+export function ladderRungs(x: LadderInput): Rung[] {
+  const live = x.checks.filter((c) => c.counted && !c.disowned && (c.outcome === "confirmed" || c.outcome === "failed"));
+  const rung = (step: 1 | 2, kind: "verification" | "reproduction"): Rung => {
+    const mine = live.filter((c) => c.tests.toLowerCase().startsWith(kind));
+    const ok = mine.filter((c) => c.outcome === "confirmed").map((c) => c.agent);
+    const bad = mine.filter((c) => c.outcome === "failed").map((c) => c.agent);
+    const label = step === 1 ? (x.world ? "Same data, same method" : "The object itself, checked again") : (x.world ? "New data, same method" : "New instances of the construction");
+    const state: Rung["state"] = ok.length && bad.length ? "mixed" : ok.length ? "confirmed" : bad.length ? "failed" : "none";
+    const whose = x.external ? "the paper's" : "the claim's";
+    const words = state === "none"
+      ? (step === 1
+        ? (x.external ? "Not yet: re-run the paper's analysis on its own data, where the authors have published it." : "Not yet: re-run the claim's own analysis on its data of record.")
+        : x.world ? "Not yet: the same method on new data covering the claim's population and period. Established needs one." : "Not yet: the same construction run afresh.")
+      : [ok.length ? `got ${whose} result: ${names(ok)}` : "", bad.length ? `did not: ${names(bad)}` : ""].filter(Boolean).join("; ").replace(/^./, (c) => c.toUpperCase()) + ".";
+    return { step, label, name: kind, state, words };
+  };
+  const m = x.methodArguments;
+  const robust = x.robustness.filter((r) => r.outcome === "confirmed" || r.outcome === "failed");
+  const design: string[] = [];
+  if (robust.length) design.push(`${robust.length === 1 ? "one robustness test" : `${robust.length} robustness tests`} listed below (${robust.filter((r) => r.outcome === "confirmed").length} robust, ${robust.filter((r) => r.outcome === "failed").length} not)`);
+  if (m.upheld + m.dismissed + m.open) design.push(`arguments about its method: ${m.upheld} upheld, ${m.dismissed} dismissed, ${m.open} open`);
+  return [
+    rung(1, "verification"),
+    rung(2, "reproduction"),
+    {
+      step: 3, label: "The design", name: "robustness tests and arguments", state: design.length ? "listed" : "none",
+      words: design.length ? `${design.join("; ").replace(/^./, (c) => c.toUpperCase())}. They say where the finding holds and whether the method tests what the claim says; robustness tests never move its credence${x.external ? ", and nor does an argument about the method" : ", and an upheld argument about the method only weakens the weight of its author's stated confidence"}.`
+        : "Nothing yet: change the method or the data and see whether it holds (a robustness test), or argue that the method does not test what the claim says.",
+    },
+  ];
 }
 
 /** The note under every summary, so it is never read as evidence. */

@@ -500,6 +500,18 @@ h1.claim-h1{font-size:clamp(1.75rem,3.4vw,2.6rem);line-height:1.15;max-width:non
 .gloss dl.terms dt{font-weight:600;color:var(--ink)}
 .gloss dl.terms dd{margin:0 0 8px;color:var(--ink)}
 .gloss .standing{font:1.02rem/1.55 var(--serif);margin:0 0 6px}
+.gloss ol.ladder{list-style:none;padding:0;margin:0 0 4px;counter-reset:rung}
+.gloss ol.ladder li{display:grid;grid-template-columns:1.6rem minmax(0,1fr);gap:0 8px;padding:8px 0;border-top:1px solid var(--line);font:15px/1.5 var(--sans);color:var(--ink)}
+.gloss ol.ladder li:first-child{border-top:0}
+.gloss ol.ladder .mark{font:600 16px/1.4 var(--sans);color:var(--muted);text-align:center}
+.gloss ol.ladder li.confirmed .mark{color:var(--ink)}
+.gloss ol.ladder li.failed .mark,.gloss ol.ladder li.mixed .mark{color:var(--amber)}
+.gloss ol.ladder .rung-body{min-width:0}
+ol.rungs{list-style:none;padding:0;margin:12px 0;display:grid;gap:22px;max-width:44rem}
+ol.rungs li{position:relative;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--ink);padding:12px 14px;font:15px/1.5 var(--sans);color:var(--ink)}
+ol.rungs li+li::before{content:"\\2193";position:absolute;top:-22px;left:18px;font:600 16px/22px var(--sans);color:var(--muted)}
+ol.rungs .rung-what,ol.rungs .rung-then{display:block;margin-top:6px}
+ol.rungs .rung-then{color:var(--muted)}
 .gloss .who{font:13.5px/1.5 var(--sans);color:var(--muted);border-top:1px solid var(--line);padding-top:8px;margin:14px 0 10px}
 details.how{margin:8px 0 16px;border-top:1px solid var(--line)}
 details.how>summary{font:15px/1.4 var(--sans);color:var(--muted)}

@@ -50,6 +50,7 @@
 
 import { ARGUMENT_PARAMS, settleArgument, type ArgumentState, type ClaimArgumentsInput } from "./arguments.js";
 import {
+  aboutTheWorld,
   clampLogOdds,
   computeCredenceV2,
   conceptualStatusOf,
@@ -281,13 +282,15 @@ export function scoreTrackRecord(
     const argSum = sumArguments(args);
     const base = logit(r.prior) + argSum.verified + argSum.other;
     const foundationRefuted = r.foundations.some((x) => x.status === "refuted");
+    // credence/0.6: the checking ladder applies to the scoring of reports exactly as to the claim's own numbers.
+    const world = r.kind !== "conceptual" && aboutTheWorld(c.scope);
     for (const [k, item] of items.entries()) {
       const prefix = items.slice(0, k);
-      const before = sigma(clampLogOdds(base + sumEvidence(prefix, c.authorOperator, opts).sum));
-      const after = sigma(clampLogOdds(base + sumEvidence([...prefix, item], c.authorOperator, opts).sum));
+      const before = sigma(clampLogOdds(base + sumEvidence(prefix, c.authorOperator, opts, undefined, world).sum));
+      const after = sigma(clampLogOdds(base + sumEvidence([...prefix, item], c.authorOperator, opts, undefined, world).sum));
       // Leave-one-OPERATOR-out: the resolution a report is scored against leaves out everything its operator filed on the
       // claim, so an operator cannot resolve its own report by filing a second one that stands in for the first.
-      const without = sumEvidence(items.filter((e) => e.operatorId !== item.operatorId), c.authorOperator, opts, c.registrant);
+      const without = sumEvidence(items.filter((e) => e.operatorId !== item.operatorId), c.authorOperator, opts, c.registrant, world);
       // Resolved against the bar at zero use (τ0), never τ(U): use raises the bar a claim must clear to READ established,
       // but a citation must not change what anyone's report is scored against (use never moves credence; §2).
       // A conceptual claim resolves by argument (an upheld counterexample), never by replication; its reviews are scored against that.
@@ -300,13 +303,13 @@ export function scoreTrackRecord(
           credence: replicationCredence, sReplication: without.sReplication, fReplication: without.fReplication, threshold: thresholdOf(0),
           confirmingReplication: without.confirmingReplication, failingReplication: without.failingReplication,
           confirmingFamilies: familyCount(without.confirmingFamilies), confirmingOperators: without.confirmingOperators, failingOperators: without.failingOperators,
-          foundationRefuted,
+          foundationRefuted, needsReproduction: world, confirmingReproductions: without.confirmingReproductions,
         });
       const resolved = resolutionOf(status, o.anchors?.get(c.ref));
       // credence/0.5: under continuous settlement an empirical claim's report is settled as far as the same independent work
       // has carried the claim (the same credence and the same bars statusOf just read); a conceptual claim settles by argument.
       const settled = settlement === "continuous" && r.kind !== "conceptual"
-        ? settledShare({ prior: r.prior, credence: replicationCredence, without, resolved, foundationRefuted })
+        ? settledShare({ prior: r.prior, credence: replicationCredence, without, resolved, foundationRefuted, needsReproduction: world })
         : resolved === null ? 0 : 2 * resolved - 1;
       // Early: nobody verified, other than this operator, had replicated the claim yet when this report was filed.
       const early = !prefix.some((e) => e.tier === "verified" && e.kind !== "review" && e.operatorId !== item.operatorId && e.auditable !== false);

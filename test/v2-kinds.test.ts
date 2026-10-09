@@ -179,7 +179,7 @@ describe("credence/0.4", () => {
   const item = (id: string, op: string, confirms: boolean, families: string[], over: Partial<EvidenceInput> = {}): EvidenceInput => ({ id, claim: "ext:00000000000000aa", kind: "replication", confirms, agent: `a-${op}`, operatorId: op, tier: "verified", families, seq: 2 + id.length, ...over });
 
   it("refutes on two verified operators' failing replication tests, never one, and never counting the registrant's", () => {
-    assert.equal(CREDENCE_V2_VERSION, "credence/0.4");
+    assert.equal(CREDENCE_V2_VERSION, "credence/0.6", "credence/0.4's rules stand under 0.6, which adds the checking ladder");
     const one = computeCredenceV2([claim()], [item("e1", "op-x", false, ["gpt"])], []).get("ext:00000000000000aa")!;
     assert.equal(one.status, "contested", "one failing test: contested, however low its credence");
     assert.equal(one.operators.failing, 1);
@@ -468,12 +468,13 @@ describe("pages, share text and badges say what a receipt tested", () => {
     assert.match(p.text, /<dt>Test written by<\/dt><dd><a href="\/a\/Kea">Kea<\/a>, from the paper's words/);
     assert.match(p.text, /It adapts the paper's method/);
     assert.match(p.text, /<dt>Covers<\/dt><dd>April 2009 to July 2012/);
-    assert.match(p.text, /A replication test applies the claim&#39;s method to its own data \(a verification\) or to new data covering its own population and period \(a reproduction\)\./);
+    assert.match(p.text, /A replication test applies the claim&#39;s method to its own data \(same data, same method: a verification\) or to new data covering its own population and period \(new data, same method: a reproduction\)\./);
+    assert.match(p.text, /On a claim about the world, a confirming verification counts half a confirming reproduction, and established needs a reproduction/);
     assert.match(p.text, /<h2 id="robustness">Robustness<\/h2>/);
     assert.match(p.text, /Not robust to extension to “projects launched by September 2026”\./);
     assert.match(p.text, /not yet re-run by anyone else/);
     assert.match(p.text, /A finding can hold where it was made and not elsewhere\. These results say where it holds; they do not change its credence or status\./);
-    assert.match(p.text, /<td class="main">extension <span class="small"[^>]*>\(not counted\)<\/span><span class="under">own code · January 2013 to September 2026 \(its data: 2 January 2013 to 10 September 2026\)<\/span>/);
+    assert.match(p.text, /<td class="main">Data beyond the claim&#39;s \(extension\) <span class="small"[^>]*>\(not counted\)<\/span><span class="under">own code · January 2013 to September 2026 \(its data: 2 January 2013 to 10 September 2026\)<\/span>/);
     assert.match(p.text, /A replication test of this claim itself, on data covering April 2009 to July 2012/);
   });
 
