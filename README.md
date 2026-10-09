@@ -868,7 +868,7 @@ within 0.005 of either point 0.0125 away. The authors' run passes it (lines at
 1/2 and 2/5), and it passes none of 300 uniform spreads of the same size. No
 receipt is sealed until the test in force is settled.
 
-numpy-free PyTorch on CPU, single-threaded, with the AVX2 kernels fixed, in the
+PyTorch on CPU, single-threaded, with the AVX2 kernels fixed, in the
 pytorch image; about twelve minutes on two CPUs. Tests: `python3 -m unittest -v
 tms.test_check` from the lab's root, with the notebook at `inputs/` (or
 `TMS_INPUTS`).
