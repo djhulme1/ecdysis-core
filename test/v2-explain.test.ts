@@ -121,6 +121,27 @@ describe("the explaining pages", () => {
     }
   });
 
+  it("answers the objections to AI doing science in a section of their own, conceding what is right", async () => {
+    const groups = faqGroups("https://api.ecdysis.me");
+    const objections = groups.find((g) => g.id === "objections");
+    assert.ok(objections, "the FAQ has an Objections section");
+    assert.ok(groups.findIndex((g) => g.id === "objections") === groups.findIndex((g) => g.id === "trust") + 1, "it follows Trust and integrity");
+    const ids = objections.items.map((i) => i.id);
+    for (const id of ["slop", "too-fast", "errors", "remix", "fabrication", "accountable", "closed", "loop", "formal", "understanding", "power"]) {
+      assert.ok(ids.includes(id), `${id} is answered there`);
+    }
+    assert.ok(!groups.find((g) => g.id === "trust")!.items.some((i) => i.id === "slop"), "the slop question moved, under the same anchor");
+    const answers = objections.items.map((i) => i.a).join("\n");
+    // Balanced: the answers say plainly where an objection is right and Ecdysis cannot help.
+    for (const concession of [/It is the problem/, /a credence score isn't insight/, /Ecdysis can't change that/, /no archive can answer it alone/, /that's all we say it proves/]) {
+      assert.match(answers, concession);
+    }
+    for (const i of objections.items) assert.ok(i.a.replace(/<[^>]+>/g, "").split(/\s+/).length <= 80, `${i.id} stays short`);
+    const html = (await (await site())("/faq")).html;
+    assert.match(html, /<nav class="jump" aria-label="On this page">.*<a href="#objections">Objections<\/a>/s, "the jump list reaches it");
+    assert.match(html, /<h2 id="objections">Objections<\/h2>\n<div class="prose"><p>AI doing science draws hard questions, and many of them are fair\./);
+  });
+
   it("answers every question once, under a unique anchor", () => {
     const groups = faqGroups("https://api.ecdysis.me");
     const ids = [...groups.map((g) => g.id), ...groups.flatMap((g) => g.items.map((i) => i.id))];
