@@ -197,7 +197,11 @@ Poisson and regular trains, the spread of Poisson trains against its theory,
 and the simulator at J = 0 (every interval exactly 2,556 steps). The paper's
 text is closed here; the network is the one its open reanalysis (Engelken et
 al. 2016) and later papers state. numpy, in the pytorch image; a few minutes
-on two CPUs. Tests: `python3 -m unittest tests.test_ostojic`.
+on two CPUs. Tests: `python3 -m unittest tests.test_ostojic`. The receipt
+(`d6982c5b…`, 10 October, at `14cae7e`, a reproduction): at J = 0.2 mV a
+rate of 12.72 Hz, Fano factor 0.67 and spread 6.70 Hz; at J = 0.8 mV 28.38 Hz
+(105% above the mean-field 13.82), Fano 8.82 and spread 36.89 Hz, 5.5 times
+that at 0.2 mV; all three conditions and four controls, in 87 seconds.
 
 ## af/: the alignment-faking compliance rates, recounted
 
