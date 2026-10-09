@@ -183,13 +183,16 @@ export type SourceText = { ok: true; kind: QuoteIndex; abstract: string | null; 
  * the quote scout and by the context writer (context.ts), so both read the same text from the same place. Throws only on a
  * network failure, which callers catch.
  */
+/** How long a source's index may take to answer: a request that hangs never holds the cron (which awaits its whole run). */
+export const SOURCE_TIMEOUT_MS = 20_000;
+
 export async function readSource(source: string, o: ReadSourceOptions): Promise<SourceText> {
   const ua = o.userAgent ?? `ecdysis-quote-scout/0.2 (https://ecdysis.me; mailto:${o.contact ?? "replies@ecdysis.me"})`;
   const fetchImpl = o.fetchImpl;
   const parsed = parseSource(source);
   if (!parsed.ok) return { ok: false, status: "unresolvable", detail: `not a source in sources/0.1's spelling: ${parsed.error}`.slice(0, 200) };
   const { scheme, id } = parsed;
-  const get = (url: string, accept: string, extra: Record<string, string> = {}) => fetchImpl(url, { headers: { "user-agent": ua, accept, ...extra } });
+  const get = (url: string, accept: string, extra: Record<string, string> = {}) => fetchImpl(url, { headers: { "user-agent": ua, accept, ...extra }, signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) });
   const page = async (url: string, abstractRe: RegExp, titleRe: RegExp | null): Promise<{ ok: true; kind: QuoteIndex; abstract: string | null; title: string | null } | { ok: false; status: "unresolvable" | "error"; detail: string }> => {
     const res = await get(url, "text/html");
     if (res.status === 404) return { ok: false, status: "unresolvable", detail: `the proceedings page is not there (${url.slice(0, 120)})` };
@@ -274,7 +277,7 @@ export async function readSource(source: string, o: ReadSourceOptions): Promise<
 
 /** Europe PMC's first hit for a query: null if it did not answer. */
 async function europePmc(fetchImpl: typeof fetch, query: string, ua: string): Promise<{ found: boolean; abstract: string | null; title: string | null } | null> {
-  const res = await fetchImpl(`https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(query)}&resultType=core&format=json&pageSize=1`, { headers: { "user-agent": ua, accept: "application/json" } });
+  const res = await fetchImpl(`https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(query)}&resultType=core&format=json&pageSize=1`, { headers: { "user-agent": ua, accept: "application/json" }, signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) });
   if (!res.ok) return null;
   const body = (await res.json().catch(() => null)) as { resultList?: { result?: Array<{ abstractText?: string; title?: string }> } } | null;
   const hit = body?.resultList?.result?.[0];
@@ -286,7 +289,7 @@ async function europePmc(fetchImpl: typeof fetch, query: string, ua: string): Pr
 async function openAlexAbstract(fetchImpl: typeof fetch, openAlexKey: string | null, key: string, ua: string): Promise<{ found: boolean; abstract: string | null; title: string | null } | null> {
   const k = openAlexKey?.trim();
   const res = await fetchImpl(`https://api.openalex.org/works/${key.startsWith("doi:") ? `doi:${encodeURIComponent(key.slice(4))}` : encodeURIComponent(key)}?select=title,display_name,abstract_inverted_index`,
-    { headers: { "user-agent": ua, accept: "application/json", ...(k ? { authorization: `Bearer ${k}` } : {}) } });
+    { headers: { "user-agent": ua, accept: "application/json", ...(k ? { authorization: `Bearer ${k}` } : {}) }, signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) });
   if (res.status === 404) return { found: false, abstract: null, title: null };
   if (!res.ok) return null;
   const w = (await res.json().catch(() => null)) as { title?: string; display_name?: string; abstract_inverted_index?: Record<string, number[]> | null } | null;

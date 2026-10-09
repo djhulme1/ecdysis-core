@@ -63,6 +63,8 @@ export const CANDIDATES_PER_FIELD = 25;
 /** How often a source is asked about again. Citation counts move slowly; a month keeps the record current enough and the indexes unbothered. */
 export const REFRESH_MS = 30 * 24 * 3600 * 1000;
 const PAUSE_MS = 1000;
+/** How long an index may take to answer: a request that hangs never holds the cron (which awaits its whole run). */
+const INDEX_TIMEOUT_MS = 20_000;
 
 export interface Observed {
   provider: ObservationProvider;
@@ -178,7 +180,7 @@ export class StakesScout {
     try {
       const mailto = encodeURIComponent(this.o.contact ?? "replies@ecdysis.me");
       const url = `https://api.openalex.org/works?filter=primary_topic.field.id:${encodeURIComponent(fieldId)},type:article&sort=cited_by_count:desc&per-page=${CANDIDATES_PER_FIELD}&select=id,doi,title,cited_by_count,publication_year,ids&mailto=${mailto}`;
-      const res = await this.fetchImpl(url, { headers: this.openAlexHeaders() });
+      const res = await this.fetchImpl(url, { headers: this.openAlexHeaders(), signal: AbortSignal.timeout(INDEX_TIMEOUT_MS) });
       if (!res.ok) return null;
       const body = (await res.json().catch(() => null)) as { results?: Array<{ id?: string; doi?: string | null; title?: string | null; cited_by_count?: number; publication_year?: number | null; ids?: Record<string, string> }> } | null;
       if (!body || !Array.isArray(body.results)) return null;
@@ -199,7 +201,7 @@ export class StakesScout {
   async observeField(fieldId: string): Promise<{ field: string; works: number; citedBy: number } | null> {
     try {
       const mailto = encodeURIComponent(this.o.contact ?? "replies@ecdysis.me");
-      const res = await this.fetchImpl(`https://api.openalex.org/fields/${encodeURIComponent(fieldId)}?mailto=${mailto}`, { headers: this.openAlexHeaders() });
+      const res = await this.fetchImpl(`https://api.openalex.org/fields/${encodeURIComponent(fieldId)}?mailto=${mailto}`, { headers: this.openAlexHeaders(), signal: AbortSignal.timeout(INDEX_TIMEOUT_MS) });
       if (!res.ok) return null;
       const f = (await res.json().catch(() => null)) as { display_name?: string; works_count?: number; cited_by_count?: number } | null;
       if (!f || typeof f.works_count !== "number" || typeof f.cited_by_count !== "number") return null;
@@ -247,7 +249,7 @@ export class StakesScout {
     const mailto = encodeURIComponent(this.o.contact ?? "replies@ecdysis.me");
     const c = key.indexOf(":");
     const path = c > 0 ? `${key.slice(0, c)}:${encodeURIComponent(key.slice(c + 1))}` : encodeURIComponent(key);
-    const res = await this.fetchImpl(`https://api.openalex.org/works/${path}?mailto=${mailto}`, { headers: this.openAlexHeaders() });
+    const res = await this.fetchImpl(`https://api.openalex.org/works/${path}?mailto=${mailto}`, { headers: this.openAlexHeaders(), signal: AbortSignal.timeout(INDEX_TIMEOUT_MS) });
     if (res.status === 404) return { status: "unresolved", detail: "OpenAlex knows no such work" };
     if (!res.ok) return { status: "error", detail: `OpenAlex ${res.status}` };
     const w = (await res.json().catch(() => null)) as OpenAlexWork | null;
@@ -261,7 +263,7 @@ export class StakesScout {
     const venue = w.primary_location?.source?.id;
     if (withVenue && typeof venue === "string" && /openalex\.org\/S\d+$/i.test(venue)) {
       const sid = venue.slice(venue.lastIndexOf("/") + 1);
-      const sres = await this.fetchImpl(`https://api.openalex.org/sources/${encodeURIComponent(sid)}?mailto=${mailto}`, { headers: this.openAlexHeaders() });
+      const sres = await this.fetchImpl(`https://api.openalex.org/sources/${encodeURIComponent(sid)}?mailto=${mailto}`, { headers: this.openAlexHeaders(), signal: AbortSignal.timeout(INDEX_TIMEOUT_MS) });
       if (sres.ok) {
         const src = (await sres.json().catch(() => null)) as { summary_stats?: Record<string, unknown> } | null;
         const v = src?.summary_stats?.["2yr_mean_citedness"];
@@ -273,7 +275,7 @@ export class StakesScout {
   }
 
   private async semanticScholar(paperId: string): Promise<{ status: "observed"; observed: Observed } | { status: "unresolved"; detail: string } | { status: "error"; detail: string }> {
-    const res = await this.fetchImpl(`https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(paperId)}?fields=citationCount,year,s2FieldsOfStudy,paperId`, { headers: { "user-agent": this.ua(), accept: "application/json" } });
+    const res = await this.fetchImpl(`https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(paperId)}?fields=citationCount,year,s2FieldsOfStudy,paperId`, { headers: { "user-agent": this.ua(), accept: "application/json" }, signal: AbortSignal.timeout(INDEX_TIMEOUT_MS) });
     if (res.status === 404) return { status: "unresolved", detail: "Semantic Scholar knows no such paper" };
     if (!res.ok) return { status: "error", detail: `Semantic Scholar ${res.status}` };
     const p = (await res.json().catch(() => null)) as S2Paper | null;
