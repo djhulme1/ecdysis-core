@@ -323,3 +323,23 @@ To replace the video:
    the transcript (the captions' words, set as prose). `npm test` holds every
    one of them to its file, so a new cut always gets a new address and no
    browser keeps the old one.
+
+## 13. The typefaces
+
+Every page is set in two typefaces, served from this site and from nowhere
+else (each page's CSP says `font-src 'self'`): Newsreader (Production Type)
+for headings and quotations, and Public Sans (USWDS) for reading and the
+interface. Both are under the SIL Open Font License 1.1; the licences are in
+`docs/fonts/`. The files are the `wght` variable fonts of the Fontsource
+packages `@fontsource-variable/newsreader` and
+`@fontsource-variable/public-sans` (5.3.0), upright and italic, each cut to
+the Latin and Latin Extended ranges, eight files in all. They sit in
+`public/media/` beside the video and are served the same way: only what
+`FONTS` in `src/web/media.ts` lists, each named by its hash. A browser
+fetches a face only when a page sets text in it, in its range; every page
+preloads the two upright Latin faces.
+
+To replace one: name the new file `<family>-<range>.<first 8 hex of its
+SHA-256>.woff2`, replace the old file in `public/media/`, and update its
+entry in `FONTS` (path, size, hash). `npm test` holds every entry to its
+file and fails on a file in `public/media/` that is not listed.

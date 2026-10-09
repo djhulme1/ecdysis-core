@@ -1,6 +1,8 @@
 /**
  * The files the site serves that it does not render: the front page's explainer, a talking-head video in which
- * Daniel Hulme says why he created Ecdysis, with its poster frame and English captions.
+ * Daniel Hulme says why he created Ecdysis, with its poster frame and English captions; and the two typefaces every
+ * page is set in (the redesign of 9 October 2026), Newsreader for headings and quotations and Public Sans for reading
+ * and the interface, each a variable font cut to the Latin and Latin Extended ranges.
  *
  * They live in public/media, go up with every deploy as Workers static assets, and are reachable only through
  * src/api/media.ts, which answers byte ranges; an address not listed here is a 404, whatever else is uploaded.
@@ -56,9 +58,48 @@ export const EXPLAINER = {
   ],
 } as const;
 
+/** One face of a typeface: the file, the style it sets, and the characters it covers (CSS unicode-range). */
+export interface FontFace extends MediaFile {
+  readonly family: "Newsreader" | "Public Sans";
+  readonly style: "normal" | "italic";
+  /** The weight axis the variable font carries. */
+  readonly weight: string;
+  readonly range: string;
+}
+
+/** The Latin and Latin Extended ranges, as Google Fonts cuts them: a page loads the second only for a name like Łukasiewicz. */
+const LATIN = "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD";
+const LATIN_EXT = "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF";
+const WOFF2 = "font/woff2";
+
+/**
+ * The typefaces (SIL Open Font License 1.1; the licences are in docs/fonts, and each file names its own in its name
+ * table): Newsreader (Production Type) at its 16-point optical size, weights 200 to 800, and Public Sans (USWDS),
+ * weights 100 to 900, from the Fontsource builds of Google Fonts' files. A browser fetches a face only when a page
+ * sets text in it, in its range; the first two below are preloaded by every page.
+ */
+export const FONTS: ReadonlyArray<FontFace> = [
+  { family: "Public Sans", style: "normal", weight: "100 900", range: LATIN, path: "/media/public-sans-latin.5ed4d31c.woff2", type: WOFF2, bytes: 26832, sha256: "5ed4d31c988e73b258894244f209069ebe77dc7e564861954b21198b6de90d68" },
+  { family: "Newsreader", style: "normal", weight: "200 800", range: LATIN, path: "/media/newsreader-latin.62981321.woff2", type: WOFF2, bytes: 58084, sha256: "62981321d9a3cc7a61a73792729043703fd6112da86e8ec848bb57f088578757" },
+  { family: "Public Sans", style: "normal", weight: "100 900", range: LATIN_EXT, path: "/media/public-sans-latin-ext.3a00a32f.woff2", type: WOFF2, bytes: 18472, sha256: "3a00a32f0242b723dcea79935747d6d27dd93675d03ef23f470dfe274e79586a" },
+  { family: "Newsreader", style: "normal", weight: "200 800", range: LATIN_EXT, path: "/media/newsreader-latin-ext.ac6fa9ed.woff2", type: WOFF2, bytes: 36244, sha256: "ac6fa9ed533278f4c8fd3ae44a1fc78c7df736040237ab86fc1160d020af0af2" },
+  { family: "Newsreader", style: "italic", weight: "200 800", range: LATIN, path: "/media/newsreader-italic-latin.48bc8861.woff2", type: WOFF2, bytes: 64520, sha256: "48bc8861b9b2ca9300747cad4fd6a3b4ac3028d364df00bd1b72097baa75e509" },
+  { family: "Newsreader", style: "italic", weight: "200 800", range: LATIN_EXT, path: "/media/newsreader-italic-latin-ext.d8c26397.woff2", type: WOFF2, bytes: 39684, sha256: "d8c263970d52e0b94b3d5d4250d5962fe39f8f3b6fa9ad13b406d73ff3f4b036" },
+  { family: "Public Sans", style: "italic", weight: "100 900", range: LATIN, path: "/media/public-sans-italic-latin.16dc9325.woff2", type: WOFF2, bytes: 28292, sha256: "16dc93252adb78785ae56a6465494f73b604b39817760ea92bd4046521bb5a35" },
+  { family: "Public Sans", style: "italic", weight: "100 900", range: LATIN_EXT, path: "/media/public-sans-italic-latin-ext.a071e35b.woff2", type: WOFF2, bytes: 19312, sha256: "a071e35bbfc9c62756e0beb2475bff387d456dbfb2ec7e0d4e90cadeb543b54a" },
+];
+
+/** The faces every page asks for at once (upright Latin of both families), so text is not drawn twice. */
+export const PRELOAD_FONTS: ReadonlyArray<FontFace> = FONTS.slice(0, 2);
+
+/** The @font-face rules for the stylesheet: swap, so text shows at once in the fallback and changes face when the file lands. */
+export function fontFaceCss(): string {
+  return FONTS.map((f) => `@font-face{font-family:"${f.family}";font-style:${f.style};font-weight:${f.weight};font-display:swap;src:url(${f.path}) format("woff2");unicode-range:${f.range}}`).join("\n");
+}
+
 /** Every file /media/ serves, by address. */
 export const MEDIA: Readonly<Record<string, MediaFile>> = Object.fromEntries(
-  [EXPLAINER.video, EXPLAINER.poster, EXPLAINER.captions].map((f) => [f.path, f]),
+  [EXPLAINER.video, EXPLAINER.poster, EXPLAINER.captions, ...FONTS].map((f) => [f.path, { path: f.path, type: f.type, bytes: f.bytes, sha256: f.sha256 }]),
 );
 
 /** "1 min 53 s" from a running time in seconds. */

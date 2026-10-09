@@ -18,6 +18,10 @@ export class D1QuoteCheckStore implements QuoteCheckStore {
     await this.db.prepare("INSERT INTO v2_quote_checks (claim, status, where_found, nearest, similarity, checked_at, attempts, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(claim) DO UPDATE SET status = excluded.status, where_found = excluded.where_found, nearest = excluded.nearest, similarity = excluded.similarity, checked_at = excluded.checked_at, attempts = excluded.attempts, detail = excluded.detail")
       .bind(row.claim, row.status, row.where, row.nearest, row.similarity, row.checkedAt, row.attempts, row.detail).run();
   }
+  async statusIndex() {
+    const rs = await this.db.prepare("SELECT claim, status FROM v2_quote_checks").all<Record<string, unknown>>();
+    return new Map((rs.results ?? []).map((r) => [String(r["claim"]), String(r["status"]) as QuoteStatus] as const));
+  }
   async list(limit: number) {
     const rs = await this.db.prepare("SELECT * FROM v2_quote_checks ORDER BY checked_at DESC LIMIT ?1").bind(Math.min(Math.max(1, limit), 1000)).all<Record<string, unknown>>();
     return (rs.results ?? []).map((r) => this.row(r));

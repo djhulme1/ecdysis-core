@@ -159,29 +159,29 @@ describe("the claims and an agent's work, as catalogue tables", () => {
     const ext = await w.svc.registerExternalClaim(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "claim.external", source: "arxiv:1706.03762", quote: "Attention alone reaches 28.4 BLEU on the WMT 2014 English-to-German task.", test: "BLEU below 27 with the stated setup" }));
     assert.equal(ext.status, 201, JSON.stringify(ext.body));
 
-    const all = await w.get("/claims");
+    const all = await w.get("/claims/table");
     assert.equal(all.status, 200);
     assert.deepEqual(listed(all.html).sort(), ["Attention al", "First claim:", "Second claim"]);
     assert.match(all.csp, /default-src 'none'/);
     assert.match(all.csp, /form-action 'self'/, "the search form submits to the site itself, and nowhere else");
     assert.doesNotMatch(all.html, /<script/);
 
-    assert.deepEqual(listed((await w.get("/claims", "?origin=literature")).html), ["Attention al"]);
-    assert.deepEqual(listed((await w.get("/claims", "?origin=here&sort=newest&order=asc")).html), ["First claim:", "Second claim"]);
-    assert.deepEqual(listed((await w.get("/claims", "?origin=here&sort=newest")).html), ["Second claim", "First claim:"]);
-    assert.deepEqual(listed((await w.get("/claims", "?q=SECOND%20task")).html), ["Second claim"]);
-    const none = await w.get("/claims", "?status=refuted");
+    assert.deepEqual(listed((await w.get("/claims/table", "?origin=literature")).html), ["Attention al"]);
+    assert.deepEqual(listed((await w.get("/claims/table", "?origin=here&sort=newest&order=asc")).html), ["First claim:", "Second claim"]);
+    assert.deepEqual(listed((await w.get("/claims/table", "?origin=here&sort=newest")).html), ["Second claim", "First claim:"]);
+    assert.deepEqual(listed((await w.get("/claims/table", "?q=SECOND%20task")).html), ["Second claim"]);
+    const none = await w.get("/claims/table", "?status=refuted");
     assert.deepEqual(listed(none.html), []);
     assert.match(none.html, /No claims match\. Clear a filter or search for something else\./);
-    assert.match(none.html, /<a class="pill" href="\/claims" aria-label="Remove the filter Status: Refuted">/);
+    assert.match(none.html, /<a class="pill" href="\/claims\/table" aria-label="Remove the filter Status: Refuted">/);
 
     // The strip's lanes filter the table; the lane in force lifts the filter; the links carry nothing the table does not offer.
-    const lanes = await w.get("/claims", "?status=unchecked&junk=%3Cx%3E");
-    assert.match(lanes.html, /<a class="st-row on" href="\/claims" aria-current="true"/);
-    assert.match(lanes.html, /<a class="st-row" href="\/claims\?status=refuted"/);
+    const lanes = await w.get("/claims/table", "?status=unchecked&junk=%3Cx%3E");
+    assert.match(lanes.html, /<a class="st-row on" href="\/claims\/table" aria-current="true"/);
+    assert.match(lanes.html, /<a class="st-row" href="\/claims\/table\?status=refuted"/);
     assert.doesNotMatch(lanes.html, /junk/);
 
-    const hostile = await w.get("/claims", `?q=${encodeURIComponent("<script>alert(1)</script>")}&status=${encodeURIComponent('" onmouseover="alert(1)')}&sort=%3Cb%3E&page=-1`);
+    const hostile = await w.get("/claims/table", `?q=${encodeURIComponent("<script>alert(1)</script>")}&status=${encodeURIComponent('" onmouseover="alert(1)')}&sort=%3Cb%3E&page=-1`);
     assert.equal(hostile.status, 200);
     assert.doesNotMatch(hostile.html, /<script>alert|onmouseover="alert/);
     assert.doesNotMatch(hostile.html, /Status: /, "a status the table does not offer is no filter");

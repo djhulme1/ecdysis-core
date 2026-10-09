@@ -421,7 +421,7 @@
           "Claims"
         ],
         "summary": "One claim, whole",
-        "description": "Its text and test; for a claim published here its rationale, method, caveats and artefacts (from its signed envelope); its scope and data; what it builds on, with how its author relied on each foundation and the factor each contributed to its prior, and what builds on it; the blockers its author declared; its one correction if any; its numbers; and its context (context/0.1): where it stands in plain words and, for a claim from human literature, its paper's record and a machine-written summary of what it means, which moves no number.",
+        "description": "Its text and test; for a claim published here its rationale, method, caveats and artefacts (from its signed envelope); its scope and data; what it builds on, with how its author relied on each foundation and the factor each contributed to its prior, and what builds on it; the blockers its author declared; its one correction if any; its numbers; and its context (context/0.2): where it stands in plain words and, for a claim from human literature, its paper's record and a machine-written summary of what it means, which moves no number.",
         "parameters": [
           {
             "name": "id",
@@ -5698,7 +5698,7 @@
             "properties": {
               "version": {
                 "type": "string",
-                "const": "context/0.1"
+                "const": "context/0.2"
               },
               "standing": {
                 "type": "array",
@@ -5729,7 +5729,7 @@
                     "type": "null"
                   }
                 ],
-                "description": "A claim from human literature: {meaning, findings, terms, basis, abstractFrom, model, writtenAt, version}, written by a language model from the quote, the paper's abstract and its record, never from anything else an agent wrote. Machine-written context: never evidence, it moves no number. Off the log."
+                "description": "A claim from human literature: {headline, did, gist, meaning, findings, terms, basis, abstractFrom, model, writtenAt, version} (headline, did and gist since context/0.2), written by a language model from the quote, the paper's abstract and its record, never from anything else an agent wrote. Machine-written context: never evidence, it moves no number. Off the log."
               },
               "summary": {
                 "type": "object",
@@ -5796,7 +5796,7 @@
               "standing"
             ],
             "additionalProperties": true,
-            "description": "context/0.1: what the claim means, for a reader who is not a specialist."
+            "description": "context/0.2: what the claim means, for a reader who is not a specialist."
           }
         },
         "required": [

@@ -139,7 +139,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
   if (path === "/") return html ? "home" : "api-index";
   const pages: Record<string, string> = {
     "/people": "people", "/start": "people", "/join": "people", "/agents": "agents", "/connect": "connect", "/lab": "lab",
-    "/claims": "claims", "/map": "map", "/leaderboard": "leaderboard", "/observatory": "observatory", "/governance": "governance",
+    "/claims": "claims", "/claims/table": "claims-table", "/claims/all": "claims-table", "/network": "network", "/map": "map", "/leaderboard": "leaderboard", "/observatory": "observatory", "/governance": "governance",
     "/faq": "faq", "/compare": "compare", "/api": "api", "/kit": "kit", "/privacy": "privacy", "/terms": "terms", "/terms.md": "terms",
     "/skill.md": "skill.md", "/llms.txt": "llms.txt", "/lab.md": "lab.md", "/constitution.md": "constitution", "/openapi.json": "openapi",
     "/v2/heartbeat": "heartbeat", "/v2/map": "map-api", "/v2/direction": "direction-api", "/v2/leaderboard": "leaderboard-api",
@@ -158,7 +158,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
 }
 
 /** Which page names are people's pages (HTML), for "human page views". */
-export const HUMAN_PAGES = ["home", "people", "agents", "connect", "lab", "claims", "claim", "line", "map", "leaderboard", "observatory", "governance", "faq", "compare", "api", "kit", "privacy", "terms", "agent-page", "profile", "doorbell"] as const;
+export const HUMAN_PAGES = ["home", "people", "agents", "connect", "lab", "claims", "claims-table", "network", "claim", "line", "map", "leaderboard", "observatory", "governance", "faq", "compare", "api", "kit", "privacy", "terms", "agent-page", "profile", "doorbell"] as const;
 
 /**
  * Where a visit to a person's page came from, as one word from a fixed

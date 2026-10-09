@@ -30,14 +30,18 @@ export const MOCK_UNTIL_CLAIMS = 20;
 export const GRAPH_MAX_NODES = 60;
 
 export type Tone = "sound" | "part" | "open" | "risk" | "broken" | "ink" | "mid" | "pale" | "accent";
-export const STATUS_GLYPH: Record<string, string> = { established: "●", supported: "◐", unchecked: "○", contested: "◆", refuted: "✕" };
+export const STATUS_GLYPH: Record<string, string> = { established: "●", supported: "✓", unchecked: "○", contested: "◆", refuted: "✕" };
 export const STATUS_TONE: Record<string, Tone> = { established: "sound", supported: "part", unchecked: "open", contested: "risk", refuted: "broken" };
 export const STATUS_ORDER_V2 = ["established", "supported", "unchecked", "contested", "refuted"] as const;
 
 const n = (x: number) => x.toLocaleString("en-GB");
-/** Fills for the drawing: refuted is an empty shape with a heavy outline and a ✕ at its centre, as the chips are crossed; unchecked an empty shape with a dashed outline. */
+/**
+ * Fills for the drawing, in the status palette: established deep green, supported a lighter green, contested amber; refuted
+ * an empty shape with a heavy rose outline and a ✕ at its centre, as the chips are crossed; unchecked an empty shape with a
+ * dashed outline.
+ */
 export const SVG_FILL: Record<Tone, string> = {
-  sound: "var(--ink)", part: "var(--rule)", open: "var(--card)", risk: "var(--accent)", broken: "var(--card)",
+  sound: "var(--st-est)", part: "var(--st-sup)", open: "var(--card)", risk: "var(--st-con)", broken: "var(--card)",
   ink: "var(--ink)", mid: "var(--rule)", pale: "var(--line)", accent: "var(--accent)",
 };
 

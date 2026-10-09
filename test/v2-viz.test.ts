@@ -59,9 +59,9 @@ describe("figures", () => {
     const a = claimGraph({ id: "g", nodes, edges, omitted: 5 });
     assert.equal(a, claimGraph({ id: "g", nodes: [...nodes].reverse(), edges, omitted: 5 }), "the same picture whatever the input order");
     assert.match(a, /<figure class="fig wide graph" id="g">/);
-    assert.match(a, /<rect [^>]*fill="var\(--card\)" stroke="var\(--ink\)" stroke-width="2"\/><text [^>]*class="lbl x">✕<\/text>/, "refuted: an empty square, outlined, crossed");
-    assert.match(a, /<circle [^>]*fill="var\(--ink\)" stroke="var\(--ink\)" stroke-width="1"\/>/, "established: filled ink");
-    assert.match(a, /<circle [^>]*fill="var\(--card\)" stroke="var\(--rule\)" stroke-dasharray="3 2"\/>/, "unchecked: dashed and empty");
+    assert.match(a, /<rect [^>]*fill="var\(--card\)" stroke="var\(--st-ref\)" stroke-width="2"\/><text [^>]*class="lbl x">✕<\/text>/, "refuted: an empty square, outlined in the refuted colour, crossed");
+    assert.match(a, /<circle [^>]*fill="var\(--st-est\)" stroke="var\(--card\)" stroke-width="1"\/>/, "established: filled in the established colour");
+    assert.match(a, /<circle [^>]*fill="var\(--card\)" stroke="var\(--st-unc\)" stroke-dasharray="3 2"\/>/, "unchecked: dashed and empty");
     assert.match(a, /<a href="\/c\/ecd:aaaaaaaaaaaaaaaa"><g>/, "a drawn claim with a page links to it");
     assert.equal((a.match(/<path d="M/g) ?? []).length, 2, "an edge to a claim not drawn is not drawn");
     assert.doesNotMatch(a, /<img|\)>/);

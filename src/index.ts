@@ -86,9 +86,9 @@ export interface Env {
   /** stakes/0.1: an OpenAlex API key (free), so the stakes scout has its own daily budget. A secret, installed by the deploy. */
   OPENALEX_API_KEY?: string;
   /**
-   * context/0.1: the model provider's key for the context writer ("What this means" on each claim page). A secret the deploy
-   * installs from the GitHub secret of the same name; no session ever sees it. Unset: no summary is written, and the papers'
-   * records are still read.
+   * context/0.2: the model provider's key for the context writer (each claim page's plain headline, why it matters, and what
+   * the authors did and found). A secret the deploy installs from the GitHub secret of the same name; no session ever sees
+   * it. Unset: no summary is written, and the papers' records are still read.
    */
   ANTHROPIC_API_KEY?: string;
   /** context/0.1: the model that writes the summaries (Anthropic's id); unset, DEFAULT_CONTEXT_MODEL. */
@@ -486,7 +486,7 @@ function switchesFrom(env: Env, access: AccessConfig, keysAgree = true): HealthS
     { name: "Email sending", ...on(!emailPaused(env), "on", "paused", "HERALD_PAUSED (read-only mode also pauses it).") },
     { name: "Shared daily email cap", ok: true, value: String(emailCap(env)), note: "EMAIL_DAILY_CAP: set it to your provider plan's daily quota." },
     { name: "OpenAlex key (stakes and quote scouts)", ...on(!!env.OPENALEX_API_KEY, "installed", "missing: the scouts share OpenAlex's anonymous budget", "OPENALEX_API_KEY, installed by the deploy from the GitHub secret.") },
-    { name: "Context writer's key (What this means)", ...on(!!env.ANTHROPIC_API_KEY, "installed", "missing: no summaries are written; the papers' records still are", "ANTHROPIC_API_KEY, installed by the deploy from the GitHub secret.") },
+    { name: "Context writer's key (plain-English context)", ...on(!!env.ANTHROPIC_API_KEY, "installed", "missing: no summaries are written; the papers' records still are", "ANTHROPIC_API_KEY, installed by the deploy from the GitHub secret.") },
     { name: "Context writer", ...on(!contextPaused(env), `on: ${(env.CONTEXT_MODEL ?? "").trim() || DEFAULT_CONTEXT_MODEL}`, "paused", "CONTEXT_PAUSED stops new summaries; CONTEXT_MODEL names the model.") },
     { name: "Context writer's daily cap", ok: true, value: String(contextCap(env)), note: "CONTEXT_DAILY_CAP: model calls allowed in a UTC day." },
     {

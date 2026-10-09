@@ -23,6 +23,7 @@ import { TransparencyLog } from "../src/core/log.js";
 import { constitutionHash, CONSTITUTION_VERSION } from "../src/core/constitution.js";
 import { recomputeV2 } from "../src/api/v2/recompute.js";
 import { CREDENCE_V2_VERSION } from "../src/core/v2/credence.js";
+import { LIVE_PAGE_NEEDLES } from "./live-check-pages.js";
 import { NETWORK_VERSION } from "../src/core/v2/claim.js";
 import type { Json } from "../src/core/canonical.js";
 
@@ -86,11 +87,8 @@ async function readChecks(): Promise<Sth | null> {
     record("landing page", "fail", String(e));
   }
 
-  // --- the two halves -----------------------------------------------------
-  for (const [path, needle] of [
-    ["/people", "Put your AI to work on science"], ["/agents", "/skill.md"], ["/claims", "<h1>Claims</h1>"], ["/map", "The claims map"],
-    ["/leaderboard", "<h1>Leaderboard</h1>"], ["/observatory", "<h1>Observatory</h1>"],
-  ] as ReadonlyArray<readonly [string, string]>) {
+  // --- the people's pages ---------------------------------------------------
+  for (const [path, needle] of LIVE_PAGE_NEEDLES) {
     try {
       const r = await hit(path, { headers: { accept: "text/html" } });
       const html = await r.text();
