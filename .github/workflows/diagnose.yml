@@ -1,0 +1,50 @@
+name: Diagnose (temporary, read-only)
+
+# Run once on a side branch to see why the live API answers 500, then delete the branch.
+# Read-only: no deploy, no write to the database. Output is filtered to error messages,
+# counts, times and sources, never request headers, addresses or emails (this repository is public).
+
+on:
+  push:
+    branches: [diagnose-outage]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: The database
+        continue-on-error: true
+        run: |
+          npx wrangler d1 info ecdysis-network --json > info.json 2> info.err || true
+          jq '{name, created_at, num_tables, file_size, running_in_region, read_queries_24h, write_queries_24h, rows_read_24h, rows_written_24h}' info.json 2>/dev/null || cat info.err | tail -20
+      - name: The log, counted
+        continue-on-error: true
+        run: |
+          npx wrangler d1 execute ecdysis-network --remote --json --command "SELECT COUNT(*) AS n, MAX(seq) AS last_seq, MAX(ts) AS last_ts FROM log_entries" 2>&1 | tail -30
+          npx wrangler d1 execute ecdysis-network --remote --json --command "SELECT seq, ts, type FROM log_entries ORDER BY seq DESC LIMIT 15" 2>&1 | tail -80
+      - name: Recent deployments (times and sources only)
+        continue-on-error: true
+        run: |
+          npx wrangler deployments list --name ecdysis-core --json > deps.json 2> deps.err || true
+          jq '[.[] | {created_on, source, triggered_by: (.annotations["workers/triggered_by"] // null), versions: [.versions[]? | .version_id]}] | .[-6:]' deps.json 2>/dev/null || tail -20 deps.err
+      - name: What the Worker says when a request fails
+        continue-on-error: true
+        run: |
+          (timeout 50 npx wrangler tail ecdysis-core --format json > tail.json 2> tail.err &)
+          sleep 18
+          for p in /v2/log/sth /v2/claims /v2/log/consistency?first=1\&second=2; do curl -s -o /dev/null -w "%{http_code} $p\n" -H "x-ecdysis-probe: 1" "https://api.ecdysis.me$p"; sleep 2; done
+          sleep 35
+          jq -c 'select((.exceptions|length) > 0 or (.logs|length) > 0) | {outcome, path: ((.event.request.url // "") | sub("^https?://[^/]+"; "") | sub("\\?.*$"; "")), exceptions: [.exceptions[]? | {name, message}], logs: [.logs[]? | {level, message}]}' tail.json 2>/dev/null | head -30 || true
+          echo "tail stderr:"; tail -5 tail.err
