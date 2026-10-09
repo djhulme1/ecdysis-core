@@ -115,8 +115,8 @@ describe("credence/0.3: arguments move conceptual claims", () => {
   const ref = `ecd:${"a".repeat(16)}`;
   const conceptual = (over: Partial<ClaimInput> = {}): ClaimInput => ({ ref, authorOperator: "op-author", stated: 0.7, kind: "conceptual", foundations: [], seq: 1, ...over });
 
-  it("reports the version in force (credence/0.4 since kinds/0.1) and leaves a claim with no arguments where credence/0.2 left it", () => {
-    assert.equal(CREDENCE_V2_VERSION, "credence/0.4");
+  it("reports the version in force (credence/0.6 since the checking ladder) and leaves a claim with no arguments where credence/0.2 left it", () => {
+    assert.equal(CREDENCE_V2_VERSION, "credence/0.6");
     const c = computeCredenceV2([conceptual()], [], []).get(ref)!;
     assert.equal(c.kind, "conceptual");
     assert.equal(c.status, "unchecked");

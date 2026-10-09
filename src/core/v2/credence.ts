@@ -159,11 +159,20 @@ import { ARGUMENT_PARAMS, type ClaimArgumentsInput, type ClaimKind } from "./arg
 import { scopesOverlap, type ClaimScope } from "./kinds.js";
 import { stakesOf } from "./stakes.js";
 
-export const CREDENCE_V2_VERSION = "credence/0.4";
+export const CREDENCE_V2_VERSION = "credence/0.6";
 
 export const CREDENCE_V2_PARAMS = {
   /** A confirming replication: 4:1 evidence. */
   confirm: Math.log(4),
+  /**
+   * credence/0.6, the checking ladder: on a claim about the world (a period scope, or general because the finding is asserted
+   * beyond its data), a confirming VERIFICATION (the claim's own data, its stated method) counts this share of a confirming
+   * replication. Re-running the analysis on the authors' data shows the arithmetic was right, not that the finding holds on
+   * new data: a reproduction does that, and keeps the full step. A failing verification keeps the full refutation: published
+   * results that do not follow from their own data are an error. A claim general by construction (a scheme, a theorem's
+   * certificate, a simulation's ensemble, a benchmark) is unchanged: its data are the object, and verifying it is the check.
+   */
+  verificationConfirmShare: 0.5,
   /** A failed replication: 6:1 against (usually the more specific evidence). */
   refute: Math.log(6),
   /** A confirming re-run, as a share of a replication: the level of a review. */
@@ -302,6 +311,13 @@ export interface EvidenceInput {
   auditable?: boolean;
   /** A receipt that a verified, independent cross-check has matched: it has been re-run by someone else and came out the same (verification by record counts these). */
   crossChecked?: boolean;
+  /**
+   * kinds/0.1: what a replication test tested, once classified: the claim's own data ("verification") or new data covering its
+   * population and period ("reproduction"). credence/0.6 weighs a confirming verification on a claim about the world at
+   * verificationConfirmShare, and needs a reproduction for established. Absent (a review, or an input that predates it):
+   * weighed as before.
+   */
+  test?: "verification" | "reproduction";
 }
 
 /** A later claim relying on a claim (extends or method). */
@@ -346,6 +362,8 @@ export interface EvidenceSum {
   confirmingOperators: number;
   /** Distinct verified operators whose counted item is a failing replication (not counting a registrant). */
   failingOperators: number;
+  /** credence/0.6: distinct verified operators whose counted confirming replication test is not a verification (a reproduction on new data, or one whose input predates credence/0.6), not counting a registrant. */
+  confirmingReproductions: number;
   /** Σ w·e over VERIFIED replication items alone: what an empirical claim's status is tested against (credence/0.4). */
   replicationSum: number;
   /** Distinct verified operators whose counted item is a replication or re-run, confirming or failing: the voices a resolution rests on. */
@@ -388,6 +406,10 @@ export interface ClaimV2 {
   credenceReplication: number;
   /** Distinct verified operators whose replication tests confirm and fail it, not counting a registrant: two either way resolve it. */
   operators: { confirming: number; failing: number };
+  /** credence/0.6, the checking ladder: a claim about the world (aboutTheWorld), whose confirming verifications count half and which needs a reproduction to be established. */
+  world: boolean;
+  /** Distinct verified operators, not counting a registrant, whose confirming replication test reproduced it on new data. */
+  reproductions: number;
   s: number;
   f: number;
   dispute: number;
@@ -537,7 +559,7 @@ export function calibrationOf(record: ReadonlyArray<{ stated: number; truth: 0 |
  * `credence`, compared with the same bars), so |y| = 1 exactly when today's rule resolves: credence/0.5 changes nothing that
  * resolves, and the approach to the bar is continuous. Before any independent verified replication, y = 0.
  */
-export function settledShare(x: { prior: number; credence: number; without: EvidenceSum; resolved: 0 | 1 | null; foundationRefuted: boolean }): number {
+export function settledShare(x: { prior: number; credence: number; without: EvidenceSum; resolved: 0 | 1 | null; foundationRefuted: boolean; needsReproduction?: boolean }): number {
   if (x.resolved !== null) return 2 * x.resolved - 1;
   const s = x.without;
   const mass = s.sReplication + s.fReplication;
@@ -550,7 +572,10 @@ export function settledShare(x: { prior: number; credence: number; without: Evid
     if (x.foundationRefuted) return 0;
     const lp = logit(bar);
     const frac = x.credence >= bar || l0 >= lp ? 1 : (l - l0) / (lp - l0);
-    return frac * Math.min(1, s.confirmingOperators / P.operatorsForEstablished) * Math.min(1, familyCount(s.confirmingFamilies) / P.familiesForEstablished);
+    // credence/0.6: a claim about the world gets only half way towards established until a reproduction on new data confirms it,
+    // so the share reaches 1 exactly when statusOf resolves it.
+    const reproduction = x.needsReproduction && s.confirmingReproductions < 1 ? 0.5 : 1;
+    return frac * Math.min(1, s.confirmingOperators / P.operatorsForEstablished) * Math.min(1, familyCount(s.confirmingFamilies) / P.familiesForEstablished) * reproduction;
   }
   if (l < l0 && s.failingReplication) {
     const lm = logit(P.refutedBelow);
@@ -577,16 +602,31 @@ function linkedTo(op: string, earlier: string[], ringLinked?: (a: string, b: str
 }
 
 /**
+ * credence/0.6: a claim ABOUT THE WORLD, whose findings new data can test: a period scope (a finding about a population at a
+ * time), or general because the finding is asserted beyond its data. A claim general by construction (a scheme, a theorem's
+ * certificate, a simulation's ensemble, a benchmark) is not: its data are the object itself. A claim with no scope (a
+ * conceptual claim, which takes no receipts) is not either.
+ */
+export function aboutTheWorld(scope: ClaimScope | null | undefined): boolean {
+  return !!scope && ("period" in scope || scope.general === "asserted");
+}
+
+/**
  * The evidence on one claim: one item per operator (strongest kind, then
  * latest), weighted, summed. Pass a prefix of a claim's items to get its
- * log-odds at any moment (scoring.ts).
+ * log-odds at any moment (scoring.ts). `world`: the claim is about the world
+ * (aboutTheWorld), so a confirming verification counts verificationConfirmShare
+ * and an operator's reproduction stands for it before its verification.
  */
-export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: CredenceV2Options = {}, registrant?: string): EvidenceSum {
+export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: CredenceV2Options = {}, registrant?: string, world = false): EvidenceSum {
+  // credence/0.6: on a claim about the world an operator's reproduction is its stronger item, whatever the order it filed them.
+  const strength = (e: EvidenceInput) => RANK[e.kind] * 2 + (world && e.kind === "replication" && e.test === "reproduction" ? 1 : 0);
+  const share = (e: EvidenceInput) => (world && e.kind === "replication" && e.confirms && e.test === "verification" ? P.verificationConfirmShare : 1);
   const best = new Map<string, EvidenceInput>();
   for (const e of items) {
     if (o.voided?.(e)) continue;
     const cur = best.get(e.operatorId);
-    if (!cur || RANK[e.kind] > RANK[cur.kind] || (RANK[e.kind] === RANK[cur.kind] && e.seq > cur.seq)) best.set(e.operatorId, e);
+    if (!cur || strength(e) > strength(cur) || (strength(e) === strength(cur) && e.seq > cur.seq)) best.set(e.operatorId, e);
   }
   const voices = [...best.values()].sort((a, b) => a.seq - b.seq);
   let checks = 0;
@@ -623,12 +663,12 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
       if (tier === "verified") checks += w * ev; else unverified += w * ev;
       if (e.confirms) reproduced = true;
     } else {
-      ev = e.confirms ? P.confirm : -P.refute;
+      ev = e.confirms ? P.confirm * share(e) : -P.refute;
       if (tier === "verified") checks += w * ev; else unverified += w * ev;
     }
     if (tier === "verified") {
       if (e.kind !== "review") replicatingOperators++;
-      if (e.confirms) s += w * MASS[e.kind];
+      if (e.confirms) s += w * MASS[e.kind] * share(e);
       else f += w * MASS[e.kind];
     }
     counted.push({ item: e, weight: w, e: ev });
@@ -644,6 +684,7 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   let failingReplication = false;
   let confirmingOperators = 0;
   let failingOperators = 0;
+  let confirmingReproductions = 0;
   const confirmingFamilies = new Set<string>();
   const earlierTests: EarlierItem[] = [];
   const earlierTesters: string[] = [];
@@ -654,13 +695,16 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
     if (tier === "verified") earlierTests.push({ families: e.families, confirms: e.confirms });
     earlierTesters.push(e.operatorId);
     if (tier !== "verified") continue;
-    replicationSum += w * (e.confirms ? P.confirm : -P.refute);
+    replicationSum += w * (e.confirms ? P.confirm * share(e) : -P.refute);
     const counts = !registrant || e.operatorId !== registrant;
     if (e.confirms) {
-      sReplication += w;
+      sReplication += w * share(e);
       confirmingReplication = true;
       if (counts) {
         confirmingOperators++;
+        // A replication test whose input names no test (a caller that predates credence/0.6) counts as before: only a known
+        // verification is held back from what established needs.
+        if (e.test !== "verification") confirmingReproductions++;
         if (e.families.length === 0) confirmingFamilies.add("?");
         for (const fam of e.families) confirmingFamilies.add(fam);
       }
@@ -674,7 +718,7 @@ export function sumEvidence(items: EvidenceInput[], authorOperator: string, o: C
   const cappedUnverified = Math.max(-P.unverifiedCap, Math.min(P.unverifiedCap, unverified));
   return {
     sum: checks + cappedUnverified + cappedReviews, sumVerified: checks + cappedReviews,
-    s, f, sReplication, fReplication, confirmingReplication, failingReplication, confirmingOperators, failingOperators, replicationSum, replicatingOperators, confirmingFamilies, reproduced, counted,
+    s, f, sReplication, fReplication, confirmingReplication, failingReplication, confirmingOperators, failingOperators, confirmingReproductions, replicationSum, replicatingOperators, confirmingFamilies, reproduced, counted,
   };
 }
 
@@ -691,6 +735,10 @@ export function statusOf(x: {
   /** Distinct verified operators whose failing replication test counts (absent: as many as refuted needs, for callers that predate credence/0.4). */
   failingOperators?: number;
   foundationRefuted: boolean;
+  /** credence/0.6: a claim about the world (aboutTheWorld) reaches established only with a confirming reproduction on new data. */
+  needsReproduction?: boolean;
+  /** Distinct verified operators whose confirming replication test is a reproduction (EvidenceSum.confirmingReproductions). */
+  confirmingReproductions?: number;
 }): ClaimStatusV2 {
   const mass = x.sReplication + x.fReplication;
   const r = mass > 0 ? x.sReplication / mass : 0;
@@ -699,8 +747,11 @@ export function statusOf(x: {
   if (x.sReplication > 0 && x.fReplication > 0 && 4 * r * (1 - r) >= P.contestedAt) return "contested";
   if (x.credence <= P.refutedBelow && x.failingReplication && (x.failingOperators ?? P.operatorsForRefuted) >= P.operatorsForRefuted) return "refuted";
   if (x.foundationRefuted) return "contested";
-  // Established: two or more independent verified replications (distinct operators) on two or more declared model families.
-  if (x.credence >= x.threshold && x.confirmingReplication && x.confirmingFamilies >= P.familiesForEstablished && (x.confirmingOperators ?? P.operatorsForEstablished) >= P.operatorsForEstablished) return "established";
+  // Established: two or more independent verified replications (distinct operators) on two or more declared model families;
+  // credence/0.6: for a claim about the world, one of them a reproduction on new data. Verifying the authors' arithmetic,
+  // however often, shows the reported results follow from their data, not that the finding holds.
+  const reproduced = !x.needsReproduction || (x.confirmingReproductions ?? 0) >= 1;
+  if (x.credence >= x.threshold && x.confirmingReplication && x.confirmingFamilies >= P.familiesForEstablished && (x.confirmingOperators ?? P.operatorsForEstablished) >= P.operatorsForEstablished && reproduced) return "established";
   if (x.confirmingReplication && x.credence >= P.supportedFrom) return "supported";
   if (!anyReplication) return "unchecked";
   return "contested";
@@ -830,7 +881,9 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     // arguments/0.1: each upheld methodological assessment halves the weight of the author's stated confidence.
     const calibration = (c.calibration ?? calibrationOf(record.get(c.authorOperator) ?? [])) * ARGUMENT_PARAMS.methodologyFactor ** (args?.methodology ?? 0);
     const prior = priorOf(c.stated, calibration, found.map(foundationFactor));
-    const ev = sumEvidence(byClaim.get(c.ref) ?? [], c.authorOperator, o, c.registrant);
+    // credence/0.6: the checking ladder, for a claim whose finding new data can test.
+    const world = kind === "empirical" && aboutTheWorld(c.scope);
+    const ev = sumEvidence(byClaim.get(c.ref) ?? [], c.authorOperator, o, c.registrant, world);
     const arg = sumArguments(args);
     const cap = caps.get(c.ref) ?? null;
     const capped = (p: number) => (cap === null ? p : Math.min(p, cap));
@@ -850,7 +903,7 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
         credence: credenceReplication, sReplication: ev.sReplication, fReplication: ev.fReplication, threshold: bar,
         confirmingReplication: ev.confirmingReplication, failingReplication: ev.failingReplication,
         confirmingFamilies: familyCount(ev.confirmingFamilies), confirmingOperators: ev.confirmingOperators, failingOperators: ev.failingOperators,
-        foundationRefuted,
+        foundationRefuted, needsReproduction: world, confirmingReproductions: ev.confirmingReproductions,
       });
     };
     const status = statusAt(threshold);
@@ -859,7 +912,7 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     // credence/0.5: under continuous settlement an empirical claim joins its author's record as far as independent work has
     // settled it (the author's own evidence weighs nothing on it already); a conceptual claim still settles by argument.
     const settled = continuous && kind !== "conceptual"
-      ? settledShare({ prior, credence: credenceReplication, without: ev, resolved, foundationRefuted })
+      ? settledShare({ prior, credence: credenceReplication, without: ev, resolved, foundationRefuted, needsReproduction: world })
       : resolved === null ? 0 : 2 * resolved - 1;
     if (settled !== 0 && c.calibration === undefined && c.authorOperator) pending.push({ op: c.authorOperator, stated: c.stated, truth: settled > 0 ? 1 : 0, weight: Math.abs(settled) });
     const dispute = disputeOf(ev.s, ev.f);
@@ -869,7 +922,7 @@ function credencePass(claims: ClaimInput[], evidence: EvidenceInput[], uses: Use
     sums.set(c.ref, total);
     out.set(c.ref, {
       ref: c.ref, external: c.external === true, kind, cap, calibration, prior, logOdds, credence, credenceVerified, credenceReplication,
-      operators: { confirming: ev.confirmingOperators, failing: ev.failingOperators }, s: ev.s, f: ev.f, dispute, use, reach, reliance, stakes, threshold, status, resolved,
+      operators: { confirming: ev.confirmingOperators, failing: ev.failingOperators }, world, reproductions: ev.confirmingReproductions, s: ev.s, f: ev.f, dispute, use, reach, reliance, stakes, threshold, status, resolved,
       arguments: { upheld: args?.upheldAttacks.length ?? 0, dismissed: args?.dismissedAttacks.length ?? 0, open: args?.open ?? 0, methodology: args?.methodology ?? 0, counterexample: args?.refuted ?? false },
       reproduced: ev.reproduced,
       families: [...ev.confirmingFamilies].filter((x) => x !== "?").sort(),

@@ -176,7 +176,7 @@ describe("arguments/0.1 through the service", () => {
     assert.equal(hb.status, 200);
     assert.ok(hb.body["arguments"], "the heartbeat carries arguments to answer and to check");
     const credence = await w.get("/v2/credence");
-    assert.equal(credence.body["version"], "credence/0.4");
+    assert.equal(credence.body["version"], "credence/0.6");
     const row = (credence.body["claims"] as Array<Record<string, Json>>).find((c) => c["ref"] === conceptual)!;
     assert.equal(row["kind"], "conceptual");
     assert.deepEqual(row["arguments"], { upheld: 1, dismissed: 1, open: 0, methodology: 0, counterexample: false });

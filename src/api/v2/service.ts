@@ -1697,7 +1697,7 @@ export class V2Service {
     // log and feed no number; the standing is computed here, from the record, in plain words.
     const checks = [...r.checks.values()].filter((k) => k.target === id && k.stage === "resulted" && !isHeld(r, k.id)).sort((a, b) => a.seq - b.seq);
     const plain = c ? standingWords({
-      kind: c.kind, status: c.status, credence: c.credence, prior: c.prior, external: !!x, operators: c.operators,
+      kind: c.kind, status: c.status, credence: c.credence, prior: c.prior, external: !!x, world: c.world, operators: c.operators,
       checks: checks.map((k) => ({ agent: k.handle, tests: testsWords(k), counted: k.replicationTest, outcome: k.outcome, disowned: k.disowned })),
       arguments: { upheld: c.arguments.upheld, dismissed: c.arguments.dismissed, open: c.arguments.open },
       blockers: [...(r.blockers.get(id)?.blockers ?? [])].filter((b) => !b.declared).map((b) => ({ blocker: b.blocker, meaning: BLOCKER_MEANING[b.blocker] })),
@@ -1714,7 +1714,7 @@ export class V2Service {
       scope: (st?.scope ?? null) as unknown as Json, data: (st?.data ?? []) as unknown as Json,
       buildsOn, ...(background.length ? { background } : {}), builtOnBy, blockers: declared,
       amended: am ? { at: am.ts, seq: am.seq, ...(am.kind ? { kind: am.kind, wasKind: am.wasKind } : {}), ...(am.test ? { test: am.test, wasTest: am.wasTest ?? null } : {}), ...(am.scope ? { scope: am.scope as unknown as Json } : {}) } : null,
-      numbers: c ? { credence: round(c.credence), status: c.status, prior: round(c.prior), calibration: round(c.calibration), credenceReplication: round(c.credenceReplication), operators: c.operators, cap: c.cap === null ? null : round(c.cap), use: round(c.use), dispute: round(c.dispute), reach: round(c.reach), reliance: round(c.reliance), stakes: round(c.stakes), reproduced: c.reproduced, families: c.families, arguments: c.arguments, disputedFoundation: c.disputedFoundation, lift: c.lift.map((l) => ({ ref: l.ref, from: round(l.from), to: round(l.to), gain: round(l.gain) })) } as unknown as Json : null,
+      numbers: c ? { credence: round(c.credence), status: c.status, prior: round(c.prior), calibration: round(c.calibration), credenceReplication: round(c.credenceReplication), operators: c.operators, world: c.world, reproductions: c.reproductions, cap: c.cap === null ? null : round(c.cap), use: round(c.use), dispute: round(c.dispute), reach: round(c.reach), reliance: round(c.reliance), stakes: round(c.stakes), reproduced: c.reproduced, families: c.families, arguments: c.arguments, disputedFoundation: c.disputedFoundation, lift: c.lift.map((l) => ({ ref: l.ref, from: round(l.from), to: round(l.to), gain: round(l.gain) })) } as unknown as Json : null,
       evidence: {
         receipts: [...r.checks.values()].filter((k) => k.target === id && k.stage === "resulted" && !k.disowned && !isHeld(r, k.id)).length,
         reviews: r.evidence.filter((e) => e.claim === id && e.kind === "review").length,
@@ -1865,10 +1865,13 @@ export class V2Service {
   async directionList(limit: number, handle?: string): Promise<NextAct[]> {
     const r = await this.record();
     const s = await this.scores();
+    // credence/0.6: the claims a verified operator's confirming verification has reached; on a claim about the world the next rung is new data.
+    const verified = new Set(r.evidence.filter((e) => e.kind === "replication" && e.confirms && e.test === "verification" && e.tier === "verified").map((e) => e.claim));
     const claims: DirectionClaim[] = [...s.claims.values()].filter((c) => !isHeld(r, c.ref)).map((c) => ({
       ref: c.ref, external: c.external, kind: c.kind, status: c.status, credence: c.credence, stakes: c.stakes, use: c.use, reliance: c.reliance, dispute: c.dispute,
       valueOfChecking: c.valueOfChecking, disputePriority: c.disputePriority, authorOperator: r.claims.find((x) => x.ref === c.ref)?.authorOperator ?? "",
       minutes: this.costOf(r, c.ref), blocked: r.blockers.get(c.ref) ?? null,
+      ...(c.world ? { rung: verified.has(c.ref) || c.reproductions > 0 ? "reproduction" as const : "verification" as const } : {}),
     }));
     const args: DirectionArgument[] = [...r.arguments.values()].filter((a) => a.status === "open" && !a.disowned && !isHeld(r, a.claim) && !r.held.has(a.id) && a.stance !== "supports")
       .map((a) => ({ id: a.id, claim: a.claim, stance: a.stance, grounds: a.grounds, checks: a.checks.filter((x) => !x.disowned).length, operatorId: a.operatorId }));

@@ -12,7 +12,10 @@
  *
  *   check           commit a replication test on an empirical claim nobody
  *                   has resolved: value (S + ½)·p(1 − p), the value of
- *                   checking it, per the expected minutes of compute;
+ *                   checking it, per the expected minutes of compute. On a
+ *                   claim about the world (credence/0.6) it names the rung:
+ *                   a verification on the claim's own data first, then a
+ *                   reproduction on new data, never a second verification;
  *   settle          a disputed claim: (S + ½)·D per minute;
  *   argue           a conceptual claim: (S + ½)·p(1 − p) per half an hour of
  *                   reasoning;
@@ -70,6 +73,13 @@ export interface DirectionClaim {
   /** Expected minutes of compute for a check, from receipts so far. */
   minutes: number;
   blocked: ClaimBlockers | null;
+  /**
+   * credence/0.6, the checking ladder, for a claim about the world: the replication test its next check should be. A
+   * verification (its own data, its stated method) first; once one has confirmed it, a reproduction (new data covering its
+   * population and period), which is what established needs and which a second verification cannot replace. Absent: a claim
+   * general by construction, where verifying the object is the check.
+   */
+  rung?: "verification" | "reproduction";
 }
 
 export interface DirectionArgument {
@@ -113,6 +123,8 @@ export interface NextAct {
   why: string;
   /** The tool and the act, for an agent. */
   how: string;
+  /** credence/0.6: for a check on a claim about the world, the replication test the record asks for next. */
+  test?: "verification" | "reproduction";
 }
 
 export interface DirectionInput {
@@ -164,7 +176,15 @@ export function direct(input: DirectionInput): NextAct[] {
       continue;
     }
     const rests = (c.reliance ?? 0) > 0 ? `; reliance ${r2(c.reliance!)}: claims of the literature were identified as resting on it` : "";
-    out.push({ act: "check", ref: c.ref, stakes: S, value: r4(c.valueOfChecking), minutes: c.minutes, perMinute: r4(c.valueOfChecking / c.minutes), why: `${c.status === "unchecked" ? "nobody has checked it" : c.status} at credence ${p}, stakes ${S}${c.external ? ` (from the literature${rests})` : ""}`, how: `commit_check against ${c.ref}` });
+    // credence/0.6: the next rung of the ladder. Once its own data have confirmed it, a claim about the world wants new data: a
+    // further verification counts half and cannot make it established; a reproduction can.
+    const rung = c.rung === "reproduction"
+      ? "; the next rung is a reproduction: the same method on new data covering its population and period, which established needs (a further verification counts half)"
+      : c.rung === "verification" ? "; the first rung is a verification on its own data, where it has a data of record; then a reproduction on new data" : "";
+    const how = c.rung === "reproduction"
+      ? `commit_check against ${c.ref} with design {method: "stated", data: "new", basis, period if it has one}: a reproduction`
+      : c.rung === "verification" ? `commit_check against ${c.ref} with design {method: "stated", data: "original", basis, period if it has one} where it has a data of record, else data: "new": a verification first, then a reproduction` : `commit_check against ${c.ref}`;
+    out.push({ act: "check", ref: c.ref, stakes: S, value: r4(c.valueOfChecking), minutes: c.minutes, perMinute: r4(c.valueOfChecking / c.minutes), why: `${c.status === "unchecked" ? "nobody has checked it" : c.status} at credence ${p}, stakes ${S}${c.external ? ` (from the literature${rests})` : ""}${rung}`, how, ...(c.rung ? { test: c.rung } : {}) });
   }
   for (const a of input.arguments) {
     const c = byRef.get(a.claim);

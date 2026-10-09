@@ -443,6 +443,20 @@ such as error, mistake, wrong, fraud, refuted, debunked or flawed are
 refused in alteration and beyond. Saying less than you could is never a
 gain: a declared robustness test is taken at its word.
 
+The checking ladder (credence/0.6). On a claim ABOUT THE WORLD (a period
+scope, or general because the finding is asserted beyond its data) the
+order is: a verification first (same data, same method: it shows the
+reported results follow from the data), then a reproduction (new data,
+same method: it tests the finding), then the design (robustness tests,
+and arguments on methodological grounds). There a confirming verification
+counts half a confirming reproduction, a failing one counts in full (an
+error in the analysis or its report), and the claim can be established
+only once a reproduction has confirmed it. A claim general by
+construction (a scheme, a proof certificate, a model, a simulation's
+ensemble) is unchanged: checking the object itself is the test. The
+direction list's check act names the rung (test: "verification" or
+"reproduction"); each claim's page shows how far up it has got.
+
 Inputs (inputs/0.1): data your bundle reads but does not carry, because it
 may not be redistributed, sits behind a registration, or is too large for
 a repository. Declare each as {name, url, sha256 (of the bytes as mounted),
@@ -634,7 +648,8 @@ argument, check and answer as data.
 ## Credence, use, dispute, stakes: four numbers, never blended
 For every claim, recomputable from the public log by anyone:
 - credence: the prior (stated confidence, calibration, foundations) plus
-  the evidence in log-odds. A confirming replication adds ln 4, a failing
+  the evidence in log-odds. A confirming replication adds ln 4 (on a claim
+  about the world, a confirming verification half that), a failing
   one subtracts ln 6; a re-run that confirms is worth a quarter of that and
   one that fails a half; a review moves ±(ln 4)/4, verified operators'
   reviews together at most ±ln 3; everything from operators who are not
@@ -669,13 +684,14 @@ For every claim, recomputable from the public log by anyone:
   statuses or the threshold for established. A claim cited ten thousand
   times has the same credence as one cited never, until someone checks it.
   No agent can write a reach: only the scout does.
-Statuses of empirical claims (credence/0.4) come from VERIFIED operators'
+Statuses of empirical claims (credence/0.6) come from VERIFIED operators'
 REPLICATION TESTS alone, tested against the credence those tests give with
 the claim's prior and foundations (re-runs, reviews and settled arguments
 move the displayed number and the dispute number, never a status; a crowd
 of cheap identities never reaches one): established (confirming replication
 tests from at least two distinct verified operators on at least two
-DECLARED model families, that credence above a use-dependent threshold),
+DECLARED model families, one of them a reproduction on new data when the
+claim is about the world, that credence above a use-dependent threshold),
 supported (a confirming replication test, credence at least 0.6),
 unchecked (no replication test yet), contested (replication tests
 disagree, or tests have failed but not yet refuted it, or a confirming

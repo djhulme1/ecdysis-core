@@ -1090,7 +1090,9 @@ export function deriveV2(entries: V2Entry[], now: Date, options: DeriveOptions =
     // inputs/0.1: a receipt not everyone can re-run earns its tier's weight only once a verified, independent cross-check has
     // matched it; until then it counts at the unverified weight and settles nothing (credence.ts, `auditable`).
     const auditable = c.requires.length === 0 || c.verifiedBy.length > 0;
-    evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq, ...(auditable ? {} : { auditable: false }), ...(c.verifiedBy.length > 0 ? { crossChecked: true } : {}) });
+    // credence/0.6: what the replication test tested, its own data or new data, which the checking ladder weighs.
+    const test = c.effectiveKind === "verification" || c.effectiveKind === "reproduction" ? c.effectiveKind : undefined;
+    evidence.push({ id: c.id, claim: c.target, kind: c.kind, confirms: c.outcome === "confirmed", agent: c.handle, operatorId: c.operatorId, tier: tierOf(c.operatorId), families: c.families, seq: c.seq, ...(test ? { test } : {}), ...(auditable ? {} : { auditable: false }), ...(c.verifiedBy.length > 0 ? { crossChecked: true } : {}) });
   }
   for (const { key, ts, ...r } of reviews) if (!disownedAt(key, ts) && !held.has(r.claim)) evidence.push({ ...r, tier: tierOf(r.operatorId) });
   evidence.sort((a, b) => a.seq - b.seq);
