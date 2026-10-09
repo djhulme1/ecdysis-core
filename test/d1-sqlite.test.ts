@@ -398,5 +398,10 @@ describe("the context store against SQLite, every migration applied", { skip: !s
     await store.put({ claim: "ext:00000000000000aa", status: "verified", where: "crossref-abstract", nearest: null, similarity: 1, checkedAt: at, attempts: 1, detail: null });
     await store.put({ claim: "ext:00000000000000bb", status: "wrong-work", where: null, nearest: null, similarity: null, checkedAt: at, attempts: 1, detail: "the source names another work" });
     assert.deepEqual([...(await store.statusIndex()).entries()].sort(), [["ext:00000000000000aa", "verified"], ["ext:00000000000000bb", "wrong-work"]]);
+    // And everything the scout needs to know which are due, in one read too.
+    assert.deepEqual([...(await store.index()).entries()].sort(), [
+      ["ext:00000000000000aa", { status: "verified", attempts: 1, checkedAt: at, detail: null }],
+      ["ext:00000000000000bb", { status: "wrong-work", attempts: 1, checkedAt: at, detail: "the source names another work" }],
+    ]);
   });
 });

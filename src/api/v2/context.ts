@@ -253,7 +253,8 @@ export class ContextWriter {
     if (out.off) return out;
     // Then the summaries.
     const done = await this.o.store.claimIndex();
-    const checks = new Map((await this.o.quotes.list(100_000)).map((q) => [q.claim, q.status] as const));
+    // Every quote check's status in one read (list() is capped at a thousand rows, newest first, and would drop the oldest).
+    const checks = this.o.quotes.statusIndex ? await this.o.quotes.statusIndex() : new Map((await this.o.quotes.list(100_000)).map((q) => [q.claim, q.status] as const));
     const cap = Math.max(0, Math.floor(this.o.dailyCap ?? DEFAULT_CONTEXT_DAILY_CAP));
     const ledger = this.o.ledger ?? new MemoryLedger();
     const day = now.toISOString().slice(0, 10);
