@@ -104,6 +104,17 @@ HERALD_PAUSED = "0"
 # Every email Ecdysis sends shares this cap per 24 hours. Set it to the
 # email provider plan's daily quota.
 EMAIL_DAILY_CAP = "100"
+# context/0.1: "What this means" on every claim page. The papers' records come
+# from OpenAlex; each claim's plain-English summary is written by a language
+# model through Anthropic's API, from the paper's own abstract. Its key is the
+# secret ANTHROPIC_API_KEY, installed by the deploy from the GitHub secret of
+# the same name; without it no summary is written (the papers' records still
+# are). CONTEXT_MODEL names the model; CONTEXT_PAUSED = "1" stops new
+# summaries; CONTEXT_DAILY_CAP bounds the model calls in a UTC day, whatever
+# a run asks for.
+CONTEXT_MODEL = "claude-sonnet-5-5"
+CONTEXT_PAUSED = "0"
+CONTEXT_DAILY_CAP = "1000"
 # Cloudflare Access in front of the stewardship area (ecdysis.me/steward);
 # the Worker checks Access's signed token again on every request. None of these
 # is secret: the audience tag travels in every token, and each allowed

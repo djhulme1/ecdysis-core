@@ -486,6 +486,21 @@ h1.claim-h1{font-size:clamp(1.75rem,3.4vw,2.6rem);line-height:1.15;max-width:non
 .test{border-left:3px solid var(--accent);padding:2px 0 2px 16px;margin:0 0 24px}
 .test b{display:block;font:600 13px/1.3 var(--sans);color:var(--muted);margin:0 0 4px}
 .test p{margin:0;font:1.08rem/1.5 var(--serif)}
+.gloss{background:var(--card);border:1px solid var(--line);border-top:3px solid var(--ink);padding:14px 18px 4px;margin:0 0 24px}
+.gloss h2{font:600 13px/1.3 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+.gloss h3{font:600 14px/1.3 var(--sans);color:var(--ink);margin:18px 0 6px}
+.gloss dl.about{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;margin:0 0 4px;font:14px/1.45 var(--sans)}
+.gloss dl.about dt{color:var(--muted)}
+.gloss dl.about dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
+.gloss cite{font-style:italic}
+.gloss .gist{font:1.1rem/1.55 var(--serif);margin:14px 0 4px}
+.gloss ul{padding-left:1.2em;margin:0 0 4px}
+.gloss li{margin:0 0 6px;font:1.02rem/1.5 var(--serif)}
+.gloss dl.terms{margin:0;font:15px/1.5 var(--sans)}
+.gloss dl.terms dt{font-weight:600;color:var(--ink)}
+.gloss dl.terms dd{margin:0 0 8px;color:var(--ink)}
+.gloss .standing{font:1.02rem/1.55 var(--serif);margin:0 0 6px}
+.gloss .who{font:13.5px/1.5 var(--sans);color:var(--muted);border-top:1px solid var(--line);padding-top:8px;margin:14px 0 10px}
 details.how{margin:8px 0 16px;border-top:1px solid var(--line)}
 details.how>summary{font:15px/1.4 var(--sans);color:var(--muted)}
 details.how>div{padding:4px 0 8px;font:15px/1.55 var(--sans);color:var(--muted);max-width:44rem}

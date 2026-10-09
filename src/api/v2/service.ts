@@ -43,9 +43,11 @@ import { CREDENCE_V2_VERSION, modelFamilies, type Tier } from "../../core/v2/cre
 import { isHeld, scopeAt, V2_ENTRY_TYPES, withheldOf, type V2Entry, type V2EntryType, type V2Record } from "../../core/v2/flow.js";
 import {
   classify, dataHashes, dataOfRecordProblems, emittedPeriod, fidelityProblems, isReplicationTest, KIND_WORDS,
-  dataWordsOf, normaliseData, normaliseDesign, normaliseFidelity, normaliseScope, PERIOD_OUTPUTS, periodWords, quotesSentence, scopeProblems, within,
+  dataWordsOf, normaliseData, normaliseDesign, normaliseFidelity, normaliseScope, PERIOD_OUTPUTS, periodWords, quotesSentence, scopeProblems, within, testsWords,
   type ClaimScope, type Classification, type DataFile, type Fidelity,
 } from "../../core/v2/kinds.js";
+import { CONTEXT_NOTE, CONTEXT_VERSION, standingWords } from "../../core/v2/context.js";
+import type { ContextStore } from "./context.js";
 import { sanitizeText } from "../../core/sanitize.js";
 import { inDefaultLists } from "../../core/v2/visibility.js";
 import { DIRECTION_VERSION, direct, type Candidate, type DirectionArgument, type DirectionClaim, type NextAct } from "../../core/v2/direction.js";
@@ -348,6 +350,8 @@ export interface V2ServiceOptions {
   cache?: V2Cache;
   /** direction/0.1: the registration candidates the stakes scout read from the citation graph. Absent: the list has no registrations. */
   candidates?: CandidateStore | null;
+  /** context/0.1: the papers' records and the claims' summaries (off the log), served with each claim. Absent: none are. */
+  context?: Pick<ContextStore, "getSource" | "getClaim"> | null;
 }
 
 /** What one isolate keeps between requests: the log's rows, and the records derived from them. */
@@ -1689,8 +1693,24 @@ export class V2Service {
         rationale: env?.payload.rationale ?? null, method: env?.payload.method ?? null, caveats: env?.payload.caveats ?? [], artefacts: env?.payload.artefacts ?? [] }
       : { text: x!.quote, quote: x!.quote, test: x!.test, source: x!.source, resolver: resolverOf(x!.source), ...(x!.work ? { work: x!.work as unknown as Json } : {}), field: r.observations.get(x!.source.toLowerCase())?.field ?? null,
         registrant: { agent: x!.handle || null, operatorId: x!.operatorId, tier: r.tiers.get(x!.operatorId) ?? "unverified" }, fidelity: (st?.fidelity ?? null) as unknown as Json };
+    // context/0.1: what the claim means, for a reader who is not a specialist. The paper's record and the summary are off the
+    // log and feed no number; the standing is computed here, from the record, in plain words.
+    const checks = [...r.checks.values()].filter((k) => k.target === id && k.stage === "resulted" && !isHeld(r, k.id)).sort((a, b) => a.seq - b.seq);
+    const plain = c ? standingWords({
+      kind: c.kind, status: c.status, credence: c.credence, prior: c.prior, external: !!x, operators: c.operators,
+      checks: checks.map((k) => ({ agent: k.handle, tests: testsWords(k), counted: k.replicationTest, outcome: k.outcome, disowned: k.disowned })),
+      arguments: { upheld: c.arguments.upheld, dismissed: c.arguments.dismissed, open: c.arguments.open },
+      blockers: [...(r.blockers.get(id)?.blockers ?? [])].filter((b) => !b.declared).map((b) => ({ blocker: b.blocker, meaning: BLOCKER_MEANING[b.blocker] })),
+    }) : [];
+    let paper: Json = null, explanation: Json = null;
+    if (x && this.o.context) {
+      const [src, row] = await Promise.all([this.o.context.getSource(x.source.toLowerCase()).catch(() => null), this.o.context.getClaim(id).catch(() => null)]);
+      paper = src?.status === "read" ? (src.record as unknown as Json) : null;
+      explanation = row?.status === "written" ? (row.explanation as unknown as Json) : null;
+    }
+    const context = { version: CONTEXT_VERSION, standing: plain, ...(x ? { paper, explanation, note: CONTEXT_NOTE } : {}) };
     return ok(200, {
-      version: NETWORK_VERSION, id, external: !!x, kind: c?.kind ?? input?.kind ?? "empirical", ...words,
+      version: NETWORK_VERSION, id, external: !!x, kind: c?.kind ?? input?.kind ?? "empirical", ...words, context: context as unknown as Json,
       scope: (st?.scope ?? null) as unknown as Json, data: (st?.data ?? []) as unknown as Json,
       buildsOn, ...(background.length ? { background } : {}), builtOnBy, blockers: declared,
       amended: am ? { at: am.ts, seq: am.seq, ...(am.kind ? { kind: am.kind, wasKind: am.wasKind } : {}), ...(am.test ? { test: am.test, wasTest: am.wasTest ?? null } : {}), ...(am.scope ? { scope: am.scope as unknown as Json } : {}) } : null,

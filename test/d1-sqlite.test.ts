@@ -413,3 +413,25 @@ describe("the issues store against SQLite, every migration applied", { skip: !sq
     assert.deepEqual(await store.flagOutcomes("op-scout", 10), ["acted", "dismissed"], "decided issues only, newest flag first");
   });
 });
+
+describe("the context store against SQLite, every migration applied", { skip: !sqlite && "node:sqlite is not available" }, () => {
+  it("keeps the papers' records and the claims' summaries, upserted, every column round-tripping, and indexes them in one read each", async () => {
+    const { D1ContextStore } = await import("../src/store/v2/context-d1.js");
+    const db = migrated();
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((t) => t.name);
+    assert.ok(tables.includes("v2_source_records") && tables.includes("v2_claim_context"));
+    const store = new D1ContextStore(d1Over(db));
+    const record = { provider: "openalex" as const, work: "W1", title: "Shifting attention to accuracy", authors: ["Gordon Pennycook"], authorCount: 6, venue: "Nature", year: 2021, type: "article", citedBy: 1126, keywords: ["misinformation"], topic: { topic: "Misinformation and Its Impacts", subfield: "Sociology and Political Science", field: "Social Sciences", domain: "Social Sciences" }, readAt: "2026-10-09T08:00:00.000Z" };
+    await store.putSource({ source: "doi:10.1038/s41586-021-03344-2", status: "error", record: null, readAt: "2026-10-09T07:00:00.000Z", attempts: 1, detail: "OpenAlex 503" });
+    await store.putSource({ source: "doi:10.1038/s41586-021-03344-2", status: "read", record, readAt: record.readAt, attempts: 1, detail: null });
+    assert.deepEqual(await store.getSource("doi:10.1038/s41586-021-03344-2"), { source: "doi:10.1038/s41586-021-03344-2", status: "read", record, readAt: record.readAt, attempts: 1, detail: null });
+    assert.equal(await store.getSource("doi:10.1000/none"), null);
+    const explanation = { meaning: "What the sentence means, in plain words, for a reader who is not a specialist.", findings: ["One finding."], terms: [{ term: "veracity", means: "Whether it is true." }], basis: "abstract" as const, abstractFrom: "europepmc", model: "claude-sonnet-5-5", writtenAt: "2026-10-09T08:01:00.000Z", version: "context/0.1" };
+    const row = { claim: "ext:0123456789abcdef", status: "written" as const, version: "context/0.1", model: "claude-sonnet-5-5", inputsHash: "a".repeat(64), explanation, writtenAt: explanation.writtenAt, attempts: 1, detail: null };
+    await store.putClaim({ ...row, status: "error", explanation: null, detail: "the model provider answered 529" });
+    await store.putClaim(row);
+    assert.deepEqual(await store.getClaim("ext:0123456789abcdef"), row);
+    assert.deepEqual([...(await store.claimIndex()).entries()], [["ext:0123456789abcdef", { status: "written", version: "context/0.1", model: "claude-sonnet-5-5", writtenAt: row.writtenAt, attempts: 1 }]]);
+    assert.deepEqual([...(await store.sourceIndex()).entries()], [["doi:10.1038/s41586-021-03344-2", { status: "read", readAt: record.readAt, attempts: 1 }]]);
+  });
+});

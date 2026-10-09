@@ -119,6 +119,23 @@ jobs:
             echo "No OPENALEX_API_KEY secret: the stakes scout uses OpenAlex's shared free budget." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Install the context writer's model key (when configured)
+        if: steps.gate.outputs.ready == 'true'
+        # context/0.1: the key the archive uses to write "What this means" on
+        # each claim page. It lives only in GitHub secrets and the Worker's
+        # secret store; piped, never echoed. Without it no summary is written,
+        # and the claim pages still show each paper's record from OpenAlex.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        shell: bash
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            printf '%s' "$ANTHROPIC_API_KEY" | npx wrangler secret put ANTHROPIC_API_KEY > /dev/null
+            echo "Context writer's key installed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No ANTHROPIC_API_KEY secret: no summaries are written; the papers' records still are." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Smoke test the live API
         if: steps.gate.outputs.ready == 'true'
         shell: bash

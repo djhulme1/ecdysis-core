@@ -21,7 +21,9 @@ import { inDefaultLists } from "../../core/v2/visibility.js";
 import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
 import { mapPageV2 } from "../../web/v2/map.js";
 import { leaderboardPageV2 } from "../../web/v2/leaderboard.js";
-import { pressure } from "../../core/v2/attempts.js";
+import { BLOCKER_MEANING, pressure, type Blocker } from "../../core/v2/attempts.js";
+import { standingWords } from "../../core/v2/context.js";
+import type { ContextStore } from "./context.js";
 import { isClaimRef } from "../../core/v2/refs.js";
 import { RESTS_ON, type LinkEdge } from "../../core/v2/links.js";
 import type { ClaimPayload } from "../../core/v2/claim.js";
@@ -128,6 +130,8 @@ export interface PagesOptions {
   waitUntil?: (p: Promise<unknown>) => void;
   /** The quote scout's results, when configured: the claim page says whether a registered quote was found in its source. */
   quotes?: QuoteCheckStore | null;
+  /** context/0.1, when configured: the paper's record and the machine-written summary each claim page shows under "What this means". */
+  context?: Pick<ContextStore, "getSource" | "getClaim"> | null;
   /** The transparency log, for the live badge of its head (/badge/sth.svg). */
   log?: LogApi | null;
 }
@@ -490,6 +494,18 @@ export class PagesHandler {
     // stakes/0.1: what the scout observed about the source, for the stakes line.
     const obs = x ? r.observations.get(x.source.toLowerCase()) ?? null : null;
     const observed = obs ? { provider: obs.provider, citedBy: obs.citedBy, venueCitedness: obs.venueCitedness, year: obs.year, field: obs.field, observedAt: obs.observedAt, unresolved: obs.unresolved } : null;
+    // context/0.1: the paper's record and the summary, off the log; where it stands, in plain words from the record itself.
+    let context: ClaimViewV2["context"] = null;
+    if (x && this.o.context) {
+      const [src, row] = await Promise.all([this.o.context.getSource(x.source.toLowerCase()).catch(() => null), this.o.context.getClaim(ref).catch(() => null)]);
+      context = { paper: src?.status === "read" ? src.record : null, explanation: row?.status === "written" ? row.explanation : null };
+    }
+    const standing = standingWords({
+      kind: score.kind, status: score.status, credence: score.credence, prior: score.prior, external: !!x, operators: score.operators,
+      checks: receipts.filter((k) => k.outcome !== null && k.stage === "resulted").map((k) => ({ agent: k.agent, tests: k.tests ?? k.kind, counted: k.counted ?? false, outcome: k.outcome, disowned: k.disowned })),
+      arguments: { upheld: score.arguments.upheld, dismissed: score.arguments.dismissed, open: score.arguments.open },
+      blockers: (blocked?.blockers ?? []).filter((b) => !b.declared).map((b) => ({ blocker: b.blocker, meaning: BLOCKER_MEANING[b.blocker as Blocker] ?? b.blocker })),
+    });
     return {
       ref, external: !!x, text: claimText(r, ref), test, field: n?.field ?? obs?.field ?? null, stated: input.stated,
       author: n ? { handle: n.handle, operatorId: n.operatorId, tier: r.tiers.get(n.operatorId) ?? "unverified" } : null,
@@ -498,7 +514,7 @@ export class PagesHandler {
       rationale: payload?.rationale ?? null, method: payload?.method ?? null, caveats: payload?.caveats ?? [], artefacts: payload?.artefacts ?? [], models: payload?.models ?? [],
       restsOn, background, restedOnBy,
       amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, scope, registrant, robustness, promote,
-      arguments: args, attempts, blocked, observed, cid: n?.cid ?? null, at: n?.ts ?? x?.ts ?? null, computedFrom: r.head,
+      arguments: args, attempts, blocked, observed, context, standing, cid: n?.cid ?? null, at: n?.ts ?? x?.ts ?? null, computedFrom: r.head,
     };
   }
 
