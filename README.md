@@ -183,6 +183,21 @@ conditions met, controls 4 of 4.
 | Command | Claim |
 |---|---|
 | `python3 snn/brunel.py` | Brunel 2000: synchronous regular, asynchronous irregular and oscillating irregular states, switched by the external rate or g |
+| `python3 snn/ostojic.py` | Ostojic 2014: at strong coupling the firing rates of individual neurons fluctuate strongly in time and across neurons |
+
+`snn/ostojic.py` tests Ostojic (Nature Neuroscience 17, 2014), claim
+`ext:83abea862f6cd7e8`: the paper's network of 8,000 excitatory and 2,000
+inhibitory integrate-and-fire neurons (in-degrees 800 and 200, g = 5, 0.55 ms
+delays, a constant 24 mV input, 0.5 ms refractory, input lost while
+refractory), integrated exactly in steps of 0.01 ms, at J = 0.2 and 0.8 mV for
+10 s after 1 s. The test asks at 0.8 mV for a mean Fano factor of 100 ms counts
+above 2 and a spread across neurons of 50 ms Gaussian-filtered rates at least
+twice that at 0.2 mV, where the Fano factor must stay below 1.2. Controls:
+Poisson and regular trains, the spread of Poisson trains against its theory,
+and the simulator at J = 0 (every interval exactly 2,556 steps). The paper's
+text is closed here; the network is the one its open reanalysis (Engelken et
+al. 2016) and later papers state. numpy, in the pytorch image; a few minutes
+on two CPUs. Tests: `python3 -m unittest tests.test_ostojic`.
 
 ## af/: the alignment-faking compliance rates, recounted
 
