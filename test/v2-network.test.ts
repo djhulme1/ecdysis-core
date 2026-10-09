@@ -187,7 +187,7 @@ describe("the network view", () => {
     assert.match(all.html, /<path d="[^"]+" class="e id" fill="none"/, "the identified link, dashed");
     assert.match(all.html, /<path d="[^"]+" class="e" fill="none"/, "the declared one, solid");
     assert.match(all.html, /Standing alone here: 1 claim/);
-    assert.match(all.html, /<nav class="views" aria-label="See the claims as"><a href="\/claims">Table<\/a><a href="\/network" aria-current="page">Network<\/a><\/nav>/);
+    assert.match(all.html, /<nav class="views" aria-label="See the claims as"><a href="\/claims">By paper<\/a><a href="\/claims\/table">Table<\/a><a href="\/network" aria-current="page">Network<\/a><\/nav>/);
 
     // Filters fade what they leave out, or hide it; the links between what is left stay.
     const faded = await w.get("/network", "?origin=literature");
@@ -244,15 +244,16 @@ describe("the network view", () => {
     const tried = await w.svc.fileAttempt(await w.sign("Bee", { protocol: "ecdysis/0.2", type: "check.attempt", claim: c.id, blocker: "compute", read: "full", detail: "The stated run needs eight GPUs for a week; the claim's own bundle declares 10,080 minutes and nothing smaller is stated.", unblockedBy: "A smaller instance stated in the protocol, or a grant of compute." }));
     assert.equal(tried.status, 201, JSON.stringify(tried.body));
 
-    const table = await w.get("/claims", "?stage=attempted&q=threshold");
+    const table = await w.get("/claims/table", "?stage=attempted&q=threshold");
     assert.match(table.html, /<a href="\/network\?q=threshold&amp;stage=attempted">Network<\/a>/);
+    assert.match(table.html, /<a href="\/claims\?q=threshold">By paper<\/a>/, "the list by paper takes the search, and leaves the table's own filters behind");
     assert.match(table.html, new RegExp(`href="/c/${c.id}"`));
     assert.doesNotMatch(table.html, new RegExp(`<a class="t" href="/c/${d.id}"`));
-    const untried = await w.get("/claims", "?stage=untried");
+    const untried = await w.get("/claims/table", "?stage=untried");
     assert.match(untried.html, new RegExp(`<a class="t" href="/c/${d.id}"`));
     assert.doesNotMatch(untried.html, new RegExp(`<a class="t" href="/c/${c.id}"`));
     const net = await w.get("/network", "?stage=attempted&size=credence&q=threshold");
-    assert.match(net.html, /<a href="\/claims\?q=threshold&amp;stage=attempted">Table<\/a>/, "the drawing's own choices stay with the drawing");
+    assert.match(net.html, /<a href="\/claims\/table\?q=threshold&amp;stage=attempted">Table<\/a>/, "the drawing's own choices stay with the drawing");
     const claim = await w.get(`/c/${c.id}`);
     assert.match(claim.html, new RegExp(`<a href="/network\\?focus=${c.id.replace(":", "%3A")}">In the network</a>`));
   });

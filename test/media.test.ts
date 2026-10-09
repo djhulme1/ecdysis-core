@@ -1,5 +1,6 @@
 /**
- * The front page's video, its poster and captions: what is uploaded, how it is served, and where it shows.
+ * The front page's video, its poster and captions, and the site's two typefaces: what is uploaded, how it is served, and
+ * where it shows.
  *
  * Guarantees: every file listed in src/web/media.ts is the file in public/ (size, hash, the hash in its name),
  * under Cloudflare's 25 MiB limit, and nothing unlisted sits in public/media; the video starts playing before it has
@@ -14,7 +15,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { EXPLAINER, MEDIA, megabytes, runningTime } from "../src/web/media.js";
+import { EXPLAINER, FONTS, MEDIA, megabytes, PRELOAD_FONTS, runningTime } from "../src/web/media.js";
 import { parseRange, serveMedia, sliceStream, type AssetFetcher } from "../src/api/media.js";
 import { MemoryRateLimiter, route, type RouteOptions } from "../src/api/router.js";
 import { MemoryStore } from "../src/store/memory-store.js";
@@ -72,6 +73,21 @@ describe("the media files", () => {
     const listed = new Set(Object.keys(MEDIA));
     for (const name of readdirSync(join(PUBLIC, "media"))) assert.ok(listed.has(`/media/${name}`), `public/media/${name} is uploaded but not listed`);
     assert.deepEqual(readdirSync(PUBLIC), ["media"], "public/ holds the media and nothing else: everything in it is uploaded");
+  });
+
+  it("carries the two typefaces as WOFF2, each face once per range, served whole and cached for a year", async () => {
+    assert.equal(FONTS.length, 8, "two families, upright and italic, Latin and Latin Extended");
+    for (const f of FONTS) {
+      assert.equal(new TextDecoder("latin1").decode(bytesOf(f.path).subarray(0, 4)), "wOF2", `${f.path} is WOFF2`);
+      assert.equal(f.type, "font/woff2");
+      const r = (await serveMedia(media(f.path), fakeAssets().assets))!;
+      assert.equal(r.status, 200, f.path);
+      assert.equal(r.headers.get("content-type"), "font/woff2");
+      assert.match(r.headers.get("cache-control") ?? "", /max-age=31536000, immutable/);
+      assert.deepEqual(await body(r), bytesOf(f.path));
+    }
+    assert.equal(new Set(FONTS.map((f) => `${f.family}|${f.style}|${f.range}`)).size, FONTS.length, "no face twice");
+    assert.deepEqual(PRELOAD_FONTS.map((f) => [f.family, f.style, f.path.includes("-ext") ? "ext" : "latin"]), [["Public Sans", "normal", "latin"], ["Newsreader", "normal", "latin"]], "every page preloads the upright Latin faces, and nothing else");
   });
 
   it("is a video that starts before it has downloaded: H.264 in MP4, its index (moov) ahead of the data (mdat)", () => {

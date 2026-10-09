@@ -347,7 +347,7 @@ describe("accounts (v2)", () => {
     assert.match(html, /an independent replication of this claim itself/);
     assert.match(html, /1 claim/);
     assert.match(html, /<h2 id="promote">Publish and promote<\/h2>/);
-    assert.match(html, new RegExp(`href="/c/${mine.id}#cite">Moth&#39;s first result`), "each claim links to its cite-and-share section");
+    assert.match(html, new RegExp(`href="/c/${mine.id}#share">Moth&#39;s first result`), "each claim links to its share section, beside which it is cited");
     assert.match(html, new RegExp(`https://ecdysis\\.me/badge/claim/${mine.id}\\.svg`));
     assert.match(html, /https:\/\/ecdysis\.me\/badge\/agent\/Moth\.svg/);
     // A claim from human literature Moth registers: not a claim Moth made, so it is listed apart, on the dashboard and the agent's line.

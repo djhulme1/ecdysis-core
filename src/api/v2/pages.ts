@@ -22,13 +22,13 @@ import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
 import { mapPageV2 } from "../../web/v2/map.js";
 import { leaderboardPageV2 } from "../../web/v2/leaderboard.js";
 import { BLOCKER_MEANING, pressure, type Blocker } from "../../core/v2/attempts.js";
-import { ladderRungs, standingWords } from "../../core/v2/context.js";
+import { checkStory, fieldName, ladderRungs, nativeFieldName, standingWords, type CheckWho, type PaperRecord } from "../../core/v2/context.js";
 import type { ContextStore } from "./context.js";
 import { isClaimRef } from "../../core/v2/refs.js";
 import { RESTS_ON, type LinkEdge } from "../../core/v2/links.js";
 import type { ClaimPayload } from "../../core/v2/claim.js";
 import type { Json } from "../../core/canonical.js";
-import { FIELD_LABELS } from "../../core/schema.js";
+import { FIELD_LABELS, FIELDS } from "../../core/schema.js";
 import { llmsTxtV2, skillMdV2 } from "./skill.js";
 import { privacyPageV2, termsMdV2 } from "./legal.js";
 import { agentsPageV2, kitPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js";
@@ -44,8 +44,8 @@ import { badgeSvg, escapeXml, robotsTxt } from "../../web/badge.js";
 import type { LogApi } from "./log-api.js";
 import { ARTICLES, CONSTITUTION_VERSION, constitutionHash, renderMarkdown } from "../../core/constitution.js";
 import {
-  agentPageV2, claimHref, claimPageV2, claimsPageV2, frozenPageV2, governancePageV2, linePageV2, missingPageV2, missingProfilePageV2, networkPageV2, observatoryPageV2, profilePageV2, relWords, withheldPageV2,
-  type AgentViewV2, type ClaimsListV2, type ClaimViewV2, type GovernanceViewV2, type LineViewV2, type LinkedClaimV2, type NetworkViewV2, type ObservatoryViewV2, type ProfileViewV2, type RobustnessRowV2,
+  agentPageV2, blockerLabel, claimHref, claimPageV2, claimsListPageV2, claimsPageV2, frozenPageV2, governancePageV2, linePageV2, missingPageV2, missingProfilePageV2, networkPageV2, observatoryPageV2, profilePageV2, relWords, withheldPageV2,
+  type AgentViewV2, type ClaimsListV2, type ClaimsPeopleV2, type ClaimViewV2, type PeopleClaimV2, type PeoplePaperV2, type GovernanceViewV2, type LineViewV2, type LinkedClaimV2, type NetworkViewV2, type ObservatoryViewV2, type ProfileViewV2, type RobustnessRowV2,
 } from "../../web/v2/pages.js";
 import { GRAPH_MAX_NODES, type GraphEdge, type GraphNode } from "../../web/v2/viz.js";
 
@@ -57,7 +57,7 @@ export const PAGE_HEADERS: Record<string, string> = {
   "referrer-policy": "no-referrer",
   "strict-transport-security": "max-age=31536000; includeSubDomains",
   "cache-control": "public, max-age=120",
-  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 };
 /** The front page plays the explainer and its captions from this origin (src/api/media.ts), so it alone may load media from 'self'. */
 export const LANDING_HEADERS: Record<string, string> = { ...PAGE_HEADERS, "content-security-policy": PAGE_HEADERS["content-security-policy"]!.replace("img-src 'self';", "img-src 'self'; media-src 'self';") };
@@ -111,7 +111,7 @@ function paperEraMove(path: string): string | null {
 
 /** The site's pages for the sitemap; claims' pages are appended from the record. */
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
-  "/", "/people", "/connect", "/lab", "/agents", "/claims", "/network", "/map", "/leaderboard", "/observatory", "/governance", "/privacy",
+  "/", "/people", "/connect", "/lab", "/agents", "/claims", "/claims/table", "/network", "/map", "/leaderboard", "/observatory", "/governance", "/privacy",
   "/faq", "/compare", "/api",
   "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/kit",
 ];
@@ -130,8 +130,8 @@ export interface PagesOptions {
   waitUntil?: (p: Promise<unknown>) => void;
   /** The quote scout's results, when configured: the claim page says whether a registered quote was found in its source. */
   quotes?: QuoteCheckStore | null;
-  /** context/0.1, when configured: the paper's record and the machine-written summary each claim page shows under "What this means". */
-  context?: Pick<ContextStore, "getSource" | "getClaim"> | null;
+  /** context/0.2, when configured: the paper's record and the machine-written context each claim page shows (its plain headline, why it matters, what the authors did and found). */
+  context?: (Pick<ContextStore, "getSource" | "getClaim"> & Partial<Pick<ContextStore, "papers" | "headlines" | "sourceIndex">>) | null;
   /** The transparency log, for the live badge of its head (/badge/sth.svg). */
   log?: LogApi | null;
 }
@@ -216,6 +216,20 @@ function indexEdges<E extends { from: string; to: string }>(edges: readonly E[])
   return { out, into };
 }
 
+/**
+ * Whose check a receipt is, as the record weighs it (core/v2/flow.ts, credence.ts): one whose outputs ignored the seed adds
+ * nothing; the claim's own operator's never settles it; one on data held privately counts at the unverified weight until a
+ * verified operator re-runs it; an operator not yet verified is shown and never settles; anything else can.
+ */
+function checkWho(r: V2Record, k: { operatorId: string; seedInsensitive?: boolean; requires: string[]; verifiedBy: string[] } | undefined, own: string | null): CheckWho {
+  if (!k) return "unverified";
+  if (k.seedInsensitive) return "ignored";
+  if (own && k.operatorId === own) return "own";
+  if (r.tiers.get(k.operatorId) !== "verified") return "unverified";
+  if (k.requires.length && !k.verifiedBy.length) return "unaudited";
+  return "other";
+}
+
 export class PagesHandler {
   private feeds: V2Feeds;
   constructor(private v2: V2Service, private o: PagesOptions = {}) {
@@ -288,7 +302,17 @@ export class PagesHandler {
     if (path === "/terms" || path === "/terms.md") return new Response(method === "HEAD" ? null : termsMdV2(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     // The default list leaves out unchecked work from operators with no standing (core/v2/visibility.ts); /claims/all lists everything in view.
     // The claims table searches, filters and sorts with a GET form that submits to the page itself, so its form-action is 'self'.
-    if (path === "/claims" || path === "/claims/all") return new Response(method === "HEAD" ? null : claimsPageV2({ ...(await this.claims(path === "/claims/all")), params: new URLSearchParams(search) }), { status: 200, headers: FORM_PAGE_HEADERS });
+    // /claims is for people: claims under their papers, with plain words (Lucy Griffiths' design); /claims/table keeps every column.
+    if (path === "/claims") {
+      // An address made for the table before 9 October 2026 (a stage, an origin, a kind, an order, one of the table's own
+      // sorts, or a field by its code) still opens the table, with its filters, rather than the list, which would drop them.
+      const params = new URLSearchParams(search);
+      if (["stage", "origin", "kind", "order"].some((k) => params.has(k)) || ["stakes", "credence", "rests", "built", "field"].includes(params.get("sort") ?? "") || (FIELDS as readonly string[]).includes(params.get("field") ?? "")) {
+        return new Response(null, { status: 302, headers: { ...PAGE_HEADERS, "cache-control": "no-store", location: `/claims/table?${params.toString()}` } });
+      }
+      return new Response(method === "HEAD" ? null : claimsListPageV2({ ...(await this.claimsPeople()), params }), { status: 200, headers: FORM_PAGE_HEADERS });
+    }
+    if (path === "/claims/table" || path === "/claims/all") return new Response(method === "HEAD" ? null : claimsPageV2({ ...(await this.claims(path === "/claims/all")), params: new URLSearchParams(search) }), { status: 200, headers: FORM_PAGE_HEADERS });
     // The network view: the same claims drawn, filtered, sized and grouped by a GET form that submits to the page itself.
     if (path === "/network") return new Response(method === "HEAD" ? null : networkPageV2({ ...(await this.network()), params: new URLSearchParams(search) }), { status: 200, headers: FORM_PAGE_HEADERS });
     const cm = path.match(CLAIM_PAGE);
@@ -399,7 +423,7 @@ export class PagesHandler {
         const x = r.external.get(c.ref);
         const sc = s.claims.get(c.ref);
         return {
-          id: c.ref, text: claimText(r, c.ref), external: !!x, kind: sc?.kind ?? c.kind ?? "empirical", field: n?.field ?? (x ? r.observations.get(x.source.toLowerCase())?.field ?? null : null),
+          id: c.ref, text: claimText(r, c.ref), external: !!x, kind: sc?.kind ?? c.kind ?? "empirical", field: n?.field ?? (x ? fieldName(r.observations.get(x.source.toLowerCase())?.field) : null),
           agent: n?.handle ?? null, source: x?.source ?? null, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5, stakes: sc?.stakes ?? 0,
           restsOn: linesIn(c.ref), restedOnBy: linesOut(c.ref), at: n?.ts ?? x?.ts ?? null, seq: c.seq,
           ...stagesOf(stages.get(c.ref)),
@@ -414,6 +438,73 @@ export class PagesHandler {
       },
       computedFrom: r.head,
     };
+  }
+
+  /**
+   * The claims for people (Lucy Griffiths' design of 9 October 2026): every claim in the default list, each with its paper's
+   * place (OpenAlex's field, subfield, topic and keywords, the field read through fieldName so one subject is one place), its
+   * plain headline where the archive has written one, when it was last checked and what the quote scout found; the papers'
+   * records; and the claims most recently checked, each with what its checks did in one line.
+   */
+  private async claimsPeople(): Promise<ClaimsPeopleV2> {
+    const r = await this.v2.record();
+    const s = await this.v2.scores();
+    const inView = r.claims.filter((c) => !isHeld(r, c.ref));
+    const listed = inView.filter((c) => inDefaultLists(r, [c.ref], c.external ? (c.registrant ?? "") : c.authorOperator));
+    const papers = (await this.o.context?.papers?.().catch(() => null)) ?? new Map<string, PaperRecord>();
+    const heads = (await this.o.context?.headlines?.().catch(() => null)) ?? new Map<string, { headline: string | null; gist: string | null }>();
+    const sourceStates = (await this.o.context?.sourceIndex?.().catch(() => null)) ?? new Map<string, { status: string }>();
+    const quotes: Map<string, string> = !this.o.quotes ? new Map()
+      : this.o.quotes.statusIndex ? await this.o.quotes.statusIndex().catch(() => new Map())
+      : new Map((await this.o.quotes.list(100_000).catch(() => [])).map((q) => [q.claim, q.status] as const));
+    const lastResult = new Map<string, string>();
+    for (const k of r.checks.values()) {
+      if (k.stage !== "resulted" || !k.resultedAt || k.disowned || isHeld(r, k.id)) continue;
+      const prev = lastResult.get(k.target);
+      if (!prev || prev < k.resultedAt) lastResult.set(k.target, k.resultedAt);
+    }
+    const flagOf = (ref: string): PeopleClaimV2["flag"] => {
+      const q = quotes.get(ref);
+      return q === "wrong-work" || q === "mismatch" || q === "not-in-abstract" ? q : null;
+    };
+    const claims: PeopleClaimV2[] = listed.map((c) => {
+      const n = r.native.get(c.ref);
+      const x = r.external.get(c.ref);
+      const sc = s.claims.get(c.ref);
+      const key = x ? x.source.toLowerCase() : null;
+      const rec = key ? papers.get(key) ?? null : null;
+      const obs = key ? r.observations.get(key) ?? null : null;
+      return {
+        id: c.ref, text: claimText(r, c.ref), headline: heads.get(c.ref)?.headline ?? null, external: !!x, kind: sc?.kind ?? c.kind ?? "empirical",
+        status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5, stakes: sc?.stakes ?? 0, seq: c.seq, checkedAt: lastResult.get(c.ref) ?? null,
+        source: x?.source ?? null, agent: n?.handle ?? x?.handle ?? null, paper: key,
+        field: n ? nativeFieldName(n.field) : fieldName(rec?.topic?.field ?? obs?.field),
+        subfield: rec?.topic?.subfield ?? null, topic: rec?.topic?.topic ?? null, keywords: rec?.keywords ?? [],
+        flag: x ? flagOf(c.ref) : null, work: x?.work ?? null,
+      };
+    });
+    const paperMap = new Map<string, PeoplePaperV2>();
+    for (const c of claims) {
+      if (!c.paper || paperMap.has(c.paper)) continue;
+      // The line on the paper: the gist the archive wrote for any of its claims, the first found in log order.
+      const gist = claims.find((o) => o.paper === c.paper && heads.get(o.id)?.gist)?.id;
+      const state = sourceStates.get(c.paper)?.status;
+      paperMap.set(c.paper, { key: c.paper, source: c.source ?? c.paper, record: papers.get(c.paper) ?? null, gist: gist ? heads.get(gist)!.gist : null, state: papers.has(c.paper) ? "read" : state === "unresolved" ? "unknown" : "unread" });
+    }
+    // The claims most recently checked, with their checks' story in one line.
+    const recentIds = claims.filter((c) => c.status !== "unchecked" && c.checkedAt).sort((a, b) => b.checkedAt!.localeCompare(a.checkedAt!) || b.seq - a.seq).slice(0, 4);
+    const recent = recentIds.map((c) => {
+      const sc = s.claims.get(c.id)!;
+      const own = r.external.get(c.id)?.operatorId ?? r.native.get(c.id)?.operatorId ?? null;
+      const checks = [...r.checks.values()].filter((k) => k.target === c.id && k.stage === "resulted" && !isHeld(r, k.id)).sort((a, b) => a.seq - b.seq)
+        .map((k) => ({ agent: k.handle, tests: testsWords(k), counted: k.replicationTest, outcome: k.outcome, disowned: k.disowned, who: checkWho(r, k, own) }));
+      const story = checkStory({
+        kind: sc.kind, status: sc.status, credence: sc.credence, prior: sc.prior, external: c.external, world: sc.world, operators: sc.operators, checks,
+        arguments: { upheld: sc.arguments.upheld, dismissed: sc.arguments.dismissed, open: sc.arguments.open }, blockers: [], by: null, declared: [], period: null,
+      });
+      return { id: c.id, line: story.lede[0] ?? "" };
+    });
+    return { claims, papers: paperMap, recent, unlisted: inView.length - listed.length, computedFrom: r.head };
   }
 
   /** One claim, whole: its words (with its envelope's rationale, method and caveats), the claims it rests on and that rest on it, its evidence. */
@@ -494,25 +585,51 @@ export class PagesHandler {
     // stakes/0.1: what the scout observed about the source, for the stakes line.
     const obs = x ? r.observations.get(x.source.toLowerCase()) ?? null : null;
     const observed = obs ? { provider: obs.provider, citedBy: obs.citedBy, venueCitedness: obs.venueCitedness, year: obs.year, field: obs.field, observedAt: obs.observedAt, unresolved: obs.unresolved } : null;
-    // context/0.1: the paper's record and the summary, off the log; where it stands, in plain words from the record itself.
+    // context/0.2: the paper's record and the summary, off the log; where it stands, in plain words from the record itself.
     let context: ClaimViewV2["context"] = null;
     if (x && this.o.context) {
       const [src, row] = await Promise.all([this.o.context.getSource(x.source.toLowerCase()).catch(() => null), this.o.context.getClaim(ref).catch(() => null)]);
-      context = { paper: src?.status === "read" ? src.record : null, explanation: row?.status === "written" ? row.explanation : null };
+      context = { paper: src?.status === "read" ? src.record : null, explanation: row?.status === "written" ? row.explanation : null, paperState: src?.status === "unresolved" ? "unknown" : src?.status === "read" ? "read" : "unread" };
     }
-    const checks = receipts.filter((k) => k.outcome !== null && k.stage === "resulted").map((k) => ({ agent: k.agent, tests: k.tests ?? k.kind, counted: k.counted ?? false, outcome: k.outcome, disowned: k.disowned }));
+    // Whose each check is, as the record weighs it: the claim's own operator's (its registrant's, or its author's), an operator not yet verified, or another.
+    const ownOperator = x?.operatorId ?? n?.operatorId ?? null;
+    const whoOf = (id: string): CheckWho => checkWho(r, r.checks.get(id), ownOperator);
+    const checks = receipts.filter((k) => k.outcome !== null && k.stage === "resulted").map((k) => ({ agent: k.agent, tests: k.tests ?? k.kind, counted: k.counted ?? false, outcome: k.outcome, disowned: k.disowned, who: whoOf(k.id) }));
     // credence/0.6: the checking ladder, from the same checks, the robustness tests and the arguments about method.
     const methodArgs = args.filter((a) => !a.disowned && (a.grounds === "methodological-flaw" || a.grounds === "statistical-insufficiency"));
     const ladder = score.kind === "empirical" ? ladderRungs({
       world: score.world, external: !!x, checks, robustness: robustness.map((rr) => ({ agent: rr.agent, outcome: rr.outcome })),
       methodArguments: { upheld: methodArgs.filter((a) => a.status === "upheld").length, dismissed: methodArgs.filter((a) => a.status === "dismissed").length, open: methodArgs.filter((a) => a.status === "open").length },
     }) : [];
-    const standing = standingWords({
+    const standingInput = {
       kind: score.kind, status: score.status, credence: score.credence, prior: score.prior, external: !!x, world: score.world, operators: score.operators,
       checks,
       arguments: { upheld: score.arguments.upheld, dismissed: score.arguments.dismissed, open: score.arguments.open },
       blockers: (blocked?.blockers ?? []).filter((b) => !b.declared).map((b) => ({ blocker: b.blocker, meaning: BLOCKER_MEANING[b.blocker as Blocker] ?? b.blocker })),
+    };
+    const standing = standingWords(standingInput);
+    // The story of its checks in plain words, for the page's lede, its story and its next check (computed, never written by a model).
+    const story = checkStory({
+      ...standingInput,
+      by: x ? { handle: x.handle || null, at: x.ts } : n ? { handle: n.handle, at: n.ts } : null,
+      declared: attempts.filter((a) => a.declared && !a.cleared && !a.disowned).map((a) => ({ label: blockerLabel(a.blocker), meaning: BLOCKER_MEANING[a.blocker as Blocker] ?? a.blocker })),
+      period: st?.scope && "period" in st.scope ? periodWords(st.scope.period) : null,
     });
+    // The other claims registered from the same paper, in view, with their plain headlines where the writer has written them.
+    // The default lists' rule holds here too: unchecked work from operators with no standing is left out.
+    let samePaper: NonNullable<ClaimViewV2["samePaper"]> = [];
+    if (x) {
+      const key = x.source.toLowerCase();
+      const others = r.claims.filter((k) => {
+        const kx = k.ref !== ref && k.external && !isHeld(r, k.ref) ? r.external.get(k.ref) : undefined;
+        return !!kx && kx.source.toLowerCase() === key && inDefaultLists(r, [k.ref], k.registrant ?? "");
+      }).slice(0, 8);
+      samePaper = await Promise.all(others.map(async (k) => {
+        const row = this.o.context ? await this.o.context.getClaim(k.ref).catch(() => null) : null;
+        const sc = s.claims.get(k.ref);
+        return { id: k.ref, text: claimText(r, k.ref), headline: row?.status === "written" ? row.explanation?.headline ?? null : null, status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5 };
+      }));
+    }
     return {
       ref, external: !!x, text: claimText(r, ref), test, field: n?.field ?? obs?.field ?? null, stated: input.stated,
       author: n ? { handle: n.handle, operatorId: n.operatorId, tier: r.tiers.get(n.operatorId) ?? "unverified" } : null,
@@ -521,7 +638,7 @@ export class PagesHandler {
       rationale: payload?.rationale ?? null, method: payload?.method ?? null, caveats: payload?.caveats ?? [], artefacts: payload?.artefacts ?? [], models: payload?.models ?? [],
       restsOn, background, restedOnBy,
       amended, quoteCheck, score, anchor: r.anchors.has(ref) ? r.anchors.get(ref)! : null, evidence, receipts, scope, registrant, robustness, promote,
-      arguments: args, attempts, blocked, observed, context, standing, ladder, cid: n?.cid ?? null, at: n?.ts ?? x?.ts ?? null, computedFrom: r.head,
+      arguments: args, attempts, blocked, observed, context, standing, ladder, story, samePaper, cid: n?.cid ?? null, at: n?.ts ?? x?.ts ?? null, computedFrom: r.head,
     };
   }
 
@@ -736,7 +853,7 @@ export class PagesHandler {
     const b = r.blockers.get(c.ref);
     // The field in words: a claim's declared field, or its source's field in the citation graph, when the scout has seen it.
     const x = r.external.get(c.ref);
-    const field = r.native.get(c.ref)?.field ?? (x ? r.observations.get(x.source.toLowerCase())?.field : undefined);
+    const field = r.native.get(c.ref)?.field ?? (x ? fieldName(r.observations.get(x.source.toLowerCase())?.field) ?? undefined : undefined);
     return {
       id: c.ref, label: short, external: c.external, ...(field ? { field: FIELD_LABELS[field] ?? field } : {}), status: c.status, use: c.use, stakes: c.stakes, credence: c.credence, gen: gen.get(c.ref) ?? 0, href: claimHref(c.ref),
       reliance: c.reliance, pressure: b ? pressure(c.stakes, b.verifiedOperators) : 0, kind: c.kind,
@@ -763,7 +880,7 @@ export class PagesHandler {
       const input = inputs.get(c.ref);
       return {
         // The field as the claims table filters it: a claim's declared field, or its source's field in the citation graph.
-        ...this.node(r, c, gen), field: nat?.field ?? (x ? r.observations.get(x.source.toLowerCase())?.field : undefined) ?? undefined,
+        ...this.node(r, c, gen), field: nat?.field ?? (x ? fieldName(r.observations.get(x.source.toLowerCase())?.field) ?? undefined : undefined) ?? undefined,
         attempted: m?.attempted ?? false, assessed: m?.assessed ?? false, resolved: m?.resolved ?? false,
         text: `${claimText(r, c.ref)} ${c.ref} ${x?.source ?? ""} ${nat?.handle ?? x?.handle ?? ""}`,
         listed: input ? inDefaultLists(r, [c.ref], input.external ? (input.registrant ?? "") : input.authorOperator) : true,

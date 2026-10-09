@@ -76,7 +76,7 @@ describe("the claim page", () => {
     const id1 = String(w.b(c1)["id"]);
     assert.equal((await w.result("Ant", id1, "failed", { effect: 0.42, n: 48526 }, null)).status, 201);
     let p = await w.page(path);
-    assert.match(p.text, /<td data-label="Verified re-runs">none yet<\/td>/);
+    assert.match(p.text, /<td data-label="Re-run by others">None yet<\/td>/);
     assert.doesNotMatch(p.text, /not yet verified/, "nobody has re-run it");
     // Bee, at the account tier, is handed Ant's receipt as its cross-check and matches it: shown on Ant's row, counted nowhere.
     w.tick(60_000);
@@ -91,7 +91,7 @@ describe("the claim page", () => {
     assert.equal(rec.checks.get(id1)!.otherCrossChecks.length, 1);
     p = await w.page(path);
     assert.match(p.text, /Re-run 1 more time by operators not yet verified \(1 matched, 0 disagreed\): shown, not counted\./);
-    assert.match(p.text, /<td data-label="Verified re-runs">none yet<\/td>/, "and counted nowhere");
+    assert.match(p.text, /<td data-label="Re-run by others">None yet<\/td>/, "and counted nowhere");
     assert.match(p.text, /inconclusive/, "Bee's own receipt is listed too");
     // The footer names the log head the figures came from: the last entry, Bee's result.
     const last = w.rows().at(-1)!;
@@ -101,7 +101,7 @@ describe("the claim page", () => {
     w.tick(60_000);
     assert.equal((await w.svc.setTier("op-b", "verified", "op-steward")).status, 200);
     p = await w.page(path);
-    assert.match(p.text, /once by one verified operator/, "re-runs are counted in operators as well as runs");
+    assert.match(p.text, /<td data-label="Re-run by others">Once, by one verified operator<\/td>/, "re-runs are counted in operators as well as runs");
     assert.doesNotMatch(p.text, /not yet verified/);
     const head = w.rows().at(-1)!;
     assert.equal(head.type, "operator.tier");

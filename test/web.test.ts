@@ -1,12 +1,14 @@
 /**
- * The two-halves site: structure, script discipline, and the on-ramp.
+ * The site: structure, script discipline, and the on-ramp.
  *
  * Guarantees: every human page ships no script and its CSP forbids script
- * outright; every page in a half says which half it is in; the people half
- * leads with prompts a person can copy; the agent half points at the
+ * outright; every page has its place in the top bar (Claims, Map, How it
+ * works, FAQ, Your Ecdysis) and its section's tabs beneath; how it works
+ * leads with prompts a person can copy; the agents' page points at the
  * machine-readable protocol; agents asking for JSON at the root still get
- * JSON; and the site, the protocol and the terms tell one story: claims,
- * not papers; no citation on faith; credence moved only by evidence.
+ * JSON; text contrast is at least 4.5:1 in both themes; and the site, the
+ * protocol and the terms tell one story: claims, not papers; no citation on
+ * faith; credence moved only by evidence.
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +18,7 @@ import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
-import { esc, shortDate, statusTone, V2_AGENT_NAV, V2_PEOPLE_NAV } from "../src/web/design.js";
+import { esc, PRIMARY_NAV, shortDate, statusTone, TOKENS, V2_AGENT_NAV, V2_MAP_NAV, V2_PEOPLE_NAV } from "../src/web/design.js";
 import { constitutionHash } from "../src/core/constitution.js";
 import type { Json } from "../src/core/canonical.js";
 
@@ -36,7 +38,7 @@ const get = (path: string, accept = "text/html") =>
 const limiter = () => new MemoryRateLimiter(1000);
 
 /** Every human page the network serves, static or computed from an empty record. */
-const PAGES = ["/", "/people", "/start", "/join", "/agents", "/connect", "/lab", "/claims", "/claims/all", "/map", "/leaderboard", "/observatory", "/faq", "/compare", "/api", "/governance", "/privacy", "/kit"];
+const PAGES = ["/", "/people", "/start", "/join", "/agents", "/connect", "/lab", "/claims", "/claims/table", "/claims/all", "/network", "/map", "/leaderboard", "/observatory", "/faq", "/compare", "/api", "/governance", "/privacy", "/kit"];
 
 describe("two halves", () => {
   it("serves every human page with no script and a CSP that forbids it", async () => {
@@ -48,6 +50,7 @@ describe("two halves", () => {
       assert.ok(!csp.includes("script-src"), `${p}: CSP must not allow script`);
       assert.match(csp, /default-src 'none'/, p);
       assert.match(csp, /frame-ancestors 'none'/, p);
+      assert.match(csp, /font-src 'self'(;|$)/, `${p}: the typefaces come from the site itself, and from nowhere else`);
       const html = await r.text();
       assert.ok(!html.includes("<script"), `${p}: no script element`);
       // Other archives' preprints may be described (the FAQ and the comparison do), and the protocol names the retired paths
@@ -56,18 +59,33 @@ describe("two halves", () => {
     }
   });
 
-  it("marks which half a page belongs to, and each half's navigation is the network's", async () => {
+  it("puts every page in its place in the top bar, with its section's tabs beneath, and only the network's pages", async () => {
     const opts = await world();
-    const people = await (await route(get("/people"), limiter(), opts)).text();
-    assert.match(people, /<a href="\/people" aria-current="true">People<\/a>/);
-    assert.match(people, /aria-label="For people"/);
-    for (const [href, label] of V2_PEOPLE_NAV) assert.ok(people.includes(`<a href="${href}"${href === "/people" ? ' aria-current="page"' : ""}>${label}</a>`), `${label} in the people nav`);
-    const agents = await (await route(get("/agents"), limiter(), opts)).text();
-    assert.match(agents, /<a href="\/agents" aria-current="true">Agents<\/a>/);
-    assert.match(agents, /aria-label="For agents"/);
-    for (const [href, label] of V2_AGENT_NAV) assert.ok(agents.includes(`<a href="${href}"${href === "/agents" ? ' aria-current="page"' : ""}>${label}</a>`), `${label} in the agent nav`);
-    assert.deepEqual(V2_PEOPLE_NAV.map(([h]) => h), ["/people", "/connect", "/lab", "/claims", "/map", "/leaderboard", "/observatory", "/faq"], "no papers, frontier, review or graph page");
-    assert.ok(!V2_AGENT_NAV.some(([h]) => /papers|frontier|graph|challenges|review/.test(h)));
+    const page = async (p: string) => (await route(get(p), limiter(), opts)).text();
+    assert.deepEqual(PRIMARY_NAV.map(([, h, l]) => [h, l]), [["/claims", "Claims"], ["/map", "Map"], ["/people", "How it works"], ["/faq", "FAQ"], ["/me", "Your Ecdysis"]], "the five places a person goes");
+    for (const p of PAGES) assert.match(await page(p), /<nav class="primary" aria-label="Site"><a href="\/claims"[^>]*>Claims<\/a><a href="\/map"[^>]*>Map<\/a><a href="\/people"[^>]*>How it works<\/a><a href="\/faq"[^>]*>FAQ<\/a><a href="\/me"[^>]*>Your Ecdysis<\/a><\/nav>/, `${p} carries the top bar`);
+    // A section's page: the top bar marks the section, its tab marks the page.
+    const tabs = (html: string, nav: ReadonlyArray<readonly [string, string]>, current: string, what: string) => {
+      assert.match(html, /<nav class="sub" aria-label="In this section">/, what);
+      for (const [href, label] of nav) assert.ok(html.includes(`<a href="${href}"${href === current ? ' aria-current="page"' : ""}>${label}</a>`), `${label} in ${what}`);
+    };
+    const people = await page("/people");
+    assert.match(people, /<a href="\/people" aria-current="true">How it works<\/a>/);
+    tabs(people, V2_PEOPLE_NAV, "/people", "how it works' tabs");
+    const agents = await page("/agents");
+    assert.match(agents, /<a href="\/people" aria-current="true">How it works<\/a>/, "the agents' references sit under how it works");
+    tabs(agents, V2_AGENT_NAV, "/agents", "the agents' tabs");
+    const board = await page("/leaderboard");
+    assert.match(board, /<a href="\/map" aria-current="true">Map<\/a>/);
+    tabs(board, V2_MAP_NAV, "/leaderboard", "the map's tabs");
+    // A place with no tabs: the top bar marks the page itself.
+    const claims = await page("/claims");
+    assert.match(claims, /<a href="\/claims" aria-current="page">Claims<\/a>/);
+    assert.doesNotMatch(claims, /<nav class="sub"/);
+    assert.match(await page("/claims/table"), /<a href="\/claims" aria-current="true">Claims<\/a>/, "the full table is in Claims");
+    assert.match(await page("/network"), /<a href="\/claims" aria-current="true">Claims<\/a>/, "and so is the network");
+    assert.deepEqual(V2_PEOPLE_NAV.map(([h]) => h), ["/people", "/connect", "/lab", "/agents", "/compare"], "no papers, frontier, review or graph page");
+    assert.ok(![...V2_AGENT_NAV, ...V2_MAP_NAV].some(([h]) => /papers|frontier|graph|challenges|review/.test(h)));
   });
 
   it("still gives agents JSON at the root", async () => {
@@ -119,14 +137,15 @@ describe("the people half", () => {
     assert.match(skill, /Never include a\s+private key anywhere/);
   });
 
-  it("lists claims newest first, and says what to do when there are none", async () => {
+  it("lists the claims under their papers, and says what is there when there are none", async () => {
     const opts = await world();
     const empty = await (await route(get("/claims"), limiter(), opts)).text();
-    assert.match(empty, /No claims yet/);
-    assert.match(empty, /<a href="\/feeds\/all\.atom">/);
-    assert.match(empty, /The record is a network of claims/);
-    const all = await (await route(get("/claims/all"), limiter(), opts)).text();
-    assert.match(all, /Every claim in view/);
+    assert.match(empty, /<h1>Findings from published research, checked in the open<\/h1>/);
+    assert.match(empty, /No claims are on the record yet\./);
+    assert.match(empty, /<a class="btn quiet" href="\/feeds\/all\.atom">New claims feed<\/a>/);
+    assert.match(empty, /<a class="btn" href="\/claims\/table">The full table<\/a>/, "checkers and agents keep the full table");
+    assert.match(await (await route(get("/claims/table"), limiter(), opts)).text(), /<h1>The full table<\/h1>/);
+    assert.match(await (await route(get("/claims/all"), limiter(), opts)).text(), /Every claim in view, including unchecked work from operators with no standing/);
   });
 });
 
@@ -210,23 +229,62 @@ describe("the brand (kit of 3 Oct 2026)", () => {
     assert.match(lock, /<source media="\(prefers-color-scheme: dark\)" srcset="\/brand\/ecdysis-horizontal-dark\.svg">/);
     assert.match(lock, /<img class="lockup" src="\/brand\/ecdysis-horizontal-light\.svg" alt="Ecdysis home" width="740" height="190"/);
     assert.match(lock, /<img class="symbol" src="\/brand\/ecdysis-symbol\.svg" alt="" [^>]*aria-hidden="true"/, "the small-screen symbol is decorative beside the lockup");
-    // Every page: the lockup is the home link, the top bar holds People, Agents and Your Ecdysis, the favicon is the kit's.
+    // Every page: the lockup is the home link, the top bar holds the five places, the favicon is the kit's.
     const page = shell({ title: "T", description: "d", half: "people", body: "<p>x</p>" });
     assert.match(page, /<a class="brand" href="\/"><picture>/);
-    assert.match(page, /<nav class="halves" aria-label="Site"><span class="seg"><a href="\/people" aria-current="true">People<\/a><a href="\/agents">Agents<\/a><\/span><a class="me" href="\/me">Your Ecdysis<\/a><\/nav>/);
+    assert.match(page, /<nav class="primary" aria-label="Site"><a href="\/claims">Claims<\/a><a href="\/map">Map<\/a><a href="\/people">How it works<\/a><a href="\/faq">FAQ<\/a><a href="\/me">Your Ecdysis<\/a><\/nav>/);
     assert.match(page, /<link rel="icon" href="\/favicon\.svg" type="image\/svg\+xml">/);
-    assert.match(shell({ title: "T", description: "d", half: "me", body: "" }), /<a class="me" href="\/me" aria-current="true">Your Ecdysis<\/a>/, "on the person's own pages the top bar says so");
+    assert.match(shell({ title: "T", description: "d", half: "me", current: "/me", body: "" }), /<a href="\/me" aria-current="page">Your Ecdysis<\/a>/, "on the person's own pages the top bar says so");
     assert.doesNotMatch(page, /class="brand"[^<]*<svg|>ecdysis</, "the brand name is never typed as the logo");
-    // The palette is the kit's and only the kit's: soft white, ink, signal orange; ink on orange buttons; the old amber, teal, violet and vermillion are gone.
-    assert.match(CSS, /--ground:#F7F8FA;--card:#FFFFFF;--ink:#242629/);
-    assert.match(CSS, /--accent:#FF8A24;--on-accent:#242629/);
-    assert.match(CSS, /@media \(prefers-color-scheme:dark\)\{:root\{--ground:#242629;--card:#2C2F33;--ink:#F7F8FA/);
-    for (const gone of ["#93560A", "#00806B", "#6345C1", "#CC3D17", "#F3F5F4", "#1F1A14"]) assert.ok(!CSS.includes(gone), `${gone} is gone`);
+    // The typefaces are the site's own, preloaded, and nothing is fetched from elsewhere.
+    assert.match(page, /<link rel="preload" href="\/media\/public-sans-latin\.[0-9a-f]{8}\.woff2" as="font" type="font\/woff2" crossorigin>/);
+    assert.match(page, /<link rel="preload" href="\/media\/newsreader-latin\.[0-9a-f]{8}\.woff2" as="font" type="font\/woff2" crossorigin>/);
+    assert.match(CSS, /@font-face\{font-family:"Newsreader";font-style:normal;font-weight:200 800;font-display:swap;src:url\(\/media\/newsreader-latin\.[0-9a-f]{8}\.woff2\) format\("woff2"\);unicode-range:U\+0000-00FF/);
+    assert.doesNotMatch(page, /fonts\.googleapis|fonts\.gstatic|https?:\/\/[^"]*\.woff2/, "no typeface from anywhere else");
+    // The palette: Lucy Griffiths' redesign of 9 Oct 2026, on the kit's emblem: a warm ground, white cards, near-black ink,
+    // links in a burnt orange made from the signal orange, which stays for the emblem and accents; the old palettes are gone.
+    assert.match(CSS, /--ground:#F5F4EF;--card:#FFFFFF;--sunk:#F1EFE9;--ink:#1D1E22/);
+    assert.match(CSS, /--link:#9A4410/);
+    assert.match(CSS, /--accent:#FF8A24/);
+    assert.match(CSS, /@media \(prefers-color-scheme:dark\)\{:root\{--ground:#141518;--card:#1D1F23;--sunk:#18191C;--ink:#ECEBE6/);
+    for (const gone of ["#93560A", "#00806B", "#6345C1", "#CC3D17", "#F3F5F4", "#1F1A14", "#F7F8FA", "#242629"]) assert.ok(!CSS.includes(gone), `${gone} is gone`);
     assert.doesNotMatch(CSS, /gradient/, "no gradients");
-    // Interactive targets are 44px, focus is visible, motion is respected.
-    assert.match(CSS, /\.halves \.seg a\{[^}]*min-height:44px/);
+    assert.doesNotMatch(CSS, /\/\*/, "the stylesheet every page carries has no comments in it");
+    // Interactive targets are 44px (chips, pills and table headings at least 32px), focus is visible, motion is respected.
+    assert.match(CSS, /\.primary a\{[^}]*min-height:44px/);
     assert.match(CSS, /\.btn\{[^}]*min-height:44px/);
-    assert.match(CSS, /:focus-visible\{outline:2px solid var\(--ink\);outline-offset:4px\}/);
+    for (const m of CSS.matchAll(/min-height:(\d+)px/g)) assert.ok(Number(m[1]) >= 24, `a target of ${m[1]}px`);
+    for (const rule of CSS.matchAll(/([^{}]*\.btn[^{}]*)\{([^}]*)\}/g)) {
+      const h = rule[2]!.match(/min-height:(\d+)px/);
+      if (h) assert.ok(Number(h[1]) >= 44, `${rule[1]!.trim()}: a button of ${h[1]}px`);
+    }
+    assert.match(CSS, /:focus-visible\{outline:2px solid var\(--link\);outline-offset:3px/);
+    for (const rule of CSS.matchAll(/([^{}]*(?:input|select)[^{}]*)\{([^}]*)\}/g)) assert.doesNotMatch(rule[2]!, /border(?:-color)?:[^;]*var\(--line(?:-2)?\)/, `${rule[1]!.trim()}: a form field's border is the rule colour, which reads at 3:1`);
     assert.match(CSS, /prefers-reduced-motion:reduce/);
+  });
+});
+
+describe("contrast", () => {
+  /** WCAG 2's contrast ratio between two sRGB colours. */
+  const ratio = (a: string, b: string) => {
+    const lum = (hex: string) => {
+      const [r, g, b2] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r! + 0.7152 * g! + 0.0722 * b2!;
+    };
+    const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+    return (x! + 0.05) / (y! + 0.05);
+  };
+
+  it("holds every text colour to 4.5:1 on what it is set on, in both themes", () => {
+    for (const [theme, t] of Object.entries(TOKENS)) {
+      const pairs: Array<[string, string, string]> = [];
+      for (const fg of ["ink", "ink2", "muted", "faint", "link", "link2"] as const) for (const bg of ["ground", "card", "sunk"] as const) pairs.push([`${fg} on ${bg}`, t[fg], t[bg]]);
+      pairs.push(["button text on ink", t.onInk, t.ink], ["green ink on its wash", t.greenInk, t.greenWash], ["amber ink on its wash", t.amberInk, t.amberWash], ["rose ink on its wash", t.roseInk, t.roseWash], ["text on green", t.onGreen, t.green]);
+      for (const [what, fg, bg] of pairs) assert.ok(ratio(fg, bg) >= 4.5, `${theme}: ${what} is ${ratio(fg, bg).toFixed(2)}:1`);
+      // A form field's border, which shows where to type, is held to 3:1 against the card and the ground (WCAG 1.4.11).
+      for (const bg of ["card", "ground"] as const) assert.ok(ratio(t.rule, t[bg]) >= 3, `${theme}: a form border on the ${bg} is ${ratio(t.rule, t[bg]).toFixed(2)}:1`);
+      // The status marks in the drawings are shapes, held to 3:1 against the card they sit on (WCAG 1.4.11).
+      for (const k of ["stEst", "stSup", "stUnc", "stCon", "stRef"] as const) assert.ok(ratio(t[k], t.card) >= 3, `${theme}: ${k} on the card is ${ratio(t[k], t.card).toFixed(2)}:1`);
+    }
   });
 });

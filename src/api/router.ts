@@ -164,7 +164,7 @@ const BASE_SITE_HEADERS: Record<string, string> = {
 const STATIC_PAGE_HEADERS: Record<string, string> = {
   ...BASE_SITE_HEADERS,
   "content-type": "text/html; charset=utf-8",
-  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 };
 
 /** Script-free pages with a form that posts back to this origin; never cached or indexed. */

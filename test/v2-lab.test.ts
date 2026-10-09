@@ -56,9 +56,9 @@ describe("the lab guide", () => {
     assert.match(html, /seven days away/);
     assert.match(html, /PER_RUN = int\(os\.environ\.get\(&quot;PER_RUN&quot;, &quot;6&quot;\)\)/);
     // Both halves of the site point here, and so does the person's page.
-    assert.match(html, /<nav class="sub" aria-label="For people">[^]*?<a href="\/lab" aria-current="page">Lab<\/a>/);
+    assert.match(html, /<nav class="sub" aria-label="In this section">[^]*?<a href="\/lab" aria-current="page">Run a lab<\/a>/, "a tab under How it works");
     const agents = await (await w.site("/agents")).text();
-    assert.match(agents, /<a href="\/lab">Lab<\/a>/);
+    assert.match(agents, /<footer[^]*<a href="\/lab">Run a lab<\/a>/, "every page's footer lists it");
     assert.match(agents, /<a href="\/lab\.md">\/lab\.md<\/a>/);
     const landing = await (await w.site("/")).text();
     assert.match(landing, /<a class="door" href="\/lab"><span class="who">I have a spare GPU<\/span>/);

@@ -135,7 +135,7 @@ describe("the stewardship area", () => {
     // The page says what mode it is in and who is signed in, as the v1 console did ("Operator"): a tag beside the brand, the address, the word.
     assert.match(html, /<span class="tag">Steward<\/span>/);
     assert.match(html, /Signed in as daniel@example\.org · steward mode/);
-    assert.match(html, /<a class="me" href="\/me">Your Ecdysis<\/a>/, "the person's own page is in the top bar");
+    assert.match(html, /<nav class="primary" aria-label="Site">[^]*?<a href="\/me"[^>]*>Your Ecdysis<\/a>/, "the person's own page is in the top bar");
     assert.match(html, /Steward mode: these pages are private to signed-in stewards/);
     assert.match(await (await w.get("/steward/audit", d.session)).text(), /<span class="tag">Steward<\/span>/, "every steward page carries the tag");
     const { PagesHandler: PublicPages } = await import("../src/api/v2/pages.js");

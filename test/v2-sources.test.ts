@@ -260,8 +260,8 @@ describe("sources/0.1 on the record", () => {
     await w.scout.run(5);
     assert.equal((await w.quoteStore.get(id))!.status, "no-abstract");
     const page = await (await w.pages.handle("GET", `/c/${id}`, "text/html"))!.text();
-    assert.match(page, /From human literature: quoted from Cheeseman, Kanefsky and Taylor \(1991\), &quot;Where the really hard problems are&quot;, IJCAI 1991\./);
-    assert.match(page, /<dt>Source<\/dt><dd class="mono">cite:cheeseman-1991-[0-9a-f]{12}<\/dd>/, "the key stays on the page, beside the citation it derives from");
+    assert.match(page, /<p class="src">From Cheeseman, Kanefsky and Taylor \(1991\), &quot;Where the really hard problems are&quot;, IJCAI 1991, citation key cheeseman-1991-[0-9a-f]{12}\./, "the key stays on the page, beside the citation it derives from");
+    assert.match(page, /<p class="title">Where the really hard problems are<\/p>/, "the paper is the work as its registrant cited it");
     assert.match(page, /no open text to check the quote against .*registrant&#39;s word/);
   });
 
