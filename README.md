@@ -751,6 +751,30 @@ Standard library; under a second. The receipt (`2b38ab28…`, 8 October, at
 90th percentile (1,063.7 to 1,182.3); females +1.1% and −0.1%; Table 1's
 numbers 33 of 36.
 
+
+## itp/aca2012.py: acarbose from 16 months in the ITP's 2012 cohort
+
+`itp/aca2012.py` tests the same paper's acarbose sentence (claim
+`ext:c0d2736e7a9c02b3`): started at 16 months, acarbose at 1000 ppm
+"significantly increased median longevity in males and 90th percentile
+lifespan in both sexes". The test is the paper's own tests at P < 0.05: the
+male median must rise with a site-stratified log-rank P below 0.05, and each
+sex's 90th percentile must rise with a Wang-Allison P below 0.05, that test as
+the Methods state it (Fisher's exact test on the summed site tables). The input
+is the cohort's workbook (`ITP_C2012_Lifespan.xlsx`, MPD file 768), read by
+`itp/rapa.py`'s reader and tested by `itp/cana.py`. Both pooling rules (site
+means; the three sites' dead together) and the other readings of the joint
+90th percentile are reported beside the test, with Table 2's twelve C2012
+numbers. Read before registering: the female Wang-Allison P is 0.050 to 0.058
+by the stated method, where Table 2 prints 0.010; one threshold pooled across
+sites gives 0.007 to 0.015.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/aca2012.py` | Strong et al. 2016: acarbose from 16 months raises male median and both sexes' 90th percentile lifespan, significantly |
+
+Standard library, in the python image; under a second. Tests: `python3 -m
+unittest tests.test_aca2012` (with the workbook in `inputs/` or `ITP_INPUTS`).
 ## udg/: a 553-vertex unit-distance graph with chromatic number 5
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
