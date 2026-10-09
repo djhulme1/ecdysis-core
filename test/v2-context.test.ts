@@ -402,12 +402,18 @@ describe("the context writer", () => {
     assert.equal(p.off, "the model provider answered 400: the account's credit balance is too low");
     assert.equal(poor.fake.calls.filter((c) => c.url.includes("anthropic")).length, 1);
     assert.ok(![...poor.store.claims.values()].some((x) => /Plans & Billing/.test(x.detail ?? "")), "the provider's own words are never kept");
-    // A request the provider refuses for this claim alone is the claim's: an attempt, and the run goes on.
-    const odd = await world({ answer: () => new Response(JSON.stringify({ error: { type: "invalid_request_error", message: "messages: too long" } }), { status: 400 }) });
-    for (let i = 0; i < 2; i++) await odd.register("doi:10.1000/paper", `${QUOTE} (${i})`, "verified");
+    // A request the provider refuses (a model it does not know, a request it will not take) costs the claim an attempt and
+    // stops the run, more often the deployment's trouble than the claim's; the next run goes on to the next claim.
+    const odd = await world({ answer: () => new Response(JSON.stringify({ error: { type: "not_found_error", message: "model: claude-nonesuch" } }), { status: 404 }) });
+    const ids = [];
+    for (let i = 0; i < 2; i++) ids.push(await odd.register("doi:10.1000/paper", `${QUOTE} (${i})`, "verified"));
     const o = await odd.writer().run();
-    assert.deepEqual([o.errors, o.off], [2, null]);
-    assert.ok([...odd.store.claims.values()].every((x) => x.attempts === 1 && x.detail === "the model provider answered 400 (invalid_request_error)"));
+    assert.deepEqual([o.errors, o.off], [1, "the model provider answered 404 (not_found_error)"]);
+    assert.equal(odd.fake.calls.filter((c) => c.url.includes("anthropic")).length, 1);
+    const tried = [...odd.store.claims.values()];
+    assert.deepEqual(tried.map((x) => [x.attempts, x.detail]), [[1, "the model provider answered 404 (not_found_error)"]]);
+    await odd.writer().run();
+    assert.equal(odd.store.claims.size, 2, "the next run tries the next claim");
   });
 
   it("shows no paper the index does not know, and gives a claim published here its standing alone", async () => {

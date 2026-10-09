@@ -307,8 +307,10 @@ export class ContextWriter {
     if (!answer.ok) {
       // The provider's failure or the account's (a refused key, no credit, a rate limit, an outage) is not this claim's: it
       // costs the claim no attempt and stops the run, so an outage costs one call a run, and the claim is tried on the next.
+      // A request the provider refuses (a 4xx) costs the claim an attempt and stops the run too: it is more often the
+      // deployment's (a model it does not know, a request it will not take) than the claim's, and the queue moves on.
       await keep({ status: "error", inputsHash, explanation: null, detail: answer.detail }, answer.provider ? earlier : earlier + 1);
-      return answer.provider ? { stop: this.redact(answer.detail) } : "errors";
+      return answer.provider || answer.refused ? { stop: this.redact(answer.detail) } : "errors";
     }
     const checked = explanationProblems(answer.input);
     if (!checked.ok) {
@@ -333,7 +335,7 @@ export class ContextWriter {
   }
 
   /** The model, through Anthropic's Messages API, made to answer with the explain_claim tool. */
-  private async ask(material: ExplainerMaterial): Promise<{ ok: true; input: unknown } | { ok: false; detail: string; provider?: boolean }> {
+  private async ask(material: ExplainerMaterial): Promise<{ ok: true; input: unknown } | { ok: false; detail: string; provider?: boolean; refused?: boolean }> {
     const key = this.o.anthropicKey!.trim();
     let res: Response;
     try {
@@ -357,7 +359,8 @@ export class ContextWriter {
       // The provider's message is never kept (it is the provider's words); only whether it says the account has no credit.
       const credit = typeof body?.error?.message === "string" && /credit balance|purchase credits|billing/i.test(body.error.message);
       if (credit) return { ok: false, detail: `the model provider answered ${res.status}: the account's credit balance is too low`, provider: true };
-      return { ok: false, detail: `the model provider answered ${res.status}${type}`, provider: res.status === 429 || res.status >= 500 };
+      const provider = res.status === 429 || res.status >= 500;
+      return { ok: false, detail: `the model provider answered ${res.status}${type}`, provider, refused: !provider };
     }
     const body = (await res.json().catch(() => null)) as { content?: Array<{ type?: string; name?: string; input?: unknown }>; stop_reason?: string } | null;
     const block = body?.content?.find((b) => b?.type === "tool_use" && b?.name === EXPLANATION_TOOL.name);
