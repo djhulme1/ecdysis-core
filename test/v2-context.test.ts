@@ -132,12 +132,12 @@ describe("the paper's record as OpenAlex has it", () => {
 
 /** OpenAlex, the indexes and the model, as fakes; every request is recorded with its headers and body. */
 function fakeWorld(model: { answer: (body: Record<string, unknown>) => Response }) {
-  const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
+  const calls: Array<{ url: string; headers: Record<string, string>; body: string; signal: boolean }> = [];
   const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const headers = Object.fromEntries(Object.entries((init?.headers ?? {}) as Record<string, string>).map(([k, v]) => [k.toLowerCase(), String(v)]));
     const body = typeof init?.body === "string" ? init.body : "";
-    calls.push({ url, headers, body });
+    calls.push({ url, headers, body, signal: init?.signal instanceof AbortSignal });
     if (url.startsWith("https://api.anthropic.com/v1/messages")) return model.answer(JSON.parse(body) as Record<string, unknown>);
     if (url.startsWith("https://api.openalex.org/works/doi:10.1000%2Fpaper")) {
       return new Response(JSON.stringify({
@@ -171,9 +171,10 @@ async function world(o: { answer?: (body: Record<string, unknown>) => Response; 
   const quotes = new MemoryQuoteCheckStore();
   const fake = fakeWorld({ answer: o.answer ?? (() => toolAnswer(GOOD)) });
   const ledger = new MemoryLedger();
-  const writer = (over: { model?: string; key?: string | null } = {}) => new ContextWriter({
+  const writer = (over: { model?: string; key?: string | null; budgetMs?: number } = {}) => new ContextWriter({
     store, v2: svc, quotes, fetchImpl: fake.fetch, now, pause: async () => {}, anthropicKey: over.key === undefined ? (o.key === undefined ? KEY : o.key) : over.key,
     model: over.model ?? o.model ?? null, paused: o.paused ?? false, dailyCap: o.cap ?? 1000, ledger, screeners: o.screeners ?? [],
+    ...(over.budgetMs === undefined ? {} : { budgetMs: over.budgetMs }),
   });
   const pages = new PagesHandler(svc, { host: "api.ecdysis.me", logPublicKey: logKey.publicKey, quotes, context: store });
   const kp = await generateKeyPair();
@@ -196,7 +197,8 @@ describe("the context writer", () => {
     const id = await w.register("doi:10.1000/paper", QUOTE, "verified", HOSTILE_TEST);
     const before = (await w.svc.scores()).claims.get(id)!;
     const out = await w.writer().run();
-    assert.deepEqual(out, { papersRead: 1, papersUnresolved: 0, written: 1, refused: 0, errors: 0, capped: false, off: null });
+    assert.deepEqual(out, { papersRead: 1, papersUnresolved: 0, written: 1, refused: 0, errors: 0, capped: false, outOfTime: false, off: null });
+    assert.ok(w.fake.calls.length > 0 && w.fake.calls.every((c) => c.signal), "every request it makes can time out, so none holds the cron");
     const ask = w.fake.calls.filter((c) => c.url.startsWith("https://api.anthropic.com/"));
     assert.equal(ask.length, 1);
     const body = JSON.parse(ask[0]!.body) as { model: string; system: string; tool_choice: { type: string; name: string }; messages: Array<{ content: string }> };
@@ -218,7 +220,7 @@ describe("the context writer", () => {
     const after = (await w.svc.scores()).claims.get(id)!;
     assert.deepEqual([after.credence, after.status, after.stakes], [before.credence, before.status, before.stakes]);
     // Written once: the next run has nothing to do.
-    assert.deepEqual(await w.writer().run(), { papersRead: 0, papersUnresolved: 0, written: 0, refused: 0, errors: 0, capped: false, off: null });
+    assert.deepEqual(await w.writer().run(), { papersRead: 0, papersUnresolved: 0, written: 0, refused: 0, errors: 0, capped: false, outOfTime: false, off: null });
     // A new model writes it again; so would a new version of the instructions.
     assert.equal((await w.writer({ model: "claude-haiku-5-5" }).run()).written, 1);
     assert.equal((await w.store.getClaim(id))!.model, "claude-haiku-5-5");
@@ -262,6 +264,18 @@ describe("the context writer", () => {
     const page = await (await w.pages.handle("GET", `/c/${id}`, "text/html"))!.text();
     assert.match(page, /No plain-English summary of this claim has been written yet\. The paper's details are OpenAlex's\./);
     assert.match(page, /<cite>Shifting attention to accuracy<\/cite>/);
+  });
+
+  it("starts nothing new once a run's time budget is spent, and the next run carries on", async () => {
+    const w = await world();
+    const id = await w.register("doi:10.1000/paper", QUOTE, "verified");
+    const out = await w.writer({ budgetMs: 0 }).run();
+    assert.deepEqual(out, { papersRead: 0, papersUnresolved: 0, written: 0, refused: 0, errors: 0, capped: false, outOfTime: true, off: null });
+    assert.equal(w.fake.calls.length, 0, "not one request once the budget is spent");
+    assert.equal(await w.ledger.get(), null, "nor a model call counted against the day");
+    const next = await w.writer().run();
+    assert.deepEqual([next.papersRead, next.written, next.outOfTime], [1, 1, false]);
+    assert.equal((await w.store.getClaim(id))?.status, "written");
   });
 
   it("paused, writes nothing; and the daily cap holds across runs until the day turns", async () => {

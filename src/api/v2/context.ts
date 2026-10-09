@@ -40,6 +40,14 @@ export const DEFAULT_CONTEXT_DAILY_CAP = 1000;
 export const RECORD_REFRESH_MS = 180 * 24 * 3600 * 1000;
 const RETRY_MS = 6 * 3600 * 1000;
 const MAX_ATTEMPTS = 4;
+/**
+ * The wall time one run may spend before it starts no new paper or summary. The cron fires every fifteen minutes and its
+ * other work takes a few; five minutes here keeps a run clear of the next.
+ */
+export const CONTEXT_RUN_BUDGET_MS = 5 * 60 * 1000;
+/** How long an index may take to answer, and the model: a request that hangs never holds the cron. */
+const INDEX_TIMEOUT_MS = 20_000;
+const MODEL_TIMEOUT_MS = 90_000;
 /** The longest abstract given to the model; longer ones are cut at a sentence end (only the model sees it). */
 const ABSTRACT_MAX = 6000;
 /** Only these quote checks let a summary be written: found in the source, or not checkable against an abstract at all. */
@@ -121,6 +129,8 @@ export interface ContextWriterOptions {
   ledger?: DailyLedger;
   /** The record's own screening (Workers AI's classifier and the deployment's rules): a summary that does not pass is not kept. */
   screeners?: Screener[];
+  /** The wall time a run may spend before it starts nothing new (CONTEXT_RUN_BUDGET_MS unless given). */
+  budgetMs?: number;
 }
 
 export interface ContextRunResult {
@@ -131,6 +141,8 @@ export interface ContextRunResult {
   errors: number;
   /** The daily cap stopped the run. */
   capped: boolean;
+  /** The run's time budget ran out with work still due: the next run carries on. */
+  outOfTime: boolean;
   /** Why nothing was written, when nothing could be: "no key", "paused", or the provider refusing the key. */
   off: string | null;
 }
@@ -168,11 +180,14 @@ export class ContextWriter {
 
   /** One run: up to `papers` papers' records read, then up to `writes` summaries written, highest stakes first. */
   async run(limits: { papers?: number; writes?: number } = {}): Promise<ContextRunResult> {
-    const out: ContextRunResult = { papersRead: 0, papersUnresolved: 0, written: 0, refused: 0, errors: 0, capped: false, off: null };
+    const out: ContextRunResult = { papersRead: 0, papersUnresolved: 0, written: 0, refused: 0, errors: 0, capped: false, outOfTime: false, off: null };
     const r = await this.o.v2.record();
     const s = await this.o.v2.scores();
     const now = this.now();
     const t = now.getTime();
+    // A run starts nothing new once its budget is spent, so a slow index or model never carries it into the next run.
+    const deadline = t + Math.max(0, this.o.budgetMs ?? CONTEXT_RUN_BUDGET_MS);
+    const spent = () => this.now().getTime() >= deadline;
     const claims = [...r.external.entries()]
       .filter(([id]) => !isHeld(r, id))
       .map(([id, x]) => ({ id, x, stakes: s.claims.get(id)?.stakes ?? 0 }))
@@ -186,6 +201,7 @@ export class ContextWriter {
       const row = sources.get(key);
       const due = !row || (row.status === "error" ? row.attempts < MAX_ATTEMPTS && Date.parse(row.readAt) < t - RETRY_MS : Date.parse(row.readAt) < t - RECORD_REFRESH_MS);
       if (!due) continue;
+      if (spent()) { out.outOfTime = true; break; }
       if (!first) await this.pause(1000);
       first = false;
       const got = await this.readPaper(c.x.source).catch((e) => ({ status: "error" as const, record: null, detail: String((e as Error)?.message ?? e) }));
@@ -218,6 +234,7 @@ export class ContextWriter {
       const q = checks.get(c.id);
       if (!q || !EXPLAINABLE.has(q)) continue;
       if (used >= cap) { out.capped = true; break; }
+      if (spent()) { out.outOfTime = true; break; }
       if (!first) await this.pause(1000);
       first = false;
       writes++;
@@ -294,6 +311,7 @@ export class ContextWriter {
     try {
       res = await this.fetchImpl("https://api.anthropic.com/v1/messages", {
         method: "POST",
+        signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
         headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
           model: this.model, max_tokens: 1500, system: EXPLAINER_SYSTEM,
@@ -327,7 +345,7 @@ export class ContextWriter {
     const mailto = encodeURIComponent(this.o.contact ?? "replies@ecdysis.me");
     const k = this.o.openAlexKey?.trim();
     const res = await this.fetchImpl(`https://api.openalex.org/works/${path}?select=id,display_name,title,publication_year,type,authorships,primary_location,keywords,primary_topic,cited_by_count&mailto=${mailto}`,
-      { headers: { "user-agent": this.ua(), accept: "application/json", ...(k ? { authorization: `Bearer ${k}` } : {}) } });
+      { headers: { "user-agent": this.ua(), accept: "application/json", ...(k ? { authorization: `Bearer ${k}` } : {}) }, signal: AbortSignal.timeout(INDEX_TIMEOUT_MS) });
     if (res.status === 404) return { status: "unresolved", record: null, detail: "OpenAlex knows no such work" };
     if (!res.ok) return { status: "error", record: null, detail: `OpenAlex ${res.status}` };
     const w = (await res.json().catch(() => null)) as OpenAlexWork | null;

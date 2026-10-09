@@ -513,8 +513,13 @@ export default {
       return;
     }
     const store = new D1Store(env.DB);
-    ctx.waitUntil((async () => {
+    // The run is the handler's own promise, awaited, as well as handed to waitUntil. Work given to waitUntil alone is allowed
+    // only about thirty seconds once the handler has returned (Cloudflare's limits), and on 9 October 2026 the context
+    // writer, which runs last, read a paper or two each run and then stopped, the scouts' polite pauses having used the time;
+    // the promise a scheduled handler returns is awaited for up to fifteen minutes. The writers' budgets keep a run inside it.
+    const run = (async () => {
       const at = new Date().toISOString();
+      const started = Date.now();
       try {
         const rec = recordFrom(env, store);
         // Each runs on its own: an email that failed never stops an agent being woken, nor a lapse being recorded.
@@ -530,7 +535,7 @@ export default {
         // stakes/0.1: a few registered sources' reach read from OpenAlex or Semantic Scholar and logged (five a run, a second apart).
         const staked = await rec.stakes.run(5).catch((e) => { console.error("stakes scout failed", e); return { observed: 0, unresolved: 0, errors: 0, fields: 0, candidates: 0 }; });
         // context/0.1: a dozen papers' records and a dozen summaries a run, highest stakes first, under the daily cap.
-        const explained = await rec.context.run({ papers: 12, writes: 12 }).catch((e) => { console.error("context writer failed", e); return { papersRead: 0, papersUnresolved: 0, written: 0, refused: 0, errors: 1, capped: false, off: "failed" }; });
+        const explained = await rec.context.run({ papers: 12, writes: 12 }).catch((e) => { console.error("context writer failed", e); return { papersRead: 0, papersUnresolved: 0, written: 0, refused: 0, errors: 1, capped: false, outOfTime: false, off: "failed" }; });
         if (rang.rung || rang.failed || swept.lapsed.length || swept.sealed.length) console.log("cron", JSON.stringify({ doorbells: rang, swept }));
         await store.putOpsState("cron:last", {
           ok: true,
@@ -540,13 +545,16 @@ export default {
           quotesChecked: quoted.checked, quotesVerified: quoted.verified, quotesMismatched: quoted.mismatched,
           sourcesObserved: staked.observed, sourcesUnresolved: staked.unresolved, sourcesErrors: staked.errors, fieldsObserved: staked.fields, candidatesRead: staked.candidates,
           papersRead: explained.papersRead, papersUnresolved: explained.papersUnresolved, summariesWritten: explained.written, summariesRefused: explained.refused, contextErrors: explained.errors,
-          ...(explained.capped ? { contextCapped: true } : {}), ...(explained.off ? { contextOff: explained.off } : {}),
+          ...(explained.capped ? { contextCapped: true } : {}), ...(explained.outOfTime ? { contextOutOfTime: true } : {}), ...(explained.off ? { contextOff: explained.off } : {}),
+          seconds: Math.round((Date.now() - started) / 1000),
         }, at);
       } catch (e) {
         console.error("cron failed", e);
-        await store.putOpsState("cron:last", { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300) }, at).catch(() => {});
+        await store.putOpsState("cron:last", { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300), seconds: Math.round((Date.now() - started) / 1000) }, at).catch(() => {});
       }
-    })());
+    })();
+    ctx.waitUntil(run);
+    await run;
   },
 
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
