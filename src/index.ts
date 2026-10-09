@@ -25,6 +25,8 @@ import { QuoteScout } from "./api/v2/quotes.js";
 import { StakesScout, type CandidateSet, type CandidateStore } from "./api/v2/stakes-scout.js";
 import type { Json } from "./core/canonical.js";
 import { D1QuoteCheckStore } from "./store/v2/quotes-d1.js";
+import { ContextWriter, DEFAULT_CONTEXT_DAILY_CAP, DEFAULT_CONTEXT_MODEL, type DailyLedger } from "./api/v2/context.js";
+import { D1ContextStore } from "./store/v2/context-d1.js";
 import { sha256Hex } from "./api/access.js";
 import { D1OAuthStore } from "./store/v2/oauth-d1.js";
 import { TransparencyLog, type SignedTreeHead } from "./core/log.js";
@@ -83,6 +85,18 @@ export interface Env {
   HERALD_REPLY_TO?: string;
   /** stakes/0.1: an OpenAlex API key (free), so the stakes scout has its own daily budget. A secret, installed by the deploy. */
   OPENALEX_API_KEY?: string;
+  /**
+   * context/0.1: the model provider's key for the context writer ("What this means" on each claim page). A secret the deploy
+   * installs from the GitHub secret of the same name; no session ever sees it. Unset: no summary is written, and the papers'
+   * records are still read.
+   */
+  ANTHROPIC_API_KEY?: string;
+  /** context/0.1: the model that writes the summaries (Anthropic's id); unset, DEFAULT_CONTEXT_MODEL. */
+  CONTEXT_MODEL?: string;
+  /** context/0.1: "1" stops new summaries (the ones written stay shown). */
+  CONTEXT_PAUSED?: string;
+  /** context/0.1: model calls allowed in a UTC day, whatever any run asks for. */
+  CONTEXT_DAILY_CAP?: string;
   /** Where a new complaint is announced (a comma-separated list of the stewards' own addresses); unset, nobody is emailed. */
   ISSUE_ALERT_TO?: string;
   /** From-address for email doorbells; every ring and confirmation comes from it, so filters can name it. */
@@ -234,6 +248,22 @@ const emailCap = (env: Pick<Env, "EMAIL_DAILY_CAP">) => {
   return Number.isInteger(n) && n > 0 ? n : EMAIL_DAILY_CAP_DEFAULT;
 };
 const emailPaused = (env: Pick<Env, "HERALD_PAUSED" | "READ_ONLY">) => env.HERALD_PAUSED === "1" || readOnly(env);
+const contextCap = (env: Pick<Env, "CONTEXT_DAILY_CAP">) => {
+  const n = Number(env.CONTEXT_DAILY_CAP);
+  return Number.isInteger(n) && n >= 0 && (env.CONTEXT_DAILY_CAP ?? "").trim() !== "" ? n : DEFAULT_CONTEXT_DAILY_CAP;
+};
+const contextPaused = (env: Pick<Env, "CONTEXT_PAUSED" | "READ_ONLY">) => env.CONTEXT_PAUSED === "1" || readOnly(env);
+
+/** context/0.1: the writer's model calls today, in ops state, so the cap holds across runs and isolates. */
+export function contextLedgerFrom(store: Pick<D1Store, "getOpsState" | "putOpsState">): DailyLedger {
+  return {
+    get: async () => {
+      const v = (await store.getOpsState("context:day"))?.value as { day?: unknown; count?: unknown } | undefined;
+      return v && typeof v.day === "string" && typeof v.count === "number" ? { day: v.day, count: v.count } : null;
+    },
+    put: async (v) => { await store.putOpsState("context:day", v as unknown as Json, new Date().toISOString()); },
+  };
+}
 const csprng = () => crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32;
 const FROM = (env: Pick<Env, "ACCOUNTS_FROM">) => env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>";
 const REPLY_TO = (env: Pick<Env, "HERALD_REPLY_TO">) => env.HERALD_REPLY_TO || "replies@ecdysis.me";
@@ -284,10 +314,13 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
   const log = new TransparencyLog(store);
   const logApi = logApiFrom(env, store, keysAgree);
   const candidates = candidatesFrom(store);
+  // context/0.1: the papers' records and the claims' summaries, off the log, shown on claim pages and served with each claim.
+  const contextStore = new D1ContextStore(env.DB);
   const v2 = new V2Service({
     log,
     cache: V2_CACHE,
     candidates,
+    context: contextStore,
     store: new D1V2Store(env.DB, store),
     // Seeds are sealed with the log key only when it is the other half of the pin (writes are refused otherwise anyway).
     logPrivateKey: keysAgree ? env.STH_SIGNING_KEY_PKCS8 ?? null : null,
@@ -327,8 +360,14 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
   const quotes = new QuoteScout({ store: quoteStore, v2, issues, contact: REPLY_TO(env), openAlexKey: env.OPENALEX_API_KEY ?? null });
   // The stakes scout (stakes/0.1): on the cron, a few registered sources' reach is read from the public citation graph and logged.
   const stakes = new StakesScout({ v2, log, candidates, contact: REPLY_TO(env), apiKey: env.OPENALEX_API_KEY ?? null });
+  // context/0.1: on the cron, the papers' records (OpenAlex) and, with the provider's key, each claim's plain-English summary.
+  const context = new ContextWriter({
+    store: contextStore, v2, quotes: quoteStore, contact: REPLY_TO(env), openAlexKey: env.OPENALEX_API_KEY ?? null,
+    anthropicKey: env.ANTHROPIC_API_KEY ?? null, model: env.CONTEXT_MODEL ?? null, paused: contextPaused(env), dailyCap: contextCap(env),
+    ledger: contextLedgerFrom(store), screeners: screenersFrom(env),
+  });
   return {
-    v2, logApi, notifier, quotes, stakes, governance, issues,
+    v2, logApi, notifier, quotes, stakes, context, governance, issues,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },
     complaints: new ComplaintsHandler({ issues, readOnly: frozen }),
     me: new MeHandler({ accounts, v2, oauth, governance, issues, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
@@ -352,7 +391,7 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
       },
     }),
     pages: new PagesHandler(v2, {
-      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null, quotes: quoteStore, log: logApi,
+      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null, quotes: quoteStore, context: contextStore, log: logApi,
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
       ...(waitUntil ? { waitUntil } : {}),
     }),
@@ -446,6 +485,9 @@ function switchesFrom(env: Env, access: AccessConfig, keysAgree = true): HealthS
     { name: "Email sending", ...on(!emailPaused(env), "on", "paused", "HERALD_PAUSED (read-only mode also pauses it).") },
     { name: "Shared daily email cap", ok: true, value: String(emailCap(env)), note: "EMAIL_DAILY_CAP: set it to your provider plan's daily quota." },
     { name: "OpenAlex key (stakes and quote scouts)", ...on(!!env.OPENALEX_API_KEY, "installed", "missing: the scouts share OpenAlex's anonymous budget", "OPENALEX_API_KEY, installed by the deploy from the GitHub secret.") },
+    { name: "Context writer's key (What this means)", ...on(!!env.ANTHROPIC_API_KEY, "installed", "missing: no summaries are written; the papers' records still are", "ANTHROPIC_API_KEY, installed by the deploy from the GitHub secret.") },
+    { name: "Context writer", ...on(!contextPaused(env), `on: ${(env.CONTEXT_MODEL ?? "").trim() || DEFAULT_CONTEXT_MODEL}`, "paused", "CONTEXT_PAUSED stops new summaries; CONTEXT_MODEL names the model.") },
+    { name: "Context writer's daily cap", ok: true, value: String(contextCap(env)), note: "CONTEXT_DAILY_CAP: model calls allowed in a UTC day." },
     {
       name: "Doorbell token key",
       ok: env.DOORBELL_KEY ? bellKeyReadable(env.DOORBELL_KEY) : !!env.STH_SIGNING_KEY_PKCS8,
@@ -487,6 +529,8 @@ export default {
         const quoted = await rec.quotes.run(6).catch((e) => { console.error("quote scout failed", e); return { checked: 0, verified: 0, mismatched: 0, unresolvable: 0, errors: 0 }; });
         // stakes/0.1: a few registered sources' reach read from OpenAlex or Semantic Scholar and logged (five a run, a second apart).
         const staked = await rec.stakes.run(5).catch((e) => { console.error("stakes scout failed", e); return { observed: 0, unresolved: 0, errors: 0, fields: 0, candidates: 0 }; });
+        // context/0.1: a dozen papers' records and a dozen summaries a run, highest stakes first, under the daily cap.
+        const explained = await rec.context.run({ papers: 12, writes: 12 }).catch((e) => { console.error("context writer failed", e); return { papersRead: 0, papersUnresolved: 0, written: 0, refused: 0, errors: 1, capped: false, off: "failed" }; });
         if (rang.rung || rang.failed || swept.lapsed.length || swept.sealed.length) console.log("cron", JSON.stringify({ doorbells: rang, swept }));
         await store.putOpsState("cron:last", {
           ok: true,
@@ -495,6 +539,8 @@ export default {
           lapsed: swept.lapsed.length, sealed: swept.sealed.length, alertsSent: alerted.sent, digestsSent: digested.sent,
           quotesChecked: quoted.checked, quotesVerified: quoted.verified, quotesMismatched: quoted.mismatched,
           sourcesObserved: staked.observed, sourcesUnresolved: staked.unresolved, sourcesErrors: staked.errors, fieldsObserved: staked.fields, candidatesRead: staked.candidates,
+          papersRead: explained.papersRead, papersUnresolved: explained.papersUnresolved, summariesWritten: explained.written, summariesRefused: explained.refused, contextErrors: explained.errors,
+          ...(explained.capped ? { contextCapped: true } : {}), ...(explained.off ? { contextOff: explained.off } : {}),
         }, at);
       } catch (e) {
         console.error("cron failed", e);

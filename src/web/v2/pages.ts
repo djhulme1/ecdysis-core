@@ -21,6 +21,7 @@ import { credenceBucketsOf, MOCK_CHIP, MOCK_UNTIL_CLAIMS, mockFigures, observato
 import { claimGraph, NETWORK_MAX, type GroupBy, type LinesBy, type SizeBy } from "./network.js";
 import { applyQuery, catalogue, queryForm, queryHref, simpleTable, tableQuery, type FilterSpec, type QuerySpec, type TableQuery } from "./table.js";
 import { credenceStrip, neighbourhood, rulerLarge, rulerMini, type NeighbourClaim } from "./plates.js";
+import { CONTEXT_NOTE, fieldPath, topicWords, type Explanation, type PaperRecord } from "../../core/v2/context.js";
 
 /** Cite and share: a citation and BibTeX (claims published here), the share box, and the badge to embed. Every value is escaped. */
 function promoteBlock(o: { citation?: string; bibtex?: string; share: ShareData; badge: string; page: string; what: string }): string {
@@ -378,6 +379,10 @@ export interface ClaimViewV2 {
   blocked?: BlockedViewV2 | null;
   /** stakes/0.1: what the scout observed about the source (null: a claim published here, or not yet observed). */
   observed?: { provider: string; citedBy: number; venueCitedness: number | null; year: number | null; field: string | null; observedAt: string; unresolved: boolean } | null;
+  /** context/0.1: what the claim means, for a reader who is not a specialist: the paper's record as OpenAlex has it, and the machine-written summary, each when there is one. */
+  context?: { paper: PaperRecord | null; explanation: Explanation | null } | null;
+  /** context/0.1: where it stands, in plain sentences computed from the record (core/v2/context.ts standingWords). */
+  standing?: string[];
   /** The content id of a claim published here (its signed envelope's hash), and when it entered the record. */
   cid?: string | null;
   at: string | null;
@@ -427,6 +432,62 @@ function neighbour(l: LinkedClaimV2, side: "rests" | "rested"): NeighbourClaim {
   return { href: claimHref(l.id), text: l.text ?? l.id, status: l.status ?? "unchecked", external: l.external, rel };
 }
 
+/** Names as a reader would say them: "A, B and C", or "A, B, C and 4 others". */
+function authorWords(p: PaperRecord): string {
+  const a = p.authors;
+  const total = Math.max(p.authorCount, a.length);
+  if (!a.length) return "";
+  if (total <= 3) return a.length === 1 ? a[0]! : `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`;
+  const more = total - 3;
+  return `${a.slice(0, 3).join(", ")} and ${more} other${more === 1 ? "" : "s"}`;
+}
+
+/** The writer of a summary, as the note under it names it. */
+function writerWords(model: string): string {
+  return /^claude/i.test(model) ? `Claude (${model})` : model;
+}
+
+/** Where an abstract was read, in a reader's words (the quote scout's indexes). */
+const ABSTRACT_FROM: Record<string, string> = { arxiv: "arXiv", crossref: "the publisher's record at Crossref", europepmc: "PubMed (Europe PMC)", openalex: "OpenAlex", openreview: "OpenReview", proceedings: "the proceedings page" };
+
+/**
+ * context/0.1: "What this means", near the top of a claim's page. The paper (OpenAlex's record: title, authors, venue, year,
+ * citations, topic, keywords), what the claim means and what the paper found (machine-written from the paper's abstract,
+ * labelled as such), its terms, and where it stands in plain words (computed from the record, so never stale). Every value
+ * is escaped. A claim published here has no paper, so it shows its standing alone.
+ */
+export function meaningSection(c: Pick<ClaimViewV2, "external" | "context" | "standing" | "observed">): string {
+  const paper = c.context?.paper ?? null;
+  const ex = c.context?.explanation ?? null;
+  const standing = c.standing ?? [];
+  if (!c.external) {
+    return standing.length ? `<section class="gloss" aria-labelledby="meaning"><h2 id="meaning">Where it stands, in plain words</h2><p class="standing">${esc(standing.join(" "))}</p></section>` : "";
+  }
+  const about: string[] = [];
+  if (paper && (paper.title || paper.venue)) {
+    const who = authorWords(paper);
+    const where = [paper.venue, paper.year ? String(paper.year) : ""].filter(Boolean).join(", ");
+    about.push(`<dt>Paper</dt><dd>${paper.title ? `<cite>${esc(paper.title)}</cite>` : ""}${who ? `${paper.title ? ", " : ""}${esc(who)}` : ""}${where ? ` (${esc(where)})` : ""}</dd>`);
+  }
+  const o = c.observed ?? null;
+  if (o && !o.unresolved) about.push(`<dt>Cited</dt><dd>${o.citedBy.toLocaleString("en-GB")} time${o.citedBy === 1 ? "" : "s"} <span class="small">(${o.provider === "openalex" ? "OpenAlex" : o.provider === "semanticscholar" ? "Semantic Scholar" : "Crossref"}, ${esc(shortDate(o.observedAt))})</span></dd>`);
+  else if (paper && paper.citedBy !== null) about.push(`<dt>Cited</dt><dd>${paper.citedBy.toLocaleString("en-GB")} time${paper.citedBy === 1 ? "" : "s"} <span class="small">(OpenAlex, ${esc(shortDate(paper.readAt))})</span></dd>`);
+  const topic = topicWords(paper?.topic ?? null);
+  if (topic) about.push(`<dt>Topic</dt><dd>${esc(topic)}</dd>`);
+  if (paper?.keywords.length) about.push(`<dt>Keywords</dt><dd>${paper.keywords.map((k) => esc(k)).join(", ")}</dd>`);
+  const parts = [
+    about.length ? `<dl class="about">${about.join("")}</dl>` : "",
+    ex ? `<p class="gist">${esc(ex.meaning)}</p>` : "",
+    ex?.findings.length ? `<h3>What the paper found</h3><ul>${ex.findings.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : "",
+    ex?.terms.length ? `<h3>Terms</h3><dl class="terms">${ex.terms.map((t) => `<dt>${esc(t.term)}</dt><dd>${esc(t.means)}</dd>`).join("")}</dl>` : "",
+    standing.length ? `<h3>Where it stands on Ecdysis</h3><p class="standing">${esc(standing.join(" "))}</p>` : "",
+    ex
+      ? `<p class="who">Written by ${esc(writerWords(ex.model))} on ${esc(shortDate(ex.writtenAt))} from ${ex.basis === "abstract" ? `the paper's abstract (as ${esc(ABSTRACT_FROM[ex.abstractFrom ?? ""] ?? "its index")} publishes it) and its OpenAlex record` : "the quoted sentence and the paper's title and record: no abstract was open to read"}. ${esc(CONTEXT_NOTE)} If it misreads the paper, <a href="/complaints">tell the stewards</a>.</p>`
+      : `<p class="who">No plain-English summary of this claim has been written yet.${paper ? " The paper's details are OpenAlex's." : ""} Where it stands is computed from the record.</p>`,
+  ];
+  return `<section class="gloss" aria-labelledby="meaning"><h2 id="meaning">What this means</h2>${parts.join("")}</section>`;
+}
+
 export function claimPageV2(c: ClaimViewV2): string {
   const s = c.score;
   const conceptual = s.kind === "conceptual";
@@ -446,6 +507,7 @@ export function claimPageV2(c: ClaimViewV2): string {
   const head = `<p class="crumbs"><a href="/claims">Claims</a> › <span class="mono">${esc(c.ref)}</span></p>
 <h1 class="claim-h1${c.text.length > 180 ? " longest" : c.text.length > 100 ? " long" : ""}">${esc(c.text)}</h1>
 ${origin}
+${meaningSection(c)}
 <div class="test"><b>What would refute it</b><p>${esc(c.test)}</p></div>
 ${amended}${s.reproduced ? `<p class="small">A matched re-run shows its author reported honestly.</p>` : ""}${c.anchor !== null ? `<p class="small"><b>A canary, revealed:</b> known to ${c.anchor ? "hold" : "fail"}.</p>` : ""}
 ${!conceptual && (c.scope || c.source) ? testFacts(c) : ""}`;
@@ -458,7 +520,7 @@ ${rulerLarge({ credence: s.credence, prior: s.prior, bar: s.threshold, status: s
 <dt>Use</dt><dd>${r2(s.use)}</dd>
 <dt>Dispute</dt><dd>${r2(s.dispute)}</dd>
 <dt>Kind</dt><dd>${conceptual ? "conceptual: checked by argument" : "empirical: checked by receipts"}</dd>
-${c.field ? `<dt>Field</dt><dd>${esc(FIELD_WORDS(c.field))}</dd>` : ""}
+${c.field || c.context?.paper?.topic?.field ? `<dt>Field</dt><dd>${esc(fieldPath(c.context?.paper?.topic ?? null, c.field ? FIELD_WORDS(c.field) : null) ?? "")}</dd>` : ""}
 ${c.external && c.source ? `<dt>Source</dt><dd class="mono">${esc(c.source)}</dd>` : ""}
 ${c.external && c.registrant ? `<dt>Registered</dt><dd>by ${c.registrant.handle ? `<a href="/a/${esc(c.registrant.handle)}">${esc(c.registrant.handle)}</a>` : "a person"}, ${esc(shortDate(c.registrant.at))}</dd>` : ""}
 ${!c.external && c.author ? `<dt>Author</dt><dd><a href="/a/${esc(c.author.handle)}">${esc(c.author.handle)}</a> (${esc(c.author.tier)})</dd>` : ""}

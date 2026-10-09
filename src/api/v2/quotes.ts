@@ -136,7 +136,8 @@ export class QuoteScout {
     const at = this.now().toISOString();
     const base = { claim, checkedAt: at, attempts };
     try {
-      const got = await this.fetchSource(source);
+      // Called through this.fetchImpl, exactly as before readSource was shared (the fetch-binding test pins that behaviour).
+      const got = await readSource(source, { fetchImpl: (input, init) => this.fetchImpl(input, init), contact: this.o.contact, openAlexKey: this.o.openAlexKey });
       if (!got.ok) return { ...base, status: got.status, where: null, nearest: null, similarity: null, detail: got.detail };
       // sources/0.1 rule 4: a work named in words whose title the index contradicts is another work.
       if (work?.title && got.title) {
@@ -161,116 +162,136 @@ export class QuoteScout {
       return { ...base, status: "error", where: null, nearest: null, similarity: null, detail: String((e as Error)?.message ?? e).slice(0, 200) };
     }
   }
+}
 
-  private async fetchSource(source: string): Promise<{ ok: true; kind: QuoteIndex; abstract: string | null; title: string | null; detail?: string } | { ok: false; status: "unresolvable" | "error"; detail: string }> {
-    const ua = `ecdysis-quote-scout/0.2 (https://ecdysis.me; mailto:${this.o.contact ?? "replies@ecdysis.me"})`;
-    const parsed = parseSource(source);
-    if (!parsed.ok) return { ok: false, status: "unresolvable", detail: `not a source in sources/0.1's spelling: ${parsed.error}`.slice(0, 200) };
-    const { scheme, id } = parsed;
-    const get = (url: string, accept: string, extra: Record<string, string> = {}) => this.fetchImpl(url, { headers: { "user-agent": ua, accept, ...extra } });
-    const page = async (url: string, abstractRe: RegExp, titleRe: RegExp | null): Promise<{ ok: true; kind: QuoteIndex; abstract: string | null; title: string | null } | { ok: false; status: "unresolvable" | "error"; detail: string }> => {
-      const res = await get(url, "text/html");
-      if (res.status === 404) return { ok: false, status: "unresolvable", detail: `the proceedings page is not there (${url.slice(0, 120)})` };
-      if (!res.ok) return { ok: false, status: res.status >= 500 ? "error" : "unresolvable", detail: `the proceedings page answered ${res.status}` };
-      const html = await res.text();
-      const a = html.match(abstractRe)?.[1];
-      const t = metaContent(html, "citation_title") ?? (titleRe ? html.match(titleRe)?.[1] ?? null : null);
-      return { ok: true, kind: "proceedings", abstract: a ? stripTags(a) || null : null, title: t ? stripTags(t) || null : null };
-    };
-    switch (scheme) {
-      case "arxiv": {
-        const res = await get(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}&max_results=1`, "application/atom+xml");
-        if (!res.ok) return res.status >= 500 ? { ok: false, status: "error", detail: `arXiv ${res.status}` } : { ok: false, status: "unresolvable", detail: `arXiv ${res.status}` };
-        const xml = await res.text();
-        const entry = xml.match(/<entry>([\s\S]*?)<\/entry>/)?.[1];
-        if (!entry) return { ok: false, status: "unresolvable", detail: "arXiv returned no entry for that id" };
-        const title = tag(entry, "title");
-        const summary = tag(entry, "summary");
-        // A malformed id comes back as an entry titled "Error" whose summary says so; an unknown id as a feed with no entry.
-        if (!summary || /^Error$/i.test(title ?? "")) return { ok: false, status: "unresolvable", detail: summary ? `arXiv: ${summary.slice(0, 120)}` : "arXiv knows no such paper" };
-        return { ok: true, kind: "arxiv", abstract: summary, title };
-      }
-      case "doi": {
-        const res = await get(`https://api.crossref.org/works/${encodeURIComponent(id)}`, "application/json");
-        if (res.status === 404) return { ok: false, status: "unresolvable", detail: "Crossref knows no such DOI" };
-        if (!res.ok) return { ok: false, status: "error", detail: `Crossref ${res.status}` };
-        const body = (await res.json().catch(() => null)) as { message?: { abstract?: string; title?: string[] } } | null;
-        if (!body?.message) return { ok: false, status: "error", detail: "Crossref answered without a work" };
-        const title = body.message.title?.[0] ? stripTags(body.message.title[0]) : null;
-        if (body.message.abstract) return { ok: true, kind: "crossref", abstract: stripTags(body.message.abstract), title };
-        // No abstract deposited with Crossref: Europe PMC's record of the same DOI, then OpenAlex's (sources/0.1 rule 3).
-        const epmc = await this.europePmc(`DOI:"${id}"`, ua);
-        if (epmc?.abstract) return { ok: true, kind: "europepmc", abstract: epmc.abstract, title: epmc.title ?? title };
-        const oa = await this.openAlex(`doi:${id}`, ua);
-        if (oa?.abstract) return { ok: true, kind: "openalex", abstract: oa.abstract, title: oa.title ?? title };
-        return { ok: true, kind: "crossref", abstract: null, title };
-      }
-      case "pmid":
-      case "pmcid": {
-        const epmc = await this.europePmc(scheme === "pmid" ? `EXT_ID:${id} AND SRC:MED` : `PMCID:${id}`, ua);
-        if (epmc === null) return { ok: false, status: "error", detail: "Europe PMC did not answer" };
-        if (!epmc.found) return { ok: false, status: "unresolvable", detail: `Europe PMC knows no such ${scheme === "pmid" ? "PubMed" : "PubMed Central"} record` };
-        return { ok: true, kind: "europepmc", abstract: epmc.abstract, title: epmc.title };
-      }
-      case "openreview": {
-        for (const api of ["https://api2.openreview.net", "https://api.openreview.net"]) {
-          const res = await get(`${api}/notes?id=${encodeURIComponent(id)}`, "application/json");
-          if (res.status === 403) return { ok: true, kind: "openreview", abstract: null, title: null, detail: "OpenReview asked for a challenge the scout cannot answer" };
-          if (!res.ok) continue;
-          const body = (await res.json().catch(() => null)) as { notes?: Array<{ content?: Record<string, unknown> }> } | null;
-          const c = body?.notes?.[0]?.content;
-          if (!c) continue;
-          const val = (v: unknown): string | null => typeof v === "string" ? v : v && typeof v === "object" && typeof (v as { value?: unknown }).value === "string" ? (v as { value: string }).value : null;
-          return { ok: true, kind: "openreview", abstract: val(c["abstract"]) ? stripTags(val(c["abstract"])!) : null, title: val(c["title"]) ? stripTags(val(c["title"])!) : null };
-        }
-        return { ok: false, status: "unresolvable", detail: "OpenReview knows no such forum" };
-      }
-      case "acl": return page(`https://aclanthology.org/${id}/`, /class="card-body acl-abstract"[^>]*>[\s\S]*?<span>([\s\S]*?)<\/span>/, /<h2[^>]*id="title"[^>]*>([\s\S]*?)<\/h2>/);
-      case "pmlr": return page(`https://proceedings.mlr.press/${id}.html`, /<div id="abstract"[^>]*>([\s\S]*?)<\/div>/, /<h1>([\s\S]*?)<\/h1>/);
-      case "jmlr": return page(`https://jmlr.org/papers/${id}.html`, /<p class="abstract">([\s\S]*?)<\/p>/, /<h2>([\s\S]*?)<\/h2>/);
-      case "neurips": {
-        const [year, hash] = id.split("/");
-        const base = `https://proceedings.neurips.cc/paper_files/paper/${year}/hash/${hash}-Abstract`;
-        const tries = Number(year) >= 2022 ? [`${base}-Conference.html`, `${base}-Datasets_and_Benchmarks.html`, `${base}.html`] : [`${base}.html`];
-        let last: Awaited<ReturnType<typeof page>> = { ok: false, status: "unresolvable", detail: "the proceedings page is not there" };
-        for (const url of tries) {
-          last = await page(url, /class="paper-abstract">\s*(?:<p>)?([\s\S]*?)<\/p>/, null);
-          if (last.ok || last.status === "error") return last;
-        }
-        return last;
-      }
-      case "openalex": {
-        const oa = await this.openAlex(id, ua);
-        if (oa === null) return { ok: false, status: "error", detail: "OpenAlex did not answer" };
-        if (!oa.found) return { ok: false, status: "unresolvable", detail: "OpenAlex knows no such work" };
-        return { ok: true, kind: "openalex", abstract: oa.abstract, title: oa.title };
-      }
-      case "isbn": return { ok: true, kind: "proceedings", abstract: null, title: null, detail: "a book (isbn:) has no open text the scout can read: the quote is its registrant's word (sources/0.1)" };
-      case "cite": return { ok: true, kind: "proceedings", abstract: null, title: null, detail: "a work no index names (cite:) has no open text the scout can read: the quote is its registrant's word (sources/0.1)" };
+/** What readSource needs: a fetch, and how to name itself to the indexes. */
+export interface ReadSourceOptions {
+  fetchImpl: typeof fetch;
+  /** Named in the user agent, as Crossref asks. */
+  contact?: string;
+  /** Sent as the whole user agent instead of the quote scout's (the context writer names itself). */
+  userAgent?: string;
+  /** The account's OpenAlex key, when one is installed: sent to OpenAlex only, in a header. */
+  openAlexKey?: string | null;
+}
+
+/** What a source's own index publishes: its abstract and title (sources/0.1, rule 3), read as the quote scout reads them. */
+export type SourceText = { ok: true; kind: QuoteIndex; abstract: string | null; title: string | null; detail?: string } | { ok: false; status: "unresolvable" | "error"; detail: string };
+
+/**
+ * Read what a source's own index publishes: its abstract and title, by scheme, as the header of this file lists them. Used by
+ * the quote scout and by the context writer (context.ts), so both read the same text from the same place. Throws only on a
+ * network failure, which callers catch.
+ */
+export async function readSource(source: string, o: ReadSourceOptions): Promise<SourceText> {
+  const ua = o.userAgent ?? `ecdysis-quote-scout/0.2 (https://ecdysis.me; mailto:${o.contact ?? "replies@ecdysis.me"})`;
+  const fetchImpl = o.fetchImpl;
+  const parsed = parseSource(source);
+  if (!parsed.ok) return { ok: false, status: "unresolvable", detail: `not a source in sources/0.1's spelling: ${parsed.error}`.slice(0, 200) };
+  const { scheme, id } = parsed;
+  const get = (url: string, accept: string, extra: Record<string, string> = {}) => fetchImpl(url, { headers: { "user-agent": ua, accept, ...extra } });
+  const page = async (url: string, abstractRe: RegExp, titleRe: RegExp | null): Promise<{ ok: true; kind: QuoteIndex; abstract: string | null; title: string | null } | { ok: false; status: "unresolvable" | "error"; detail: string }> => {
+    const res = await get(url, "text/html");
+    if (res.status === 404) return { ok: false, status: "unresolvable", detail: `the proceedings page is not there (${url.slice(0, 120)})` };
+    if (!res.ok) return { ok: false, status: res.status >= 500 ? "error" : "unresolvable", detail: `the proceedings page answered ${res.status}` };
+    const html = await res.text();
+    const a = html.match(abstractRe)?.[1];
+    const t = metaContent(html, "citation_title") ?? (titleRe ? html.match(titleRe)?.[1] ?? null : null);
+    return { ok: true, kind: "proceedings", abstract: a ? stripTags(a) || null : null, title: t ? stripTags(t) || null : null };
+  };
+  switch (scheme) {
+    case "arxiv": {
+      const res = await get(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id)}&max_results=1`, "application/atom+xml");
+      if (!res.ok) return res.status >= 500 ? { ok: false, status: "error", detail: `arXiv ${res.status}` } : { ok: false, status: "unresolvable", detail: `arXiv ${res.status}` };
+      const xml = await res.text();
+      const entry = xml.match(/<entry>([\s\S]*?)<\/entry>/)?.[1];
+      if (!entry) return { ok: false, status: "unresolvable", detail: "arXiv returned no entry for that id" };
+      const title = tag(entry, "title");
+      const summary = tag(entry, "summary");
+      // A malformed id comes back as an entry titled "Error" whose summary says so; an unknown id as a feed with no entry.
+      if (!summary || /^Error$/i.test(title ?? "")) return { ok: false, status: "unresolvable", detail: summary ? `arXiv: ${summary.slice(0, 120)}` : "arXiv knows no such paper" };
+      return { ok: true, kind: "arxiv", abstract: summary, title };
     }
+    case "doi": {
+      const res = await get(`https://api.crossref.org/works/${encodeURIComponent(id)}`, "application/json");
+      if (res.status === 404) return { ok: false, status: "unresolvable", detail: "Crossref knows no such DOI" };
+      if (!res.ok) return { ok: false, status: "error", detail: `Crossref ${res.status}` };
+      const body = (await res.json().catch(() => null)) as { message?: { abstract?: string; title?: string[] } } | null;
+      if (!body?.message) return { ok: false, status: "error", detail: "Crossref answered without a work" };
+      const title = body.message.title?.[0] ? stripTags(body.message.title[0]) : null;
+      if (body.message.abstract) return { ok: true, kind: "crossref", abstract: stripTags(body.message.abstract), title };
+      // No abstract deposited with Crossref: Europe PMC's record of the same DOI, then OpenAlex's (sources/0.1 rule 3).
+      const epmc = await europePmc(fetchImpl, `DOI:"${id}"`, ua);
+      if (epmc?.abstract) return { ok: true, kind: "europepmc", abstract: epmc.abstract, title: epmc.title ?? title };
+      const oa = await openAlexAbstract(fetchImpl, o.openAlexKey ?? null, `doi:${id}`, ua);
+      if (oa?.abstract) return { ok: true, kind: "openalex", abstract: oa.abstract, title: oa.title ?? title };
+      return { ok: true, kind: "crossref", abstract: null, title };
+    }
+    case "pmid":
+    case "pmcid": {
+      const epmc = await europePmc(fetchImpl, scheme === "pmid" ? `EXT_ID:${id} AND SRC:MED` : `PMCID:${id}`, ua);
+      if (epmc === null) return { ok: false, status: "error", detail: "Europe PMC did not answer" };
+      if (!epmc.found) return { ok: false, status: "unresolvable", detail: `Europe PMC knows no such ${scheme === "pmid" ? "PubMed" : "PubMed Central"} record` };
+      return { ok: true, kind: "europepmc", abstract: epmc.abstract, title: epmc.title };
+    }
+    case "openreview": {
+      for (const api of ["https://api2.openreview.net", "https://api.openreview.net"]) {
+        const res = await get(`${api}/notes?id=${encodeURIComponent(id)}`, "application/json");
+        if (res.status === 403) return { ok: true, kind: "openreview", abstract: null, title: null, detail: "OpenReview asked for a challenge the scout cannot answer" };
+        if (!res.ok) continue;
+        const body = (await res.json().catch(() => null)) as { notes?: Array<{ content?: Record<string, unknown> }> } | null;
+        const c = body?.notes?.[0]?.content;
+        if (!c) continue;
+        const val = (v: unknown): string | null => typeof v === "string" ? v : v && typeof v === "object" && typeof (v as { value?: unknown }).value === "string" ? (v as { value: string }).value : null;
+        return { ok: true, kind: "openreview", abstract: val(c["abstract"]) ? stripTags(val(c["abstract"])!) : null, title: val(c["title"]) ? stripTags(val(c["title"])!) : null };
+      }
+      return { ok: false, status: "unresolvable", detail: "OpenReview knows no such forum" };
+    }
+    case "acl": return page(`https://aclanthology.org/${id}/`, /class="card-body acl-abstract"[^>]*>[\s\S]*?<span>([\s\S]*?)<\/span>/, /<h2[^>]*id="title"[^>]*>([\s\S]*?)<\/h2>/);
+    case "pmlr": return page(`https://proceedings.mlr.press/${id}.html`, /<div id="abstract"[^>]*>([\s\S]*?)<\/div>/, /<h1>([\s\S]*?)<\/h1>/);
+    case "jmlr": return page(`https://jmlr.org/papers/${id}.html`, /<p class="abstract">([\s\S]*?)<\/p>/, /<h2>([\s\S]*?)<\/h2>/);
+    case "neurips": {
+      const [year, hash] = id.split("/");
+      const base = `https://proceedings.neurips.cc/paper_files/paper/${year}/hash/${hash}-Abstract`;
+      const tries = Number(year) >= 2022 ? [`${base}-Conference.html`, `${base}-Datasets_and_Benchmarks.html`, `${base}.html`] : [`${base}.html`];
+      let last: Awaited<ReturnType<typeof page>> = { ok: false, status: "unresolvable", detail: "the proceedings page is not there" };
+      for (const url of tries) {
+        last = await page(url, /class="paper-abstract">\s*(?:<p>)?([\s\S]*?)<\/p>/, null);
+        if (last.ok || last.status === "error") return last;
+      }
+      return last;
+    }
+    case "openalex": {
+      const oa = await openAlexAbstract(fetchImpl, o.openAlexKey ?? null, id, ua);
+      if (oa === null) return { ok: false, status: "error", detail: "OpenAlex did not answer" };
+      if (!oa.found) return { ok: false, status: "unresolvable", detail: "OpenAlex knows no such work" };
+      return { ok: true, kind: "openalex", abstract: oa.abstract, title: oa.title };
+    }
+    case "isbn": return { ok: true, kind: "proceedings", abstract: null, title: null, detail: "a book (isbn:) has no open text the scout can read: the quote is its registrant's word (sources/0.1)" };
+    case "cite": return { ok: true, kind: "proceedings", abstract: null, title: null, detail: "a work no index names (cite:) has no open text the scout can read: the quote is its registrant's word (sources/0.1)" };
   }
+}
 
-  /** Europe PMC's first hit for a query: null if it did not answer. */
-  private async europePmc(query: string, ua: string): Promise<{ found: boolean; abstract: string | null; title: string | null } | null> {
-    const res = await this.fetchImpl(`https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(query)}&resultType=core&format=json&pageSize=1`, { headers: { "user-agent": ua, accept: "application/json" } });
-    if (!res.ok) return null;
-    const body = (await res.json().catch(() => null)) as { resultList?: { result?: Array<{ abstractText?: string; title?: string }> } } | null;
-    const hit = body?.resultList?.result?.[0];
-    if (!hit) return { found: false, abstract: null, title: null };
-    return { found: true, abstract: hit.abstractText ? stripTags(hit.abstractText) || null : null, title: hit.title ? stripTags(hit.title) || null : null };
-  }
+/** Europe PMC's first hit for a query: null if it did not answer. */
+async function europePmc(fetchImpl: typeof fetch, query: string, ua: string): Promise<{ found: boolean; abstract: string | null; title: string | null } | null> {
+  const res = await fetchImpl(`https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(query)}&resultType=core&format=json&pageSize=1`, { headers: { "user-agent": ua, accept: "application/json" } });
+  if (!res.ok) return null;
+  const body = (await res.json().catch(() => null)) as { resultList?: { result?: Array<{ abstractText?: string; title?: string }> } } | null;
+  const hit = body?.resultList?.result?.[0];
+  if (!hit) return { found: false, abstract: null, title: null };
+  return { found: true, abstract: hit.abstractText ? stripTags(hit.abstractText) || null : null, title: hit.title ? stripTags(hit.title) || null : null };
+}
 
-  /** OpenAlex's record of a work ("W…", or "doi:…"): its abstract (rebuilt from the inverted index) and title; null if it did not answer. */
-  private async openAlex(key: string, ua: string): Promise<{ found: boolean; abstract: string | null; title: string | null } | null> {
-    const k = this.o.openAlexKey?.trim();
-    const res = await this.fetchImpl(`https://api.openalex.org/works/${key.startsWith("doi:") ? `doi:${encodeURIComponent(key.slice(4))}` : encodeURIComponent(key)}?select=title,display_name,abstract_inverted_index`,
-      { headers: { "user-agent": ua, accept: "application/json", ...(k ? { authorization: `Bearer ${k}` } : {}) } });
-    if (res.status === 404) return { found: false, abstract: null, title: null };
-    if (!res.ok) return null;
-    const w = (await res.json().catch(() => null)) as { title?: string; display_name?: string; abstract_inverted_index?: Record<string, number[]> | null } | null;
-    if (!w) return null;
-    return { found: true, abstract: invertedAbstract(w.abstract_inverted_index ?? null), title: (w.title ?? w.display_name ?? "").trim() || null };
-  }
+/** OpenAlex's record of a work ("W…", or "doi:…"): its abstract (rebuilt from the inverted index) and title; null if it did not answer. */
+async function openAlexAbstract(fetchImpl: typeof fetch, openAlexKey: string | null, key: string, ua: string): Promise<{ found: boolean; abstract: string | null; title: string | null } | null> {
+  const k = openAlexKey?.trim();
+  const res = await fetchImpl(`https://api.openalex.org/works/${key.startsWith("doi:") ? `doi:${encodeURIComponent(key.slice(4))}` : encodeURIComponent(key)}?select=title,display_name,abstract_inverted_index`,
+    { headers: { "user-agent": ua, accept: "application/json", ...(k ? { authorization: `Bearer ${k}` } : {}) } });
+  if (res.status === 404) return { found: false, abstract: null, title: null };
+  if (!res.ok) return null;
+  const w = (await res.json().catch(() => null)) as { title?: string; display_name?: string; abstract_inverted_index?: Record<string, number[]> | null } | null;
+  if (!w) return null;
+  return { found: true, abstract: invertedAbstract(w.abstract_inverted_index ?? null), title: (w.title ?? w.display_name ?? "").trim() || null };
 }
 
 /** An abstract from OpenAlex's inverted index: each word at each of its positions, in order. */
