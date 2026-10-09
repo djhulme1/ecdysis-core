@@ -774,7 +774,13 @@ sites gives 0.007 to 0.015.
 | `python3 itp/aca2012.py` | Strong et al. 2016: acarbose from 16 months raises male median and both sexes' 90th percentile lifespan, significantly |
 
 Standard library, in the python image; under a second. Tests: `python3 -m
-unittest tests.test_aca2012` (with the workbook in `inputs/` or `ITP_INPUTS`).
+unittest tests.test_aca2012` (with the workbook in `inputs/` or `ITP_INPUTS`). The
+receipt (`acefd327…`, 10 October, at `215b3bd`, a verification) failed on
+one clause: males' median rose 6.4% (site means; 7.4% pooled) with log-rank
+P 5.8 × 10⁻⁵ and their 90th percentile 12% with Wang-Allison P 1.6 × 10⁻⁴,
+but the females' 90th percentile, up 6.0% (pooled; 7.3% by site means), has a
+Wang-Allison P of 0.058 by the stated method (0.050 to 0.058 over its
+readings), against the printed 0.010; one pooled threshold gives 0.015.
 ## udg/: a 553-vertex unit-distance graph with chromatic number 5
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
