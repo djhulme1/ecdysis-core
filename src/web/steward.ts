@@ -263,6 +263,8 @@ export interface HealthView {
    * refusal is never invisible; and the day's reads by page name. Aggregate counts under a fixed vocabulary, never who.
    */
   funnel?: FunnelView | null;
+  /** context/0.1: the latest summaries the writer refused or could not write, newest first, with its own note on each. */
+  contextProblems?: Array<{ claim: string; status: string; detail: string | null; at: string; attempts: number }> | null;
   csrf?: string;
 }
 /**
@@ -290,10 +292,19 @@ function funnelSection(f: HealthView["funnel"]): string {
 export function healthPage(o: HealthView, flash: string | null, problem: string | null, who: string | null = null, now = new Date()): string {
   const ago = (iso: string) => { const m = Math.max(0, Math.round((now.getTime() - Date.parse(iso)) / 60_000)); return m < 60 ? `${m} min` : m < 2880 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`; };
   const c = o.cron?.value ?? null;
-  const n = (k: string) => Number(c?.[k] ?? 0);
+  // The cron records each count under one name (src/index.ts); a run recorded before the names settled used a v2 prefix.
+  const n = (k: string) => Number(c?.[k] ?? c?.[`v2${k[0]!.toUpperCase()}${k.slice(1)}`] ?? 0);
   const cronLine = o.cron
-    ? `${c?.["ok"] === false ? '<span class="status broken">failed</span>' : '<span class="status sound">ran</span>'} ${esc(shortDate(o.cron.at))} UTC (${esc(ago(o.cron.at))} ago). ${c?.["ok"] === false ? esc(String(c?.["error"] ?? "")) : esc(`Doorbells rung ${n("doorbellsRung")} (failed ${n("doorbellsFailed")}, paused ${n("doorbellsPaused")}, waiting ${n("doorbellsWaiting")}); checks lapsed ${n("v2Lapsed")}, sealed ${n("v2Sealed")}; alert emails ${n("v2AlertsSent")}, digests ${n("v2DigestsSent")}; quotes checked ${n("v2QuotesChecked")} (verified ${n("v2QuotesVerified")}, mismatched ${n("v2QuotesMismatched")}).`)}${c?.["doorbellsError"] ? ` <span class="status broken">doorbells: ${esc(String(c["doorbellsError"]))}</span>` : ""}`
+    ? `${c?.["ok"] === false ? '<span class="status broken">failed</span>' : '<span class="status sound">ran</span>'} ${esc(shortDate(o.cron.at))} UTC (${esc(ago(o.cron.at))} ago)${c?.["seconds"] !== undefined ? `, taking ${esc(String(c["seconds"]))} s` : ""}. ${c?.["ok"] === false ? esc(String(c?.["error"] ?? "")) : esc(`Doorbells rung ${n("doorbellsRung")} (failed ${n("doorbellsFailed")}, paused ${n("doorbellsPaused")}, waiting ${n("doorbellsWaiting")}); checks lapsed ${n("lapsed")}, sealed ${n("sealed")}; alert emails ${n("alertsSent")}, digests ${n("digestsSent")}; quotes checked ${n("quotesChecked")} (verified ${n("quotesVerified")}, mismatched ${n("quotesMismatched")}); sources observed ${n("sourcesObserved")} (unresolved ${n("sourcesUnresolved")}, errors ${n("sourcesErrors")}), fields ${n("fieldsObserved")}.`)}${c?.["doorbellsError"] ? ` <span class="status broken">doorbells: ${esc(String(c["doorbellsError"]))}</span>` : ""}`
     : "No run recorded yet.";
+  // context/0.1: what the run's context writer did, and the latest summaries it refused or could not write.
+  const contextLine = o.cron && c?.["ok"] !== false && c?.["papersRead"] !== undefined
+    ? `Papers' records read ${n("papersRead")} (unresolved ${n("papersUnresolved")}); summaries written ${n("summariesWritten")}, refused ${n("summariesRefused")}, failed ${n("contextErrors")}.${c?.["contextOff"] ? ` <span class="status broken">Off: ${esc(String(c["contextOff"]))}</span>` : ""}${c?.["contextCapped"] ? ' <span class="status risk">The daily cap stopped it.</span>' : ""}${c?.["contextOutOfTime"] ? ' <span class="status risk">Its time ran out; the next run carries on.</span>' : ""}`
+    : "No run of the context writer recorded yet.";
+  const problems = o.contextProblems ?? null;
+  const problemsBlock = problems === null ? "" : problems.length
+    ? `<table><thead><tr><th>Claim</th><th>State</th><th>Why</th><th>When</th><th>Attempts</th></tr></thead><tbody>${problems.map((p) => `<tr><td><a href="/c/${esc(p.claim)}"><code class="mono">${esc(p.claim)}</code></a></td><td><span class="status ${p.status === "error" ? "broken" : "risk"}">${p.status === "error" ? "failed" : esc(p.status)}</span></td><td class="small">${esc(p.detail ?? "")}</td><td class="small">${esc(shortDate(p.at))} UTC</td><td>${p.attempts}</td></tr>`).join("")}</tbody></table>`
+    : `<p class="small">No summary has been refused or has failed.</p>`;
   const a = o.audit?.value ?? null;
   const auditLine = o.audit
     ? `${a?.["intact"] ? '<span class="status sound">intact</span>' : '<span class="status broken">problem</span>'} ${esc(shortDate(o.audit.at))} UTC over ${esc(String(a?.["size"] ?? "?"))} entries${a?.["problem"] ? `: ${esc(String(a["problem"]))}` : ""}`
@@ -307,6 +318,9 @@ export function healthPage(o: HealthView, flash: string | null, problem: string 
 ${o.csrf ? `<form method="post" action="/steward/health/audit"><input type="hidden" name="csrf" value="${esc(o.csrf)}"><button class="btn quiet" type="submit">Run a full audit now</button> <span class="small">Replays the whole hash chain and Merkle tree; read-only; recorded here, never on the log.</span></form>` : ""}
 <h2>The cron</h2>
 <p>${cronLine}</p>
+<h3>The context writer (What this means)</h3>
+<p>${contextLine}</p>
+${problemsBlock}
 <h2>The write funnel</h2>
 ${funnelSection(o.funnel ?? null)}
 <h2>Switches</h2>

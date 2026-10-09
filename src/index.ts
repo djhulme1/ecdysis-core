@@ -380,6 +380,7 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
         logSize: () => store.logSize(),
         opsState: async (key) => { const v = await store.getOpsState(key); return v ? { value: (v.value && typeof v.value === "object" && !Array.isArray(v.value) ? v.value : null) as Record<string, unknown> | null, at: v.at } : null; },
         counters: async () => [...(await store.listAccessPrefix("funnel:")), ...(await store.listAccessPrefix("pv:")), ...(await store.listAccessPrefix("op:")), ...(await store.listAccessPrefix("mcpw:"))],
+        contextProblems: async () => (await contextStore.recentProblems(10)).map((r) => ({ claim: r.claim, status: r.status, detail: r.detail, at: r.writtenAt, attempts: r.attempts })),
         runAudit: async () => {
           const r = await logApi.audit();
           const body = r.body as { intact?: boolean; problem?: string | null };

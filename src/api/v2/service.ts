@@ -47,7 +47,7 @@ import {
   type ClaimScope, type Classification, type DataFile, type Fidelity,
 } from "../../core/v2/kinds.js";
 import { CONTEXT_NOTE, CONTEXT_VERSION, standingWords } from "../../core/v2/context.js";
-import type { ContextStore } from "./context.js";
+import { summaryState, type ContextStore } from "./context.js";
 import { sanitizeText } from "../../core/sanitize.js";
 import { inDefaultLists } from "../../core/v2/visibility.js";
 import { DIRECTION_VERSION, direct, type Candidate, type DirectionArgument, type DirectionClaim, type NextAct } from "../../core/v2/direction.js";
@@ -1702,13 +1702,15 @@ export class V2Service {
       arguments: { upheld: c.arguments.upheld, dismissed: c.arguments.dismissed, open: c.arguments.open },
       blockers: [...(r.blockers.get(id)?.blockers ?? [])].filter((b) => !b.declared).map((b) => ({ blocker: b.blocker, meaning: BLOCKER_MEANING[b.blocker] })),
     }) : [];
-    let paper: Json = null, explanation: Json = null;
+    let paper: Json = null, explanation: Json = null, summary: Json = null;
     if (x && this.o.context) {
       const [src, row] = await Promise.all([this.o.context.getSource(x.source.toLowerCase()).catch(() => null), this.o.context.getClaim(id).catch(() => null)]);
       paper = src?.status === "read" ? (src.record as unknown as Json) : null;
       explanation = row?.status === "written" ? (row.explanation as unknown as Json) : null;
+      // Why a claim has no summary, when it has none: refused by the archive's checks, failed (tried again), or not yet tried.
+      summary = summaryState(row) as unknown as Json;
     }
-    const context = { version: CONTEXT_VERSION, standing: plain, ...(x ? { paper, explanation, note: CONTEXT_NOTE } : {}) };
+    const context = { version: CONTEXT_VERSION, standing: plain, ...(x ? { paper, explanation, ...(summary ? { summary } : {}), note: CONTEXT_NOTE } : {}) };
     return ok(200, {
       version: NETWORK_VERSION, id, external: !!x, kind: c?.kind ?? input?.kind ?? "empirical", ...words, context: context as unknown as Json,
       scope: (st?.scope ?? null) as unknown as Json, data: (st?.data ?? []) as unknown as Json,

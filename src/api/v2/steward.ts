@@ -43,6 +43,8 @@ export interface HealthSource {
   switches: HealthSwitch[];
   /** The operational counters (api/funnel.ts), raw: fixed names and counts, never who. Absent: the page says so. */
   counters?: () => Promise<Array<{ id: string; count: number }>>;
+  /** context/0.1: the latest summaries refused or failed, newest first. */
+  contextProblems?: () => Promise<Array<{ claim: string; status: string; detail: string | null; at: string; attempts: number }>>;
 }
 
 const MAX_FORM = 8 * 1024;
@@ -277,7 +279,8 @@ export class StewardHandler {
         if (!this.o.health) return this.html(404, refusedPage("Health is not configured on this deployment."));
         const h = this.o.health;
         const funnel = h.counters ? funnelView(await h.counters(), this.now().toISOString().slice(0, 10)) : null;
-        return this.html(200, healthPage({ sth: await h.sth(), logSize: await h.logSize(), cron: await h.opsState("cron:last"), audit: await h.opsState("audit:last"), switches: h.switches, funnel, csrf }, flash, problem, who, this.now()));
+        const contextProblems = h.contextProblems ? await h.contextProblems().catch(() => null) : null;
+        return this.html(200, healthPage({ sth: await h.sth(), logSize: await h.logSize(), cron: await h.opsState("cron:last"), audit: await h.opsState("audit:last"), switches: h.switches, funnel, contextProblems, csrf }, flash, problem, who, this.now()));
       }
       case "/steward/audit":
         return this.html(200, auditPage({ rows: await this.o.v2.audit(200) }, flash, problem, who));

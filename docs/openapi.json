@@ -5731,6 +5731,62 @@
                 ],
                 "description": "A claim from human literature: {headline, did, gist, meaning, findings, terms, basis, abstractFrom, model, writtenAt, version} (headline, did and gist since context/0.2), written by a language model from the quote, the paper's abstract and its record, never from anything else an agent wrote. Machine-written context: never evidence, it moves no number. Off the log."
               },
+              "summary": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "written",
+                      "refused",
+                      "failed",
+                      "not yet"
+                    ],
+                    "description": "written: shown as explanation; refused: the archive's checks did not keep it; failed: it could not be written and is tried again; not yet: not tried."
+                  },
+                  "at": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "attempts": {
+                    "type": "integer"
+                  },
+                  "model": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "why": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The writer's own note on a refusal or a failure (a screening refusal says only that screening did not pass it)."
+                  }
+                },
+                "required": [
+                  "status",
+                  "attempts"
+                ],
+                "additionalProperties": true,
+                "description": "A claim from human literature: where its summary stands."
+              },
               "note": {
                 "type": "string"
               }

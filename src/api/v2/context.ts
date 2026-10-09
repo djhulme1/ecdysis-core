@@ -83,7 +83,9 @@ export interface ContextStore {
   /** Every source's state in one read, so a run never asks once per source. */
   sourceIndex(): Promise<Map<string, Pick<SourceRecordRow, "status" | "readAt" | "attempts">>>;
   /** Every claim's state in one read. */
-  claimIndex(): Promise<Map<string, Pick<ClaimContextRow, "status" | "version" | "model" | "writtenAt" | "attempts">>>;
+  claimIndex(): Promise<Map<string, Pick<ClaimContextRow, "status" | "version" | "model" | "writtenAt" | "attempts" | "detail">>>;
+  /** The latest summaries refused or failed, newest first, for the Health page. */
+  recentProblems(limit: number): Promise<ClaimContextRow[]>;
   /** Every paper's record that was read, by source, in one read: for the lists, which group claims under their papers. */
   papers?(): Promise<Map<string, PaperRecord>>;
   /** Every written summary's headline and gist, by claim, in one read: for the lists' plain lines. */
@@ -98,9 +100,37 @@ export class MemoryContextStore implements ContextStore {
   async getClaim(claim: string) { const r = this.claims.get(claim); return r ? structuredClone(r) : null; }
   async putClaim(row: ClaimContextRow) { this.claims.set(row.claim, structuredClone(row)); }
   async sourceIndex() { return new Map([...this.sources.values()].map((r) => [r.source, { status: r.status, readAt: r.readAt, attempts: r.attempts }] as const)); }
-  async claimIndex() { return new Map([...this.claims.values()].map((r) => [r.claim, { status: r.status, version: r.version, model: r.model, writtenAt: r.writtenAt, attempts: r.attempts }] as const)); }
+  async claimIndex() { return new Map([...this.claims.values()].map((r) => [r.claim, { status: r.status, version: r.version, model: r.model, writtenAt: r.writtenAt, attempts: r.attempts, detail: r.detail }] as const)); }
+  async recentProblems(limit: number) {
+    return [...this.claims.values()].filter((r) => r.status !== "written").sort((a, b) => (a.writtenAt < b.writtenAt ? 1 : a.writtenAt > b.writtenAt ? -1 : a.claim < b.claim ? -1 : 1)).slice(0, limit).map((r) => structuredClone(r));
+  }
   async papers() { return new Map([...this.sources.values()].filter((r) => r.status === "read" && r.record).map((r) => [r.source, structuredClone(r.record!)] as const)); }
   async headlines() { return new Map([...this.claims.values()].filter((r) => r.status === "written" && r.explanation).map((r) => [r.claim, { headline: r.explanation!.headline ?? null, gist: r.explanation!.gist ?? null }] as const)); }
+}
+
+/** A failure the writer records as the provider's or the account's, never the claim's (see ContextWriter.ask). */
+export function providerFailure(detail: string | null): boolean {
+  return !!detail && /^the model provider (refused the key|could not be reached|answered (429|5\d\d)\b|answered \d+: the account's credit balance is too low)/.test(detail);
+}
+
+/**
+ * Where a claim's summary stands, for anyone to read beside the claim (GET /v2/claims/<id>): written, refused by the
+ * archive's checks, failed (the archive tries again), or not yet tried. Why is the writer's own note, with the key already
+ * redacted from it; a screening refusal says only that screening did not pass it, never the screening's categories.
+ */
+export interface SummaryState {
+  status: "written" | "refused" | "failed" | "not yet";
+  at: string | null;
+  attempts: number;
+  model: string | null;
+  why: string | null;
+}
+
+export function summaryState(row: ClaimContextRow | null | undefined): SummaryState {
+  if (!row) return { status: "not yet", at: null, attempts: 0, model: null, why: null };
+  const status = row.status === "error" ? "failed" : row.status;
+  const why = row.status === "written" ? null : row.detail?.startsWith("screening") && row.status === "refused" ? "the archive's screening did not pass it" : row.detail;
+  return { status, at: row.writtenAt, attempts: row.attempts, model: row.model, why };
 }
 
 /** How many model calls a UTC day has had: kept in ops state on the deployment. */
@@ -150,7 +180,7 @@ export interface ContextRunResult {
   capped: boolean;
   /** The run's time budget ran out with work still due: the next run carries on. */
   outOfTime: boolean;
-  /** Why nothing was written, when nothing could be: "no key", "paused", or the provider refusing the key. */
+  /** Why nothing (more) was written: "no key", "paused", or the provider's or the account's failure that stopped the run. */
   off: string | null;
 }
 
@@ -233,10 +263,12 @@ export class ContextWriter {
     for (const c of claims) {
       if (writes >= (limits.writes ?? 12)) break;
       const row = done.get(c.id);
+      // A failure of the provider's or the account's is not the claim's: tried again on the next run, however often it has
+      // happened (a run stops at the first such failure, so it costs one call a run), including those recorded before this rule.
       const due = !row
         || row.version !== CONTEXT_VERSION
         || (row.status === "written" && row.model !== this.model)
-        || (row.status === "error" && row.attempts < MAX_ATTEMPTS && Date.parse(row.writtenAt) < t - RETRY_MS);
+        || (row.status === "error" && (providerFailure(row.detail) || (row.attempts < MAX_ATTEMPTS && Date.parse(row.writtenAt) < t - RETRY_MS)));
       if (!due) continue;
       const q = checks.get(c.id);
       if (!q || !EXPLAINABLE.has(q)) continue;
@@ -249,17 +281,17 @@ export class ContextWriter {
       await ledger.put({ day, count: used });
       const paper = (await this.o.store.getSource(c.x.source.toLowerCase()))?.record ?? null;
       const result = await this.writeOne(c.id, c.x.source, c.x.quote, c.x.kind, paper, row ?? null);
-      if (result === "stop") { out.off = "the model provider refused the key"; out.errors++; break; }
+      if (typeof result === "object") { out.off = result.stop; out.errors++; break; }
       out[result]++;
     }
     return out;
   }
 
   /** One claim's summary: read the abstract, ask the model, check what it says, screen it, keep it. */
-  private async writeOne(claim: string, source: string, quote: string, kind: "empirical" | "conceptual", paper: PaperRecord | null, prev: Pick<ClaimContextRow, "status" | "attempts" | "version"> | null): Promise<"written" | "refused" | "errors" | "stop"> {
+  private async writeOne(claim: string, source: string, quote: string, kind: "empirical" | "conceptual", paper: PaperRecord | null, prev: Pick<ClaimContextRow, "status" | "attempts" | "version"> | null): Promise<"written" | "refused" | "errors" | { stop: string }> {
     const at = this.now().toISOString();
-    const attempts = prev && prev.status === "error" && prev.version === CONTEXT_VERSION ? prev.attempts + 1 : 1;
-    const keep = async (row: Omit<ClaimContextRow, "claim" | "version" | "model" | "writtenAt" | "attempts">) => {
+    const earlier = prev && prev.status === "error" && prev.version === CONTEXT_VERSION ? prev.attempts : 0;
+    const keep = async (row: Omit<ClaimContextRow, "claim" | "version" | "model" | "writtenAt" | "attempts">, attempts = earlier + 1) => {
       await this.o.store.putClaim({ claim, version: CONTEXT_VERSION, model: this.model, writtenAt: at, attempts, ...row, detail: row.detail ? this.redact(row.detail) : null });
     };
     let text: Awaited<ReturnType<typeof readSource>>;
@@ -286,8 +318,12 @@ export class ContextWriter {
     const inputsHash = await hashJson({ version: CONTEXT_VERSION, model: this.model, system: EXPLAINER_SYSTEM, tool: EXPLANATION_TOOL as unknown as Json, material: material as unknown as Json });
     const answer = await this.ask(material);
     if (!answer.ok) {
-      await keep({ status: "error", inputsHash, explanation: null, detail: answer.detail });
-      return answer.stop ? "stop" : "errors";
+      // The provider's failure or the account's (a refused key, no credit, a rate limit, an outage) is not this claim's: it
+      // costs the claim no attempt and stops the run, so an outage costs one call a run, and the claim is tried on the next.
+      // A request the provider refuses (a 4xx) costs the claim an attempt and stops the run too: it is more often the
+      // deployment's (a model it does not know, a request it will not take) than the claim's, and the queue moves on.
+      await keep({ status: "error", inputsHash, explanation: null, detail: answer.detail }, answer.provider ? earlier : earlier + 1);
+      return answer.provider || answer.refused ? { stop: this.redact(answer.detail) } : "errors";
     }
     const checked = explanationProblems(answer.input);
     if (!checked.ok) {
@@ -313,7 +349,7 @@ export class ContextWriter {
   }
 
   /** The model, through Anthropic's Messages API, made to answer with the explain_claim tool. */
-  private async ask(material: ExplainerMaterial): Promise<{ ok: true; input: unknown } | { ok: false; detail: string; stop?: boolean }> {
+  private async ask(material: ExplainerMaterial): Promise<{ ok: true; input: unknown } | { ok: false; detail: string; provider?: boolean; refused?: boolean }> {
     const key = this.o.anthropicKey!.trim();
     let res: Response;
     try {
@@ -328,13 +364,17 @@ export class ContextWriter {
         }),
       });
     } catch (e) {
-      return { ok: false, detail: `the model provider could not be reached: ${String((e as Error)?.message ?? e)}` };
+      return { ok: false, detail: `the model provider could not be reached: ${String((e as Error)?.message ?? e)}`, provider: true };
     }
-    if (res.status === 401 || res.status === 403) return { ok: false, detail: `the model provider refused the key (${res.status})`, stop: true };
+    if (res.status === 401 || res.status === 403) return { ok: false, detail: `the model provider refused the key (${res.status})`, provider: true };
     if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { error?: { type?: unknown } } | null;
+      const body = (await res.json().catch(() => null)) as { error?: { type?: unknown; message?: unknown } } | null;
       const type = typeof body?.error?.type === "string" ? ` (${body.error.type.slice(0, 60)})` : "";
-      return { ok: false, detail: `the model provider answered ${res.status}${type}` };
+      // The provider's message is never kept (it is the provider's words); only whether it says the account has no credit.
+      const credit = typeof body?.error?.message === "string" && /credit balance|purchase credits|billing/i.test(body.error.message);
+      if (credit) return { ok: false, detail: `the model provider answered ${res.status}: the account's credit balance is too low`, provider: true };
+      const provider = res.status === 429 || res.status >= 500;
+      return { ok: false, detail: `the model provider answered ${res.status}${type}`, provider, refused: !provider };
     }
     const body = (await res.json().catch(() => null)) as { content?: Array<{ type?: string; name?: string; input?: unknown }>; stop_reason?: string } | null;
     const block = body?.content?.find((b) => b?.type === "tool_use" && b?.name === EXPLANATION_TOOL.name);
