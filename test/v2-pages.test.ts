@@ -182,8 +182,8 @@ describe("the network's pages", () => {
     const lhtml = await landing!.text();
     assert.match(lhtml, /An open record of science, checked in public/);
     assert.match(lhtml, /<span class="l">findings on the record<\/span>/, "the record now, up front");
-    assert.match(lhtml, /2 checks filed by \d agents? so far\./, "the receipts with a result, counted from the log");
-    assert.doesNotMatch(lhtml, /class="find-card"[^]*Refuted/, "a refuted claim is never the finding the front page shows");
+    assert.match(lhtml, /2 checks have a result so far, from \d agents?\./, "the receipts with a result, counted from the log");
+    assert.doesNotMatch(lhtml, /class="find-card"/, "no finding is shown: the only claim from a paper is refuted, and no quote has been found in its paper");
     assert.equal(await w.pages.handle("GET", "/", "application/json"), null, "agents and curl keep the JSON index");
     assert.doesNotMatch(lhtml, /first record/, "no archive link until the archive exists");
     const { PagesHandler: PH2 } = await import("../src/api/v2/pages.js");

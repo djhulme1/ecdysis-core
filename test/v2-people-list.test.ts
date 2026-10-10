@@ -12,7 +12,7 @@ import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
-import { PagesHandler } from "../src/api/v2/pages.js";
+import { featuredFinding, OffLogMemo, PagesHandler } from "../src/api/v2/pages.js";
 import { MemoryContextStore } from "../src/api/v2/context.js";
 import { MemoryQuoteCheckStore, type QuoteStatus } from "../src/api/v2/quotes.js";
 import { checkStory, CONTEXT_VERSION, fieldName, surnames, type PaperRecord, type StoryInput } from "../src/core/v2/context.js";
@@ -282,13 +282,19 @@ async function world() {
   };
   const bundle = (n: number): Bundle => ({ repo: "https://github.com/example/rep", commit: n.toString(16).padStart(40, "0"), image: "sha256:" + "a".repeat(64), run: "python run.py", outputs: [{ name: "alpha", tolerance: 0.01 }], runtimeMinutes: 5 });
   let bundles = 0;
+  /** Each receipt's outputs, so a later check assigned it as a cross-check re-runs it and reports the same (no dispute). */
+  const outputsOf = new Map<string, Record<string, number>>();
   const check = async (handle: string, target: string, outcome: "confirmed" | "failed") => {
     clock.t += 60_000;
     const c = await svc.commitCheck(await sign(handle, { protocol: "ecdysis/0.2", type: "check.commit", target, kind: "replication", bundle: bundle(++bundles) as unknown as Json }));
     assert.equal(c.status, 201, JSON.stringify(c.body));
+    const id = String((c.body as Record<string, Json>)["id"]);
+    const cross = ((c.body as Record<string, Json>)["crossCheck"] as { receipt?: string } | null)?.receipt ?? null;
     clock.t += 60_000;
-    const r = await svc.fileResult(await sign(handle, { protocol: "ecdysis/0.2", type: "check.result", commit: String((c.body as Record<string, Json>)["id"]), outcome, outputs: { alpha: outcome === "confirmed" ? 1 : 0 }, crossCheck: null }));
+    const outputs = { alpha: outcome === "confirmed" ? 1 : 0 };
+    const r = await svc.fileResult(await sign(handle, { protocol: "ecdysis/0.2", type: "check.result", commit: id, outcome, outputs, crossCheck: cross ? { receipt: cross, outputs: outputsOf.get(cross)! } : null }));
     assert.equal(r.status, 201, JSON.stringify(r.body));
+    outputsOf.set(id, outputs);
   };
   const paper = (source: string, over: Partial<PaperRecord>) => context.putSource({
     source: source.toLowerCase(), status: "read", readAt: now().toISOString(), attempts: 1, detail: null,
@@ -525,6 +531,7 @@ describe("the front page reads the same record (Lucy Griffiths' home page, 10 Oc
     assert.match(card, /<span class="status [^"]*"[^>]*>[^<]*Unchecked<\/span>/);
     assert.doesNotMatch(card, /\d+%/, "an unchecked claim shows no percentage beside its status");
     assert.match(card, /<b>So far:<\/b> nobody has checked it on Ecdysis yet\./);
+    assert.match(card, /<b>Still to come:<\/b> a verification: re-running the authors(&#39;|') analysis on their own data, where they have published it\.<\/li>/, "a short next step keeps the words that say what it is");
 
     await w.check("Bee", a1, "confirmed");
     await w.check("Ant", b, "failed");
@@ -535,7 +542,8 @@ describe("the front page reads the same record (Lucy Griffiths' home page, 10 Oc
     assert.doesNotMatch(html, /<script/);
     // The record now, counted as the claims page counts it.
     assert.match(html, /<div class="fig-n"><span class="v">4<\/span><span class="l">findings on the record<\/span><\/div><div class="fig-n"><span class="v">2<\/span><span class="l">checked so far<\/span><\/div><div class="fig-n t-sound"><span class="v">1<\/span><span class="l">supported by their checks<\/span><\/div>/);
-    assert.match(html, /2 checks filed by 2 agents so far\. Live from the public log\./);
+    assert.match(html, /<div class="fig-n t-risk"><span class="v">1<\/span><span class="l">contested<\/span><\/div>/, "b's one failed check makes it contested");
+    assert.match(html, /2 checks have a result so far, from 2 agents\. Counted live from the public log/);
     // The finding: the supported one, never the one whose check failed.
     card = html.slice(html.indexOf('<aside class="find-card"'), html.indexOf("</aside>"));
     assert.match(card, new RegExp(`<p class="ft"><a href="/c/${a1}">Prompting people to think about accuracy improves the news they share\\.</a></p>`));
@@ -564,5 +572,104 @@ describe("the front page reads the same record (Lucy Griffiths' home page, 10 Oc
     assert.equal(await from(["Brian Nosek"], 1), "Nosek, <cite>Science</cite>, 2015");
     assert.equal(await from(["Brian Nosek", "Jeffrey Spies"], 2), "Nosek and Spies, <cite>Science</cite>, 2015");
     assert.equal(await from(["Brian Nosek", "Jeffrey Spies"], 270), "Nosek et al., <cite>Science</cite>, 2015", "an index that lists only some of many authors");
+  });
+
+  it("never shows a disagreement, a failed check, a quote the scout did not find in its paper or a conceptual claim, whatever its status", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    await w.agent("Cat", "op-c", ["gemini"]);
+    await w.svc.setTier("op-c", "account"); // Cat's operator has an account, not verification: its checks cannot settle a claim
+    const misinfo = { topic: "Misinformation and Its Impacts", subfield: "Sociology and Political Science", field: "Social Sciences", domain: "Social Sciences" };
+    // Each of these would come first on its headline and paper, were it not for what the card would have to say.
+    const whole = async (id: string, source: string, headline: string) => { await w.paper(source, { title: `The paper of ${headline}`, topic: misinfo }); await w.explain(id, headline); };
+    const a1 = await w.register("Ant", "doi:10.1000/s1", "subtly shifting attention to accuracy increases the quality of news that people subsequently share");
+    await whole(a1, "doi:10.1000/s1", "A finding its checks will disagree about.");
+    const lost = await w.register("Ant", "doi:10.1000/s2", "the sentence the scout could not find anywhere it looked for the paper", "unresolvable");
+    await whole(lost, "doi:10.1000/s2", "A finding whose source the scout could not resolve.");
+    const reg = await w.svc.registerExternalClaim(await w.sign("Ant", { protocol: "ecdysis/0.2", type: "claim.external", source: "doi:10.1000/s3", quote: "A widely held position stated here as its authors state it, at length enough to screen.", test: "A counterexample of the stated form, or an established claim on the record entailing its negation.", kind: "conceptual" }));
+    assert.equal(reg.status, 201, JSON.stringify(reg.body));
+    const idea = String((reg.body as Record<string, Json>)["ref"]);
+    await w.quotes.put({ claim: idea, status: "verified", where: "crossref-abstract", nearest: null, similarity: 1, checkedAt: w.now().toISOString(), attempts: 1, detail: null });
+    await whole(idea, "doi:10.1000/s3", "A position argued rather than measured.");
+    const plain = await w.register("Bee", "doi:10.1000/s4", "the measured lensing signal exceeds the baryonic prediction by a factor of five");
+    const card = async () => { const html = (await w.get("/")).html; const i = html.indexOf('<aside class="find-card"'); return i < 0 ? "" : html.slice(i, html.indexOf("</aside>", i)); };
+
+    // Confirmed by a verified operator, then failed by one with an account only: still supported, but a disagreement.
+    await w.check("Bee", a1, "confirmed");
+    await w.check("Cat", a1, "failed");
+    assert.equal((await w.svc.scores()).claims.get(a1)!.status, "supported", "Cat's failure cannot settle anything");
+    let c = await card();
+    assert.ok(c.includes(`/c/${plain}"`), "the plain unchecked finding is shown instead");
+    for (const id of [a1, lost, idea]) assert.ok(!c.includes(`/c/${id}"`), id);
+    assert.doesNotMatch(c, /disagree|did not get/);
+
+    // A failed check, even one that cannot settle the claim, takes an unchecked claim off the front page.
+    await w.check("Cat", plain, "failed");
+    assert.equal((await w.svc.scores()).claims.get(plain)!.status, "unchecked");
+    c = await card();
+    assert.equal(c, "", "nothing left that the card could tell without a failure: no card at all");
+  });
+
+  it("chooses by the words the card prints: whole and surest first, never a disputed receipt", () => {
+    const base: PeopleClaimV2 = {
+      id: "ext:0000000000000001", text: "t", headline: "h", external: true, kind: "empirical", status: "supported", credence: 0.7, stakes: 0, seq: 1,
+      checkedAt: "2026-10-09T10:00:00Z", source: "doi:10.1/x", agent: "Ant", paper: "doi:10.1/x", field: null, subfield: null, topic: null, keywords: [], flag: null, quote: "verified",
+    };
+    const c = (id: number, over: Partial<PeopleClaimV2>): PeopleClaimV2 => ({ ...base, id: `ext:${String(id).padStart(16, "0")}`, seq: id, ...over });
+    const pick = (claims: PeopleClaimV2[], o: Partial<Parameters<typeof featuredFinding>[1]> = {}) =>
+      featuredFinding(claims, { full: () => 0, tone: () => "show", disputed: () => false, ...o })?.id ?? null;
+    const sure = c(2, { credence: 0.8 });
+    assert.equal(pick([c(1, {}), sure]), sure.id, "the surest");
+    assert.equal(pick([sure, c(3, { status: "established", credence: 0.91 })]), c(3, {}).id, "established before supported");
+    assert.equal(pick([sure, c(4, {})], { full: (x) => (x.id === sure.id ? 1 : 0) }), c(4, {}).id, "a whole card before a surer one without its headline or paper");
+    assert.equal(pick([c(5, { checkedAt: "2026-10-01T00:00:00Z" }), c(6, { checkedAt: "2026-10-09T00:00:00Z" })]), c(6, {}).id, "then the most recently checked");
+    assert.equal(pick([sure, c(7, {})], { disputed: (x) => x.id === sure.id }), c(7, {}).id, "a receipt another re-ran and could not match keeps its claim off");
+    for (const tone of ["mixed", "split", "fail", "uncounted", null] as const) assert.equal(pick([sure], { tone: () => tone }), null, `a story told as ${tone}`);
+    for (const over of [{ status: "contested" }, { status: "refuted" }, { quote: "mismatch", flag: "mismatch" as const }, { quote: null }, { quote: "unresolvable" }, { kind: "conceptual" }, { external: false }])
+      assert.equal(pick([c(8, over)]), null, JSON.stringify(over));
+    // With nothing supported, a claim no check has reached a result on, the most relied on; never one with a result of any kind.
+    const fresh = (id: number, over: Partial<PeopleClaimV2>) => c(id, { status: "unchecked", credence: 0.55, checkedAt: null, ...over });
+    assert.equal(pick([fresh(9, { stakes: 1 }), fresh(10, { stakes: 3 })], { tone: () => null }), c(10, {}).id);
+    assert.equal(pick([fresh(11, { checkedAt: "2026-10-09T00:00:00Z" })], { tone: () => null }), null, "an unchecked claim that a check failed is not shown as untouched");
+  });
+});
+
+describe("the off-log reads, kept a minute per isolate", () => {
+  it("reads the papers, headlines and quote verdicts once a minute for the front page and the claims list, and never keeps a failed read", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    const id = await w.register("Ant", "doi:10.1000/m1", "subtly shifting attention to accuracy increases the quality of news that people subsequently share");
+    await w.paper("doi:10.1000/m1", { title: "Shifting attention to accuracy can reduce misinformation online" });
+    await w.explain(id, "Prompting people to think about accuracy improves the news they share.");
+    let reads = 0, failNext = false;
+    const context = {
+      getSource: (s: string) => w.context.getSource(s), getClaim: (c: string) => w.context.getClaim(c), sourceIndex: () => w.context.sourceIndex(), headlines: () => w.context.headlines(),
+      papers: async () => { reads++; if (failNext) { failNext = false; throw new Error("D1 is down"); } return w.context.papers(); },
+    };
+    const memo = new OffLogMemo(60_000);
+    const pages = new PagesHandler(w.svc, { host: "api.ecdysis.me", quotes: w.quotes, context, memo });
+    const get = async (path: string) => (await (await pages.handle("GET", path, "text/html"))!.text());
+    const [home, list] = await Promise.all([get("/"), get("/claims")]);
+    assert.equal(reads, 1, "two requests at once share one read");
+    assert.match(home, /Prompting people to think about accuracy/);
+    assert.match(list, /Prompting people to think about accuracy/);
+    await get("/");
+    await get("/claims");
+    assert.equal(reads, 1, "and it serves both pages for the minute");
+    await w.explain(id, "A newer headline, written after the read.");
+    assert.doesNotMatch(await get("/"), /A newer headline/, "within the minute, the kept read");
+    w.tick(61_000);
+    assert.match(await get("/"), /A newer headline/, "after it, a fresh read");
+    assert.equal(reads, 2);
+    w.tick(61_000);
+    failNext = true;
+    assert.match(await get("/"), /A newer headline/, "a failed table leaves the page standing on what it could read");
+    await get("/");
+    assert.equal(reads, 4, "and the failed read was not kept");
+    const unmemoised = new PagesHandler(w.svc, { host: "api.ecdysis.me", quotes: w.quotes, context });
+    await unmemoised.handle("GET", "/", "text/html");
+    await unmemoised.handle("GET", "/", "text/html");
+    assert.equal(reads, 6, "without a memo, every request reads");
   });
 });

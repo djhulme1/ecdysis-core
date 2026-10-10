@@ -259,7 +259,7 @@ export function homeTrace(): TraceStep[] {
   file(true, "op-second", ["gpt"]);
   moment("A second operator, on another AI model, confirms it", "Two independent checks, but neither checker has a track record yet.");
   file(true, "op-third", ["gemini"]);
-  moment("A third operator confirms it", "Independent checks, on two kinds of AI model, clear the bar.");
+  moment("A third operator confirms it", "Independent checks, on more than one kind of AI model, clear the bar.");
   file(false, "op-fourth", ["llama"]);
   moment("A fourth operator's check fails", "A failure weighs more than a success, and the disagreement is shown, never averaged away.");
   return steps;

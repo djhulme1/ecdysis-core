@@ -22,7 +22,7 @@ import { quoteCheckWords, type QuoteCheckStore } from "./quotes.js";
 import { mapPageV2 } from "../../web/v2/map.js";
 import { leaderboardPageV2 } from "../../web/v2/leaderboard.js";
 import { BLOCKER_MEANING, pressure, type Blocker } from "../../core/v2/attempts.js";
-import { checkStory, fieldName, ladderRungs, nativeFieldName, standingWords, type CheckWho, type PaperRecord } from "../../core/v2/context.js";
+import { checkStory, fieldName, ladderRungs, nativeFieldName, standingWords, type CheckStory, type CheckWho, type PaperRecord } from "../../core/v2/context.js";
 import type { ContextStore } from "./context.js";
 import { isClaimRef } from "../../core/v2/refs.js";
 import { RESTS_ON, type LinkEdge } from "../../core/v2/links.js";
@@ -134,6 +134,53 @@ export interface PagesOptions {
   context?: (Pick<ContextStore, "getSource" | "getClaim"> & Partial<Pick<ContextStore, "papers" | "headlines" | "sourceIndex">>) | null;
   /** The transparency log, for the live badge of its head (/badge/sth.svg). */
   log?: LogApi | null;
+  /** One per isolate (src/index.ts): the off-log reads the claims list and the front page share, kept a minute. Absent: read every time. */
+  memo?: OffLogMemo | null;
+}
+
+/** What the claims list and the front page read off the log: the papers' records, the plain headlines, the sources' states and the quote scout's verdicts. */
+export interface OffLog {
+  papers: Map<string, PaperRecord>;
+  heads: Map<string, { headline: string | null; gist: string | null }>;
+  sourceStates: Map<string, { status: string }>;
+  quotes: Map<string, string>;
+}
+
+/**
+ * The off-log reads, kept for a short while per isolate, so the busiest pages (the front page and the claims list) do not
+ * read four tables on every request: concurrent readers share one read, and a read in which any table failed is used once
+ * and not kept. The record itself is the log, cached by V2Cache; nothing here is a number the log can recompute.
+ */
+export class OffLogMemo {
+  value: OffLog | null = null;
+  at = 0;
+  pending: Promise<OffLog> | null = null;
+  constructor(readonly ttlMs = 60_000) {}
+}
+
+/**
+ * The finding the front page shows beside its headline (Lucy Griffiths' home page, 10 October 2026), judged by the words the
+ * card will print as well as by its status. Only an empirical claim from a paper whose quote the scout found in that paper.
+ * First choice: one its checks support, with every check that has a result confirming it and at least one that can settle it
+ * (the story's tone is "show"), and none of its receipts disputed; established before supported, then one with a plain
+ * headline and its paper's record, then the surest, then the most recently checked. Otherwise one that no check has reached
+ * a result on yet, the most relied on. Never a contested or refuted claim, a disagreement, a failed check or a quote the scout
+ * could not match: the front page praises in public, and a refutation is never promoted.
+ */
+export function featuredFinding(claims: readonly PeopleClaimV2[], o: {
+  /** 0 when the claim has a plain headline and its paper's record has a title, so the card is whole; else 1. */
+  full: (c: PeopleClaimV2) => number;
+  /** The tone of its checks' story (checkStory's showsTone). */
+  tone: (c: PeopleClaimV2) => CheckStory["showsTone"];
+  /** True when a later receipt re-ran one of its receipts and did not match. */
+  disputed: (c: PeopleClaimV2) => boolean;
+}): PeopleClaimV2 | null {
+  const eligible = (c: PeopleClaimV2) => c.external && c.kind === "empirical" && c.quote === "verified" && !c.flag && !o.disputed(c);
+  const supported = claims.filter((c) => (c.status === "established" || c.status === "supported") && c.checkedAt !== null && eligible(c) && o.tone(c) === "show")
+    .sort((a, b) => Number(a.status !== "established") - Number(b.status !== "established") || o.full(a) - o.full(b) || b.credence - a.credence
+      || (b.checkedAt ?? "").localeCompare(a.checkedAt ?? "") || a.seq - b.seq);
+  if (supported[0]) return supported[0];
+  return claims.filter((c) => c.status === "unchecked" && c.checkedAt === null && eligible(c)).sort((a, b) => o.full(a) - o.full(b) || b.stakes - a.stakes || a.seq - b.seq)[0] ?? null;
 }
 
 /** The data a receipt declared, in a few words: its period, else its basis. */
@@ -382,45 +429,49 @@ export class PagesHandler {
 
   /**
    * The front page (Lucy Griffiths' home page, 10 October 2026): the live figures, counted from the default list as the
-   * claims page counts them; one real finding with the story of its checks; and the record's fields to enter by.
+   * claims page counts them; one real finding with the story of its checks (featuredFinding); and the record's fields to
+   * enter by.
    */
   private async landing(site: string): Promise<LandingData> {
     const r = await this.v2.record();
     const s = await this.v2.scores();
     const people = await this.claimsPeople();
     const claims = people.claims;
+    const listed = new Set(claims.map((c) => c.id));
     const resulted = [...r.checks.values()].filter((k) => k.stage === "resulted" && !k.disowned && !isHeld(r, k.id));
+    const onListed = resulted.filter((k) => listed.has(k.target));
     const figures = {
       findings: claims.length,
       checked: claims.filter((c) => c.checkedAt !== null).length,
       supported: claims.filter((c) => c.status === "supported" || c.status === "established").length,
       contested: claims.filter((c) => c.status === "contested").length,
       refuted: claims.filter((c) => c.status === "refuted").length,
-      checks: resulted.length,
-      checkers: new Set(resulted.map((k) => k.handle)).size,
+      checks: onListed.length,
+      checkers: new Set(onListed.map((k) => k.handle)).size,
     };
-    // The finding beside the headline: the surest claim from a paper that its checks support, with a plain headline and
-    // its paper's record where one has both; while none is supported, the unchecked claim most relied on, said so. Never a
-    // contested or refuted one: the front page praises in public, and a refutation is never promoted.
     const paperOf = (c: PeopleClaimV2) => (c.paper ? people.papers.get(c.paper)?.record ?? null : null);
-    const full = (c: PeopleClaimV2) => (c.headline && paperOf(c)?.title ? 0 : 1);
-    const checkedFirst = claims.filter((c) => c.external && !c.flag && (c.status === "established" || c.status === "supported"))
-      .sort((a, b) => Number(a.status !== "established") - Number(b.status !== "established") || full(a) - full(b) || b.credence - a.credence
-        || (b.checkedAt ?? "").localeCompare(a.checkedAt ?? "") || a.seq - b.seq);
-    const fallback = claims.filter((c) => c.external && !c.flag && c.status === "unchecked").sort((a, b) => full(a) - full(b) || b.stakes - a.stakes || a.seq - b.seq);
-    const pick = checkedFirst[0] ?? fallback[0] ?? null;
+    const stories = new Map<string, CheckStory>();
+    const storyOf = (id: string) => stories.get(id) ?? stories.set(id, this.storyOf(r, s, id, true)).get(id)!;
+    const disputed = new Set([...r.checks.values()].filter((k) => k.disputedBy.length).map((k) => k.target));
+    const pick = featuredFinding(claims, {
+      full: (c) => (c.headline && paperOf(c)?.title ? 0 : 1),
+      tone: (c) => storyOf(c.id).showsTone,
+      disputed: (c) => disputed.has(c.id),
+    });
     let featured: HomeFinding | null = null;
     if (pick) {
-      const story = this.storyOf(r, s, pick.id, pick.external);
-      const quote = this.o.quotes ? await this.o.quotes.get(pick.id).catch(() => null) : null;
-      const next = story.next.includes(": ") ? `${story.next.slice(0, story.next.indexOf(": "))}.` : story.next;
+      const story = storyOf(pick.id);
+      // What the record still needs, in its first clause when that stands on its own ("a reproduction by a second verified
+      // operator …"); a short one ("a verification") keeps the words that say what it is.
+      const colon = story.next.indexOf(": ");
+      const head = colon > 0 ? story.next.slice(0, colon) : "";
       featured = {
         id: pick.id, headline: pick.headline ?? `“${pick.text}”`, machineHeadline: !!pick.headline,
         status: pick.status, credence: pick.credence, where: pick.topic ?? pick.subfield ?? pick.field,
-        external: pick.external, source: pick.source, agent: pick.agent, paper: paperOf(pick),
-        registered: `${pick.external ? quote?.status === "verified" ? "word for word from the paper" : "from the paper" : `here by ${pick.agent ?? "its author"}`}, with the test that would prove it wrong`,
+        external: true, source: pick.source, agent: pick.agent, paper: paperOf(pick),
+        registered: "word for word from the paper, with the test that would prove it wrong",
         checked: pick.checkedAt ? story.lede[0] ?? null : null,
-        next,
+        next: head.split(" ").length >= 4 ? `${head}.` : story.next,
       };
     }
     // The fields to enter by, busiest first, each with its two commonest subfields (the claims page's tiles, kept short): eight of them.
@@ -495,6 +546,40 @@ export class PagesHandler {
     };
   }
 
+  /** The off-log reads (OffLog), from the memo while it is fresh; a read in which any table failed is used once and not kept. */
+  private async offLog(): Promise<OffLog> {
+    const m = this.o.memo ?? null;
+    const now = this.v2.clock().getTime();
+    if (m?.value && now >= m.at && now - m.at < m.ttlMs) return m.value;
+    if (m?.pending) return m.pending;
+    const read = (async () => {
+      let whole = true;
+      const or = <T>(fallback: T) => (): T => { whole = false; return fallback; };
+      const q = this.o.quotes;
+      const [papers, heads, sourceStates, quotes] = await Promise.all([
+        this.o.context?.papers?.().catch(or(null)),
+        this.o.context?.headlines?.().catch(or(null)),
+        this.o.context?.sourceIndex?.().catch(or(null)),
+        !q ? null : q.statusIndex ? q.statusIndex().catch(or(null)) : q.list(100_000).then((xs) => new Map(xs.map((x) => [x.claim, x.status] as const))).catch(or(null)),
+      ]);
+      const value: OffLog = {
+        papers: papers ?? new Map(), heads: heads ?? new Map(), sourceStates: sourceStates ?? new Map(),
+        quotes: (quotes as Map<string, string> | null) ?? new Map(),
+      };
+      return { value, whole };
+    })();
+    if (!m) return (await read).value;
+    const shared = read.then((x) => x.value);
+    m.pending = shared;
+    try {
+      const { value, whole } = await read;
+      if (whole) { m.value = value; m.at = now; }
+      return value;
+    } finally {
+      m.pending = null;
+    }
+  }
+
   /**
    * The claims for people (Lucy Griffiths' design of 9 October 2026): every claim in the default list, each with its paper's
    * place (OpenAlex's field, subfield, topic and keywords, the field read through fieldName so one subject is one place), its
@@ -506,12 +591,7 @@ export class PagesHandler {
     const s = await this.v2.scores();
     const inView = r.claims.filter((c) => !isHeld(r, c.ref));
     const listed = inView.filter((c) => inDefaultLists(r, [c.ref], c.external ? (c.registrant ?? "") : c.authorOperator));
-    const papers = (await this.o.context?.papers?.().catch(() => null)) ?? new Map<string, PaperRecord>();
-    const heads = (await this.o.context?.headlines?.().catch(() => null)) ?? new Map<string, { headline: string | null; gist: string | null }>();
-    const sourceStates = (await this.o.context?.sourceIndex?.().catch(() => null)) ?? new Map<string, { status: string }>();
-    const quotes: Map<string, string> = !this.o.quotes ? new Map()
-      : this.o.quotes.statusIndex ? await this.o.quotes.statusIndex().catch(() => new Map())
-      : new Map((await this.o.quotes.list(100_000).catch(() => [])).map((q) => [q.claim, q.status] as const));
+    const { papers, heads, sourceStates, quotes } = await this.offLog();
     const lastResult = new Map<string, string>();
     for (const k of r.checks.values()) {
       if (k.stage !== "resulted" || !k.resultedAt || k.disowned || isHeld(r, k.id)) continue;
@@ -535,7 +615,7 @@ export class PagesHandler {
         source: x?.source ?? null, agent: n?.handle ?? x?.handle ?? null, paper: key,
         field: n ? nativeFieldName(n.field) : fieldName(rec?.topic?.field ?? obs?.field),
         subfield: rec?.topic?.subfield ?? null, topic: rec?.topic?.topic ?? null, keywords: rec?.keywords ?? [],
-        flag: x ? flagOf(c.ref) : null, work: x?.work ?? null,
+        flag: x ? flagOf(c.ref) : null, quote: x ? quotes.get(c.ref) ?? null : null, work: x?.work ?? null,
       };
     });
     const paperMap = new Map<string, PeoplePaperV2>();

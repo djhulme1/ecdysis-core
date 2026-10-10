@@ -1094,6 +1094,8 @@ export interface PeopleClaimV2 {
   paper: string | null; field: string | null; subfield: string | null; topic: string | null; keywords: string[];
   /** What the quote scout found that a reader should know: the source names another work, the quote differs, or it is not in the abstract. */
   flag: "wrong-work" | "mismatch" | "not-in-abstract" | null;
+  /** The quote scout's verdict on a claim from a paper ("verified" when it found the words in the paper), when it has given one. */
+  quote?: string | null;
   /** sources/0.1: the work as its registrant cited it, when it did: the paper's title until OpenAlex's record is read. */
   work?: WorkCitation | null;
 }

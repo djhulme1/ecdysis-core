@@ -186,19 +186,32 @@ describe("the front page (Lucy Griffiths' home page, 10 October 2026)", () => {
     assert.match(main, /<a href="https:\/\/doi\.org\/10\.1126\/science\.aac4716">Open Science Collaboration, <cite>Science<\/cite>, 2015<\/a>/, "the case rests on a cited result");
     for (const href of ["/compare", "/faq#verify", "/constitution.md", "https://github.com/djhulme1/ecdysis-core", "/faq", "/me", "/connect", "/lab"]) assert.ok(main.includes(`href="${href}"`), href);
     assert.match(main, /<h3>Registered<\/h3>[^]*<h3>Checked<\/h3>[^]*<h3>Weighed<\/h3>/, "the method in three steps");
-    assert.match(main, /Only independent evidence moves how sure the record is\. Votes, citations and reputations don('|&#39;)t/);
+    assert.match(main, /Only independent evidence moves how sure the record is\. Votes, citations and prestige don('|&#39;)t/, "never reputations: an agent's track record does weigh its evidence");
     assert.match(main, /<h2 id="trust-h">Nothing on Ecdysis asks for your trust<\/h2>/);
+    // Only what the code makes true (an independent review, 10 October 2026): the log's head is signed, credence and status
+    // recompute from it, a person following findings gets a digest, and only the starter prompts make an agent ask first.
+    assert.match(main, /Every entry goes into an append-only public log whose signed head would show any rewrite\. Every credence and status recomputes from that log, by rules anyone can read\./);
+    assert.match(main, /Follow the findings you care about, and get a daily or weekly digest of where they stand and the new checks on them\./);
+    assert.match(main, /Our starter prompts have it show you its work before it files anything, and its record is public and earned\./);
+    const people = peoplePageV2({ host: "ecdysis.me", mcpUrl: "https://api.ecdysis.me/mcp" });
+    for (const page of [landingPageV2(HOME), people]) {
+      assert.doesNotMatch(page, /checks with you before it publishes|approve what it files|every number recomputes|Every number on every page|open record of machine science/i, "no promise the code does not keep");
+    }
+    assert.match(people, /The three prompts below have it show you its work before it files anything\./);
+    assert.match(landingPageV2(HOME), /Ecdysis is an open record of science, checked in public\. Text is licensed CC BY 4\.0, and every credence and status can be recomputed from the public log\./, "the footer says what the front page says");
     assert.doesNotMatch(main, /<script|Illustrative|mock/i);
     assert.doesNotMatch(main, BANNED);
   });
 
   it("puts the live state of the record up front, and says where the figures come from", () => {
     const main = mainOf(landingPageV2(HOME));
-    for (const [v, l] of [["1,035", "findings on the record"], ["39", "checked so far"], ["38", "supported by their checks"], ["1", "where checks disagree"]]) {
+    for (const [v, l] of [["1,035", "findings on the record"], ["39", "checked so far"], ["38", "supported by their checks"], ["1", "contested"]]) {
       assert.match(main, new RegExp(`<span class="v">${v}</span><span class="l">${l}</span>`), l);
     }
     assert.doesNotMatch(main, /refuted by their checks/, "no refuted figure while none is refuted");
-    assert.match(main, /40 checks filed by 4 agents so far\. Live from the public log\. Every figure on Ecdysis can be recomputed by anyone\. <a href="\/faq#verify">Verify it yourself<\/a>/);
+    assert.doesNotMatch(main, /where checks disagree/, "contested also means one failed check, or a refuted foundation: the status's own word");
+    assert.match(main, /40 checks have a result so far, from 4 agents\. Counted live from the public log, so anyone can recompute these figures\. <a href="\/faq#verify">Verify it yourself<\/a>/);
+    assert.match(mainOf(landingPageV2({ ...HOME, figures: { ...HOME.figures!, checks: 1, checkers: 1 } })), /1 check has a result so far, from 1 agent\./);
     const refuted = mainOf(landingPageV2({ ...HOME, figures: { ...HOME.figures!, refuted: 2 } }));
     assert.match(refuted, /<span class="v">2<\/span><span class="l">refuted by their checks<\/span>/);
     const empty = mainOf(landingPageV2(LANDING));

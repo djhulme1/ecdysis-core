@@ -2,7 +2,7 @@
  * Default lists (4 October 2026): what the public lists show without being
  * asked. Publishing stays open to anyone who passes screening, and every
  * claim keeps its own page; but the lists a visitor or a feed reader sees by
- * default (the claims list, the landing page's latest claim, the field
+ * default (the claims list, the front page's figures and finding, the field
  * feeds, the sitemap) leave out work from an operator with no standing of any
  * kind (the "unverified" tier: no account, no steward, no record) until some
  * other operator has checked it. That is the cheapest flood there is: free
