@@ -433,6 +433,13 @@ describe("the claims for people, under their papers", () => {
     const claimPage = (await w.get(`/c/${id}`)).html;
     assert.match(claimPage, /<a class="chip" href="\/claims\?keyword=kw%20%3Cimg%20src%3Dx%20onerror%3Dalert\(1\)%3E%22&#39;">kw &lt;img src=x onerror=alert\(1\)&gt;&quot;&#39;<\/a>/, "a keyword's link is encoded and its words escaped");
     assert.match(claimPage, /<a href="\/claims\?topic=Topic%20%3Cimg/);
+    // The front page shows the same claim (the only one) beside its headline, and the field among its tiles.
+    const home = (await w.get("/")).html;
+    assert.ok(home.includes(`/c/${id}"`));
+    assert.doesNotMatch(home, /<img src=x/, "nor on the front page");
+    assert.match(home, /<cite>Venue &lt;img src=x onerror=alert\(1\)&gt;&quot;&#39;<\/cite>/);
+    assert.match(home, /<span>Topic &lt;img src=x onerror=alert\(1\)&gt;&quot;&#39;<\/span>/);
+    assert.match(home, /<a class="tile" href="\/claims\?field=Field%20%3Cimg%20src%3Dx%20onerror%3Dalert%281%29%3E%22%27"><b>Field &lt;img src=x onerror=alert\(1\)&gt;&quot;&#39;<\/b><span>Sub &lt;img src=x onerror=alert\(1\)&gt;&quot;&#39;<\/span><\/a>/, "a tile's link is encoded and its words escaped");
   });
 
   it("sends an address made for the table on to the table, with its filters, instead of dropping them", async () => {
@@ -491,5 +498,71 @@ describe("the claims for people, under their papers", () => {
     const junk = await w.register("Nobody", "doi:10.1000/p1", "a quote an operator with no standing registered from the same paper");
     assert.ok(!(await w.get(`/c/${a2}`)).html.includes(`href="/c/${junk}"`), "unchecked work from an operator with no standing is not shown beside the paper's other claims");
     assert.ok(!(await w.get("/claims")).html.includes(`/c/${junk}"`), "nor in the list");
+  });
+});
+
+describe("the front page reads the same record (Lucy Griffiths' home page, 10 October 2026)", () => {
+  it("counts the default list, shows the surest checked finding with its paper and its checks' story, and offers the record's fields", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    await w.agent("Bee", "op-b", ["gpt"]);
+    const misinfo = { topic: "Misinformation and Its Impacts", subfield: "Sociology and Political Science", field: "Social Sciences", domain: "Social Sciences" };
+    const a1 = await w.register("Ant", "doi:10.1000/p1", "subtly shifting attention to accuracy increases the quality of news that people subsequently share");
+    const a2 = await w.register("Ant", "doi:10.1000/p1", "the veracity of headlines had little effect on sharing intentions");
+    await w.paper("doi:10.1000/p1", { title: "Shifting attention to accuracy can reduce misinformation online", topic: misinfo });
+    await w.explain(a1, "Prompting people to think about accuracy improves the news they share.");
+    const b = await w.register("Bee", "doi:10.1000/p2", "the halo's mass profile is consistent with cold dark matter at the 2 sigma level");
+    await w.paper("doi:10.1000/p2", { title: "A dark matter halo, weighed", authors: ["Vera Rubin"], authorCount: 1, venue: "ApJ", year: 1980, topic: { topic: "Galaxies", subfield: "Astronomy and Astrophysics", field: "Physics and Astronomy", domain: "Physical Sciences" } });
+    await w.explain(b, "A galaxy's dark matter halo weighs what cold dark matter predicts.");
+    const wrong = await w.register("Bee", "doi:10.1000/p4", "a sentence the scout found in a different paper altogether", "wrong-work");
+    await w.paper("doi:10.1000/p4", { title: "Another paper", authorCount: 7, authors: ["Ada Lovelace", "Charles Babbage", "Mary Somerville"], topic: misinfo });
+    await w.explain(wrong, "A headline for a quote the scout could not find in its paper.");
+
+    // Before any check: the unchecked finding most relied on, said so, with no percentage; never the flagged one.
+    let html = (await w.get("/")).html;
+    let card = html.slice(html.indexOf('<aside class="find-card"'), html.indexOf("</aside>"));
+    assert.ok(card.length > 0 && !card.includes(`/c/${wrong}"`), "a quote the scout could not match is never the finding shown");
+    assert.match(card, /<span class="status [^"]*"[^>]*>[^<]*Unchecked<\/span>/);
+    assert.doesNotMatch(card, /\d+%/, "an unchecked claim shows no percentage beside its status");
+    assert.match(card, /<b>So far:<\/b> nobody has checked it on Ecdysis yet\./);
+
+    await w.check("Bee", a1, "confirmed");
+    await w.check("Ant", b, "failed");
+    const scores = (await w.svc.scores()).claims;
+    assert.equal(scores.get(a1)!.status, "supported");
+    assert.notEqual(scores.get(b)!.status, "supported", "b's check failed");
+    html = (await w.get("/")).html;
+    assert.doesNotMatch(html, /<script/);
+    // The record now, counted as the claims page counts it.
+    assert.match(html, /<div class="fig-n"><span class="v">4<\/span><span class="l">findings on the record<\/span><\/div><div class="fig-n"><span class="v">2<\/span><span class="l">checked so far<\/span><\/div><div class="fig-n t-sound"><span class="v">1<\/span><span class="l">supported by their checks<\/span><\/div>/);
+    assert.match(html, /2 checks filed by 2 agents so far\. Live from the public log\./);
+    // The finding: the supported one, never the one whose check failed.
+    card = html.slice(html.indexOf('<aside class="find-card"'), html.indexOf("</aside>"));
+    assert.match(card, new RegExp(`<p class="ft"><a href="/c/${a1}">Prompting people to think about accuracy improves the news they share\\.</a></p>`));
+    assert.ok(!card.includes(`/c/${b}"`) && !card.includes(`/c/${a2}"`) && !card.includes(`/c/${wrong}"`));
+    assert.match(card, />Supported · \d+%<\/span><span>Misinformation and Its Impacts<\/span>/);
+    assert.match(card, /<p class="from">Pennycook and Epstein, <cite>Nature<\/cite>, 2021<\/p>/, "two authors by both names");
+    assert.match(card, /<b>Registered<\/b> word for word from the paper, with the test that would prove it wrong/, "the scout found the quote in the paper");
+    assert.match(card, /<b>Checked:<\/b> Bee repeated the authors(&#39;|') method on new data from the same population and period and got the paper(&#39;|')s result\./);
+    assert.match(card, /<b>Still to come:<\/b> a reproduction by a second verified operator other than the registrant(&#39;|')s, ideally working with a different family of AI model\.<\/li>/, "what the record still needs, in its first clause");
+    assert.match(card, /The headline is machine-written from the paper/);
+    // The fields to enter by: busiest first, each with its commonest subfields, each opening the list at that field.
+    const tiles = html.slice(html.indexOf('<h2 id="topics">'), html.indexOf('<section class="why-grid"'));
+    assert.match(tiles, /<a class="tile" href="\/claims\?field=Social%20Sciences"><b>Social Sciences<\/b><span>Sociology and Political Science<\/span><\/a><a class="tile" href="\/claims\?field=Physics%20and%20Astronomy"><b>Physics and Astronomy<\/b><span>Astronomy and Astrophysics<\/span><\/a>/);
+  });
+
+  it("names an author as lists do: one by name, two by both names, three or more as the first and et al.", async () => {
+    const w = await world();
+    await w.agent("Ant", "op-a", ["claude"]);
+    const id = await w.register("Ant", "doi:10.1000/p9", "a single quoted sentence from the paper's abstract, registered with its test");
+    const from = async (authors: string[], authorCount: number) => {
+      await w.paper("doi:10.1000/p9", { authors, authorCount, venue: "Science", year: 2015 });
+      const html = (await w.get("/")).html;
+      assert.ok(html.includes(`/c/${id}"`));
+      return /<p class="from">([^]*?)<\/p>/.exec(html.slice(html.indexOf('<aside class="find-card"')))![1];
+    };
+    assert.equal(await from(["Brian Nosek"], 1), "Nosek, <cite>Science</cite>, 2015");
+    assert.equal(await from(["Brian Nosek", "Jeffrey Spies"], 2), "Nosek and Spies, <cite>Science</cite>, 2015");
+    assert.equal(await from(["Brian Nosek", "Jeffrey Spies"], 270), "Nosek et al., <cite>Science</cite>, 2015", "an index that lists only some of many authors");
   });
 });

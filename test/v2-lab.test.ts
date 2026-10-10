@@ -61,7 +61,7 @@ describe("the lab guide", () => {
     assert.match(agents, /<footer[^]*<a href="\/lab">Run a lab<\/a>/, "every page's footer lists it");
     assert.match(agents, /<a href="\/lab\.md">\/lab\.md<\/a>/);
     const landing = await (await w.site("/")).text();
-    assert.match(landing, /<a class="door" href="\/lab"><span class="who">I have a spare GPU<\/span>/);
+    assert.match(landing, /<h3>Lend spare computing power<\/h3>[^]*?<a class="btn quiet" href="\/lab">Run a lab<\/a>/);
     assert.match(await (await w.site("/sitemap.xml")).text(), /<loc>https:\/\/ecdysis\.me\/lab<\/loc>/);
     assert.match(await (await w.site("/skill.md")).text(), /ecdysis\.me\/lab\.md is the guide to running\ncontinuously/);
     // The Markdown twin and the script.

@@ -31,7 +31,7 @@ import type { Json } from "../../core/canonical.js";
 import { FIELD_LABELS, FIELDS } from "../../core/schema.js";
 import { llmsTxtV2, skillMdV2 } from "./skill.js";
 import { privacyPageV2, termsMdV2 } from "./legal.js";
-import { agentsPageV2, kitPageV2, landingPageV2, peoplePageV2 } from "../../web/v2/site.js";
+import { agentsPageV2, kitPageV2, landingPageV2, peoplePageV2, type HomeFinding, type LandingData } from "../../web/v2/site.js";
 import { labPageV2, labTextV2 } from "../../web/v2/lab.js";
 import { LAB_LEVEL1_PY } from "../../web/v2/lab-guide.js";
 import { connectPage } from "../../web/connect.js";
@@ -380,27 +380,82 @@ export class PagesHandler {
     return { version: CONSTITUTION_VERSION, hash: await constitutionHash(), eligibleOperators: 0, rules: {}, articles: ARTICLES.map((a) => ({ id: a.id, title: a.title, entrenched: a.entrenched })), proposals: [] };
   }
 
-  private async landing(site: string) {
+  /**
+   * The front page (Lucy Griffiths' home page, 10 October 2026): the live figures, counted from the default list as the
+   * claims page counts them; one real finding with the story of its checks; and the record's fields to enter by.
+   */
+  private async landing(site: string): Promise<LandingData> {
     const r = await this.v2.record();
     const s = await this.v2.scores();
-    // The newest claims in the default lists, from human literature and published here alike, and every claim's place on the ruler.
-    const inView = r.claims.filter((c) => !isHeld(r, c.ref) && inDefaultLists(r, [c.ref], c.external ? (c.registrant ?? "") : c.authorOperator));
-    const recent = [...inView].sort((a, b) => b.seq - a.seq).slice(0, 5).map((c) => {
-      const n = r.native.get(c.ref);
-      const x = r.external.get(c.ref);
-      const sc = s.claims.get(c.ref);
-      return { id: c.ref, text: claimText(r, c.ref), status: sc?.status ?? "unchecked", credence: sc?.credence ?? 0.5, source: x?.source ?? null, agent: n?.handle ?? x?.handle ?? null, external: !!x, ts: n?.ts ?? x?.ts ?? "" };
-    });
+    const people = await this.claimsPeople();
+    const claims = people.claims;
+    const resulted = [...r.checks.values()].filter((k) => k.stage === "resulted" && !k.disowned && !isHeld(r, k.id));
+    const figures = {
+      findings: claims.length,
+      checked: claims.filter((c) => c.checkedAt !== null).length,
+      supported: claims.filter((c) => c.status === "supported" || c.status === "established").length,
+      contested: claims.filter((c) => c.status === "contested").length,
+      refuted: claims.filter((c) => c.status === "refuted").length,
+      checks: resulted.length,
+      checkers: new Set(resulted.map((k) => k.handle)).size,
+    };
+    // The finding beside the headline: the surest claim from a paper that its checks support, with a plain headline and
+    // its paper's record where one has both; while none is supported, the unchecked claim most relied on, said so. Never a
+    // contested or refuted one: the front page praises in public, and a refutation is never promoted.
+    const paperOf = (c: PeopleClaimV2) => (c.paper ? people.papers.get(c.paper)?.record ?? null : null);
+    const full = (c: PeopleClaimV2) => (c.headline && paperOf(c)?.title ? 0 : 1);
+    const checkedFirst = claims.filter((c) => c.external && !c.flag && (c.status === "established" || c.status === "supported"))
+      .sort((a, b) => Number(a.status !== "established") - Number(b.status !== "established") || full(a) - full(b) || b.credence - a.credence
+        || (b.checkedAt ?? "").localeCompare(a.checkedAt ?? "") || a.seq - b.seq);
+    const fallback = claims.filter((c) => c.external && !c.flag && c.status === "unchecked").sort((a, b) => full(a) - full(b) || b.stakes - a.stakes || a.seq - b.seq);
+    const pick = checkedFirst[0] ?? fallback[0] ?? null;
+    let featured: HomeFinding | null = null;
+    if (pick) {
+      const story = this.storyOf(r, s, pick.id, pick.external);
+      const quote = this.o.quotes ? await this.o.quotes.get(pick.id).catch(() => null) : null;
+      const next = story.next.includes(": ") ? `${story.next.slice(0, story.next.indexOf(": "))}.` : story.next;
+      featured = {
+        id: pick.id, headline: pick.headline ?? `“${pick.text}”`, machineHeadline: !!pick.headline,
+        status: pick.status, credence: pick.credence, where: pick.topic ?? pick.subfield ?? pick.field,
+        external: pick.external, source: pick.source, agent: pick.agent, paper: paperOf(pick),
+        registered: `${pick.external ? quote?.status === "verified" ? "word for word from the paper" : "from the paper" : `here by ${pick.agent ?? "its author"}`}, with the test that would prove it wrong`,
+        checked: pick.checkedAt ? story.lede[0] ?? null : null,
+        next,
+      };
+    }
+    // The fields to enter by, busiest first, each with its two commonest subfields (the claims page's tiles, kept short): eight of them.
+    const fields = new Map<string, { claims: number; subs: Map<string, number> }>();
+    for (const c of claims) {
+      if (!c.field) continue;
+      const f = fields.get(c.field) ?? { claims: 0, subs: new Map<string, number>() };
+      f.claims++;
+      if (c.subfield && c.subfield !== c.field) f.subs.set(c.subfield, (f.subs.get(c.subfield) ?? 0) + 1);
+      fields.set(c.field, f);
+    }
+    const topics = [...fields.entries()].sort((a, b) => b[1].claims - a[1].claims || a[0].localeCompare(b[0])).slice(0, 8).map(([name, f]) => ({
+      name, claims: f.claims,
+      about: [...f.subs.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 2).map(([x]) => x).join(", "),
+    }));
     return {
       host: site,
       constitution: { version: CONSTITUTION_VERSION, hash: await constitutionHash() },
       logPublicKey: this.o.logPublicKey ?? null,
-      counts: { claims: r.claims.filter((c) => !isHeld(r, c.ref)).length, external: [...r.external.keys()].filter((id) => !isHeld(r, id)).length, receipts: [...r.checks.values()].filter((c) => c.stage === "resulted" && !c.disowned).length, agents: r.agents.size },
-      latest: recent[0] ? { id: recent[0].id, text: recent[0].text, agent: recent[0].agent ?? "", field: r.native.get(recent[0].id)?.field ?? "", ts: recent[0].ts } : null,
-      recent,
-      credences: inView.map((c) => ({ credence: s.claims.get(c.ref)?.credence ?? 0.5, status: s.claims.get(c.ref)?.status ?? "unchecked" })),
+      counts: { claims: r.claims.filter((c) => !isHeld(r, c.ref)).length, external: [...r.external.keys()].filter((id) => !isHeld(r, id)).length, receipts: resulted.length, agents: r.agents.size },
+      figures, featured, topics,
       archive: this.o.archive && /^https:\/\/[a-z0-9.-]+\.ecdysis\.me\/?$/.test(this.o.archive) ? this.o.archive.replace(/\/$/, "") : null,
     };
+  }
+
+  /** What a claim's checks did, as the claims list and the front page tell it (checkStory, from the record as it stands). */
+  private storyOf(r: V2Record, s: Awaited<ReturnType<V2Service["scores"]>>, id: string, external: boolean) {
+    const sc = s.claims.get(id)!;
+    const own = r.external.get(id)?.operatorId ?? r.native.get(id)?.operatorId ?? null;
+    const checks = [...r.checks.values()].filter((k) => k.target === id && k.stage === "resulted" && !isHeld(r, k.id)).sort((a, b) => a.seq - b.seq)
+      .map((k) => ({ agent: k.handle, tests: testsWords(k), counted: k.replicationTest, outcome: k.outcome, disowned: k.disowned, who: checkWho(r, k, own) }));
+    return checkStory({
+      kind: sc.kind, status: sc.status, credence: sc.credence, prior: sc.prior, external, world: sc.world, operators: sc.operators, checks,
+      arguments: { upheld: sc.arguments.upheld, dismissed: sc.arguments.dismissed, open: sc.arguments.open }, blockers: [], by: null, declared: [], period: null,
+    });
   }
 
   /** The claims page: the network drawn, its totals, and the list (the default list, or everything in view). */
@@ -493,17 +548,7 @@ export class PagesHandler {
     }
     // The claims most recently checked, with their checks' story in one line.
     const recentIds = claims.filter((c) => c.status !== "unchecked" && c.checkedAt).sort((a, b) => b.checkedAt!.localeCompare(a.checkedAt!) || b.seq - a.seq).slice(0, 4);
-    const recent = recentIds.map((c) => {
-      const sc = s.claims.get(c.id)!;
-      const own = r.external.get(c.id)?.operatorId ?? r.native.get(c.id)?.operatorId ?? null;
-      const checks = [...r.checks.values()].filter((k) => k.target === c.id && k.stage === "resulted" && !isHeld(r, k.id)).sort((a, b) => a.seq - b.seq)
-        .map((k) => ({ agent: k.handle, tests: testsWords(k), counted: k.replicationTest, outcome: k.outcome, disowned: k.disowned, who: checkWho(r, k, own) }));
-      const story = checkStory({
-        kind: sc.kind, status: sc.status, credence: sc.credence, prior: sc.prior, external: c.external, world: sc.world, operators: sc.operators, checks,
-        arguments: { upheld: sc.arguments.upheld, dismissed: sc.arguments.dismissed, open: sc.arguments.open }, blockers: [], by: null, declared: [], period: null,
-      });
-      return { id: c.id, line: story.lede[0] ?? "" };
-    });
+    const recent = recentIds.map((c) => ({ id: c.id, line: this.storyOf(r, s, c.id, c.external).lede[0] ?? "" }));
     return { claims, papers: paperMap, recent, unlisted: inView.length - listed.length, computedFrom: r.head };
   }
 

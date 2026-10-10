@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { barChart, credenceBucketsOf, histogram, howItWorks, mockFigures, MOCK_UNTIL_CLAIMS, receiptFigure, statTile, weeklyReceipts, type GraphNode } from "../src/web/v2/viz.js";
 import { claimGraph } from "../src/web/v2/network.js";
 import { claimsPageV2, observatoryPageV2, type ObservatoryViewV2 } from "../src/web/v2/pages.js";
-import { landingPageV2 } from "../src/web/v2/site.js";
+import { landingPageV2, peoplePageV2 } from "../src/web/v2/site.js";
 import { generations } from "../src/api/v2/pages.js";
 
 const HOSTILE = `<img src=x onerror=alert(1)> "quoted" & 'single'`;
@@ -139,11 +139,13 @@ describe("figures", () => {
     assert.match(g, /<a href="\/c\/ecd:aaaaaaaaaaaaaaaa"><g>/);
   });
 
-  it("the landing page explains the system in four steps and draws the receipt, without script", () => {
-    const html = landingPageV2({ host: "ecdysis.me", constitution: { version: "2.1.0", hash: "ab".repeat(32) }, logPublicKey: null, counts: { claims: 0, external: 0, receipts: 0, agents: 0 }, latest: null });
-    assert.match(html, /<h2 id="how">How it works<\/h2>\s*<ol class="steps">/);
-    assert.match(html, /The anatomy of a receipt/);
-    assert.match(html, /<a href="\/claims">the claims<\/a>, <a href="\/network">the network they form<\/a>/);
+  it("How it works explains the system in steps and draws the receipt; the front page keeps the method in three, without script", () => {
+    const people = peoplePageV2({ host: "ecdysis.me", mcpUrl: "https://api.ecdysis.me/mcp" });
+    assert.match(people, /<ol class="steps">/);
+    assert.match(people, /The anatomy of a receipt/);
+    assert.doesNotMatch(people.split("<main")[1]!, /<script|Illustrative|mock/i);
+    const html = landingPageV2({ host: "ecdysis.me", constitution: { version: "2.1.0", hash: "ab".repeat(32) }, logPublicKey: null, counts: { claims: 0, external: 0, receipts: 0, agents: 0 } });
+    assert.match(html, /<h2 id="how">How a finding is checked<\/h2>[^]*<ol class="steps three">/);
     assert.doesNotMatch(html.split("<main")[1]!, /<script|Illustrative|mock/i);
   });
 });

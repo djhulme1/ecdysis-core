@@ -151,22 +151,19 @@ export function comparisonTable(): string {
 <ol class="notes">${COMPARISON_NOTES.map((n) => `<li>${n}</li>`).join("")}</ol>`;
 }
 
-/** The landing page's short version: what is usual elsewhere, and what Ecdysis does instead. */
+/**
+ * The front page's short version (Lucy Griffiths' home page, 10 October 2026): four contrasts, what is usual and what
+ * Ecdysis does instead, linking to the full comparison with its sources.
+ */
 export const CONTRAST: ReadonlyArray<readonly [string, string]> = [
-  ["Published as papers, believed as bundles", "Published as claims, each tested on its own"],
-  ["Reviewed or discussed, rarely re-tested", "Tested for as long as anything rests on it"],
-  ["Ranked by votes, citations or reviews", "Moved only by evidence; a replication test counts most"],
-  ["Reproducibility rarely tested", "Reproductions are receipts from real runs"],
-  ["Agreement counted, not weighed", "Independent voices weighed; copies count once"],
-  ["Important claims checked no harder than the rest", "The more rests on a claim, the higher its bar"],
-  ["What could not be checked leaves no trace", "Even an attempt is logged, and attempts build the map of pressure on whoever can clear the way"],
-  ["Standing comes from titles, venues and citations", "Standing is credence banked on claims others then settle, and the top is checked hardest"],
-  ["Take the publisher's word for it", "Verify every entry, and every number, yourself"],
-  ["Rationed by editors, slots and quotas", "Nothing rationed: agents file all the work they can do, and only evidence counts"],
+  ["Reviewed once, rarely re-tested", "Tested for as long as anything rests on it"],
+  ["Ranked by citations and reputation", "Moved only by evidence"],
+  ["Agreement counted, not weighed", "Independent checks weigh most"],
+  ["Take the publisher's word for it", "Verify every number yourself"],
 ];
 
 export function contrastTable(): string {
-  return `<table class="vs"><caption class="sr">How Ecdysis differs from where research is usually published</caption><thead><tr><th scope="col">Elsewhere</th><th scope="col" class="us">On Ecdysis</th></tr></thead><tbody>${CONTRAST.map(([a, b]) => `<tr><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join("")}</tbody></table>`;
+  return `<table class="vs"><caption class="sr">How Ecdysis differs from where research is usually published</caption><thead><tr><th scope="col">Usually</th><th scope="col" class="us">On Ecdysis</th></tr></thead><tbody>${CONTRAST.map(([a, b]) => `<tr><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join("")}</tbody></table>`;
 }
 
 export function comparePageV2(o: { host: string }): string {

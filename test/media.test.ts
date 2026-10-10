@@ -306,23 +306,25 @@ describe("the front page's video", () => {
   }
   const page = (path: string) => new Request(`https://ecdysis.me${path}`, { headers: { accept: "text/html" } });
 
-  it("sits beside the headline: the browser's own player, the poster, captions, nothing loaded before play, no script", async () => {
+  it("sits just below the opening, framed by what it answers: the browser's own player, the poster, captions, nothing loaded before play, no script", async () => {
     const opts = await world();
     const r = await route(page("/"), new MemoryRateLimiter(1000), opts);
     assert.equal(r.status, 200);
     const html = await r.text();
-    const hero = html.slice(html.indexOf('<section class="hero has-film">'), html.indexOf('<div class="doors">'));
-    assert.ok(hero.includes("<h1>Science has outgrown its shell.</h1>"), "the video is in the hero, beside the headline");
-    const video = /<video [^>]*>/.exec(hero)?.[0] ?? "";
-    for (const attr of ["controls", "playsinline", 'preload="none"', `poster="${EXPLAINER.poster.path}"`, 'width="1280"', 'height="720"']) assert.ok(video.includes(attr), `${attr} in ${video}`);
+    const film = html.slice(html.indexOf('<section class="film-row"'), html.indexOf('<section class="figures"'));
+    assert.ok(film.length > 0, "the film has its own section, before the record's figures");
+    assert.ok(html.indexOf("<h1>Science has outgrown its shell.</h1>") < html.indexOf("<video"), "below the opening");
+    assert.match(film, /<h2 id="film-h">Why Ecdysis exists<\/h2>/);
+    assert.match(film, /Daniel Hulme, who founded Ecdysis, explains in under two minutes why science needs a record that checks itself\./);
+    const video = /<video [^>]*>/.exec(film)?.[0] ?? "";
+    for (const attr of ["controls", "playsinline", 'preload="none"', `poster="${EXPLAINER.poster.path}"`, 'width="1280"', 'height="720"', 'aria-labelledby="film-h"']) assert.ok(video.includes(attr), `${attr} in ${video}`);
     assert.doesNotMatch(video, /autoplay|muted|loop/, "it plays when someone asks it to, with its sound");
-    assert.ok(hero.includes(`<source src="${EXPLAINER.video.path}" type="video/mp4">`));
-    assert.ok(hero.includes(`<track kind="captions" src="${EXPLAINER.captions.path}" srclang="en" label="English">`));
-    assert.match(hero, /<details class="transcript"><summary>Read the transcript<\/summary>/);
-    for (const p of EXPLAINER.transcript) assert.ok(hero.includes(`<p>${esc(p)}</p>`), "the transcript, escaped, in full");
-    assert.ok(hero.includes("1&nbsp;min&nbsp;53&nbsp;s"), "the running time never breaks across lines");
+    assert.ok(film.includes(`<source src="${EXPLAINER.video.path}" type="video/mp4">`));
+    assert.ok(film.includes(`<track kind="captions" src="${EXPLAINER.captions.path}" srclang="en" label="English">`));
+    assert.match(film, /<details class="transcript"><summary>Read the transcript<\/summary>/);
+    for (const p of EXPLAINER.transcript) assert.ok(film.includes(`<p>${esc(p)}</p>`), "the transcript, escaped, in full");
+    assert.ok(film.includes("1&nbsp;min&nbsp;53&nbsp;s"), "the running time never breaks across lines");
     assert.ok(!html.includes("<script"), "still no script");
-    assert.ok(html.indexOf("<video") < html.indexOf('<div class="doors">'), "above the three doors");
   });
 
   it("lets the front page alone load media from this origin", async () => {

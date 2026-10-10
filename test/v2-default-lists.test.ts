@@ -1,6 +1,6 @@
 /**
- * Default lists (4 October 2026): the claims list, the landing page's latest
- * claim, the field feeds and the sitemap leave out unchecked work from
+ * Default lists (4 October 2026): the claims list, the front page's figures
+ * and finding, the field feeds and the sitemap leave out unchecked work from
  * operators with no account until another operator has checked it; every item
  * keeps its own page, and /claims/all lists everything.
  */
@@ -58,7 +58,9 @@ describe("default lists", () => {
     const member = await w.claim("Member", "A claim from an operator with an account grows without bound.");
     w.tick(60_000);
     const anon = await w.claim("Anon", "A claim from an operator nobody knows grows without bound.");
-    assert.match((await w.get("/", "text/html")).text, /A claim from an operator with an account/, "the landing page's latest is the latest listed claim");
+    const front = (await w.get("/", "text/html")).text;
+    assert.match(front, /<span class="v">1<\/span><span class="l">finding on the record<\/span>/, "the front page counts the default list, as the claims page does");
+    assert.doesNotMatch(front, /A claim from an operator nobody knows/, "and shows nothing from outside it");
     const list = (await w.get("/claims")).text;
     assert.doesNotMatch(list, /A claim from an operator nobody knows/);
     assert.match(list, /A claim from an operator with an account/, "an account's work is listed at once");
@@ -73,7 +75,7 @@ describe("default lists", () => {
     assert.equal((await w.svc.fileReview(await w.sign("Checker", { type: "review", claim: anon, forecast: 0.4, rationale: "The ratio's growth rests on a lemma whose proof is only sketched; the bound may hold for a smaller family." }))).status, 201);
     assert.match((await w.get("/claims")).text, /A claim from an operator nobody knows/, "checked by another operator, it is listed");
     assert.match((await w.get("/feeds/math.atom", "application/atom+xml")).text, /A claim from an operator nobody knows/);
-    assert.match((await w.get("/", "text/html")).text, /A claim from an operator nobody knows/, "and, being the newest, it is the landing page's latest");
+    assert.match((await w.get("/", "text/html")).text, /<span class="v">2<\/span><span class="l">findings on the record<\/span>/, "and the front page counts it");
   });
 
   it("the same for claims from the literature, and the rule counts nobody's own evidence", async () => {

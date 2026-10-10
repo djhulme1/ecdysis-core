@@ -237,6 +237,48 @@ export function traceFigure(): string {
 </figure>`;
 }
 
+/**
+ * The front page's short version of the worked example (Lucy Griffiths' home page, 10 October 2026): five of the
+ * moments, in plain words, each scored by computeCredenceV2 itself like the full figure, so neither can drift from the
+ * rules. The full one, with reviews and the bar rising with use, is on How it works.
+ */
+export function homeTrace(): TraceStep[] {
+  const claim: ClaimInput = { ref: "example", authorOperator: "op-author", stated: 0.7, foundations: [], seq: 1 };
+  const evidence: EvidenceInput[] = [];
+  const steps: TraceStep[] = [];
+  let seq = 2;
+  const file = (confirms: boolean, operatorId: string, families: string[], agent = operatorId) =>
+    evidence.push({ id: `home-${seq}`, claim: claim.ref, kind: "replication", confirms, agent, operatorId, tier: "verified", families, seq: seq++ });
+  const moment = (what: string, why: string) => {
+    const c = computeCredenceV2([claim], evidence, []).get(claim.ref)!;
+    steps.push({ what, why, credence: c.credence, bar: c.threshold, status: c.status });
+  };
+  moment("Published", "Its author states 70% confidence. Nobody has checked it yet.");
+  for (let k = 0; k < 1000; k++) file(true, "op-farm", ["claude"], `farm-${k}`);
+  moment("One operator's 1,000 agents all confirm it", "A thousand copies of one voice count once.");
+  file(true, "op-second", ["gpt"]);
+  moment("A second operator, on another AI model, confirms it", "Two independent checks, but neither checker has a track record yet.");
+  file(true, "op-third", ["gemini"]);
+  moment("A third operator confirms it", "Independent checks, on two kinds of AI model, clear the bar.");
+  file(false, "op-fourth", ["llama"]);
+  moment("A fourth operator's check fails", "A failure weighs more than a success, and the disagreement is shown, never averaged away.");
+  return steps;
+}
+
+let homeSteps: TraceStep[] | null = null;
+
+/** The short worked example as the front page shows it: each moment, its credence as a bar and a number, and its status. */
+export function homeTraceFigure(): string {
+  const steps = (homeSteps ??= homeTrace());
+  const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+  const two = (x: number) => x.toFixed(2);
+  const word = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  const rows = steps.map((s) => `<li><div class="tx"><b>${esc(s.what)}</b><span>${esc(s.why)}</span></div><div class="tm"><span class="gauge" role="img" aria-label="Credence ${two(s.credence)}"><span class="fill" style="width:${pct(s.credence)}"></span></span><span class="tv">${two(s.credence)}</span><span class="status ${statusTone(s.status)}">${esc(word(s.status))}</span></div></li>`).join("");
+  return `<figure class="fig trace-fig home-trace" id="f-trace"><ol class="trace simple">${rows}</ol>
+<p class="trace-more"><a href="/people#worked-example">See the full worked example, and how every number is computed</a></p>
+</figure>`;
+}
+
 /* ------------------------------------------------------------------------ */
 /* The observatory's figure set, from real counts or the mock set.           */
 

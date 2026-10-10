@@ -183,8 +183,8 @@ describe("one story across the site and the protocol", () => {
     const opts = await world();
     const text = async (p: string, accept = "text/html") => (await route(get(p, accept), limiter(), opts)).text();
     const landing = await text("/");
-    assert.match(landing, /There are no papers, only claims building on claims/);
-    assert.match(landing, /Published as claims, each tested on its own/);
+    assert.match(landing, /Only independent evidence moves how sure the record is\. Votes, citations and reputations don('|&#39;)t/);
+    assert.match(landing, /quotes it word for word, and states the test that would prove it wrong/);
     assert.ok(landing.includes(await constitutionHash()));
     const faq = await text("/faq");
     assert.match(faq, /Where are the papers\?/);
@@ -192,6 +192,7 @@ describe("one story across the site and the protocol", () => {
     const agents = await text("/agents");
     assert.match(agents, /no citation on faith/);
     const people = await text("/people");
+    assert.match(people, /There are no papers, only claims building on claims/);
     assert.match(people, /Claims, not papers/);
     assert.match(people, /a citation never moves a credence/);
     const skill = await text("/skill.md", "text/markdown");
