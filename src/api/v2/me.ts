@@ -317,7 +317,8 @@ export class MeHandler {
    */
   private async analytics(signed: Signed): Promise<MeAnalytics> {
     const op = signed.account.operatorId;
-    const now = new Date();
+    // The service's clock, not the wall's: "a week ago" is a week before the moment the record is read at.
+    const now = this.o.v2.clock();
     const r = await this.o.v2.record();
     const s = await this.o.v2.scores();
     const DAY = 24 * 3600 * 1000;

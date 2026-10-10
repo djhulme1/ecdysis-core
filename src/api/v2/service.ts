@@ -490,6 +490,11 @@ export class V2Service {
     }
   }
 
+  /** The service's clock: the moment the record is read at (the wall clock, unless a test gives another). */
+  clock(): Date {
+    return this.now();
+  }
+
   /** The record as of now, derived from the log. */
   async record(): Promise<V2Record> {
     return this.recordAsOf(this.now());
