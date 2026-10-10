@@ -34,6 +34,7 @@ an input is executed.
 | `python3 mm/check.py dps` | Dumas, Pernet & Sedoglavic: 4 × 4 rational in 48 | `data/4x4x4_48_rational_*.sms`, jgdumas/plinopt |
 | `python3 mm/check.py symflips` | Moosbauer & Poole: 5 × 5 in 93 and 6 × 6 in 153 over every field | `schemes/{555m93,666m153}{,_lifted}.txt`, jakobmoosbauer/symmetric-flips |
 | `python3 mm/check.py perminov` | Perminov: 4 × 4 by 4 × 10 in 115, coefficients in {−1, 0, 1} | `schemes/results/ZT/4x4x10_m115_ZT.{json,m}`, dronperminov/FastMatrixMultiplication |
+| `python3 mm/check.py medley` | Medley, Gokul, Luu & Manolios: 7 × 7 over F₂ in 245, against Perminov's 248 | Appendix A of the e-print `arXiv:2609.17533v1`; `schemes/results/Z2/7x7x7_m248_Z2.json`, dronperminov/FastMatrixMultiplication at `d1350dd` |
 
 Each run writes `results/outputs.json`: the number of products, the entries
 that differ from the tensor (0 for a correct scheme), the probe's mismatches
@@ -47,6 +48,16 @@ output entry `C_ik` as in the flip graph files; `read_symflips` reads all of
 them and refuses anything else. The integer schemes are checked over Z, which
 makes them hold over every field; the F₂ files are checked modulo 2 and
 compared with the integer ones reduced modulo 2, term by term.
+
+Medley et al. print their scheme in the paper itself: Appendix A of the
+e-print's `main.tex` holds a Base32 block of zlib-compressed bytes, 21 a
+term (the masks of A, B and C as 7-byte little-endian integers, bit 7i + j
+for entry [i, j]), with C indexed by the product's own entry rather than
+transposed. `read_medley` decodes it as the appendix says (the zlib stream
+must end where the block does, and no mask may set a bit beyond the 49
+entries) and maps C to this module's convention; the run reports the same
+scheme read the other way round, which must fail, and over the integers,
+where it does (it is a scheme of characteristic 2).
 
 Perminov's JSON holds the scheme three ways: integer arrays `u`, `v` and `w`
 (`w` over C transposed, as this module's convention), the products as strings

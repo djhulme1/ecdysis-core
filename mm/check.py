@@ -23,6 +23,11 @@ results/outputs.json:
                (arXiv:2603.02398): the 4x4x10 scheme in 115 products with
                coefficients in {-1, 0, 1}, over the integers, from its JSON file,
                with the file's own strings and its list file read back against it.
+  medley       Medley, Gokul, Luu & Manolios, "GPU-Accelerated Search for Fast
+               Matrix Multiplication over F2" (arXiv:2609.17533): the 7x7 scheme in
+               245 products modulo 2, read from the Base32 block its Appendix A
+               prints in the e-print's TeX, against the record it improves on
+               (Perminov's 248 over F2, arXiv:2511.20317, from his repository).
   selftest     the checker on Strassen's scheme and on broken copies of it.
 
 Every scheme is checked three ways.
@@ -48,6 +53,7 @@ numbers. Nothing reads the clock.
 """
 
 import ast
+import base64
 import hashlib
 import io
 import json
@@ -55,7 +61,9 @@ import os
 import re
 import struct
 import sys
+import tarfile
 import zipfile
+import zlib
 from fractions import Fraction
 
 # ---------------------------------------------------------------- numbers
@@ -786,6 +794,88 @@ def run_perminov(seed):
     return out, passed
 
 
+MEDLEY = ("arXiv-2609.17533v1.tar.gz", "20a71d1efdad8ac29a967fdbb9793bb86161f0762ef5482f3fd87199c0754fcd")
+MEDLEY_TEX, MEDLEY_N, MEDLEY_CLAIMED = "main.tex", 7, 245
+MEDLEY_BEGIN, MEDLEY_END = "BEGIN-RANK245-7X7X7-ZLIB-BASE32", "END-RANK245-7X7X7-ZLIB-BASE32"
+PRIOR = ("perm7x7x7_m248_Z2.json", "0b55061fe5ed404aaa5ba380742433fc029650be5821f91719d96b97bdb6f74c")
+PRIOR_RANK = 248   # the record the paper improves on: Perminov, arXiv:2511.20317, his table of binary-field results
+
+
+def medley_block(tex):
+    """Appendix A's Base32 text: after the first BEGIN marker and before the first END marker after it (the markers
+    appear again, as constants, in the verifier listing that follows the block), with its whitespace removed."""
+    start = tex.find(MEDLEY_BEGIN)
+    if start < 0:
+        raise ValueError("the TeX has no BEGIN marker")
+    start += len(MEDLEY_BEGIN)
+    end = tex.find(MEDLEY_END, start)
+    if end < 0:
+        raise ValueError("the TeX has no END marker after BEGIN")
+    block = "".join(tex[start:end].split())
+    if not re.fullmatch(r"[A-Z2-7]+", block):
+        raise ValueError("the block holds characters outside Base32's alphabet")
+    return block
+
+
+def read_medley(block, n=MEDLEY_N):
+    """The block decoded as Appendix A states: Base32 (padded to a multiple of eight characters), then zlib, which must
+    end exactly where the bytes do; 3n bytes a term, the masks of A, B and C as n-byte little-endian integers, bit
+    n*i + j recording entry [i, j]. C's mask is indexed by the product's own entry (C[i][k] = sum_j A[i][j] B[j][k]), as
+    the paper's verifier checks it, so its bit n*i + k goes to this module's w index k*n + i. Returns (scheme, the decoded
+    bytes, how many terms have a zero factor)."""
+    raw = base64.b32decode(block + "=" * (-len(block) % 8))
+    d = zlib.decompressobj()
+    data = d.decompress(raw) + d.flush()
+    if not d.eof or d.unused_data:
+        raise ValueError("the zlib stream does not end where the block does")
+    size = 3 * n
+    if not data or len(data) % size:
+        raise ValueError(f"{len(data)} decoded bytes are not whole terms of {size}")
+    scheme, zero = [], 0
+    for off in range(0, len(data), size):
+        a, b, c = (int.from_bytes(data[off + q * n:off + (q + 1) * n], "little") for q in range(3))
+        if max(a, b, c) >> (n * n):
+            raise ValueError("a mask sets a bit beyond the n x n entries")
+        zero += 1 if 0 in (a, b, c) else 0
+        u = {x: 1 for x in range(n * n) if a >> x & 1}
+        v = {x: 1 for x in range(n * n) if b >> x & 1}
+        w = {(x % n) * n + x // n: 1 for x in range(n * n) if c >> x & 1}
+        scheme.append((u, v, w))
+    return scheme, data, zero
+
+
+def flip_c(scheme, n):
+    """The same scheme with C read the other way round (the cyclic convention's transposed C): a misreading that a
+    correct check must reject."""
+    return [(u, v, {(y % n) * n + y // n: z for y, z in w.items()}) for u, v, w in scheme]
+
+
+def run_medley(seed):
+    """The test: the scheme Appendix A prints has at most 245 terms, none with a zero factor, passes every Brent equation of
+    <7, 7, 7> modulo 2, and has fewer products than the record the paper improves on (248), and the probes agree. Beside it:
+    that record itself (Perminov's 248, checked modulo 2), the scheme read with C transposed (which must fail), over the
+    integers (it is a scheme of characteristic 2) and its distinct terms. Whether no better scheme was public before the
+    paper is a question of the literature, which no run can settle."""
+    with tarfile.open(fileobj=io.BytesIO(input_bytes(*MEDLEY)), mode="r:gz") as tar:
+        tex = tar.extractfile(MEDLEY_TEX).read().decode("utf-8")
+    block = medley_block(tex)
+    scheme, data, zero = read_medley(block)
+    n = MEDLEY_N
+    products, wrong, pw, cw, lines = assess("medley_777_f2", scheme, n, n, n, "F2", seed)
+    doc = json.loads(input_bytes(*PRIOR).decode("utf-8"))
+    pn, pm, pp, prank, prior = perm_scheme(doc)
+    if (pn, pm, pp) != (n, n, n) or doc.get("z2") is not True:
+        raise ValueError(f"the prior record's file is for {pn}x{pm}x{pp}, z2 {doc.get('z2')}, not 7x7x7 over F2")
+    distinct = len({tuple(tuple(sorted(f)) for f in t) for t in scheme})
+    out = {"products": products, "distinct": distinct, "zero_factors": zero, "wrong": wrong, "entries": (n * n) ** 3,
+           "probe_wrong": pw, "control_wrong": cw, "transposed_wrong": wrong_entries(flip_c(scheme, n), n, n, n, "F2"),
+           "wrong_over_z": wrong_entries(scheme, n, n, n, "Z"), "prior_products": prank,
+           "prior_wrong": wrong_entries(prior, n, n, n, "F2"), "improvement": prank - products, "block_chars": len(block),
+           "decoded_sha256": hashlib.sha256(data).hexdigest()[:16], "probe_digest": digest(lines)}
+    passed = wrong == 0 and pw == 0 and zero == 0 and products <= MEDLEY_CLAIMED and products < PRIOR_RANK
+    return out, passed
+
+
 def run_selftest(seed):
     s = strassen()
     good = wrong_entries(s, 2, 2, 2, "Z")
@@ -797,7 +887,7 @@ def run_selftest(seed):
 
 
 RUNS = {"flips": run_flips, "alphatensor": run_alphatensor, "alphaevolve": run_alphaevolve, "dps": run_dps,
-        "symflips": run_symflips, "perminov": run_perminov, "selftest": run_selftest}
+        "symflips": run_symflips, "perminov": run_perminov, "medley": run_medley, "selftest": run_selftest}
 
 
 def main(argv):

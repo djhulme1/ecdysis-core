@@ -4,6 +4,7 @@ A check that cannot fail is not a check: every format is read back, passes, and 
 coefficient is changed. Run with: python3 -m unittest discover -s tests
 """
 
+import base64
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+import zlib
 from fractions import Fraction
 from io import BytesIO
 
@@ -328,6 +330,83 @@ class Perminov(unittest.TestCase):
         self.assertLess(abs(C.exponent(7, 2, 2, 2)[0] - strassen), 1e-35)
 
 
+def medley_bytes(scheme, n):
+    """A scheme over F2 in Medley et al.'s byte layout: per term the masks of A, B and C as n-byte little-endian
+    integers, bit n*i + j for entry [i, j], C indexed by the product's own entry (this module's w index k*n + i is
+    C's entry [i, k])."""
+    out = b""
+    for u, v, w in C.mod2(scheme):
+        a = sum(1 << x for x in u)
+        b = sum(1 << x for x in v)
+        c = sum(1 << (y % n) * n + y // n for y in w)
+        out += a.to_bytes(n, "little") + b.to_bytes(n, "little") + c.to_bytes(n, "little")
+    return out
+
+
+def medley_tex(data, wrap=76):
+    """The bytes as Appendix A prints them: zlib, then Base32 without padding, in lines, between the markers, which the
+    verifier listing after the block names again."""
+    b32 = base64.b32encode(zlib.compress(data, 9)).decode("ascii").rstrip("=")
+    lines = [b32[i:i + wrap] for i in range(0, len(b32), wrap)]
+    return ("\\begin{Verbatim}\n" + C.MEDLEY_BEGIN + "\n" + "\n".join(lines) + "\n" + C.MEDLEY_END + "\n\\end{Verbatim}\n"
+            + 'BEGIN = "' + C.MEDLEY_BEGIN + '"\nEND = "' + C.MEDLEY_END + '"\n')
+
+
+def naive(n):
+    """The schoolbook scheme: one product A[i][j] B[j][k] for each (i, j, k), into C[i][k]."""
+    return [({i * n + j: 1}, {j * n + k: 1}, {k * n + i: 1}) for i in range(n) for j in range(n) for k in range(n)]
+
+
+class Medley(unittest.TestCase):
+    def test_the_layout_reads_back_and_passes_mod_2(self):
+        for scheme, n in ((C.strassen(), 2), (naive(3), 3)):
+            with self.subTest(n=n):
+                block = C.medley_block(medley_tex(medley_bytes(scheme, n)))
+                got, data, zero = C.read_medley(block, n)
+                self.assertEqual(got, C.mod2(scheme))
+                self.assertEqual((zero, len(data)), (0, 3 * n * len(scheme)))
+                self.assertEqual(C.wrong_entries(got, n, n, n, "F2"), 0)
+
+    def test_c_read_transposed_fails_and_a_changed_bit_or_a_lost_term_fails(self):
+        got, _, _ = C.read_medley(C.medley_block(medley_tex(medley_bytes(naive(3), 3))), 3)
+        self.assertGreater(C.wrong_entries(C.flip_c(got, 3), 3, 3, 3, "F2"), 0)
+        data = bytearray(medley_bytes(C.strassen(), 2))
+        data[0] ^= 2
+        got, _, _ = C.read_medley(C.medley_block(medley_tex(bytes(data))), 2)
+        self.assertGreater(C.wrong_entries(got, 2, 2, 2, "F2"), 0)
+        got, _, _ = C.read_medley(C.medley_block(medley_tex(medley_bytes(C.strassen()[:-1], 2))), 2)
+        self.assertGreater(C.wrong_entries(got, 2, 2, 2, "F2"), 0)
+
+    def test_a_zero_factor_is_counted(self):
+        data = medley_bytes(C.strassen(), 2) + bytes(2) + b"\x01\x00" + b"\x01\x00"
+        _, _, zero = C.read_medley(C.medley_block(medley_tex(data)), 2)
+        self.assertEqual(zero, 1)
+
+    def test_the_first_end_after_begin_is_used(self):
+        tex = medley_tex(medley_bytes(C.strassen(), 2))
+        self.assertEqual(C.medley_block("intro " + tex), C.medley_block(tex))
+        self.assertNotIn("BEGIN", C.medley_block(tex))
+
+    def test_what_cannot_be_read_is_refused(self):
+        good = medley_bytes(C.strassen(), 2)
+        b32 = base64.b32encode(zlib.compress(good)).decode("ascii").rstrip("=")
+        cases = (
+            "no markers at all",
+            C.MEDLEY_BEGIN + " " + b32 + " ",                                     # no END
+            C.MEDLEY_BEGIN + " " + b32.lower() + " " + C.MEDLEY_END,              # not Base32's alphabet
+            C.MEDLEY_BEGIN + " " + b32 + "18 " + C.MEDLEY_END,
+        )
+        for tex in cases:
+            with self.subTest(tex=tex[:40]), self.assertRaises(ValueError):
+                C.read_medley(C.medley_block(tex), 2)
+        for data in (good + b"\x00", good[:-1], good[:-6] + b"\x10\x00" + good[-4:]):
+            with self.subTest(data=len(data)), self.assertRaises(ValueError):
+                C.read_medley(C.medley_block(medley_tex(data)), 2)
+        trailing = base64.b32encode(zlib.compress(good) + b"junk").decode("ascii").rstrip("=")
+        with self.assertRaises(ValueError):
+            C.read_medley(C.medley_block(C.MEDLEY_BEGIN + trailing + C.MEDLEY_END), 2)
+
+
 class Inputs(unittest.TestCase):
     def test_an_input_that_is_not_the_committed_bytes_is_refused(self):
         with tempfile.TemporaryDirectory() as d:
@@ -387,6 +466,30 @@ class PerminovReleased(unittest.TestCase):
                          (115, 0, 25600, 0, 1))
         self.assertEqual((out["strings_agree"], out["list_agree"], out["below_strassen"], out["exponent"]),
                          (115, 115, 1, 2.80479))
+
+
+def medley_inputs():
+    d = os.environ.get("MM_INPUTS") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "inputs")
+    return d if all(os.path.isfile(os.path.join(d, name)) for name, _ in (C.MEDLEY, C.PRIOR)) else None
+
+
+@unittest.skipUnless(medley_inputs(), "Medley et al.'s e-print and Perminov's 248 are not at inputs/ (or MM_INPUTS)")
+class MedleyReleased(unittest.TestCase):
+    def test_the_printed_scheme_and_the_record_it_beats(self):
+        if os.path.basename(medley_inputs().rstrip("/")) != "inputs":
+            self.skipTest("the files must sit in a directory named inputs")
+        here = os.getcwd()
+        os.chdir(os.path.join(medley_inputs(), ".."))
+        try:
+            out, passed = C.run_medley(SEED)
+        finally:
+            os.chdir(here)
+        self.assertTrue(passed)
+        self.assertEqual((out["products"], out["distinct"], out["zero_factors"], out["wrong"], out["entries"]),
+                         (245, 245, 0, 0, 117649))
+        self.assertEqual((out["transposed_wrong"], out["wrong_over_z"], out["prior_products"], out["prior_wrong"],
+                          out["improvement"], out["block_chars"], out["decoded_sha256"]),
+                         (588, 10124, 248, 0, 3, 3498, "203bdb157c85a7eb"))
 
 
 if __name__ == "__main__":
