@@ -114,6 +114,16 @@ describe("the summary's limits", () => {
     assert.match(bad(null).join(";"), /not an object/);
   });
 
+  it("lets a finding report a comparison as its paper does, and still refuses the start of any tag, comment or instruction", () => {
+    // 9 October 2026: a finding quoting "(<0.1 Hz)" was refused as markup, and the claim kept no summary.
+    const fair = explanationProblems({ ...GOOD, findings: ["Slow fluctuations (<0.1 Hz) were strongly correlated within each network (P < 10−3).", "More than half of the regions (> 50%) took part."] });
+    assert.ok(fair.ok, JSON.stringify(fair));
+    const bad = (x: unknown) => { const r = explanationProblems(x); assert.equal(r.ok, false, JSON.stringify(x).slice(0, 120)); return r.ok ? [] : r.problems; };
+    for (const tag of ["</p>", "<!-- note -->", "<?xml version='1.0'?>", "<script>alert(1)</script>", "<img src=x onerror=alert(1)", "<SVG onload=alert(1)>"]) {
+      assert.match(bad({ ...GOOD, findings: [`A finding of reasonable length ${tag}`] }).join(";"), /findings\[0\]: carries markup/, tag);
+    }
+  });
+
   it("asks for a headline always, and keeps an empty account of what the authors did, or of the paper, as none", () => {
     const bad = (x: unknown) => { const r = explanationProblems(x); assert.equal(r.ok, false, JSON.stringify(x).slice(0, 120)); return r.ok ? [] : r.problems; };
     const { headline: _h, ...noHeadline } = GOOD;
@@ -389,6 +399,46 @@ describe("the context writer", () => {
     assert.match(titleOnly, /no abstract was open to read/);
     assert.match(titleOnly, /Plain-language headline machine-written from the quoted sentence and the paper's title,/, "the head says what the headline was written from");
     assert.doesNotMatch(titleOnly, /What the authors did|What they found/);
+  });
+
+  it("asks again for a summary refused for its form, after six hours and four attempts at most; never for one declined or screened out", async () => {
+    const SIX_HOURS = 6 * 3600 * 1000;
+    const asked = (w: Awaited<ReturnType<typeof world>>) => w.fake.calls.filter((c) => c.url.startsWith("https://api.anthropic.com/")).length;
+    // A headline over its limit (9 October 2026: 184 characters), then one that fits.
+    let long = true;
+    const w = await world({ answer: () => jsonAnswer(long ? { ...GOOD, headline: `${GOOD.headline} ${"It goes on, and on, past the limit. ".repeat(3)}` } : GOOD) });
+    const id = await w.register("doi:10.1000/paper", QUOTE, "verified");
+    assert.equal((await w.writer().run()).refused, 1);
+    assert.match((await w.store.getClaim(id))!.detail ?? "", /^outside the limits: headline: \d+ characters, outside 15 to 170$/);
+    await w.writer().run();
+    assert.equal(asked(w), 1, "not again within six hours");
+    w.tick(SIX_HOURS + 1);
+    long = false;
+    assert.equal((await w.writer().run()).written, 1);
+    assert.deepEqual([(await w.store.getClaim(id))!.status, (await w.store.getClaim(id))!.attempts], ["written", 2]);
+    // An answer that never fits: four attempts in all, then the claim waits for a new version or model.
+    const never = await world({ answer: () => jsonAnswer({ ...GOOD, findings: ["A finding that ends in a tag <b>bold</b>"] }) });
+    const n = await never.register("doi:10.1000/paper", QUOTE, "verified");
+    for (let i = 1; i <= 6; i++) { await never.writer().run(); never.tick(SIX_HOURS + 1); }
+    assert.equal(asked(never), 4);
+    assert.deepEqual([(await never.store.getClaim(n))!.status, (await never.store.getClaim(n))!.attempts], ["refused", 4]);
+    // Declined by the model, or not passed by screening: asking again would change neither.
+    const declined = await world({ answer: () => new Response(JSON.stringify({ content: [], stop_reason: "refusal" }), { status: 200 }) });
+    await declined.register("doi:10.1000/paper", QUOTE, "verified");
+    const blocker: Screener = { name: "test-classifier", screen: async () => [{ screener: "test-classifier", severity: 3, category: "test-category" }] };
+    const screened = await world({ screeners: [blocker] });
+    await screened.register("doi:10.1000/paper", QUOTE, "verified");
+    for (const x of [declined, screened]) {
+      for (let i = 1; i <= 3; i++) { await x.writer().run(); x.tick(SIX_HOURS + 1); }
+      assert.equal(asked(x), 1);
+    }
+    // A comparison its paper reports comes through, and is shown escaped, never as markup.
+    const compared = await world({ answer: () => jsonAnswer({ ...GOOD, findings: ["Slow fluctuations (<0.1 Hz) were strongly correlated within each network (P < 10−3)."] }) });
+    const c = await compared.register("doi:10.1000/paper", QUOTE, "verified");
+    assert.equal((await compared.writer().run()).written, 1);
+    const page = await (await compared.pages.handle("GET", `/c/${c}`, "text/html"))!.text();
+    assert.match(page, /\(&lt;0\.1 Hz\)/);
+    assert.doesNotMatch(page, /\(<0\.1 Hz\)/);
   });
 
   it("says beside the claim why it has no summary: not yet tried, refused by the archive's checks, or failed and tried again", async () => {
