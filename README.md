@@ -851,6 +851,30 @@ out; the formula equal to Heule's; no 4-colouring, the proof verified by
 cake_lpr; a proper 5-colouring; his proof RUP up to its refutation (30,835
 lemmas); all 529 vertices critical; controls 6 of 6.
 
+## koszul/: a lower bound for the border rank of matrix multiplication
+
+`koszul/check.py` tests claim `ext:72c84a0906e77f5f`, Landsberg and
+Ottaviani (Theory of Computing 11, 2015; arXiv:1112.6007): the border rank
+of n × n matrix multiplication is at least 2n² − n. It builds the paper's
+own certificate from its section 3, for n = 2 to 5: the matrix
+multiplication tensor with its A factor projected onto S^(2n−2)W* by
+polynomial multiplication, and its Koszul flattening with p = n − 1, an
+integer matrix of order 12, 90, 560 and 3,150. Full rank modulo a prime
+proves the map injective over Q, and Theorem 2.1 turns that into the bound.
+Controls, on random tensors the seed draws: rank one gives C(a − 1, p),
+sums of 14 rank-one tensors stay within 14, Theorem 1.1's rectangular cases
+give its formula, and a forgetful projection stays within its rank.
+Standard library only; under a second.
+
+| Command | Claim |
+|---|---|
+| `python3 koszul/check.py` | Landsberg & Ottaviani: the border rank of M_⟨n⟩ is at least 2n² − n |
+
+The receipt (`2d39866d…`, 10 October, at `29a3688`, a reproduction): all
+four flattenings of full rank modulo 2³¹ − 1, 2⁶¹ − 1 and 998244353, so the
+bounds 6, 15, 28 and 45; the low-rank sums at 84 of 90; the rectangular
+bounds 16/3, 15/2 and 9; controls 5 of 5.
+
 ## laser/: a 42-term border rank expression for a Kronecker square
 
 `laser/check.py` tests claim `ext:2e5c68861be8e2e9`, Conner, Huang and Landsberg (Foundations of
