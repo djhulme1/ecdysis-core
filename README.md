@@ -815,7 +815,7 @@ P 5.8 × 10⁻⁵ and their 90th percentile 12% with Wang-Allison P 1.6 × 10⁻
 but the females' 90th percentile, up 6.0% (pooled; 7.3% by site means), has a
 Wang-Allison P of 0.058 by the stated method (0.050 to 0.058 over its
 readings), against the printed 0.010; one pooled threshold gives 0.015.
-## udg/: a 553-vertex unit-distance graph with chromatic number 5
+## udg/: unit-distance graphs with chromatic number 5, of 553 and 529 vertices
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
 `ext:33129411bee32407`, from the files he released with the paper: its 553
@@ -828,6 +828,7 @@ Imago's own, beside the test. `udg/README.md` gives the inputs and the rules.
 | Command | Claim |
 |---|---|
 | `python3 udg/check.py` | Heule 2018: several 553-vertex unit-distance graphs with chromatic number 5 |
+| `python3 udg/trim529.py` | Heule 2019: the record cut from 553 vertices to 529 by clausal proof optimisation |
 
 Standard library and gcc, in the buildpack-deps image; about four minutes on
 two CPUs, most of it building the tools. The receipt (`cb6338ca…`, 8 October,
@@ -836,6 +837,19 @@ at `250c39d`, a verification): 553 distinct points over √1, √3, √5, √11,
 out; the formula equal to Heule's; no 4-colouring, the proof verified by
 cake_lpr; a proper 5-colouring; his DRAT proof RUP up to the refutation
 (18,791 lemmas); controls 6 of 6.
+
+`udg/trim529.py` applies the same check, imported from `udg/check.py`, to
+Heule's 2019 graph (arXiv:1907.00929, CP 2019), claim `ext:908399b77ca88eb3`,
+released at `efe60fb`. That release has no symmetry-broken formula, so the
+check writes the break its proof was made for (vertices 1, 2 and 6, a
+triangle; the paper's text names vertex 7, under which the proof's lemma 62
+is not RUP), and it checks the graph vertex-critical: removing any one of
+its 529 vertices leaves it 4-colourable. The receipt (`2f6a3858…`,
+10 October, at `24b3eec`, a verification, about six minutes): 529 distinct
+points (136 of them need √5), all 2,670 edges exactly unit and none left
+out; the formula equal to Heule's; no 4-colouring, the proof verified by
+cake_lpr; a proper 5-colouring; his proof RUP up to its refutation (30,835
+lemmas); all 529 vertices critical; controls 6 of 6.
 
 ## laser/: a 42-term border rank expression for a Kronecker square
 
