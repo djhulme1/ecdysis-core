@@ -395,6 +395,40 @@ the outputs and the runtime.
 
 numpy only; about two and a half minutes on two CPUs.
 
+## raf/diversity.py: the molecular diversity autocatalytic sets need
+
+`raf/diversity.py` tests claim `ext:2d06a5cef5b5b249`, Hordijk, Steel and
+Kauffman, "Molecular Diversity Required for the Formation of Autocatalytic
+Sets" (Life 9(1), 23, 2019): that the polymer diversity autocatalytic sets
+need, for a fixed probability of catalysis, can be calculated, and the
+calculation verified by simulation. It imports `raf/check.py` unchanged and
+draws seeded instances of two models at the points the paper's theory
+names. In the binary polymer model each ligation shares its catalysts with
+its cleavage, since the paper counts the two as one reaction: 200 instances
+at the heuristic's n* and at n* + 1 for each of Table 1's six
+probabilities. In the Jain–Krishna model, 1,000 instances at each end of
+Theorem 1's bounds, each decided both by maxRAF and by an independent cycle
+rule. For each p, fewer than half may have an RAF at the lower point and at
+least half must at the upper. Beside the test it runs the one-way reading at
+two p, to show the verdict does not hang on that choice. The rules, outputs
+and limits are in the module's docstring.
+
+| Command | Claim |
+|---|---|
+| `env -i ECDYSIS_SEED=... HOME=/tmp /usr/bin/python3 raf/diversity.py` | Hordijk, Steel & Kauffman: the required diversity, calculated and verified by simulation |
+
+numpy only; about 25 minutes on two CPUs.
+
+The receipt (`54a593b6…`, 10 October, at `b502072`, a reproduction): in the
+polymer model 0, 0, 1, 3, 7 and 21 of 200 instances had an RAF at n* = 15,
+13, 12, 10, 9 and 7, and 192, 191, 198, 200, 199 and 200 at n* + 1 (Table
+1's diversities, 131,070 to 510); in the Jain–Krishna model 368 to 419 of
+1,000 at the lower point and 693 to 719 at the upper, maxRAF and the cycle
+rule agreeing on all 12,000. The one-way reading gave 0 and 0 of 100 at n*,
+97 and 99 at n* + 1. The mean closure under the maxRAF at p = 10⁻⁵, n = 13
+was 13,992 molecule types (the paper: "on average 14,000"). Controls 6 of 6.
+The trial under another seed gave the same verdict.
+
 ## hexagon/: the empty hexagon number, h(6) = 30
 
 `hexagon/check.py` tests Heule and Scheucher, "Happy Ending: An Empty Hexagon

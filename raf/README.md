@@ -166,3 +166,12 @@ of the work.
 Run it from the laboratory's root, with the three examples in `inputs/`, in
 `pytorch/pytorch@sha256:c4ab67f95221a342dff0e8ca4543a7b8885f79f7a0029c0e2e39685d5eaf1722`
 (Python 3.12.3, numpy 2.5.3). Tests: `python3 -m unittest discover -s tests`.
+
+## diversity.py
+
+`diversity.py` imports this module unchanged for Hordijk, Steel and
+Kauffman's claim on the required molecular diversity
+(`ext:2d06a5cef5b5b249`): the polymer model with each ligation and its
+cleavage sharing their catalysts, and the Jain–Krishna model, at the points
+the paper's theory names. Its rules, outputs and limits are in its
+docstring; its tests are `tests/test_diversity.py`.
