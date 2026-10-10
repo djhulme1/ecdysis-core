@@ -89,13 +89,13 @@ const vars = (p: Palette) =>
 /** The stylesheet every page carries inline (pages are script-free and fetch no stylesheet), its comments taken out. */
 export const CSS = `
 ${fontFaceCss()}
-:root{${vars(TOKENS.light)};--accent:#FF8A24;--on-accent:#1D1E22;--sound:var(--green);--risk:var(--amber);--broken:var(--rose);--on-amber:#1D1E22;
+:root{${vars(TOKENS.light)};--link-inv:${TOKENS.dark.link};--accent:#FF8A24;--on-accent:#1D1E22;--sound:var(--green);--risk:var(--amber);--broken:var(--rose);--on-amber:#1D1E22;
 --radius:10px;--radius-s:8px;
 --serif:"Newsreader",Georgia,"Iowan Old Style",Charter,"Times New Roman",serif;
 --sans:"Public Sans",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
 --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
 --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;--s9:96px;--s10:128px;color-scheme:light}
-@media (prefers-color-scheme:dark){:root{${vars(TOKENS.dark)};color-scheme:dark}}
+@media (prefers-color-scheme:dark){:root{${vars(TOKENS.dark)};--link-inv:${TOKENS.light.link};color-scheme:dark}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{margin:0;background:var(--ground);color:var(--ink);font:17px/1.65 var(--sans);overflow-wrap:break-word;font-kerning:normal;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
@@ -238,13 +238,6 @@ textarea::placeholder,input::placeholder{color:var(--faint)}
 .label+p{margin-top:10px}
 dl.kv{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:4px;margin:0 0 0 10px;font:14px/1.4 var(--sans);color:var(--muted);vertical-align:middle}
 dl.kv dt{margin-left:14px}dl.kv dt:first-child{margin-left:0}dl.kv dd{margin:0;color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
-
-/* Doors: the three ways in, on the front page. */
-.doors{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:16px;margin:8px 0}
-.door{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 22px 20px;color:var(--ink);text-decoration:none;min-height:44px}
-.door:hover{border-color:var(--ink)}
-.door .who{display:block;flex:0 0 auto;font:550 1.6rem/1.15 var(--serif);letter-spacing:-.01em;margin:0 0 8px}
-.door .what{display:block;font:15.5px/1.55 var(--sans);color:var(--muted);margin:0 0 20px;flex:1}
 
 /* Folds: what a checker needs, kept whole and closed until asked for. */
 details summary{cursor:pointer;font:15px/1.4 var(--sans);color:var(--muted);margin-top:6px;min-height:44px;display:flex;align-items:center;gap:8px;list-style:none}
@@ -814,17 +807,33 @@ a.tile:hover{border-color:var(--ink);color:var(--ink)}
 .agents-card h2{margin:0 0 6px}
 .agents-card p{max-width:44rem;color:var(--ink-2);font-size:15.5px}
 
-/* The front page. */
-.hero{max-width:46rem;margin:8px 0 32px}
-.hero .eyebrow{margin:0 0 12px}
-.hero h1{font-size:clamp(2.5rem,5.6vw,4rem);line-height:1.05;margin:0 0 20px}
-.hero .lede{font-size:1.2rem;color:var(--ink-2);margin:0}
-.hero.has-film{max-width:none;display:grid;grid-template-columns:minmax(0,1fr);gap:32px 56px;align-items:start}
-.hero-text{max-width:46rem}
-@media (min-width:1040px){.hero.has-film{grid-template-columns:minmax(0,5fr) minmax(0,6fr)}.hero.has-film h1{font-size:clamp(2.5rem,4.3vw,3.8rem)}.film{padding-top:4px}}
-.film figure{margin:0}
+/* The front page (Lucy Griffiths' home page, 10 October 2026). */
+.home-hero{display:grid;grid-template-columns:minmax(0,1fr);gap:28px 56px;align-items:center;margin:8px 0 40px}
+@media (min-width:960px){.home-hero{grid-template-columns:minmax(0,7fr) minmax(0,5fr)}}
+.home-hero .eyebrow{color:var(--link);margin:0 0 12px}
+.home-hero h1{font-size:clamp(2.5rem,5.6vw,4.2rem);line-height:1.04;margin:0 0 20px}
+.home-hero .lede{font-size:1.15rem;margin:0 0 24px}
+.home-hero .actions{margin:0}
+.hero-text{max-width:42rem}
+.find-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 24px 18px;box-shadow:12px 12px 0 var(--sunk);min-width:0}
+.find-card .eyebrow{margin:0 0 10px}
+.find-card .top{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:0 0 12px;font:13px/1.4 var(--sans);color:var(--muted)}
+.find-card .top .status{margin:0}
+.find-card .ft{font:500 1.32rem/1.35 var(--serif);margin:0 0 10px}
+.find-card .ft a{color:var(--ink);text-decoration:none}
+.find-card .ft a:hover{text-decoration:underline;text-decoration-color:var(--rule)}
+.find-card .from{font:14px/1.5 var(--sans);color:var(--muted);margin:0 0 14px;padding-bottom:14px;border-bottom:1px solid var(--line-2)}
+.find-story{list-style:none;padding:0;margin:0 0 12px;font:14.5px/1.5 var(--sans);color:var(--ink-2)}
+.find-story li{margin:0 0 8px}
+.find-story b{color:var(--ink)}
+.find-card .more{font:600 14.5px/1.4 var(--sans);margin:0}
+.find-card .note{font:12.5px/1.45 var(--sans);color:var(--muted);margin:10px 0 0}
+.film-row{display:grid;grid-template-columns:minmax(0,1fr);gap:20px 44px;align-items:center;margin:24px 0 32px}
+@media (min-width:860px){.film-row{grid-template-columns:minmax(0,7fr) minmax(0,5fr)}}
 .film video{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#000;border:1px solid var(--line);border-radius:var(--radius)}
-.film figcaption{font:14.5px/1.5 var(--sans);color:var(--muted);margin:10px 0 8px}
+.film-text h2{margin:0 0 10px}
+.film-text p{font:17px/1.6 var(--sans);color:var(--ink-2);margin:0 0 8px}
+.film-text p.small{font-size:14.5px;color:var(--muted);margin:0 0 12px}
 details.transcript{border-top:1px solid var(--line)}
 details.transcript>summary{gap:10px;margin:0;color:var(--ink)}
 details.transcript>summary::before{content:none}
@@ -832,11 +841,42 @@ details.transcript>summary::after{content:"+";display:inline-block;font:400 1.25
 details.transcript[open]>summary::after{content:"\\2212"}
 details.transcript>summary:hover{text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:.2em}
 details.transcript>p{font:16px/1.65 var(--sans);color:var(--ink);max-width:44rem;margin:0 0 12px}
-.now{margin:40px 0 8px;padding:24px 24px 10px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
-.now h2{margin-top:0}
-.now h3{margin:24px 0 6px}
-.now .strip{margin-top:4px}
-.now .ledger-scroll{margin:0 -4px}
+.figures{display:grid;grid-template-columns:minmax(0,1fr);gap:14px 36px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 24px;margin:0 0 8px}
+@media (min-width:960px){.figures{grid-template-columns:minmax(0,3fr) minmax(0,1.15fr)}}
+.fig-row{display:flex;flex-wrap:wrap;gap:12px 40px}
+.fig-n{display:flex;flex-direction:column;min-width:7rem}
+.fig-n .v{font:500 2.2rem/1.1 var(--serif);letter-spacing:-.01em;font-variant-numeric:tabular-nums;color:var(--ink)}
+.fig-n .l{font:13.5px/1.35 var(--sans);color:var(--muted)}
+.fig-n.t-sound .v{color:var(--green)}
+.fig-n.t-risk .v{color:var(--amber-ink)}
+.fig-n.t-broken .v{color:var(--rose-ink)}
+.fig-note{font:13.5px/1.5 var(--sans);color:var(--muted);margin:0}
+@media (max-width:600px){.fig-row{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px}.fig-n{min-width:0}}
+.home-trace{max-width:none;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:4px 22px 14px}
+.trace.simple .tm{grid-template-columns:minmax(0,1fr) auto auto}
+.trace.simple .status{grid-column:auto;margin:0}
+.trace-more{font:600 14.5px/1.4 var(--sans);margin:6px 0 0;padding-top:12px;border-top:1px solid var(--line-2)}
+.steps.three{grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr))}
+.step-n.last{background:var(--green);color:var(--on-green)}
+.steps.three h3,.take h3{font:500 1.18rem/1.3 var(--serif)}
+.why-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:8px 48px;align-items:start;margin:52px 0 0}
+@media (min-width:900px){.why-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.why-grid h2{margin-top:0}
+.why-grid p{max-width:36rem}
+.vs-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:10px 20px 12px;min-width:0}
+.vs-card .vs{margin:0 0 6px}
+.vs-card p{margin:0}
+.take{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:16px;margin:8px 0 40px}
+.take .card{display:flex;flex-direction:column}
+.take h3{margin:0 0 6px}
+.take p{font:15.5px/1.55 var(--sans);color:var(--muted);margin:0 0 18px;flex:1}
+.trust{display:grid;grid-template-columns:minmax(0,1fr);gap:16px 40px;background:var(--ink);color:var(--on-ink);border-radius:var(--radius);padding:26px 28px;margin:0 0 24px}
+@media (min-width:860px){.trust{grid-template-columns:minmax(0,2fr) minmax(0,1fr);align-items:start}}
+.trust h2{color:var(--on-ink);margin:0 0 10px}
+.trust p{color:var(--on-ink);margin:0;max-width:40rem}
+.trust-links{list-style:none;padding:0;margin:0}
+.trust-links li{margin:0 0 6px}
+.trust-links a{color:var(--link-inv);font:600 14.5px/1.4 var(--sans)}
 ol.setup{list-style:none;counter-reset:setup;padding:0;margin:8px 0 32px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr));gap:12px}
 ol.setup li{counter-increment:setup;position:relative;padding:18px 18px 16px 58px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);font:16px/1.55 var(--sans)}
 ol.setup li::before{content:counter(setup);position:absolute;left:18px;top:16px;display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--ink);color:var(--on-ink);font:650 14px/1 var(--sans)}
@@ -1021,7 +1061,7 @@ ${o.body}
 </div>
 <div class="frame">
 <footer>
-<div class="foot-brand"><img class="symbol" src="/brand/ecdysis-symbol.svg" alt="" width="540" height="258" decoding="async"><span>Ecdysis is an open record of machine science. Text is licensed CC BY 4.0, and every figure can be recomputed from the public log.</span></div>
+<div class="foot-brand"><img class="symbol" src="/brand/ecdysis-symbol.svg" alt="" width="540" height="258" decoding="async"><span>Ecdysis is an open record of science, checked in public. Text is licensed CC BY 4.0, and every credence and status can be recomputed from the public log.</span></div>
 <div class="cols">${FOOT_COLUMNS.map(([h, links]) => `<div><h2>${esc(h)}</h2><ul>${links.map(([href, label]) => `<li><a href="${href}">${esc(label)}</a></li>`).join("")}</ul></div>`).join("")}</div>
 ${o.computedFrom ? `<p class="small computed">This page was computed from the public log at entry #${o.computedFrom.seq} (${esc(shortDate(o.computedFrom.ts))}, ${esc(o.computedFrom.ts.slice(11, 16))} UTC). Entries since then are not on it: reload for the record as it stands.</p>` : ""}${o.footerExtra ?? ""}
 </footer>

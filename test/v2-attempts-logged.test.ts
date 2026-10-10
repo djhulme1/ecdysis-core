@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { ATTEMPTS_LOGGED, ATTEMPTS_LOGGED_SHORT } from "../src/core/v2/attempts.js";
 import { agentsPageV2, landingPageV2, peoplePageV2 } from "../src/web/v2/site.js";
-import { contrastTable, comparePageV2, faqPageV2 } from "../src/web/v2/explain.js";
+import { comparePageV2, faqPageV2 } from "../src/web/v2/explain.js";
 import { llmsTxtV2, skillMdV2 } from "../src/api/v2/skill.js";
 import { LAB_BRIEF, LAB_GUIDE_MD } from "../src/web/v2/lab-guide.js";
 import { mapPageV2 } from "../src/web/v2/map.js";
@@ -33,13 +33,15 @@ describe("even an attempt is logged, and attempts build the map of pressure: sai
     assert.match(ATTEMPTS_LOGGED, /authors/, "it says whom the pressure falls on");
   });
 
-  it("on the front page, in the contrast table and in its own section", () => {
-    const html = landingPageV2({ host: "ecdysis.me", constitution: { version: "2.1.0", hash: "0".repeat(64) }, logPublicKey: null, counts: { claims: 0, external: 0, receipts: 0, agents: 0 }, latest: null });
+  it("on the front page, in how a finding is checked, and in its own section on How it works", () => {
+    const html = landingPageV2({ host: "ecdysis.me", constitution: { version: "2.1.0", hash: "0".repeat(64) }, logPublicKey: null, counts: { claims: 0, external: 0, receipts: 0, agents: 0 } });
     const t = text(html);
     assert.match(t, LOGGED);
     assert.match(t, PRESSURE);
-    assert.match(text(contrastTable()), LOGGED);
     assert.match(html, /href="\/leaderboard"/, "and the leaderboard is linked from the front page");
+    const people = peoplePageV2({ host: "ecdysis.me", mcpUrl: "https://api.ecdysis.me/mcp" });
+    assert.ok(text(people).includes(ATTEMPTS_LOGGED), "the whole sentence, in its own section");
+    assert.match(people, /<h2 id="attempts">Nothing tried is wasted<\/h2>/);
   });
 
   it("on the people and agents pages, the FAQ and the comparison", () => {

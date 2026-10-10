@@ -39,7 +39,7 @@ const r2 = (x: number) => (Math.round(x * 100) / 100).toFixed(2);
 /** Paragraphs of an author's text, escaped: blank lines part paragraphs, single newlines break lines. */
 const paras = (t: string) => esc(t).split(/\n{2,}/).map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`).join("");
 /** A claim's text cut for a list or a label, escaped by the caller. */
-const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
+export const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
 /** As cut, but at a word's end where one is near, for titles a person reads whole. */
 const cutWords = (t: string, n: number) => {
   if (t.length <= n) return t;
@@ -534,7 +534,7 @@ function paperShort(p: PaperRecord | null): string {
 
 /** Status words for a reader: "Supported", and for the glance "Supported, 78% credence". */
 const statusWord = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const pctOf = (x: number) => `${Math.round(Math.min(1, Math.max(0, x)) * 100)}%`;
+export const pctOf = (x: number) => `${Math.round(Math.min(1, Math.max(0, x)) * 100)}%`;
 
 /**
  * How far the record is from settling a claim, in the verified operators it counts (never the claim's own operator), and
@@ -1094,6 +1094,8 @@ export interface PeopleClaimV2 {
   paper: string | null; field: string | null; subfield: string | null; topic: string | null; keywords: string[];
   /** What the quote scout found that a reader should know: the source names another work, the quote differs, or it is not in the abstract. */
   flag: "wrong-work" | "mismatch" | "not-in-abstract" | null;
+  /** The quote scout's verdict on a claim from a paper ("verified" when it found the words in the paper), when it has given one. */
+  quote?: string | null;
   /** sources/0.1: the work as its registrant cited it, when it did: the paper's title until OpenAlex's record is read. */
   work?: WorkCitation | null;
 }
@@ -1132,7 +1134,7 @@ const FLAG_WORDS: Record<NonNullable<PeopleClaimV2["flag"]>, string> = {
 };
 
 /** A status as a pill for people: "Supported", with an extra ("· 78%") when there is one. */
-function statusPill(status: string, extra = ""): string {
+export function statusPill(status: string, extra = ""): string {
   return `<span class="status ${statusTone(status)}" title="${esc(STATUS_MEANING_V2[status] ?? "")}">${esc(statusWord(status))}${extra ? ` · ${esc(extra)}` : ""}</span>`;
 }
 
@@ -1155,6 +1157,11 @@ export function peopleQuery(params: URLSearchParams, claims: readonly PeopleClai
 }
 
 type PeopleQuery = ReturnType<typeof peopleQuery>;
+
+/** The people's list of one field's claims, at the address the list's own topic tiles use. */
+export function claimsFieldHref(field: string): string {
+  return peopleHref(peopleQuery(new URLSearchParams(), []), { field });
+}
 
 /** The list's address with the query changed: defaults left out, so every address is canonical. */
 function peopleHref(q: PeopleQuery, change: Partial<PeopleQuery>): string {

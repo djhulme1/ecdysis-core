@@ -11,7 +11,7 @@ import { LogApi } from "./api/v2/log-api.js";
 import { Accounts } from "./api/v2/accounts.js";
 import { MeHandler } from "./api/v2/me.js";
 import { StewardHandler } from "./api/v2/steward.js";
-import { PagesHandler } from "./api/v2/pages.js";
+import { OffLogMemo, PagesHandler } from "./api/v2/pages.js";
 import { Notifier } from "./api/v2/notify.js";
 import { V2Governance } from "./api/v2/governance.js";
 import { OAuth } from "./api/v2/oauth.js";
@@ -290,6 +290,18 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
 const V2_CACHE = new V2Cache();
 
 /**
+ * One per isolate and database, like the cache above: the papers' records, headlines and quote verdicts the front page and
+ * the claims list read off the log, kept a minute, so a busy front page does not read four tables on every request. Keyed by
+ * the database binding, so a memo never answers for another database.
+ */
+const OFF_LOG_MEMOS = new WeakMap<object, OffLogMemo>();
+function offLogMemo(db: object): OffLogMemo {
+  let m = OFF_LOG_MEMOS.get(db);
+  if (!m) OFF_LOG_MEMOS.set(db, (m = new OffLogMemo(60_000)));
+  return m;
+}
+
+/**
  * direction/0.1: the registration candidates (each observed field's most-cited works in the citation graph), which the
  * stakes scout reads once a month and the direction list offers as `register` acts. They are direction, never a number about
  * any claim, so they live in ops state rather than on the log.
@@ -392,7 +404,7 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
       },
     }),
     pages: new PagesHandler(v2, {
-      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null, quotes: quoteStore, context: contextStore, log: logApi,
+      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null, quotes: quoteStore, context: contextStore, log: logApi, memo: offLogMemo(env.DB),
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
       ...(waitUntil ? { waitUntil } : {}),
     }),

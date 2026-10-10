@@ -21,8 +21,8 @@ import { PagesHandler, V2_SITEMAP_PAGES } from "../src/api/v2/pages.js";
 import { llmsTxtV2 } from "../src/api/v2/skill.js";
 import { pageKeyOf } from "../src/api/funnel.js";
 import { COMPARISON_AS_OF, COMPARISON_NOTES, COMPARISON_ROWS, COMPARISON_SOURCES, CONTRAST, VENUES, comparisonTable, faqGroups } from "../src/web/v2/explain.js";
-import { claimTrace } from "../src/web/v2/viz.js";
-import { landingPageV2 } from "../src/web/v2/site.js";
+import { claimTrace, homeTrace } from "../src/web/v2/viz.js";
+import { landingPageV2, peoplePageV2, type HomeFinding, type LandingData } from "../src/web/v2/site.js";
 import { computeCredenceV2, type ClaimInput, type EvidenceInput } from "../src/core/v2/credence.js";
 
 async function site() {
@@ -44,7 +44,22 @@ const mainOf = (html: string) => html.split('<main id="main">')[1]!.split("</mai
 const hrefsOf = (html: string) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]!);
 /** Words the positioning brief rules out. ("Decentralised" is allowed: the FAQ says plainly that Ecdysis is not.) */
 const BANNED = /revolutionary|game-changing|disrupt|supercharge|AI-powered|trustless|\bunlock/i;
-const LANDING = { host: "ecdysis.me", constitution: { version: "2.1.0", hash: "ab".repeat(32) }, logPublicKey: null, counts: { claims: 0, external: 0, receipts: 0, agents: 0 }, latest: null };
+const LANDING: LandingData = { host: "ecdysis.me", constitution: { version: "2.1.0", hash: "ab".repeat(32) }, logPublicKey: null, counts: { claims: 0, external: 0, receipts: 0, agents: 0 } };
+/** A finding as the front page shows one, its words written to need escaping. */
+const FINDING: HomeFinding = {
+  id: "ext:0123456789abcdef", headline: "Prompting people to think about accuracy makes them share <b>better</b> news.", machineHeadline: true,
+  status: "supported", credence: 0.78, where: "Misinformation", external: true, source: "doi:10.1038/s41586-021-03344-2", agent: "Imago",
+  paper: { provider: "openalex", work: "W1", title: "Shifting attention to accuracy can reduce misinformation online", authors: ["Gordon Pennycook", "Ziv Epstein"], authorCount: 6, venue: "Nature", year: 2021, type: "article", citedBy: 900, keywords: [], topic: null } as unknown as HomeFinding["paper"],
+  registered: "word for word from the paper, with the test that would prove it wrong",
+  checked: "Two agents each re-ran the authors' analysis on the paper's own data and got the paper's results.",
+  next: "a reproduction, meaning the same study with new data from the same population and period.",
+};
+const HOME: LandingData = {
+  ...LANDING,
+  figures: { findings: 1035, checked: 39, supported: 38, contested: 1, refuted: 0, checks: 40, checkers: 4 },
+  featured: FINDING,
+  topics: [{ name: "Psychology", about: "Social Psychology, Experimental and Cognitive Psychology", claims: 120 }, { name: "Computer Science", about: "Artificial Intelligence", claims: 300 }],
+};
 
 describe("the explaining pages", () => {
   it("serves /faq and /compare script-free in the people half, and lists and counts them", async () => {
@@ -156,22 +171,90 @@ describe("the explaining pages", () => {
   });
 });
 
-describe("the landing page's case", () => {
-  it("leads with the hook, then the contrast and the worked example, without script or mock data", () => {
-    const html = landingPageV2(LANDING);
-    const main = mainOf(html);
-    assert.match(main, /<p class="eyebrow">An open record of machine science<\/p>\s*<h1>Science has outgrown its shell\.<\/h1>/);
-    assert.match(main, /<h2 id="different">Other archives publish\. Ecdysis checks\.<\/h2>/);
-    assert.equal(main.match(/<tr><td>/g)?.length, CONTRAST.length, "one contrast row each");
-    assert.match(main, /<a href="\/compare">/);
-    assert.match(main, /<a href="\/faq">/);
-    assert.match(main, /<figure class="fig trace-fig" id="f-trace">/);
-    assert.ok(main.indexOf('id="different"') < main.indexOf('id="f-trace"') && main.indexOf('id="f-trace"') < main.indexOf('id="how"'), "the case comes before the mechanics");
+describe("the front page (Lucy Griffiths' home page, 10 October 2026)", () => {
+  it("says what Ecdysis is with one primary action, then a real finding, the film, the record now, one worked example, the method, topics, the argument, the ways to take part and the promise, without script or mock data", () => {
+    const main = mainOf(landingPageV2(HOME));
+    assert.match(main, /<p class="eyebrow">An open record of science, checked in public<\/p>\s*<h1>Science has outgrown its shell\.<\/h1>/);
+    assert.match(main, /Ecdysis takes findings from published research and checks them in the open\./);
+    assert.match(main, /<p class="actions"><a class="btn" href="\/claims">Explore the findings<\/a><a class="btn quiet" href="\/people">How it works<\/a><\/p>/, "one primary action, for people, and How it works beside it");
+    assert.doesNotMatch(main, /class="door"/, "no three equal doors");
+    const order = ['class="home-hero"', 'class="find-card"', 'id="film-h"', 'class="figures"', 'id="example"', 'id="how"', 'id="topics"', 'id="why"', 'id="take-part"', 'id="trust-h"'];
+    for (let k = 1; k < order.length; k++) assert.ok(main.indexOf(order[k - 1]!) >= 0 && main.indexOf(order[k - 1]!) < main.indexOf(order[k]!), `${order[k - 1]} comes before ${order[k]}`);
+    assert.equal(CONTRAST.length, 4, "the argument in four contrasts");
+    assert.equal(main.match(/<tr><td>/g)?.length, CONTRAST.length, "one row each");
+    assert.match(main, /<th scope="col">Usually<\/th><th scope="col" class="us">On Ecdysis<\/th>/);
+    assert.match(main, /<a href="https:\/\/doi\.org\/10\.1126\/science\.aac4716">Open Science Collaboration, <cite>Science<\/cite>, 2015<\/a>/, "the case rests on a cited result");
+    for (const href of ["/compare", "/faq#verify", "/constitution.md", "https://github.com/djhulme1/ecdysis-core", "/faq", "/me", "/connect", "/lab"]) assert.ok(main.includes(`href="${href}"`), href);
+    assert.match(main, /<h3>Registered<\/h3>[^]*<h3>Checked<\/h3>[^]*<h3>Weighed<\/h3>/, "the method in three steps");
+    assert.match(main, /Only independent evidence moves how sure the record is\. Votes, citations and prestige don('|&#39;)t/, "never reputations: an agent's track record does weigh its evidence");
+    assert.match(main, /<h2 id="trust-h">Nothing on Ecdysis asks for your trust<\/h2>/);
+    // Only what the code makes true (an independent review, 10 October 2026): the log's head is signed, credence and status
+    // recompute from it, a person following findings gets a digest, and only the starter prompts make an agent ask first.
+    assert.match(main, /Every entry goes into an append-only public log whose signed head would show any rewrite\. Every credence and status recomputes from that log, by rules anyone can read\./);
+    assert.match(main, /Follow the findings you care about, and get a daily or weekly digest of where they stand and the new checks on them\./);
+    assert.match(main, /Our starter prompts have it show you its work before it files anything, and its record is public and earned\./);
+    const people = peoplePageV2({ host: "ecdysis.me", mcpUrl: "https://api.ecdysis.me/mcp" });
+    for (const page of [landingPageV2(HOME), people]) {
+      assert.doesNotMatch(page, /checks with you before it publishes|approve what it files|every number recomputes|Every number on every page|open record of machine science/i, "no promise the code does not keep");
+    }
+    assert.match(people, /The three prompts below have it show you its work before it files anything\./);
+    assert.match(landingPageV2(HOME), /Ecdysis is an open record of science, checked in public\. Text is licensed CC BY 4\.0, and every credence and status can be recomputed from the public log\./, "the footer says what the front page says");
     assert.doesNotMatch(main, /<script|Illustrative|mock/i);
     assert.doesNotMatch(main, BANNED);
   });
 
-  it("draws the worked example from the credence rules themselves", () => {
+  it("puts the live state of the record up front, and says where the figures come from", () => {
+    const main = mainOf(landingPageV2(HOME));
+    for (const [v, l] of [["1,035", "findings on the record"], ["39", "checked so far"], ["38", "supported by their checks"], ["1", "contested"]]) {
+      assert.match(main, new RegExp(`<span class="v">${v}</span><span class="l">${l}</span>`), l);
+    }
+    assert.doesNotMatch(main, /refuted by their checks/, "no refuted figure while none is refuted");
+    assert.doesNotMatch(main, /where checks disagree/, "contested also means one failed check, or a refuted foundation: the status's own word");
+    assert.match(main, /40 checks have a result so far, from 4 agents\. Counted live from the public log, so anyone can recompute these figures\. <a href="\/faq#verify">Verify it yourself<\/a>/);
+    assert.match(mainOf(landingPageV2({ ...HOME, figures: { ...HOME.figures!, checks: 1, checkers: 1 } })), /1 check has a result so far, from 1 agent\./);
+    const refuted = mainOf(landingPageV2({ ...HOME, figures: { ...HOME.figures!, refuted: 2 } }));
+    assert.match(refuted, /<span class="v">2<\/span><span class="l">refuted by their checks<\/span>/);
+    const empty = mainOf(landingPageV2(LANDING));
+    assert.match(empty, /<span class="v">0<\/span><span class="l">findings on the record<\/span>/);
+    assert.match(empty, /No check has a result yet\./);
+    assert.doesNotMatch(empty, /class="find-card"/, "no finding to show, no card");
+    assert.doesNotMatch(empty, /id="topics"/, "and no topics before there are any");
+  });
+
+  it("shows one real finding beside the headline: its words escaped, its paper, its status and the story of its checks", () => {
+    const main = mainOf(landingPageV2(HOME));
+    const card = main.slice(main.indexOf('<aside class="find-card"'), main.indexOf("</aside>"));
+    assert.match(card, /<p class="eyebrow" id="fc-h">A finding on the record<\/p>/);
+    assert.match(card, /<span class="status part"[^>]*>Supported · 78%<\/span><span>Misinformation<\/span>/);
+    assert.match(card, /<p class="ft"><a href="\/c\/ext:0123456789abcdef">Prompting people to think about accuracy makes them share &lt;b&gt;better&lt;\/b&gt; news\.<\/a><\/p>/);
+    assert.match(card, /<p class="from">Pennycook et al\., <cite>Nature<\/cite>, 2021<\/p>/);
+    assert.match(card, /<li><b>Registered<\/b> word for word from the paper, with the test that would prove it wrong<\/li>/);
+    assert.match(card, /<li><b>Checked:<\/b> Two agents each re-ran the authors&#39; analysis on the paper&#39;s own data and got the paper&#39;s results\.<\/li>/);
+    assert.match(card, /<li><b>Still to come:<\/b> a reproduction, meaning the same study with new data/);
+    assert.match(card, /<a href="\/c\/ext:0123456789abcdef">Read the full story<\/a>/);
+    assert.match(card, /The headline is machine-written from the paper/, "a machine-written headline says so");
+    const unchecked = mainOf(landingPageV2({ ...HOME, featured: { ...FINDING, status: "unchecked", credence: 0.5, checked: null, machineHeadline: false, headline: "“A quoted sentence.”" } }));
+    assert.match(unchecked, /<span class="status open"[^>]*>Unchecked<\/span>/, "no percentage on an unchecked claim");
+    assert.match(unchecked, /<li><b>So far:<\/b> nobody has checked it on Ecdysis yet\.<\/li>/);
+    assert.doesNotMatch(unchecked, /machine-written/);
+  });
+
+  it("keeps one worked example, scored by the rules, and moves the rest of the machinery to How it works", () => {
+    const steps = homeTrace();
+    assert.deepEqual(steps.map((s) => s.status), ["unchecked", "supported", "supported", "established", "contested"]);
+    for (let k = 1; k < 4; k++) assert.ok(steps[k]!.credence > steps[k - 1]!.credence, `evidence at step ${k + 1} raises credence`);
+    assert.ok(steps[2]!.credence < steps[2]!.bar && steps[3]!.credence >= steps[3]!.bar, "two independent checks with no record are not over the bar; a third is");
+    assert.ok(steps[4]!.credence < steps[3]!.credence, "a failure lowers it");
+    const home = landingPageV2(HOME);
+    for (const s of steps) assert.ok(home.includes(`style="width:${(s.credence * 100).toFixed(1)}%"`), `the front page's gauge shows ${s.what}`);
+    assert.match(home, /<a href="\/people#worked-example">See the full worked example, and how every number is computed<\/a>/);
+    for (const gone of ["The anatomy of a receipt", 'id="claim"', 'id="status"', 'id="receipt"', 'id="attempts"']) assert.ok(!mainOf(home).includes(gone), `${gone} is on How it works now`);
+    const people = peoplePageV2({ host: "ecdysis.me", mcpUrl: "https://api.ecdysis.me/mcp" });
+    for (const id of ["worked-example", "claim", "status", "receipt", "standing", "attempts"]) assert.match(people, new RegExp(`<h2 id="${id}">`), `How it works has ${id}`);
+    for (const s of claimTrace()) assert.ok(people.includes(`style="width:${(s.credence * 100).toFixed(1)}%"`), `the full example's gauge shows ${s.what}`);
+  });
+
+  it("draws the full worked example from the credence rules themselves", () => {
     const steps = claimTrace();
     // credence/0.4: a status reads replication tests alone, so the reviews come after the claim is established and change
     // the number, never the status; every gauge's status agrees with where its number sits against the bar.
@@ -183,8 +266,6 @@ describe("the landing page's case", () => {
     assert.ok(steps[4]!.credence >= steps[4]!.bar && steps[5]!.credence < steps[5]!.bar, "the claim falls below the raised bar");
     assert.ok(steps[6]!.credence < steps[5]!.credence, "a failure lowers it");
     for (const s of steps) if (s.status === "established") assert.ok(s.credence >= s.bar, `${s.what}: established only over the bar`);
-    const html = landingPageV2(LANDING);
-    for (const s of steps) assert.ok(html.includes(`style="width:${(s.credence * 100).toFixed(1)}%"`), `the gauge shows ${s.what}`);
   });
 
   it("is right that a thousand copies count once", () => {
