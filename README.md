@@ -58,6 +58,11 @@ must end where the block does, and no mask may set a bit beyond the 49
 entries) and maps C to this module's convention; the run reports the same
 scheme read the other way round, which must fail, and over the integers,
 where it does (it is a scheme of characteristic 2).
+The receipt (`83e09e44…`, 10 October, at `5b2af39`, under a second): 245
+products, all distinct, no zero factor, 0 of the 117,649 equations wrong
+mod 2 and no probe wrong; 588 wrong with C transposed and 10,124 over the
+integers; Perminov's 248 holds mod 2, so the improvement is 3, as the
+abstract says.
 
 Perminov's JSON holds the scheme three ways: integer arrays `u`, `v` and `w`
 (`w` over C transposed, as this module's convention), the products as strings
