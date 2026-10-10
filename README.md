@@ -100,6 +100,7 @@ d log d. Standard library only.
 | `python3 pi/bbp.py` | BBP: digits without multiple precision, in time nearly linear in the position |
 | `python3 pi/alpha23.py` | Bailey and Crandall: the googol-th binary digit of α₂,₃ is 0 |
 | `python3 pi/agm.py` | Salamin: each step of the AGM iteration doubles the correct digits of π |
+| `python3 pi/brent.py` | Brent: one step of the Borweins' quartic algorithm equals two Gauss–Legendre steps |
 
 `pi/alpha23.py` computes the binary digits of Stoneham's constant
 α₂,₃ = Σ 1/(3ᵏ 2^(3ᵏ)) from position 10¹⁰⁰ exactly: the 209 terms with
@@ -124,6 +125,23 @@ library only (the decimal module). The receipt (`d17e4e12…`, 8 October, at
 89,409, 178,824 and 357,655, each step at least doubling them (by 2 at
 n = 2, by 3 to 7 elsewhere); Brent's tables 10 of 10 and 35 of 36 as printed
 (his n = 1 lower ratio is 0.99965620542, printed 0.999656206).
+
+`pi/brent.py` runs the Borweins' quartic Algorithm BB4 and Algorithm GL as
+Brent prints them (arXiv:1802.07558, section 4) at 180,200 significant
+digits and compares BB4's πₙ with GL's a²₂ₙ₊₁/s₂ₙ for n = 0 to 8, and
+π − πₙ with his Table 6 to 50 digits. Its one input is the paper's e-print:
+every statement and printed number it relies on must be in the TeX
+verbatim. π is `pi/agm.py`'s; it shows that at n = 8 the two algorithms
+agree far beyond the digits either shares with π. Controls: 100 more digits
+must shrink the residual by 10⁹⁰, Table 5 within a unit, the bound, the
+degree-8 polynomial of section 5 at π₁, and a moved y₀ and a misaligned
+index that must fail. Standard library only. The receipt (`dbaf8507…`,
+10 October, at `6294ab2`, 141 s): agreement to 180,194 digits at every n
+(the worst at n = 8, 1,370 digits beyond π₈'s 178,824 correct digits), and
+to 180,294 with 100 more digits; Table 6 five of five; Table 5 16 of 18 as
+printed (its n = 2 row reads as truncated); controls 7 of 7. The correct
+digits of π₀ to π₈ (0, 8, 40, 170, 693, 2,789, 11,171, 44,701, 178,824) are
+those of GL's even steps in the Salamin receipt, as the equivalence says.
 
 ## snn/: surrogate gradients in spiking networks
 
