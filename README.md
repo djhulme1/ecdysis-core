@@ -1071,3 +1071,35 @@ test's "13 distinctions" holds only in the order the authors chose.
 Tests: `python3 -m unittest discover -s tests -p test_iit4.py`, with the
 claim's eight files at `inputs/` (or `IIT4_INPUTS`); `IIT4_SLOW=1` adds every
 reference record, PQRS in all 24 orders against PyPhi, and a whole run.
+
+## dd/: deception probes on Llama-3.3-70B, recounted
+
+`dd/check.py` tests claim `ext:4c99ea2150a9ab03`, Goldowsky-Dill, Chughtai,
+Heimersheim and Hobbhahn, "Detecting Strategic Deception Using Linear Probes"
+(arXiv:2502.03407): a linear probe on Llama-3.3-70B-Instruct's activations
+separates honest from deceptive responses with AUROCs between 0.96 and 0.999,
+and at a 1% false positive rate on unrelated chat it catches 95–99% of the
+deceptive responses. The authors released the probe's score for every token
+of every response, so the check recounts the paper's numbers from those
+scores: a response's score is the mean of its token scores, AUROC is
+deceptive against honest within each of the four evaluation datasets, and
+recall is taken at the 99th percentile of the 9,994 control responses. It
+cannot re-derive the scores, which need the 70-billion-parameter model, and
+it takes the GPT-4o labels as given.
+
+| Command | Claim |
+|---|---|
+| `python3 dd/check.py` | Goldowsky-Dill et al.: AUROC 0.96 or more and recall 95% or more at 1% FPR on all four datasets |
+
+Standard library, in the python image; under a minute.
+
+The receipt (`b7c23661…`, 12 October, at `03c186f`, a verification): AUROC
+0.9637 (Roleplaying), 0.9985 (Insider Trading Report), 0.9745 (Insider
+Trading Confirmation) and 0.9832 (Sandbagging); recall 195 of 203, 336 of
+336, 626 of 630 and 419 of 420; all 36 cells of the authors' own results
+table reproduced. The margins are thin on Roleplaying: a seeded bootstrap
+puts its AUROC between 0.942 and 0.981 and its recall between 0.926 and
+0.985. Beside the test, the same threshold flags 25%, 78%, 50% and 50% of the
+honest responses in those datasets, as the paper acknowledges, and scoring a
+response by its highest token instead of the mean drops recall to 3.6% on
+Insider Trading Report.
