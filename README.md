@@ -36,6 +36,7 @@ an input is executed.
 | `python3 mm/check.py perminov` | Perminov: 4 × 4 by 4 × 10 in 115, coefficients in {−1, 0, 1} | `schemes/results/ZT/4x4x10_m115_ZT.{json,m}`, dronperminov/FastMatrixMultiplication |
 | `python3 mm/check.py medley` | Medley, Gokul, Luu & Manolios: 7 × 7 over F₂ in 245, against Perminov's 248 | Appendix A of the e-print `arXiv:2609.17533v1`; `schemes/results/Z2/7x7x7_m248_Z2.json`, dronperminov/FastMatrixMultiplication at `d1350dd` |
 | `python3 mm/check.py dps204` | Dumas, Pernet, Sedoglavic, Stapleton & Tichavský: 4 × 4 in 48 products and 204 other operations over rings with 1/2 | `data/4x4x4_48_204_{L,R,P}.{sms,slp}`, jgdumas/plinopt at `d17e385`; the e-print `arXiv:2609.12027v2` |
+| `python3 mm/check.py arai` | Arai, Ichikawa & Hukushima: (4,5,5) in 73 and (5,5,5) in 94 over F₂, against 76 and 95 | `data/{455_73,555_94}.m`, Yamato-Arai/adap at `fe7b204`; `solutions/{455-76-mod0,555-95-mod2}.exp`, jakobmoosbauer/flips at `c801b27` |
 
 Each run writes `results/outputs.json`: the number of products, the entries
 that differ from the tensor (0 for a correct scheme), the probe's mismatches
@@ -81,6 +82,15 @@ products, all distinct, no zero factor, 0 of the 117,649 equations wrong
 mod 2 and no probe wrong; 588 wrong with C transposed and 10,124 over the
 integers; Perminov's 248 holds mod 2, so the improvement is 3, as the
 abstract says.
+
+Arai, Ichikawa & Hukushima's two schemes (their adaptive flip graph, ISSAC 2024) are list files in
+Perminov's layout, so `perm_list` reads them; both are checked modulo 2, the characteristic the paper
+states, against the previous bests its table names, read from Kauers & Moosbauer's flips release of
+December 2022 (76 for (4,5,5) over the integers, 95 for (5,5,5) modulo 2). The receipt (`1e407d3b…`,
+12 October, at `4c05a5d`, a verification): 73 and 94 products, all distinct, every coefficient 1, no
+zero factor, 0 of the 10,000 and 15,625 equations wrong modulo 2 and no probe wrong; 7,518 and 6,183
+wrong over the integers and 200 with the 5 × 5's C transposed; the 76 and the 95 hold, so both
+improvements are as the abstract says.
 
 Perminov's JSON holds the scheme three ways: integer arrays `u`, `v` and `w`
 (`w` over C transposed, as this module's convention), the products as strings
