@@ -906,7 +906,14 @@ Texas's males, but not Michigan's: Table 3 prints the control males' median as
 | `python3 itp/asta.py` | Harrison et al. 2024: astaxanthin and meclizine from 12 months extend male median lifespan by 12% and 8% |
 
 Standard library, in the python image; under a second. Tests: `python3 -m
-unittest tests.test_asta` (with the workbook in `inputs/` or `ASTA_INPUTS`).
+unittest tests.test_asta` (with the workbook in `inputs/` or `ASTA_INPUTS`). The
+receipt (`88dee5d7…`, 12 October, at `d42969f`, a verification): male
+medians 814, 908 and 881.5 days for the controls, astaxanthin and meclizine
+(+11.5% and +8.3%), log-rank p 0.0030 and 0.027; all four conditions. Beside
+it: females +3.4% (p 0.70) and +2.7% (p 0.47); the males' Wang-Allison p 0.33
+and 0.098 by the stated method (printed 0.19 and 0.14); Table 1's numbers 10
+of 18 and Tables 2 to 4's 42 of 54, every miss among the males pooled or at
+Michigan, or a 90th percentile within a week.
 ## udg/: unit-distance graphs with chromatic number 5, of 553 and 529 vertices
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
