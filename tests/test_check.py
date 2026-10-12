@@ -492,5 +492,108 @@ class MedleyReleased(unittest.TestCase):
                          (588, 10124, 248, 0, 3, 3498, "203bdb157c85a7eb"))
 
 
+def strassen_programs():
+    """Strassen's 2x2 scheme as three straight-line programs in PLinOpt's notation, and its L, R and P."""
+    left = "o0:=i0+i3; o1:=i2+i3; o2:=i0; o3:=i3; o4:=i0+i1; o5:=i2-i0; o6:=i1-i3;"
+    right = "o0:=i0+i3; o1:=i0; o2:=i1-i3; o3:=i2-i0; o4:=i3; o5:=i0+i1; o6:=i2+i3;"
+    # vec C row-major: C11 = m0 + m3 - m4 + m6, C12 = m2 + m4, C21 = m1 + m3, C22 = m0 - m1 + m2 + m5
+    prod = "t0:=i0+i3; o0:=t0-i4+i6; o1:=i2+i4; o2:=i1+i3; o3:=i0-i1+i2+i5;"
+    return left, right, prod
+
+
+class StraightLinePrograms(unittest.TestCase):
+    def test_forms_numbers_and_counts(self):
+        prog = C.Slp("t0:=i0+i1; o0:=t0/2; o1:=-i0; o2:=i1; o3:=(i0-i1)*3;", 2)
+        env, counts = prog.run()
+        self.assertEqual(prog.outputs(env, 4), [{0: Fraction(1, 2), 1: Fraction(1, 2)}, {0: -1}, {1: 1}, {0: 3, 1: -3}])
+        self.assertEqual(counts, {"adds": 2, "scalings": 2, "negations": 1, "copies": 1})
+        env, _ = prog.run([Fraction(3), Fraction(5)])
+        self.assertEqual(prog.outputs(env, 4), [4, -3, 5, -6])
+
+    def test_constants_fold_and_minus_one_is_a_negation(self):
+        prog = C.Slp("o0:=(2/4)*2*i0; o1:=i0*-1; o2:=(-1)*i0; o3:=i0*(2/4)*2;", 1)
+        env, counts = prog.run()
+        self.assertEqual(prog.outputs(env, 4), [{0: 1}, {0: -1}, {0: -1}, {0: 1}])
+        # Constants fold before they meet a value; a value scaled twice, as written, is two scalings.
+        self.assertEqual((counts["scalings"], counts["negations"], counts["copies"]), (2, 2, 1))
+
+    def test_refusals(self):
+        for text, n in (("o0:=i0+i1", 2), ("o0:=i0; o0:=i1;", 2), ("i0:=i1;", 2), ("o0:=t1;", 2),
+                        ("o0:=i0*i1;", 2), ("o0:=i0/i1;", 2), ("o0:=i0+2;", 2), ("o0:=i2;", 2), ("o0:=(i0;", 2),
+                        ("o0:=i0 % 2;", 2), ("o0:=5;", 1), ("o0:=i0/0;", 1)):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                C.Slp(text, n).run()
+        prog = C.Slp("o0:=i0; o2:=i1;", 2)
+        with self.assertRaises(ValueError):
+            prog.outputs(prog.run()[0], 2)
+
+    def test_strassen_as_programs(self):
+        left, right, prod = strassen_programs()
+        programs = (C.Slp(left, 4), C.Slp(right, 4), C.Slp(prod, 7))
+        products = C.DPS204_PRODUCTS
+        try:
+            C.DPS204_PRODUCTS = 7
+            wrong, _ = C.slp_probe(programs, 2, C.Stream(SEED, "t"))
+            self.assertEqual(wrong, 0)
+            broken = (C.Slp(left.replace("+", "-", 1), 4),) + programs[1:]
+            self.assertGreater(C.slp_probe(broken, 2, C.Stream(SEED, "t"))[0], 0)
+        finally:
+            C.DPS204_PRODUCTS = products
+        ops = sum(sum(v for k, v in p.run()[1].items() if k != "copies") for p in programs)
+        self.assertEqual(ops, 18)   # Strassen's 18 additions and subtractions
+
+    def test_slp_matrix(self):
+        self.assertEqual(C.slp_matrix([{0: 1, 1: 0}, {1: Fraction(-1, 2)}], 2), {(0, 0): 1, (1, 1): Fraction(-1, 2)})
+
+
+def dps204_eprint(tex):
+    raw = tex.encode("utf-8")
+    buf = BytesIO()
+    import tarfile
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        info = tarfile.TarInfo(C.DPS204_TEX)
+        info.size = len(raw)
+        tar.addfile(info, BytesIO(raw))
+    return buf.getvalue()
+
+
+class Dps204EPrint(unittest.TestCase):
+    def test_the_printed_counts_are_required(self):
+        tex = "\n\n".join(x.replace(" ", "\n  ", 3) for x in C.DPS204_PRINTED)
+        C.dps204_tex(dps204_eprint(tex))
+        for i in range(len(C.DPS204_PRINTED)):
+            gone = "\n".join(x for j, x in enumerate(C.DPS204_PRINTED) if j != i)
+            with self.subTest(i=i), self.assertRaises(ValueError):
+                C.dps204_tex(dps204_eprint(gone))
+        with self.assertRaises(ValueError):
+            C.dps204_tex(dps204_eprint("\n".join(C.DPS204_PRINTED).replace("204", "203", 1)))
+
+
+def dps204_inputs():
+    d = os.environ.get("MM_INPUTS") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "inputs")
+    names = [x[0] for x in C.DPS204.values()] + [C.DPS204_EPRINT[0]]
+    return d if all(os.path.isfile(os.path.join(d, name)) for name in names) else None
+
+
+@unittest.skipUnless(dps204_inputs(), "the DPS 2026 files are not at inputs/ (or MM_INPUTS)")
+class Dps204Released(unittest.TestCase):
+    def test_the_released_algorithm(self):
+        if os.path.basename(dps204_inputs().rstrip("/")) != "inputs":
+            self.skipTest("the files must sit in a directory named inputs")
+        here = os.getcwd()
+        os.chdir(os.path.join(dps204_inputs(), ".."))
+        try:
+            out, passed = C.run_dps204(SEED)
+        finally:
+            os.chdir(here)
+        self.assertTrue(passed)
+        self.assertEqual((out["products"], out["wrong"], out["entries"], out["odd_denominators"], out["max_denominator"]),
+                         (48, 0, 4096, 0, 2))
+        self.assertEqual((out["operations"], out["slp_matches"], out["slp_probe_wrong"], out["slp_control_caught"]),
+                         (204, 3, 0, 1))
+        self.assertEqual(out["printed_counts"], "L 55+2; R 55+2; P 90+0")
+        self.assertEqual(out["slp_l"], "55 additions, 2 scalings, 0 negations, 10 copies")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,6 +35,7 @@ an input is executed.
 | `python3 mm/check.py symflips` | Moosbauer & Poole: 5 × 5 in 93 and 6 × 6 in 153 over every field | `schemes/{555m93,666m153}{,_lifted}.txt`, jakobmoosbauer/symmetric-flips |
 | `python3 mm/check.py perminov` | Perminov: 4 × 4 by 4 × 10 in 115, coefficients in {−1, 0, 1} | `schemes/results/ZT/4x4x10_m115_ZT.{json,m}`, dronperminov/FastMatrixMultiplication |
 | `python3 mm/check.py medley` | Medley, Gokul, Luu & Manolios: 7 × 7 over F₂ in 245, against Perminov's 248 | Appendix A of the e-print `arXiv:2609.17533v1`; `schemes/results/Z2/7x7x7_m248_Z2.json`, dronperminov/FastMatrixMultiplication at `d1350dd` |
+| `python3 mm/check.py dps204` | Dumas, Pernet, Sedoglavic, Stapleton & Tichavský: 4 × 4 in 48 products and 204 other operations over rings with 1/2 | `data/4x4x4_48_204_{L,R,P}.{sms,slp}`, jgdumas/plinopt at `d17e385`; the e-print `arXiv:2609.12027v2` |
 
 Each run writes `results/outputs.json`: the number of products, the entries
 that differ from the tensor (0 for a correct scheme), the probe's mismatches
@@ -58,6 +59,18 @@ must end where the block does, and no mask may set a bit beyond the 49
 entries) and maps C to this module's convention; the run reports the same
 scheme read the other way round, which must fail, and over the integers,
 where it does (it is a scheme of characteristic 2).
+
+Dumas, Pernet, Sedoglavic, Stapleton & Tichavský's 2026 algorithm comes with
+its straight-line programs: three `.slp` files whose statements (`t12:=(t10+
+t14)/2;`) compute L·vec(A), R·vec(B) and P·(products). `Slp` reads them as
+data with a small parser of its own (numbers, names, + − * / and brackets;
+nothing is executed as code), checks that each program computes exactly its
+`.sms` matrix, and counts what the paper counts: each addition or
+subtraction, each scaling by a constant other than ±1, and each negation; a
+plain copy costs nothing. The paper's per-matrix counts (55 and two halvings
+for L and for R, 90 for P) are compared with the files'. The programs are
+also run on numbers drawn from the seed as a whole algorithm, and L's
+program with its first + read as − must fail.
 The receipt (`83e09e44…`, 10 October, at `5b2af39`, under a second): 245
 products, all distinct, no zero factor, 0 of the 117,649 equations wrong
 mod 2 and no probe wrong; 588 wrong with C transposed and 10,124 over the

@@ -28,6 +28,14 @@ results/outputs.json:
                245 products modulo 2, read from the Base32 block its Appendix A
                prints in the e-print's TeX, against the record it improves on
                (Perminov's 248 over F2, arXiv:2511.20317, from his repository).
+  dps204       Dumas, Pernet, Sedoglavic, Stapleton & Tichavsky, "Fast matrix
+               multiplication via recursive <4x4x4:48> algorithms into practice"
+               (arXiv:2609.12027v2): the rank-48 algorithm over rings containing
+               1/2, as its L, R and P matrices and the three straight-line programs
+               that compute them in 204 operations, read as data (never executed as
+               code), each program checked to compute exactly its matrix, its
+               operations counted as the paper counts them, and run on numbers drawn
+               from the seed; the e-print must print the counts and name the files.
   selftest     the checker on Strassen's scheme and on broken copies of it.
 
 Every scheme is checked three ways.
@@ -876,6 +884,297 @@ def run_medley(seed):
     return out, passed
 
 
+# ---------------------------------------------------------------- DPS 2026: the 204-operation algorithm
+# Dumas, Pernet, Sedoglavic, Stapleton & Tichavsky, "Fast matrix multiplication via recursive <4x4x4:48>
+# algorithms into practice" (arXiv:2609.12027v2): the rank-48 algorithm as its L, R and P matrices (.sms) and the
+# straight-line programs (.slp) that compute them, from PLinOpt at d17e385, the files the paper names; its
+# e-print is read for the counts it prints.
+
+DPS204 = {  # role: (input name, sha256)
+    "L": ("plinopt_4x4x4_48_204_L.sms", "acd034de1ccd02570d41b098827666f062346eccc8eceea9b352e292391d05fa"),
+    "R": ("plinopt_4x4x4_48_204_R.sms", "bde98dc3051e8109bf1c2de5c30dbd671345d39acd6c5c2d1cc3c7c1256777b8"),
+    "P": ("plinopt_4x4x4_48_204_P.sms", "fcd97838986bf12d7704723335a1cc72effe337dfede46ed9558ed094d772a0d"),
+    "L.slp": ("plinopt_4x4x4_48_204_L.slp", "b021b1d260e9b01e6970c1c704684aa8d5fb7fb3d9ab7ac23e361786b129c49d"),
+    "R.slp": ("plinopt_4x4x4_48_204_R.slp", "3a152ea5e41f2ff04f31357aca7fc08000c0a0733b1acda0207e67bf6c4cf434"),
+    "P.slp": ("plinopt_4x4x4_48_204_P.slp", "9e0ffdf3bfebe86f6a3cd427ba469d59d67d82f4f897fe0cab6366c1f402cefd"),
+}
+DPS204_EPRINT = ("arXiv-2609.12027v2.tar.gz", "4e28ca9625f26ae079b6e276c757eb6db062e411aefa910f5168627d25051d7e")
+DPS204_TEX = "mm444cst.tex"
+DPS204_PRINTED = (  # each must be in the e-print's TeX, whitespace runs read as one space
+    r"We present a fast algorithm for multiplying two~\(\matrixsize{4}{4}\) matrices using~\(48\) multiplications "
+    r"and~\(204\) other operations (addition, subtraction or scaling by a constant) over any ring containing an "
+    r"inverse of~\(2\).",
+    r"\item~\(55\) additions/subtractions and two halvings for~\({\mat{L}}\);",
+    r"\item~\(55\) additions/subtractions and two halvings for~\({\mat{R}}\);",
+    r"\item~\(90\) additions/subtractions for~\({\mat{P}}\).",
+    r"This gives~\(204\) linear operations, namely~\(200\) additions/subtractions and~\(4\) halvings, in addition "
+    r"to the~\(48\) bilinear products.",
+    r"\plinoptdata{data/4x4x4_48_204_{L,R,P}.s{ms,lp}}",
+)
+DPS204_COUNTS = {"L": (55, 2), "R": (55, 2), "P": (90, 0)}   # (additions and subtractions, scalings) as printed
+DPS204_PRODUCTS, DPS204_OPERATIONS = 48, 204
+
+SLP_TOKEN = re.compile(r"\s*(?:(\d+(?:/\d+)?)|([A-Za-z_][A-Za-z0-9_]*)|(:=|[-+*/();]))")
+
+
+def slp_tokens(text):
+    out, pos = [], 0
+    while pos < len(text):
+        if text[pos:].strip() == "":
+            break
+        m = SLP_TOKEN.match(text, pos)
+        if not m or m.end() == pos:
+            raise ValueError(f"unreadable program text at {text[pos:pos + 20]!r}")
+        num, name, sym = m.groups()
+        out.append(("num", Fraction(num)) if num is not None else ("name", name) if name is not None else ("sym", sym))
+        pos = m.end()
+    return out
+
+
+class Slp:
+    """One straight-line program read as data and never executed as code: statements "name := expression;" over
+    the inputs i0, i1, ..., each name assigned once and used only after it. Values are linear forms
+    {input index: Fraction}, or, given input values, numbers. It counts what the paper counts: each binary + or -,
+    each multiplication or division by a constant other than 1 and -1 (a scaling), and each negation (a unary minus,
+    or a factor -1); a statement with none of these is a copy and costs nothing."""
+
+    def __init__(self, text, inputs):
+        self.inputs = inputs
+        self.statements = []
+        toks = slp_tokens(text)
+        i = 0
+        names = set()
+        while i < len(toks):
+            j = i
+            while j < len(toks) and toks[j] != ("sym", ";"):
+                j += 1
+            if j == len(toks):
+                raise ValueError("a statement without its ;")
+            st = toks[i:j]
+            if len(st) < 3 or st[0][0] != "name" or st[1] != ("sym", ":="):
+                raise ValueError(f"not an assignment: {st[:3]}")
+            target = st[0][1]
+            if re.fullmatch(r"i\d+", target):
+                raise ValueError(f"an input is assigned: {target}")
+            if target in names:
+                raise ValueError(f"{target} is assigned twice")
+            names.add(target)
+            self.statements.append((target, st[2:]))
+            i = j + 1
+
+    def run(self, values=None):
+        """Every name's value: forms if values is None, else numbers from the input values given. Returns (env,
+        counts {adds, scalings, negations, copies})."""
+        env = {}
+        counts = {"adds": 0, "scalings": 0, "negations": 0, "copies": 0}
+        for target, toks in self.statements:
+            parser = _SlpExpr(toks, env, self.inputs, values)
+            kind, v = parser.expr()
+            if parser.i != len(toks):
+                raise ValueError(f"{target}: unread tokens")
+            if kind != "value":
+                raise ValueError(f"{target}: a constant is assigned")
+            env[target] = v
+            for k in ("adds", "scalings", "negations"):
+                counts[k] += parser.counts[k]
+            if not any(parser.counts.values()):
+                counts["copies"] += 1
+        return env, counts
+
+    def outputs(self, env, n):
+        names = sorted(k for k in env if re.fullmatch(r"o\d+", k))
+        if names != sorted(f"o{r}" for r in range(n)):
+            raise ValueError(f"outputs are not o0 .. o{n - 1}")
+        return [env[f"o{r}"] for r in range(n)]
+
+
+class _SlpExpr:
+    """expr := term (('+' | '-') term)*; term := unary (('*' | '/') unary)*; unary := '-' unary | atom;
+    atom := number | name | '(' expr ')'. A result is ("const", Fraction) or ("value", form or number)."""
+
+    def __init__(self, toks, env, inputs, values):
+        self.t, self.i, self.env, self.inputs, self.values = toks, 0, env, inputs, values
+        self.counts = {"adds": 0, "scalings": 0, "negations": 0}
+
+    def peek(self):
+        return self.t[self.i] if self.i < len(self.t) else (None, None)
+
+    def expr(self):
+        kind, v = self.term()
+        while self.peek() in (("sym", "+"), ("sym", "-")):
+            sign = 1 if self.t[self.i][1] == "+" else -1
+            self.i += 1
+            k2, w = self.term()
+            if kind != "value" or k2 != "value":
+                raise ValueError("a constant in a sum")
+            self.counts["adds"] += 1
+            v = self.combine(v, w, sign)
+        return kind, v
+
+    def term(self):
+        kind, v = self.unary()
+        while self.peek() in (("sym", "*"), ("sym", "/")):
+            op = self.t[self.i][1]
+            self.i += 1
+            k2, w = self.unary()
+            if kind == "const" and k2 == "const":
+                if op == "/" and w == 0:
+                    raise ValueError("division by zero")
+                v = v * w if op == "*" else v / w
+                continue
+            if op == "/" and k2 != "const":
+                raise ValueError("division by a value")
+            if kind == "value" and k2 == "value":
+                raise ValueError("a product of two values: not linear")
+            c, x = (w, v) if kind == "value" else (v, w)
+            if op == "/":
+                if c == 0:
+                    raise ValueError("division by zero")
+                c = 1 / c
+            if c == -1:
+                self.counts["negations"] += 1
+            elif c != 1:
+                self.counts["scalings"] += 1
+            kind, v = "value", self.scale(x, c)
+        return kind, v
+
+    def unary(self):
+        if self.peek() == ("sym", "-"):
+            self.i += 1
+            kind, v = self.unary()
+            if kind == "const":
+                return kind, -v
+            self.counts["negations"] += 1
+            return kind, self.scale(v, Fraction(-1))
+        return self.atom()
+
+    def atom(self):
+        kind, val = self.peek()
+        if kind == "num":
+            self.i += 1
+            return "const", val
+        if kind == "name":
+            self.i += 1
+            m = re.fullmatch(r"i(\d+)", val)
+            if m:
+                idx = int(m.group(1))
+                if idx >= self.inputs:
+                    raise ValueError(f"{val}: no such input")
+                return "value", ({idx: Fraction(1)} if self.values is None else Fraction(self.values[idx]))
+            if val not in self.env:
+                raise ValueError(f"{val} is used before it is assigned")
+            v = self.env[val]
+            return "value", (dict(v) if self.values is None else v)
+        if (kind, val) == ("sym", "("):
+            self.i += 1
+            out = self.expr()
+            if self.peek() != ("sym", ")"):
+                raise ValueError("an unclosed (")
+            self.i += 1
+            return out
+        raise ValueError(f"unexpected {val!r}")
+
+    def scale(self, x, c):
+        if self.values is not None:
+            return x * c
+        return {k: y * c for k, y in x.items() if y * c != 0}
+
+    def combine(self, v, w, sign):
+        if self.values is not None:
+            return v + sign * w
+        out = dict(v)
+        for k, y in w.items():
+            out[k] = out.get(k, 0) + sign * y
+            if out[k] == 0:
+                del out[k]
+        return out
+
+
+def slp_matrix(forms, cols):
+    """{(row, col): Fraction} of the forms, zeros dropped."""
+    return {(r, c): x for r, f in enumerate(forms) for c, x in f.items() if x != 0 and c < cols}
+
+
+def dps204_tex(data):
+    """The e-print's TeX, whitespace runs read as one space; refused unless it prints every DPS204_PRINTED."""
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        member = tar.getmember(DPS204_TEX)
+        tex = tar.extractfile(member).read().decode("utf-8")
+    flat = re.sub(r"\s+", " ", tex)
+    missing = [s for s in DPS204_PRINTED if s not in flat]
+    if missing:
+        raise ValueError(f"the e-print does not print {missing[0][:60]!r}")
+    return flat
+
+
+def slp_probe(programs, n, stream):
+    """Multiply two n x n matrices drawn from the stream (A row by row, then B) by running the three programs
+    on numbers: products r = L_r(vec A) R_r(vec B), vec C = P(products). Returns (wrong entries, C)."""
+    A = [[stream.entry("Q") for _ in range(n)] for _ in range(n)]
+    B = [[stream.entry("Q") for _ in range(n)] for _ in range(n)]
+    va = [Fraction(A[i][j]) for i in range(n) for j in range(n)]
+    vb = [Fraction(B[i][j]) for i in range(n) for j in range(n)]
+    lp, rp, pp = programs
+    left = lp.outputs(lp.run(va)[0], DPS204_PRODUCTS)
+    right = rp.outputs(rp.run(vb)[0], DPS204_PRODUCTS)
+    prods = [x * y for x, y in zip(left, right)]
+    vc = pp.outputs(pp.run(prods)[0], n * n)
+    C = [vc[i * n:(i + 1) * n] for i in range(n)]
+    wrong = sum(1 for i in range(n) for k in range(n) if C[i][k] != sum(A[i][j] * B[j][k] for j in range(n)))
+    return wrong, C
+
+
+def run_dps204(seed):
+    n = 4
+    flat = dps204_tex(input_bytes(*DPS204_EPRINT))
+    mats = {}
+    for role in ("L", "R", "P"):
+        rows, cols, entries, unreadable = read_sms(input_bytes(*DPS204[role]))
+        mats[role] = (rows, cols, entries, unreadable)
+    (lr, lc, L, lu), (rr, rc, R, ru), (pr, pc, P, pu) = mats["L"], mats["R"], mats["P"]
+    rank = lr
+    if (lc, rr, rc, pr, pc) != (n * n, rank, n * n, n * n, rank):
+        raise ValueError(f"unexpected shapes L {lr}x{lc}, R {rr}x{rc}, P {pr}x{pc}")
+    scheme = lrp_scheme(L, R, P, n, n, n, rank)
+    products, wrong, pw, cw, lines = assess("dps204_444_q", scheme, n, n, n, "Q", seed)
+    coefficients = list(L.values()) + list(R.values()) + list(P.values())
+    odd = sum(1 for x in coefficients if odd_part(x.denominator) > 1)
+    texts = {role: input_bytes(*DPS204[role + ".slp"]).decode("ascii") for role in ("L", "R", "P")}
+    programs = (Slp(texts["L"], n * n), Slp(texts["R"], n * n), Slp(texts["P"], rank))
+    counts, matches = {}, 0
+    for role, prog, want, nout, nin in (("L", programs[0], L, rank, n * n), ("R", programs[1], R, rank, n * n),
+                                       ("P", programs[2], P, n * n, rank)):
+        env, c = prog.run()
+        got = slp_matrix(prog.outputs(env, nout), nin)
+        counts[role] = c
+        matches += 1 if got == {k: v for k, v in want.items() if v != 0} else 0
+    ops = sum(c["adds"] + c["scalings"] + c["negations"] for c in counts.values())
+    slp_wrong = 0
+    for q in range(3):
+        w, C = slp_probe(programs, n, Stream(seed, f"dps204_slp/probe/{q}"))
+        slp_wrong += w
+        lines.append(f"dps204_slp/{q}:" + ";".join(",".join(str(Fraction(x)) for x in row) for row in C))
+    # The control on the programs: L's program with its first + read as -, which must no longer give L.
+    altered = Slp(texts["L"].replace("+", "-", 1), n * n)
+    env, _ = altered.run()
+    caught = 1 if slp_matrix(altered.outputs(env, rank), n * n) != {k: v for k, v in L.items() if v != 0} else 0
+    printed = "; ".join(f"{role} {counts[role]['adds']}+{counts[role]['scalings']}"
+                        + ("" if (counts[role]["adds"], counts[role]["scalings"]) == DPS204_COUNTS[role]
+                           else f" (printed {DPS204_COUNTS[role][0]}+{DPS204_COUNTS[role][1]})")
+                        for role in ("L", "R", "P"))
+    out = {"products": products, "wrong": wrong, "entries": 16 ** 3, "probe_wrong": pw, "control_wrong": cw,
+           "odd_denominators": odd, "not_rational": lu + ru + pu,
+           "max_denominator": max(x.denominator for x in coefficients),
+           "slp_l": "{adds} additions, {scalings} scalings, {negations} negations, {copies} copies".format(**counts["L"]),
+           "slp_r": "{adds} additions, {scalings} scalings, {negations} negations, {copies} copies".format(**counts["R"]),
+           "slp_p": "{adds} additions, {scalings} scalings, {negations} negations, {copies} copies".format(**counts["P"]),
+           "operations": ops, "slp_matches": matches, "slp_probe_wrong": slp_wrong, "slp_control_caught": caught,
+           "printed_counts": printed, "probe_digest": digest(lines)}
+    passed = (wrong == 0 and pw == 0 and products <= DPS204_PRODUCTS and odd == 0 and out["not_rational"] == 0
+              and matches == 3 and ops <= DPS204_OPERATIONS and slp_wrong == 0 and caught == 1 and cw > 0)
+    return out, passed
+
+
 def run_selftest(seed):
     s = strassen()
     good = wrong_entries(s, 2, 2, 2, "Z")
@@ -887,7 +1186,8 @@ def run_selftest(seed):
 
 
 RUNS = {"flips": run_flips, "alphatensor": run_alphatensor, "alphaevolve": run_alphaevolve, "dps": run_dps,
-        "symflips": run_symflips, "perminov": run_perminov, "medley": run_medley, "selftest": run_selftest}
+        "symflips": run_symflips, "perminov": run_perminov, "medley": run_medley, "dps204": run_dps204,
+        "selftest": run_selftest}
 
 
 def main(argv):
