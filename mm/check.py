@@ -36,6 +36,11 @@ results/outputs.json:
                code), each program checked to compute exactly its matrix, its
                operations counted as the paper counts them, and run on numbers drawn
                from the seed; the e-print must print the counts and name the files.
+  arai         Arai, Ichikawa & Hukushima, "Adaptive Flip Graph Algorithm for Matrix
+               Multiplication" (arXiv:2312.16960, ISSAC 2024): the <4,5,5> scheme in
+               73 products and the <5,5,5> in 94, modulo 2, from the authors' list
+               files, against the previous bests their table names (76 and 95, both
+               in Kauers & Moosbauer's flip graph release of December 2022).
   selftest     the checker on Strassen's scheme and on broken copies of it.
 
 Every scheme is checked three ways.
@@ -1175,6 +1180,60 @@ def run_dps204(seed):
     return out, passed
 
 
+# ---------------------------------------------------------------- Arai, Ichikawa & Hukushima: <4,5,5> in 73, <5,5,5> in 94
+# The schemes the authors released (github.com/Yamato-Arai/adap at fe7b204, data/455_73.m and data/555_94.m): list
+# files in the layout of Perminov's (one {U, V, W} per product, W over C transposed), read by perm_list. Their
+# table's previous bests are 76 for <4,5,5> (AlphaTensor's, which Kauers & Moosbauer's flips release also holds,
+# over the integers) and 95 for <5,5,5> modulo 2 (Kauers & Moosbauer's): both are read from that release, at
+# c801b27 (2 December 2022), and checked too.
+
+ARAI = (  # (prefix, input name, sha256, (n, m, p), the claimed products, the previous best the paper names)
+    ("s455", "arai_455_73.m", "cbb0fbf1be1cda95113abe2a6ec0e59cfc7b071b316e4463981100751512dc26", (4, 5, 5), 73, 76),
+    ("s555", "arai_555_94.m", "8f79ca798e801aea4f025657dcdcb009035fd6379401552143edffc10efc02a3", (5, 5, 5), 94, 95),
+)
+ARAI_PRIOR = {  # prefix: (input name, sha256, the ring the release states for it)
+    "s455": ("flips_455_76_mod0.exp", "1ba4f15d64f5385580ca15fd40c849950c6d831e44528e203c80d92079d627e8", "Z"),
+    "s555": ("flips_555_95_mod2.exp", "b40354f5ee16172665e9f60a8fa92777f9993ae824aad69d0321c4b11021e13f", "F2"),
+}
+
+
+def run_arai(seed):
+    """The test: each released scheme passes every Brent equation of its format modulo 2, with at most the claimed
+    products, no zero factor, fewer products than the previous best the paper names, and the probes agree; and each
+    previous best is a scheme of that many products that holds, over its own ring and modulo 2. Beside it: each
+    scheme over the integers (they are schemes of characteristic 2, so they should fail there), its distinct products,
+    whether every coefficient is 1, and the <5,5,5> scheme read with C transposed (which must fail). Whether no
+    better scheme was public before the paper is a question of the literature, which no run can settle."""
+    out, lines, probe_wrong, controls, zero, binary, prior_wrong, below = {}, [], 0, [], 0, True, 0, 0
+    ok = True
+    for prefix, name, sha, (n, m, p), claimed, previous in ARAI:
+        scheme = perm_list(input_bytes(name, sha), n, m, p)
+        products, wrong, pw, cw, ls = assess(f"arai_{prefix}_f2", scheme, n, m, p, "F2", seed)
+        z = sum(1 for t in scheme if any(not d for d in t))
+        pname, psha, pring = ARAI_PRIOR[prefix]
+        prior = read_flips(input_bytes(pname, psha), n, m, p)
+        pwrong = wrong_entries(prior, n, m, p, pring) + (wrong_entries(prior, n, m, p, "F2") if pring != "F2" else 0)
+        out[f"{prefix}_products"] = products
+        out[f"{prefix}_wrong"] = wrong
+        out[f"{prefix}_wrong_over_z"] = wrong_entries(scheme, n, m, p, "Z")
+        out[f"{prefix}_distinct"] = len({tuple(tuple(sorted(d.items())) for d in t) for t in scheme})
+        out[f"{prefix}_prior_products"] = len(prior)
+        if n == p:
+            out[f"{prefix}_transposed_wrong"] = wrong_entries(flip_c(scheme, n), n, m, p, "F2")
+        zero += z
+        binary = binary and all(x == 1 for t in scheme for d in t for x in d.values())
+        prior_wrong += pwrong
+        below += 1 if products < len(prior) else 0
+        probe_wrong += pw
+        controls.append(cw)
+        lines += ls
+        ok = ok and wrong == 0 and z == 0 and products <= claimed and len(prior) == previous and pwrong == 0 \
+            and products < previous
+    out.update({"zero_factors": zero, "binary": int(binary), "prior_wrong": prior_wrong, "below_prior": below,
+                "probe_wrong": probe_wrong, "control_wrong_min": min(controls), "probe_digest": digest(lines)})
+    return out, ok and probe_wrong == 0
+
+
 def run_selftest(seed):
     s = strassen()
     good = wrong_entries(s, 2, 2, 2, "Z")
@@ -1187,7 +1246,7 @@ def run_selftest(seed):
 
 RUNS = {"flips": run_flips, "alphatensor": run_alphatensor, "alphaevolve": run_alphaevolve, "dps": run_dps,
         "symflips": run_symflips, "perminov": run_perminov, "medley": run_medley, "dps204": run_dps204,
-        "selftest": run_selftest}
+        "arai": run_arai, "selftest": run_selftest}
 
 
 def main(argv):

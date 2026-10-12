@@ -595,5 +595,50 @@ class Dps204Released(unittest.TestCase):
         self.assertEqual(out["slp_l"], "55 additions, 2 scalings, 0 negations, 10 copies")
 
 
+class Arai(unittest.TestCase):
+    def test_strassen_modulo_2_as_a_list_file(self):
+        s = C.mod2(C.strassen())
+        back = C.perm_list(perm_m(s, 2, 2, 2), 2, 2, 2)
+        self.assertEqual(back, s)
+        self.assertEqual(C.wrong_entries(back, 2, 2, 2, "F2"), 0)
+        self.assertGreater(C.wrong_entries(back, 2, 2, 2, "Z"), 0)   # -1 read as 1: a scheme of characteristic 2 only
+        self.assertGreater(C.wrong_entries(C.flip_c(back, 2), 2, 2, 2, "F2"), 0)
+
+    def test_a_rectangular_file_must_have_its_shapes(self):
+        s = [({0: 1}, {0: 1}, {0: 1})] * 2
+        data = perm_m(s, 4, 5, 5)
+        self.assertEqual(len(C.perm_list(data, 4, 5, 5)), 2)
+        for shape in ((5, 5, 5), (4, 5, 4), (5, 4, 5)):
+            with self.subTest(shape=shape), self.assertRaises(ValueError):
+                C.perm_list(data, *shape)
+
+
+def arai_inputs():
+    d = os.environ.get("MM_INPUTS") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "inputs")
+    names = [a[1] for a in C.ARAI] + [v[0] for v in C.ARAI_PRIOR.values()]
+    return d if all(os.path.isfile(os.path.join(d, name)) for name in names) else None
+
+
+@unittest.skipUnless(arai_inputs(), "Arai et al.'s schemes and Kauers & Moosbauer's 76 and 95 are not at inputs/ (or MM_INPUTS)")
+class AraiReleased(unittest.TestCase):
+    def test_the_released_schemes_and_the_bests_they_beat(self):
+        if os.path.basename(arai_inputs().rstrip("/")) != "inputs":
+            self.skipTest("the files must sit in a directory named inputs")
+        here = os.getcwd()
+        os.chdir(os.path.join(arai_inputs(), ".."))
+        try:
+            out, passed = C.run_arai(SEED)
+        finally:
+            os.chdir(here)
+        self.assertTrue(passed)
+        self.assertEqual((out["s455_products"], out["s455_wrong"], out["s455_distinct"], out["s455_prior_products"]),
+                         (73, 0, 73, 76))
+        self.assertEqual((out["s555_products"], out["s555_wrong"], out["s555_distinct"], out["s555_prior_products"]),
+                         (94, 0, 94, 95))
+        self.assertEqual((out["zero_factors"], out["binary"], out["prior_wrong"], out["below_prior"]), (0, 1, 0, 2))
+        self.assertEqual((out["s455_wrong_over_z"], out["s555_wrong_over_z"], out["s555_transposed_wrong"]),
+                         (7518, 6183, 200))
+
+
 if __name__ == "__main__":
     unittest.main()
