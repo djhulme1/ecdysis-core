@@ -218,6 +218,7 @@ conditions met, controls 4 of 4.
 |---|---|
 | `python3 snn/brunel.py` | Brunel 2000: synchronous regular, asynchronous irregular and oscillating irregular states, switched by the external rate or g |
 | `python3 snn/ostojic.py` | Ostojic 2014: at strong coupling the firing rates of individual neurons fluctuate strongly in time and across neurons |
+| `python3 snn/engelken.py` | Engelken et al. 2016: the autocorrelation's timescale does not follow the coupling, and small perturbations decay rapidly |
 
 `snn/ostojic.py` tests Ostojic (Nature Neuroscience 17, 2014), claim
 `ext:83abea862f6cd7e8`: the paper's network of 8,000 excitatory and 2,000
@@ -236,6 +237,25 @@ on two CPUs. Tests: `python3 -m unittest tests.test_ostojic`. The receipt
 rate of 12.72 Hz, Fano factor 0.67 and spread 6.70 Hz; at J = 0.8 mV 28.38 Hz
 (105% above the mean-field 13.82), Fano 8.82 and spread 36.89 Hz, 5.5 times
 that at 0.2 mV; all three conditions and four controls, in 87 seconds.
+
+`snn/engelken.py` tests Engelken, Farkhooi, Hansel, van Vreeswijk & Wolf's
+reanalysis of Ostojic's network (F1000Research 5:2043, 2016), claim
+`ext:2de4f36e0bd30dff`, on `snn/ostojic.py`'s network and simulator. At J =
+0.5 to 0.8 mV, the e-folding time of the population-averaged spike
+autocorrelation (3,000 neurons, 1 ms bins, a log-linear fit on lags of 10-40
+ms, 10 s after 1 s) must lie within 10-40 ms and vary at most twofold. At 0.3
+and 0.45 mV, the matched rate network's least stable eigenvector is computed
+exactly (LAPACK's eigenvalues, then inverse iteration in real arithmetic,
+which keeps within the runner's 4 GB), and the spiking network's mean
+response to 2 ms perturbations of its input along it (SD 1 mV, random signs
+back to back for 60 s, read by cross-correlation) must fall by e within 80
+ms. The data of record, the authors' code (Zenodo 59624), is read as data,
+never run: the run is refused unless it states the parameters used. Controls:
+telegraph-modulated and independent Poisson trains, the estimator on
+synthetic responses of 30 and 150 ms, the eigenvector against numpy's full
+eig, the pulsed simulator against `snn/ostojic.py`'s with zero
+perturbations, and the simulator at J = 0. numpy, in the pytorch image; about
+half an hour on two CPUs. Tests: `python3 -m unittest tests.test_engelken`.
 
 ## af/: the alignment-faking compliance rates, recounted
 
