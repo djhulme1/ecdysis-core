@@ -255,7 +255,20 @@ telegraph-modulated and independent Poisson trains, the estimator on
 synthetic responses of 30 and 150 ms, the eigenvector against numpy's full
 eig, the pulsed simulator against `snn/ostojic.py`'s with zero
 perturbations, and the simulator at J = 0. numpy, in the pytorch image; about
-half an hour on two CPUs. Tests: `python3 -m unittest tests.test_engelken`.
+half an hour on two CPUs. Tests: `python3 -m unittest tests.test_engelken`. The receipt
+(`0253e735…`, 12 October, at `6563e39`, a verification): autocorrelation
+e-folding times of 18.83, 18.54, 18.68 and 19.54 ms at J = 0.5 to 0.8 mV
+(largest over smallest 1.05). At 0.3 and 0.45 mV the rate network's
+rightmost eigenvalues were 0.8110 ± 0.0894i and 0.9175 ± 0.1013i, and its own
+projected response fell by e in 96.7 and 186.2 ms; the spiking network's fell
+by e in 46.15 and 46.45 ms (46 and 41 without a fit). All seven conditions
+and seven controls, in 30 minutes. A trial under another seed gave 19.38 to
+18.14 ms, and 56.95 and 57.30 ms beside the rate network's 113.1 and 290.4
+(eigenvalues 0.8256 and 0.9345, nearly real). So the spiking decay changes
+from one network to the next (about 30 to 57 ms in the three drawn here,
+counting the pilot), with the drawn network's least stable mode, but within a
+network it hardly moves with the coupling, and it stays well below the rate
+network's.
 
 ## af/: the alignment-faking compliance rates, recounted
 
