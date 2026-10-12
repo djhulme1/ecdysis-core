@@ -264,6 +264,7 @@ conditions met, controls 4 of 4.
 | `python3 snn/brunel.py` | Brunel 2000: synchronous regular, asynchronous irregular and oscillating irregular states, switched by the external rate or g |
 | `python3 snn/ostojic.py` | Ostojic 2014: at strong coupling the firing rates of individual neurons fluctuate strongly in time and across neurons |
 | `python3 snn/engelken.py` | Engelken et al. 2016: the autocorrelation's timescale does not follow the coupling, and small perturbations decay rapidly |
+| `python3 snn/clustered.py` | Litwin-Kumar & Doiron 2012: clustering slows the dynamics and lifts the Fano factor above 1, where uniform balanced networks stay below |
 
 `snn/ostojic.py` tests Ostojic (Nature Neuroscience 17, 2014), claim
 `ext:83abea862f6cd7e8`: the paper's network of 8,000 excitatory and 2,000
@@ -314,6 +315,27 @@ from one network to the next (about 30 to 57 ms in the three drawn here,
 counting the pilot), with the drawn network's least stable mode, but within a
 network it hardly moves with the coupling, and it stays well below the rate
 network's.
+
+`snn/clustered.py` tests Litwin-Kumar & Doiron (Nature Neuroscience 15, 2012),
+claim `ext:621d0751f2c1b161`: their balanced network of 4,000 excitatory and
+1,000 inhibitory integrate-and-fire neurons, built afresh from the Online
+Methods, uniform and with 50 clusters of 80 (R_EE = 2.5, in-cluster weights
+x1.9), 12 networks of each kind with 9 trials each, as Fig. 2 used. The test
+asks the clustered networks' mean Fano factor of 100 ms counts (1.5 to 3 s)
+to exceed 1 and the uniform networks' by at least 0.31, half the gap the
+paper reports (1.4 against 0.78). Weights are integers in units of 0.0001,
+so every synaptic sum is exact and a run repeats bit for bit. Controls:
+Poisson counts and rates switching between trials. numpy, in the pytorch
+image; about eight minutes on two CPUs. Tests: `python3 -m unittest
+tests.test_clustered`. The receipt (`93dffe5e…`, 12 October, at `416af10`,
+a reproduction): Fano factors 1.436 (s.d. 0.77) clustered and 0.863 (s.d.
+0.13) uniform, the paper's 1.4 (0.7) and 0.78 (0.09); with a denominator of 9
+trials rather than 8, 1.277 and 0.767. Over 300 ms windows 2.47 and 0.81:
+only the clustered networks' rise with the window, as Fig. 2g shows. Rates
+4.39 +- 5.77 and 2.58 +- 2.15 Hz (paper 3.3 +- 4.1 and 2.0 +- 1.8), and
+in-cluster count correlations of 0.233 (paper 0.13) against 0.0005 for the
+same index blocks in uniform networks. Two pilots under other seeds gave
+1.420 and 1.406 against 0.865 and 0.864.
 
 ## af/: the alignment-faking compliance rates, recounted
 
