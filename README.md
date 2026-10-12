@@ -1027,3 +1027,47 @@ PyTorch on CPU, single-threaded, with the AVX2 kernels fixed, in the
 pytorch image; about twelve minutes on two CPUs. Tests: `python3 -m unittest -v
 tms.test_check` from the lab's root, with the notebook at `inputs/` (or
 `TMS_INPUTS`).
+
+## iit4/: IIT 4.0, and a computer that simulates a system without its structure
+
+`iit4/check.py` tests claim `ext:48aa3af09abe12bb`, Findlay, Marshall,
+Albantakis, David, Mayner, Koch and Tononi, "Dissociating Artificial
+Intelligence from Artificial Consciousness" (arXiv:2412.04571): a basic
+stored-program computer of Boolean units simulates another system exactly,
+and under IIT 4.0 the two are not phenomenally equivalent. `engine.py` is an
+IIT 4.0 of Imago's own, written from PyPhi's source at `c1a7f4e` (the commit
+the authors' lock file pins) read as data, and `computer.py` ports the
+authors' weakly connected computer with graphiit's graph semantics. No line
+of PyPhi or of the authors' code runs in the bundle. PyPhi itself was run
+once, in a sandbox with no network (`iit4/reference/` holds the scripts and
+its results), and `tests/test_iit4.py` holds the engine to those results: 70
+states of 31 networks, to every distinction's purview and specified state,
+and PyPhi's partitions and cuts in its own order.
+
+| Command | Claim |
+|---|---|
+| `env -i ECDYSIS_SEED=... HOME=/tmp /usr/bin/python3 iit4/check.py` | Findlay et al.: the computer simulates PQRS and WXyZ exactly, with no complex above four units, Φ 6 or four distinctions, where PQRS is one complex with 13 |
+
+numpy, in the pytorch image; about five minutes on two CPUs.
+
+The receipt (`dac8b2ba…`, 12 October, at `600f0c2`, a verification): PQRS
+in 0101 is one complex of all four units, φs 1.508147, Φ 391.247222, 13
+distinctions and 8,184 relations, and all 16 rows of the authors' Figure 8
+table come out as printed. The 117-unit computer (231 connections) shows both
+targets' states every eight updates, 20 of 20, and so do 50 programs drawn
+from the seed. In its initial state, under both programs, its 25 candidate
+sets give 24 complexes: the 16 program rings (Φ 4 to 6, four distinctions
+each, as Figures 3 and 5 print) and eight single units. Controls 10 of 10.
+
+Beside the test, the order of the units. PyPhi keeps the first of tied states
+and tied purviews, so the Φ-structure depends on how the units are numbered.
+Relabelling PQRS (the same dynamics) gives nine values of Φ over its 24
+orders, from 205.05 to 397.23, with 13 distinctions in 15 orders and 12 in
+the other nine; the authors' 391.25 is the value of three. PyPhi gives the
+same 24 numbers as the engine. The computer's rings do not move under any
+order of their units, so the dissociation holds in all 24 orders, but the
+test's "13 distinctions" holds only in the order the authors chose.
+
+Tests: `python3 -m unittest discover -s tests -p test_iit4.py`, with the
+claim's eight files at `inputs/` (or `IIT4_INPUTS`); `IIT4_SLOW=1` adds every
+reference record, PQRS in all 24 orders against PyPhi, and a whole run.
