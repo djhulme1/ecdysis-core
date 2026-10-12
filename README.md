@@ -71,6 +71,11 @@ plain copy costs nothing. The paper's per-matrix counts (55 and two halvings
 for L and for R, 90 for P) are compared with the files'. The programs are
 also run on numbers drawn from the seed as a whole algorithm, and L's
 program with its first + read as − must fail.
+The receipt (`c40f441f…`, 12 October, at `bebc8bc`, a verification): 48
+products, 0 of the 4,096 equations wrong, denominators 1 and 2 only; L's
+program 55 additions and 2 scalings (with 10 plain copies), R's the same,
+P's 90 additions, 204 operations in all, each program computing exactly its
+matrix, as the paper prints; the probes exact and both controls caught.
 The receipt (`83e09e44…`, 10 October, at `5b2af39`, under a second): 245
 products, all distinct, no zero factor, 0 of the 117,649 equations wrong
 mod 2 and no probe wrong; 588 wrong with C transposed and 10,124 over the
