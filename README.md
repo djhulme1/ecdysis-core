@@ -135,6 +135,7 @@ d log d. Standard library only.
 | `python3 pi/alpha23.py` | Bailey and Crandall: the googol-th binary digit of α₂,₃ is 0 |
 | `python3 pi/agm.py` | Salamin: each step of the AGM iteration doubles the correct digits of π |
 | `python3 pi/brent.py` | Brent: one step of the Borweins' quartic algorithm equals two Gauss–Legendre steps |
+| `python3 pi/bailey88.py` | Bailey 1988: the 29,360,000 decimals of π his appendix and Table 1 print |
 
 `pi/alpha23.py` computes the binary digits of Stoneham's constant
 α₂,₃ = Σ 1/(3ᵏ 2^(3ᵏ)) from position 10¹⁰⁰ exactly: the 209 terms with
@@ -176,6 +177,22 @@ to 180,294 with 100 more digits; Table 6 five of five; Table 5 16 of 18 as
 printed (its n = 2 row reads as truncated); controls 7 of 7. The correct
 digits of π₀ to π₈ (0, 8, 40, 170, 693, 2,789, 11,171, 44,701, 178,824) are
 those of GL's even steps in the Salamin receipt, as the equivalence says.
+
+`pi/bailey88.py` tests Bailey's 29,360,000 decimals of π (Mathematics of
+Computation 50, 1988), computed on the Cray-2 with the Borweins' quartic
+algorithm: the seven 1000-digit blocks his appendix prints and Table 1's
+counts of each digit, against π computed afresh to 29,360,100 decimals by the
+Chudnovskys' series (binary splitting) and, separately, by Gauss–Legendre in
+binary fixed point, both in GMP (`pi/bailey88.c`). The two must agree before
+anything is compared. Its one input is the author's copy of the paper, read
+by a PDF reader of the module's own (content streams only, each page's
+trailing page number checked and dropped, as the fifth block runs over a page
+break). gcc and GMP in the buildpack-deps image, two processes, about two
+minutes. The receipt (`ebe64e8b…`, 12 October, at `86fc803`, a
+verification, 115 s): the two methods agree in all 29,360,100 decimals (25
+Gauss–Legendre iterations); all 7,000 printed digits are π's; the ten counts
+are Table 1's exactly, and so are its 30 printed counts, deviations and
+z-scores; the 29,360,000 decimals' digest is `e873ebe328ad95f4`.
 
 ## snn/: surrogate gradients in spiking networks
 
