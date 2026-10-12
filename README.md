@@ -949,6 +949,40 @@ it: females +3.4% (p 0.70) and +2.7% (p 0.47); the males' Wang-Allison p 0.33
 and 0.098 by the stated method (printed 0.19 and 0.14); Table 1's numbers 10
 of 18 and Tables 2 to 4's 42 of 54, every miss among the males pooled or at
 Michigan, or a 90th percentile within a week.
+
+## itp/strong2008.py: NDGA and aspirin in the ITP's first cohort (2004)
+
+`itp/strong2008.py` tests Strong et al., Aging Cell 7(5) 2008, the ITP's
+first paper (claim `ext:6c6aee7d6ede468c`): "Pooling data from all three
+sites, a log-rank test showed that both NDGA (p = 0.0006) and aspirin
+(p = 0.01) led to increased lifespan of male mice." The test is the paper's
+own primary analysis as its Methods state it, the two-tailed log-rank test at
+p < 0.05 stratified by site with removed mice censored, for each drug's males
+against the controls, with its direction (the treated males' observed deaths
+not above expected). The input is the cohort's workbook
+(`ITP_C2004_Lifespan.xlsx`, MPD file 834), read by `itp/rapa.py`'s reader and
+tested by `itp/cana.py`; every row must carry its group's design. Beside the
+test: the printed p values to their decimals, each site's p, the six null
+results, the male medians by two pooling rules, the Wang-Allison counts, the
+difference among sites in the controls' survival (a three-group log-rank test
+written here) and Table 1's control medians and counts.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/strong2008.py` | Strong et al. 2008: NDGA and aspirin increase male lifespan (site-stratified log-rank) |
+
+Standard library, in the python image; under a second. Tests: `python3 -m
+unittest tests.test_strong2008` (with the workbook in `inputs/` or
+`STRONG2008_INPUTS`). The receipt (`70125ff4…`, 12 October, at `2734a82`, a
+verification): log-rank p 0.00056 for NDGA and 0.011 for aspirin, the printed
+0.0006 and 0.01, with 37.8 and 27.8 fewer deaths than expected; all four
+conditions. Every site's p as the Results print it (NDGA 0.003 at Texas, 0.09
+at the Jackson Laboratory, none at Michigan; aspirin 0.04, 0.051, none), and
+all six null results. Not as printed: the male medians (783.5, 881 and 846
+days pooled against the printed 786, 881 and 849), the Wang-Allison counts by
+one mouse each (p 0.16 and 0.17 against 0.12 and 0.16), and 5 of Table 1's
+12 control numbers (Michigan's females 82 dead, printed 86). The three sites'
+control males differ (p 4 × 10⁻⁶; printed 0.0001), the females do not.
 ## udg/: unit-distance graphs with chromatic number 5, of 553 and 529 vertices
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
