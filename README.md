@@ -882,6 +882,31 @@ P 5.8 × 10⁻⁵ and their 90th percentile 12% with Wang-Allison P 1.6 × 10⁻
 but the females' 90th percentile, up 6.0% (pooled; 7.3% by site means), has a
 Wang-Allison P of 0.058 by the stated method (0.050 to 0.058 over its
 readings), against the printed 0.010; one pooled threshold gives 0.015.
+## itp/asta.py: astaxanthin and meclizine in the ITP's 2019 cohort
+
+`itp/asta.py` tests Harrison et al., GeroScience 46(1) 2024 (claim
+`ext:b5ad2f9a9f04a0b5`): astaxanthin "extended the median male lifespan by
+12% (p = 0.003, log-rank test)", meclizine "by 8% (p = 0.03)", both from 12
+months. The test asks for half each gain in the median age at death of the
+three sites' males pooled (removed mice left out) and for the paper's own
+significance, a two-tailed log-rank p below 0.05 stratified by site with
+removed mice censored. The input is the cohort's workbook
+(`ITP_C2019_Lifespan.xlsx`, MPD file 573), read by `itp/rapa.py`'s reader
+and tested by `itp/cana.py`; every row of the three groups must carry its
+design (dose and starting age) in the workbook's own columns. Beside the test:
+the females, the Wang-Allison test as the Methods state it, and the 72 printed
+numbers of Tables 1 to 4. Read before registering: the data give +11.5% (p
+0.0030) and +8.3% (p 0.027), the printed 12% and 8%. Every female median and
+count agrees with the tables, and so do the Jackson Laboratory's and
+Texas's males, but not Michigan's: Table 3 prints the control males' median as
+861 days (94 mice), and the deposited data give 820 (93 dead).
+
+| Command | Claim |
+|---|---|
+| `python3 itp/asta.py` | Harrison et al. 2024: astaxanthin and meclizine from 12 months extend male median lifespan by 12% and 8% |
+
+Standard library, in the python image; under a second. Tests: `python3 -m
+unittest tests.test_asta` (with the workbook in `inputs/` or `ASTA_INPUTS`).
 ## udg/: unit-distance graphs with chromatic number 5, of 553 and 529 vertices
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
