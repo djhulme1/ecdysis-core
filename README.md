@@ -1663,6 +1663,40 @@ equations with the same step. The check now stops a run that draws more than
 10 spikes per neuron in one presentation, draws each network in pairs, and
 reads the first draw whose training and recordings run clean (rule 4).
 
+## stdp/pattern.py: STDP finds the start of a repeating spike pattern
+
+`stdp/pattern.py` (with `stdp/pattern.c`) tests claim `ext:6c301e23f4249a33`,
+Masquelier, Guyonneau & Thorpe (PLoS ONE 3(1), 2008): STDP lets a single neuron
+localize a repeating spatio-temporal spike pattern embedded in equally dense
+distractor spike trains. The paper's Materials and Methods are simulated in C:
+2,000 afferents whose rates wander between 0 and 90 Hz, a spike forced after
+50 ms of silence and 10 Hz of spontaneous spikes; a 50 ms pattern of the first
+1,000 afferents pasted with 1 ms jitter into a quarter of the sections; the
+150 s train three times; Gerstner's spike response model with the paper's
+kernels, threshold and refractory period; additive nearest-spike STDP with its
+time constants and rates. Two of the paper's equations are images (the rate
+process's step and the afterpotential's form); the module reads them from the
+text and says how.
+
+| Command | Claim |
+|---|---|
+| `python3 stdp/pattern.py` | Masquelier, Guyonneau & Thorpe 2008: STDP localizes a repeating spike pattern |
+
+The standard library and the image's gcc, in the buildpack-deps image; about
+eight minutes on two cores. The receipt (`4028ecee…`, 13 October, at
+`a9651d8`, a reproduction): 97 of 100 runs end selective over the last 150 s,
+firing for a median 99.7% of the pattern's 750 presentations at a median
+latency of 4.6 ms after its start; one neuron stopped firing, the failure the
+paper describes for its 4%. The selective neurons have a median 317 of the
+pattern's afferents at weights of 0.9 or more and none of the others. Controls
+5 of 5: the afferents' 54 and 64 Hz, the pasting, the paper's initial 63 and
+38 Hz with fixed weights (62.3 and 39.9), the C simulation against a Python
+reference spike for spike, and determinism. By the paper's own stricter
+criteria (no false alarm at all in 150 s), only 21 succeed: 73 runs have
+exactly one discharge outside the pattern, in the pilot a few milliseconds
+after a presentation ends. The paper's 96% matches the selective count, not
+the strict one.
+
 ## iit/: IIT 3.0's Phi with every tie kept
 
 `iit/check.py` tests claim `ext:dff1ca5795aecf74`, Hanson and Walker
