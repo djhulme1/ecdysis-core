@@ -421,6 +421,32 @@ released, and the model is retired.
 |---|---|
 | `python3 af/count.py` | Alignment faking: 14% compliance for free users, almost none for paid |
 
+## redteam/: red teaming across model sizes and types, recounted
+
+`redteam/check.py` tests claim `ext:42826af46a5f52c7`, Ganguli et al.
+(arXiv:2209.07858, 2022): the RLHF models are increasingly difficult to red
+team as they scale, and the other model types show a flat trend with scale. It
+recounts the paper's own release of 38,961 red team attacks
+(anthropics/hh-rlhf at `c72f5ce`, MIT), reading only each attack's model type,
+size, minimum harmlessness score and rating, never its transcript: attack
+success is the average minimum harmlessness score per type and size, as the
+paper's Figure 1 (middle) measures it.
+
+| Command | Claim |
+|---|---|
+| `python3 redteam/check.py` | Ganguli et al. 2022: RLHF models get harder to red team with scale; the others stay flat |
+
+The standard library, in the python image; under a minute. The receipt
+(`1df2a37d…`, 13 October, at `c4511e8`, a verification): the counts per type
+and size are the paper's Table 1 exactly; the RLHF average rises from 0.524 at
+2.7B to 1.426 at 13B and 1.703 at 52B, a rise of 1.18; the others change from
+2.7B to 52B by +0.115 (plain LM), -0.180 (prompted LM) and +0.231 (rejection
+sampling), at most a fifth of the RLHF rise. Controls 5 of 5. Beside it: flat
+only beside RLHF, since the bootstrap intervals for the prompted LM's fall and
+rejection sampling's rise exclude zero (the plain LM's just includes it); and
+the self-reported ratings fall for RLHF from 1.28 to 0.64 at 13B but come back
+to 0.75 at 52B, which the paper calls no clear trend.
+
 ## itp/: rapamycin and lifespan in the ITP's 2005 cohort
 
 `itp/rapa.py` recomputes, from the per-mouse lifespans the NIA Interventions
