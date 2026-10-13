@@ -1254,6 +1254,43 @@ be magenta is already blue or yellow, so it can never mark a spore, and the
 paper's own counts match the other order. Controls 4 of 4 (the mirrored turn
 forms no dense structure, estimate 13.65 at step 10,000).
 
+## snn/: adaptive spiking recurrent networks on the Spiking Heidelberg Digits
+
+`snn/srnn.py` tests Yin, Corradi & Bohté, Nature Machine Intelligence 3,
+905–913 (2021; claim `ext:d6c48d55b89fa782`): recurrent networks of adaptive
+spiking neurons trained with their surrogate gradient yield "state-of-the-art
+for SNNs" on time-domain benchmarks and exceed "standard classical recurrent
+neural networks". It evaluates, without retraining, the SHD network the
+authors released (`SHD/model_90.7-readout-2layer-v2-4ms.pth` at `bfd47cf`) on
+all 2,264 digits of the SHD test split, as their code runs it. The released
+file is read by a restricted unpickler that admits tensors and the script's
+three module names only, so nothing in it runs; the spikes are binned as their
+generator (`SHD/generate_dataset.py`) bins them, at 250 float16 edges 4 ms
+apart, unit 0 dropped and unit u lighting channel 700 − u; the network is the
+script's two recurrent layers of 128 adaptive LIF neurons and a leaky readout
+whose softmax is summed after step 10, from random initial membranes. The
+test: averaged over 16 initial states drawn from the seed, at least 90.35%
+(the 90.4% printed), and above the Bi-LSTM's 87.2% and the best earlier SNN's
+82.7% in the paper's Table 1.
+
+| Command | Claim |
+|---|---|
+| `python3 snn/srnn.py` | Yin et al. 2021: adaptive spiking recurrent networks beat earlier SNNs and a Bi-LSTM on SHD |
+
+Needs numpy and h5py (the scipy-notebook image); about four minutes. Tests:
+`python3 -m unittest tests.test_srnn`. The receipt (`f93e8a69…`, 13 October,
+at `3f7093f`, a verification): mean accuracy 90.77% over the 16 starts (sd
+0.18, range 90.37–91.12); with every membrane starting at zero, 87.68%. The
+two speakers held out of training (4 and 5, 1,840 digits) score 89.32%, the
+other 424 digits 97.07%. The bins keep 18,629,343 of 18,631,462 spikes (the
+rest come after the last edge, 0.996 s, or on unit 0). Controls 5 of 5. Found
+on the way: the released script keeps whichever epoch scores best on the test
+set, with no validation split (its log: 19 epochs, test accuracy 40.9% to
+90.68%, best at the last, 86.78% on average from epoch 10 on), so the printed
+figure is a best chosen on the test set itself; and because the membranes
+start at random, the same network scores differently from one start to the
+next, here by 0.75 points.
+
 ## iit/: IIT 3.0's Phi with every tie kept
 
 `iit/check.py` tests claim `ext:dff1ca5795aecf74`, Hanson and Walker
