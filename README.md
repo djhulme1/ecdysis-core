@@ -37,6 +37,7 @@ an input is executed.
 | `python3 mm/check.py medley` | Medley, Gokul, Luu & Manolios: 7 × 7 over F₂ in 245, against Perminov's 248 | Appendix A of the e-print `arXiv:2609.17533v1`; `schemes/results/Z2/7x7x7_m248_Z2.json`, dronperminov/FastMatrixMultiplication at `d1350dd` |
 | `python3 mm/check.py dps204` | Dumas, Pernet, Sedoglavic, Stapleton & Tichavský: 4 × 4 in 48 products and 204 other operations over rings with 1/2 | `data/4x4x4_48_204_{L,R,P}.{sms,slp}`, jgdumas/plinopt at `d17e385`; the e-print `arXiv:2609.12027v2` |
 | `python3 mm/check.py arai` | Arai, Ichikawa & Hukushima: (4,5,5) in 73 and (5,5,5) in 94 over F₂, against 76 and 95 | `data/{455_73,555_94}.m`, Yamato-Arai/adap at `fe7b204`; `solutions/{455-76-mod0,555-95-mod2}.exp`, jakobmoosbauer/flips at `c801b27` |
+| `python3 mm/check.py ternary` | Perminov 2025: new best ranks for (4,5,12), (5,6,10) and (6,7,9) in {−1, 0, 1}, and binary-field improvements, against sums and products of earlier schemes | `schemes/results/improved_ZT/*.json`, dronperminov/FastMatrixMultiplication at `c774162`; AlphaEvolve's notebook; `{458,568,456}/*.exp`, mkauers/matrix-multiplication at `6487519`; AlphaTensor's `factorizations_f2.npz` |
 
 Each run writes `results/outputs.json`: the number of products, the entries
 that differ from the tensor (0 for a correct scheme), the probe's mismatches
@@ -124,6 +125,33 @@ by a plain count, where the figures print 141 and 148. The released AA^T file
 and the released triangular scheme (with a coefficient −2) are also exact
 with 12 recursive calls, but they are not the printed schemes: they share
 only the eight corner calls, and no term, with them. Controls 9 of 9.
+
+Perminov's 2025 paper (Fast Matrix Multiplication via Ternary Meta Flip
+Graphs, arXiv:2511.20317; claim `ext:6ecea9674102382e`) gives new best ranks
+for (4,5,12), (5,6,10) and (6,7,9), 179, 217 and 268 with coefficients in
+{−1, 0, 1}, against previous bests of 180, 218 and 270, and 30 rank
+improvements in the binary field. The `ternary` run checks the three schemes
+his repository held when v2 was submitted, then sets the ranks against
+schemes published before the paper, each read where it was published: two
+of AlphaEvolve's (⟨4,4,5⟩ in 61, ⟨2,5,6⟩ in 47), three of Kauers & Wood's
+(⟨4,5,8⟩ in 118 and ⟨5,6,8⟩ in 170 over the integers, ⟨4,5,6⟩ in 89 modulo
+2) and AlphaTensor's ⟨4,4,4⟩ in 47 modulo 2. `cyclic` reads a scheme for
+⟨n,m,p⟩ as one for ⟨m,p,n⟩, `direct_sum` splits B's and C's columns into
+blocks with a scheme for each, and `kronecker` multiplies two schemes into
+one for the product format; the tests check all three on Strassen's scheme
+and on a broken copy. The receipt (`054bd991…`, 13 October, at `748dcf5`, a
+verification, under a second) **failed**: the three released schemes are
+exact over the integers in 179, 217 and 268 products, every coefficient ±1,
+the files' strings agreeing on all 664 products, but ⟨4,5,12⟩ in 179 is
+AlphaEvolve's ⟨4,4,5⟩ (+) Kauers & Wood's ⟨4,5,8⟩, and ⟨5,6,10⟩ in 217 is
+AlphaEvolve's ⟨2,5,6⟩ (+) their ⟨5,6,8⟩, both exact over the integers (with
+coefficients up to 4 and 6, so not in {−1, 0, 1}). Modulo 2, six of the
+binary ranks were reached before: ⟨4,4,8⟩ in 94, ⟨4,4,12⟩ in 141 and
+⟨4,4,16⟩ in 188 are two, three and four copies of AlphaTensor's 47, ⟨8,8,8⟩
+in 329 is its 47 times Strassen's 7, ⟨4,5,6⟩ in 89 is Kauers & Wood's, and
+⟨5,6,10⟩ in 217 is the integer sum. The (6,7,9) rank, 268, is not reached by
+these schemes. The ternary schemes remain the first with coefficients in
+{−1, 0, 1} at those ranks, which the claim's sentence does not say.
 
 The data stay with their authors, under their licences; the receipts fetch
 them at pinned commits and never copy them here.
