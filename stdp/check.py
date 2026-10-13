@@ -33,11 +33,12 @@ rule 4 was added after the first receipt (6d2aeda8..., inconclusive), whose seal
 4. Draws. A run of the C program runs away when one presentation draws more than 10 spikes per excitatory neuron or
    leaves a value not finite; the program then stops and says at which digit (dcnet.c's header says why: the released
    code's Euler step is unstable under the inhibition a volley of excitatory spikes calls up). Each network is drawn
-   twice (its weights, delays and input spikes from streams labelled by size and draw), the two draws trained at once.
-   A draw counts if its training and both its recordings (rule 5) run without a runaway; the test reads the first draw
-   that counts, in order, and the other, if it counts too, is reported beside it. If draws 1 and 2 of a size both run
-   away, a draw 3 is made; if it runs away too, the check stops and says so, with no verdict. The released network's
-   recordings (rule 7) are redrawn the same way, by their delays, up to three times.
+   in pairs (its weights, delays and input spikes from streams labelled by size and draw), the two draws of a pair
+   trained at once. A draw counts if its training and both its recordings (rule 5) run without a runaway; the test
+   reads the first draw that counts, in order, and the next that counts, if any, is reported beside it. If both draws
+   of the first pair run away, a second pair (draws 3 and 4) is made; if all four run away, the check stops and says
+   so, with no verdict. The released network's recordings (rule 7) are redrawn one at a time, by their delays, up to
+   three times.
 5. Classes and accuracy, as the paper (and the released evaluation script, given the training digits) take them: each
    trained network, learning off and thresholds fixed, is shown the 60,000 training digits once; a neuron's class is the
    digit with its highest mean count (strictly highest, from 0 up; a neuron that never fires has none); each of the
@@ -130,7 +131,7 @@ OUTPUTS = ("acc_400", "acc_100", "gain", "acc_400_other", "acc_100_other", "draw
            "acc_released_test_classes", "acc_400_test_classes", "unassigned", "repeats", "theta_400", "theta_100",
            "script_facts", "controls", "control_detail", "conditions_met", "conditions_total", "test_passed")
 RUNAWAY = 10          # rule 4: spikes per excitatory neuron in one presentation, as dcnet.c
-MAX_DRAWS = 3
+MAX_DRAWS = {"400": 4, "100": 4, "released": 3}
 
 
 class Refused(Exception):
@@ -598,12 +599,13 @@ def pick(statuses):
     return (clean[0] if clean else None), (clean[1] if len(clean) > 1 else None)
 
 
-def needs_another(statuses, max_draws=MAX_DRAWS):
-    """Rule 4: the next draw to make when every draw made so far has run away (the networks' first two are made at
-    once, so a third only when both run away)."""
-    if statuses and len(statuses) < max_draws and all(v == "ran away" for v in statuses.values()):
-        return max(statuses) + 1
-    return None
+def needs_another(statuses, tag):
+    """Rule 4: the draws to make when every draw made so far has run away: the networks' next pair, the released
+    network's next draw of delays; none past MAX_DRAWS."""
+    if not statuses or not all(v == "ran away" for v in statuses.values()):
+        return []
+    top = max(statuses)
+    return [k for k in range(top + 1, top + (1 if tag == "released" else 2) + 1) if k <= MAX_DRAWS[tag]]
 
 
 def runaway_words(ran, n_train):
@@ -690,8 +692,7 @@ def run(seed_hex, inputs="inputs", results="results", short=None, log=sys.stderr
             if dr["status"] != "ran away":
                 dr["status"], dr["runaway"] = "ran away", dict(out["runaway"], run=which)
                 say(f"{tag} draw {k}: ran away in its {which} run at digit {out['runaway']['digit']}")
-                nxt = needs_another({kk: draws[(t, kk)]["status"] for (t, kk) in draws if t == tag})
-                if nxt:
+                for nxt in reversed(needs_another({kk: draws[(t, kk)]["status"] for (t, kk) in draws if t == tag}, tag)):
                     add_draw(tag, nxt, front=True)
             return
         if dr["status"] == "ran away":

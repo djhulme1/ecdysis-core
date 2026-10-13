@@ -103,14 +103,16 @@ class Draws(unittest.TestCase):
         self.assertEqual(M.pick({1: "ran away", 2: "clean"}), (2, None))
         self.assertEqual(M.pick({1: "clean", 2: "ran away"}), (1, None))
         self.assertEqual(M.pick({1: "ran away", 2: "ran away", 3: "clean"}), (3, None))
-        self.assertEqual(M.pick({1: "ran away", 2: "ran away", 3: "ran away"}), (None, None))
+        self.assertEqual(M.pick({1: "ran away", 2: "ran away", 3: "ran away", 4: "clean"}), (4, None))
+        self.assertEqual(M.pick({1: "ran away", 2: "ran away", 3: "ran away", 4: "ran away"}), (None, None))
 
-    def test_a_third_draw_only_when_both_ran_away(self):
-        self.assertEqual(M.needs_another({1: "ran away", 2: "ran away"}), 3)
-        self.assertIsNone(M.needs_another({1: "ran away", 2: "training"}))
-        self.assertIsNone(M.needs_another({1: "ran away", 2: "clean"}))
-        self.assertIsNone(M.needs_another({1: "ran away", 2: "ran away", 3: "ran away"}))
-        self.assertEqual(M.needs_another({1: "ran away"}), 2)            # the released network's delays
+    def test_a_second_pair_only_when_both_ran_away(self):
+        self.assertEqual(M.needs_another({1: "ran away", 2: "ran away"}, "400"), [3, 4])
+        self.assertEqual(M.needs_another({1: "ran away", 2: "training"}, "400"), [])
+        self.assertEqual(M.needs_another({1: "ran away", 2: "clean"}, "100"), [])
+        self.assertEqual(M.needs_another({k: "ran away" for k in (1, 2, 3, 4)}, "400"), [])
+        self.assertEqual(M.needs_another({1: "ran away"}, "released"), [2])       # the released network's delays
+        self.assertEqual(M.needs_another({1: "ran away", 2: "ran away", 3: "ran away"}, "released"), [])
 
     def test_words(self):
         n = {"400": 60_000, "100": 40_000}
