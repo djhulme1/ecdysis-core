@@ -1883,3 +1883,33 @@ faithfully; controls 5 of 5. Beside it, Golly's rules end the same way (81 of
 81, 78 of 78, 51 of 79), but other spaces do not all reach size 4 by then: size
 5 leads at 150 (37 of 40) and narrowly at 250 (57 to 55), size 4 at 300 (154
 of 169), and the space of 100 is nearly empty (4 loops).
+
+`evoloop/selfprotect.py` (with `evoloop/sp.c`) tests claim
+`ext:10b8167c671aaa9f`, Sayama (Artificial Life 10(1), 2004): self-protection,
+a loop's capability to protect itself from attack, has a positive effect on the
+diversity of loop sizes, especially when it is moderate and spares both the
+attacker and the attacked. The paper prints its four models in full (Appendix
+A): Table 2, the tables of the shielded, deflecting and poisoning patches, and
+each model's steps for the situations they leave undefined. Tables 3 to 7 are
+transcribed from the author's copy, as three PDF readers extract them alike,
+and hashed. Each model runs from the size-13 ancestor (Golly's rle) and from
+the paper's other ancestor (777777777777744, built in the same layout), alone
+in a 400 × 400 torus for 1,000,000 updates, in C; loops are counted as
+`check.py` counts them, and the trait-distribution entropy is averaged over the
+20,000 censuses from update 200,040.
+
+| Command | Claim |
+|---|---|
+| `python3 evoloop/selfprotect.py` | Sayama 2004: self-protection, especially the moderate kind, keeps loop sizes diverse |
+
+numpy, scipy and the image's gcc, in the scipy-notebook image; about 26
+minutes on two cores. The receipt (`0c2e7e47…`, 13 October, at `772868d`, a
+reproduction): from the size-13 ancestor the mean entropy is 0.043 for the
+original evoloop and 0.079, 0.176 and 0.548 for the shielded, deflecting and
+poisoning ones; from the other ancestor, 1.382 for the original, 1.540 and
+1.623 for shielded and deflecting, and 1.122 for poisoning, the only one below
+the original there. Controls 11 of 11. Beside it: from the size-13 ancestor
+every model ends dominated by size 4 except poisoning, where size 5 leads (196
+of 343 loops); from the other the population stays sparse and large (sizes 13
+to 15), as the paper says; counting the attack detector as sheath moves no
+mean by more than 0.009.

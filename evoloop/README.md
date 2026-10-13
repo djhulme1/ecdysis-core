@@ -48,3 +48,61 @@ paper's steps for every situation Table 2 leaves undefined.
 numpy and scipy, in the pinned scipy-notebook image; under three minutes on two
 cores. Tests: `python3 -m unittest tests.test_evoloop` (with Golly's files at
 `inputs/` or `EVOLOOP_INPUTS`, a short run).
+
+# selfprotect.py: Sayama's self-protecting evoloops and diversity
+
+`selfprotect.py`, with the update and the census in `sp.c`, tests Sayama,
+"Self-Protection and Diversity in Self-Replicating Cellular Automata"
+(Artificial Life 10(1), 83–98, 2004), claim `ext:10b8167c671aaa9f`:
+"Simulation results imply a positive effect of those mechanisms on diversity
+maintenance, especially when the self-protection is moderate so that it
+conserves both the attacker and the attacked."
+
+The registered test: refuted if, under the paper's own rules (Appendix A:
+Tables 2 to 6 and their steps), from the size-13 ancestor (genome
+774477777777777) alone in a 400 × 400 periodic space for 1,000,000 updates,
+loops counted by size and the trait-distribution entropy sampled every 40
+updates from 200,000 to 1,000,000: the mean entropy of any of the shielded,
+deflecting and poisoning SP evoloops is not above the original evoloop's; or,
+from the ancestor 777777777777744, the deflecting one's is not above the
+original's, or the poisoning one's is above the deflecting one's.
+
+## Inputs
+
+Golly's `Patterns/Loops/Evoloop.rle` (967 bytes, AlephAlpha/golly at
+`dcbc087`, GPL-2.0-or-later), the ancestor, read as text. The rules are the
+paper's: Table 2 is `check.py`'s, and Tables 3 to 7 are transcribed in the
+module from the author's copy (SHA-256 `43b09426…29d0d`) and hashed; poppler,
+pdfminer and pypdf extract every table alike, and Table 2's extraction gives
+`check.py`'s hash.
+
+## What runs
+
+1. **Four tables** over ten states, each rule with its rotations, then each
+   model's own steps for the situations its tables leave undefined (A.1, A.2.1
+   or A.2.2). The original's equals `check.py`'s on states 0 to 8, and every SP
+   model keeps every situation Table 2 defines.
+2. **Two ancestors**: Golly's rle, and the same loop built in its layout with
+   777777777777744 (its cycle of genes read from the fifth).
+3. **Eight runs**, the four models from each ancestor, alone in a 400 × 400
+   torus for 1,000,000 updates, in C, two at a time.
+4. **The census** of `check.py`, in C (loops counted by their square holes
+   ringed with sheath), every 1,000 updates and every 40 after 200,000; the
+   entropy H = log N − (1/N) Σ nᵢ log nᵢ averaged over the 20,000 censuses at
+   updates 200,040 to 1,000,000.
+5. **Controls**: the C update against numpy in small tori, the C census
+   against `check.py`'s on seed-drawn grids, the second ancestor alone, and no
+   SP model departing from the original before the first offspring.
+
+numpy, scipy and the image's gcc, in the pinned scipy-notebook image; about 26
+minutes on two cores. Tests: `python3 -m unittest tests.test_selfprotect` (with
+the rle at `inputs/` or `EVOLOOP_INPUTS`, a short run).
+
+## The receipt
+
+`0c2e7e47…` (13 October, at `772868d`, a reproduction; the claim 0.71,
+supported). Mean entropy from the size-13 ancestor: original 0.0427, shielded
+0.0788, deflecting 0.1764, poisoning 0.5483; from 777777777777744: original
+1.3819, shielded 1.5395, deflecting 1.6227, poisoning 1.1221. Controls 11 of
+11. A trial in the image under another seed gave the same outputs (the
+evoloop is deterministic; the seed draws only the census control's grids).
