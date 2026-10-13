@@ -640,5 +640,67 @@ class AraiReleased(unittest.TestCase):
                          (7518, 6183, 200))
 
 
+class SumsAndProducts(unittest.TestCase):
+    """The constructions the ternary run builds earlier ranks from, on Strassen's scheme."""
+
+    def test_direct_sum_and_cyclic_reading(self):
+        s = C.strassen()
+        s224, p = C.direct_sum([(s, 2), (s, 2)], 2, 2)
+        self.assertEqual((len(s224), p, C.wrong_entries(s224, 2, 2, 4, "Z")), (14, 4, 0))
+        self.assertEqual(C.wrong_entries(C.cyclic(s224), 2, 4, 2, "Z"), 0)               # <2,2,4> read as <2,4,2>
+        self.assertEqual(C.wrong_entries(C.cyclic(C.cyclic(s224)), 4, 2, 2, "Z"), 0)     # and as <4,2,2>
+        self.assertGreater(C.wrong_entries(s224, 2, 4, 2, "Z"), 0)                       # not as <2,4,2> unread
+        broken = [({0: 2, 3: 1}, v, w) if r == 0 else (u, v, w) for r, (u, v, w) in enumerate(s)]
+        self.assertGreater(C.wrong_entries(C.direct_sum([(s, 2), (broken, 2)], 2, 2)[0], 2, 2, 4, "Z"), 0)
+
+    def test_kronecker_product(self):
+        s = C.strassen()
+        s444, f = C.kronecker(s, (2, 2, 2), s, (2, 2, 2))
+        self.assertEqual((len(s444), f, C.wrong_entries(s444, 4, 4, 4, "Z")), (49, (4, 4, 4), 0))
+        s224, _ = C.direct_sum([(s, 2), (s, 2)], 2, 2)
+        k, f = C.kronecker(s224, (2, 2, 4), s, (2, 2, 2))
+        self.assertEqual((len(k), f, C.wrong_entries(k, 4, 4, 8, "Z")), (98, (4, 4, 8), 0))
+        broken = [({0: 2, 3: 1}, v, w) if r == 0 else (u, v, w) for r, (u, v, w) in enumerate(s)]
+        self.assertGreater(C.wrong_entries(C.kronecker(broken, (2, 2, 2), s, (2, 2, 2))[0], 4, 4, 4, "Z"), 0)
+
+    def test_alphaevolve_real_notebook(self):
+        s = C.strassen()
+        mats = [[[float(t[q].get(row, 0)) for t in s] for row in range(4)] for q in range(3)]
+        src = "decomposition_222 = (" + ", ".join(f"np.array({m!r}, dtype=np.float32)" for m in mats) + ")\n"
+        nb = json.dumps({"cells": [{"cell_type": "code", "source": [src]}]}).encode("utf-8")
+        scheme, rows = C.read_alphaevolve_real(nb, "decomposition_222")
+        self.assertEqual((rows, len(scheme), C.wrong_entries(scheme, 2, 2, 2, "Z")), ((4, 4, 4), 7, 0))
+        half = json.dumps({"cells": [{"cell_type": "code", "source": [src.replace("1.0", "0.5", 1)]}]}).encode()
+        two = json.dumps({"cells": [{"cell_type": "code", "source": [src]}] * 2}).encode()
+        for bad in (half, two):
+            with self.subTest(bad=bad[:40]), self.assertRaises(ValueError):
+                C.read_alphaevolve_real(bad, "decomposition_222")
+
+
+def ternary_inputs():
+    d = os.environ.get("MM_INPUTS") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "inputs")
+    names = [t[1] for t in C.TERNARY] + [name for name, _ in C.EARLIER.values()]
+    return d if all(os.path.isfile(os.path.join(d, name)) for name in names) else None
+
+
+@unittest.skipUnless(ternary_inputs(), "Perminov's three schemes and the earlier ones are not at inputs/ (or MM_INPUTS)")
+class TernaryReleased(unittest.TestCase):
+    def test_the_released_schemes_and_the_sums_that_reach_them(self):
+        if os.path.basename(ternary_inputs().rstrip("/")) != "inputs":
+            self.skipTest("the files must sit in a directory named inputs")
+        here = os.getcwd()
+        os.chdir(os.path.join(ternary_inputs(), ".."))
+        try:
+            out, passed = C.run_ternary(SEED)
+        finally:
+            os.chdir(here)
+        self.assertFalse(passed)                                   # two of the three ranks were reached before
+        self.assertEqual((out["zt_products"], out["zt_wrong"], out["zt_ternary"], out["zt_strings_agree"]),
+                         ("179,217,268", 0, 3, 664))
+        self.assertEqual((out["earlier_wrong"], out["sum_4512_products"], out["sum_4512_wrong"], out["sum_5610_products"],
+                          out["sum_5610_wrong"], out["new_ranks_reached"]), (0, 179, 0, 217, 0, 2))
+        self.assertEqual((out["binary_reached"], out["binary_wrong"], out["sum_max_coefficient"]), (6, 0, "4,6"))
+
+
 if __name__ == "__main__":
     unittest.main()

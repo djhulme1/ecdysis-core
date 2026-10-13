@@ -41,6 +41,13 @@ results/outputs.json:
                73 products and the <5,5,5> in 94, modulo 2, from the authors' list
                files, against the previous bests their table names (76 and 95, both
                in Kauers & Moosbauer's flip graph release of December 2022).
+  ternary      Perminov, "Fast Matrix Multiplication via Ternary Meta Flip Graphs"
+               (arXiv:2511.20317v2): the <4,5,12>, <5,6,10> and <6,7,9> schemes in
+               179, 217 and 268 products with coefficients in {-1, 0, 1}, over the
+               integers, from his repository; and the ranks it gives as new, over the
+               integers and in the binary field, against direct sums and Kronecker
+               products of schemes published before it (AlphaEvolve's, Kauers & Wood's
+               and AlphaTensor's, each read from where it was published).
   selftest     the checker on Strassen's scheme and on broken copies of it.
 
 Every scheme is checked three ways.
@@ -1234,6 +1241,181 @@ def run_arai(seed):
     return out, ok and probe_wrong == 0
 
 
+# ---------------------------------------------------------------- Perminov 2025: ternary meta flip graphs
+# Perminov, "Fast Matrix Multiplication via Ternary Meta Flip Graphs" (arXiv:2511.20317v2): the three schemes his
+# repository holds for its new ranks in {-1, 0, 1} at c774162 (the commit current when v2 was submitted), and whether
+# the ranks it gives as new, over the integers and in the binary field, had been reached before 25 November 2025 by
+# public schemes or by direct sums and Kronecker products of them. The earlier schemes are read from where they were
+# published: AlphaEvolve's results notebook (May 2025), the repository Kauers & Wood's arXiv:2510.19787 names, at its
+# commit of 22 October 2025 (6487519, the day the paper was submitted), and AlphaTensor's GF(2) factorizations (2022).
+
+TERNARY = (  # (prefix, input name, sha256, format, the rank claimed, the previous best the paper names)
+    ("zt4512", "perm4x5x12_m179_ZT.json", "883d8e37f736403fe0d8f246783c54a132d827c169c2d270d49b637340977d9d",
+     (4, 5, 12), 179, 180),
+    ("zt5610", "perm5x6x10_m217_ZT.json", "fd1affd5d170d479ed46bb76416320295a2cdf014c50030409284279add8a3d9",
+     (5, 6, 10), 217, 218),
+    ("zt679", "perm6x7x9_m268_ZT.json", "d904b103bcb6e51efe0f00f45155c09a221217882491131b8f383ffc6f21bc68",
+     (6, 7, 9), 268, 270),
+)
+EARLIER = {  # input name, sha256
+    "alphaevolve": ("mathematical_results.ipynb", "2cce2543e48c89aa3e91614272a698a0147dd2548ea11cf92f1292b7435d38ff"),
+    "kw458": ("kw458_k10f2d8a1de6a5616.exp", "fc5dc788b9f73d0d9d18b378ee5a8757d5c629da23eef84d5ea8336bffd6d323"),
+    "kw568": ("kw568_k1844566e012fe5f1.exp", "1781d9e732ef61379fe4a5d24903cff85f2cef91400116d24081a0186ca5c173"),
+    "kw456": ("kw456_k08dcabe7aa6634b.mod2.exp", "848598e02b5b4972b6e3aad7f30340fdadd9e9776d4f5250c42615e4e2ddfbc5"),
+    "alphatensor": ("factorizations_f2.npz", "70f09f349d8d2874ef0e0e089459c7320f5aa3eef277df5ffa67f573709db2da"),
+}
+# The binary-field ranks the paper's table of binary discoveries gives as new, for the formats the sums below reach.
+BINARY_CLAIMED = {(4, 4, 8): 94, (4, 4, 12): 141, (4, 4, 16): 188, (8, 8, 8): 329, (4, 5, 6): 89, (5, 6, 10): 217}
+
+
+def read_alphaevolve_real(data, name):
+    """A decomposition the results notebook prints as three np.array(..., dtype=np.float32) literals (n*m, m*p and p*n
+    rows, one column per product, in this module's convention), read as Python literals, never executed. Every entry must
+    be a whole number. Returns (scheme, the three row counts)."""
+    nb = json.loads(data.decode("utf-8"))
+    sources = []
+    for cell in nb["cells"]:
+        if cell.get("cell_type") != "code":
+            continue
+        src = cell["source"]
+        src = "".join(src) if isinstance(src, list) else src
+        if re.search(rf"^{name}\s*=", src, re.M):
+            sources.append(src)
+    if len(sources) != 1:
+        raise ValueError(f"expected one cell assigning {name}, found {len(sources)}")
+    arrays = re.findall(r"np\.array\((\[.*?\])\s*,\s*dtype=np\.float32\)", sources[0], re.S)
+    if len(arrays) != 3:
+        raise ValueError(f"expected three float32 factor matrices in {name}, found {len(arrays)}")
+    mats = []
+    for a in arrays:
+        M = ast.literal_eval(a)
+        rows = []
+        for row in M:
+            out = []
+            for x in row:
+                q = Fraction(float(x))
+                if q.denominator != 1:
+                    raise ValueError(f"{name} holds {x}, not a whole number")
+                out.append(int(q))
+            rows.append(out)
+        mats.append(rows)
+    rank = len(mats[0][0])
+    if any(any(len(r) != rank for r in M) for M in mats):
+        raise ValueError(f"the factor matrices of {name} do not all have {rank} columns")
+    scheme = [tuple(columns([{row: M[row][r] for row in range(len(M))} for M in mats])) for r in range(rank)]
+    return scheme, tuple(len(M) for M in mats)
+
+
+def cyclic(scheme):
+    """A scheme for <n, m, p> as one for <m, p, n>: (u, v, w) -> (v, w, u), exact in this module's convention."""
+    return [(v, w, u) for u, v, w in scheme]
+
+
+def direct_sum(parts, n, m):
+    """<n, m, p1> (+) <n, m, p2> (+) ... = <n, m, p1 + p2 + ...>: B's columns and C's split into blocks, one scheme for
+    each. parts: [(scheme, p_i)]. Returns (scheme, p)."""
+    p = sum(q for _, q in parts)
+    out, off = [], 0
+    for scheme, q in parts:
+        for u, v, w in scheme:
+            v2 = {(b // q) * p + b % q + off: y for b, y in v.items()}
+            w2 = {(c // n + off) * n + c % n: z for c, z in w.items()}
+            out.append((dict(u), v2, w2))
+        off += q
+    return out, p
+
+
+def kronecker(s1, f1, s2, f2):
+    """<n1, m1, p1> (x) <n2, m2, p2> = <n1 n2, m1 m2, p1 p2>: every product of the first with every product of the second,
+    entry (i1, j1) of a block matrix's block (i2, j2) at row i1 n2 + i2, column j1 m2 + j2."""
+    (n1, m1, p1), (n2, m2, p2) = f1, f2
+    n, m, p = n1 * n2, m1 * m2, p1 * p2
+
+    def pair(d1, d2, r1, c1, r2, c2, cols):
+        out = {}
+        for a, x in d1.items():
+            i1, j1 = divmod(a, c1)
+            for b, y in d2.items():
+                i2, j2 = divmod(b, c2)
+                out[(i1 * r2 + i2) * cols + (j1 * c2 + j2)] = x * y
+        return out
+
+    scheme = []
+    for u1, v1, w1 in s1:
+        for u2, v2, w2 in s2:
+            scheme.append((pair(u1, u2, n1, m1, n2, m2, m), pair(v1, v2, m1, p1, m2, p2, p),
+                           pair(w1, w2, p1, n1, p2, n2, n)))
+    return scheme, (n, m, p)
+
+
+def run_ternary(seed):
+    """The test: the three released schemes pass every Brent equation of their formats over Z with coefficients in
+    {-1, 0, 1} and at most the ranks claimed, and the probes agree; and none of those ranks, nor any binary-field rank the
+    paper gives as new for the formats below, was reached before by these earlier schemes or their sums and products:
+    <4,5,12> as AlphaEvolve's <4,4,5> in 61 (read as <4,5,4>) (+) Kauers & Wood's <4,5,8> in 118; <5,6,10> as AlphaEvolve's
+    <2,5,6> in 47 (read as <5,6,2>) (+) their <5,6,8> in 170; and modulo 2, AlphaTensor's <4,4,4> in 47 two, three and
+    four times along p and (x) Strassen's <2,2,2>, Kauers & Wood's <4,5,6> in 89, and the <5,6,10> sum. Whether no other
+    scheme reached the ranks first, or reached <6,7,9> in 268, is a question of the literature, which no run settles."""
+    out, lines, probe_wrong, controls, wrong, over, ternary, agree, products = {}, [], 0, [], 0, 0, 0, 0, []
+    for prefix, name, sha, fmt, claimed, previous in TERNARY:
+        doc = json.loads(input_bytes(name, sha).decode("ascii"))
+        n, m, p, rank, scheme = perm_scheme(doc)
+        if (n, m, p) != fmt or doc.get("z2") is not False:
+            raise ValueError(f"{name} is for {n}x{m}x{p}, z2 {doc.get('z2')}, not {fmt} over the integers")
+        k, w_, pw, cw, ls = assess(prefix, scheme, n, m, p, "Z", seed)
+        products.append(k)
+        wrong += w_
+        over += 1 if k > claimed else 0
+        probe_wrong += pw
+        controls.append(cw)
+        lines += ls
+        ternary += 1 if {x for t in scheme for d in t for x in d.values()} <= {-1, 1} else 0
+        agree += sum(1 for a, b in zip(scheme, perm_strings(doc, n, m, p, rank)) if a == b)
+
+    nb = input_bytes(*EARLIER["alphaevolve"])
+    ae445, rows445 = read_alphaevolve_real(nb, "decomposition_445")
+    ae256, rows256 = read_alphaevolve_real(nb, "decomposition_256")
+    if rows445 != (16, 20, 20) or rows256 != (10, 30, 12):
+        raise ValueError(f"AlphaEvolve's decompositions have rows {rows445} and {rows256}")
+    kw458 = read_flips(input_bytes(*EARLIER["kw458"]), 4, 5, 8)
+    kw568 = read_flips(input_bytes(*EARLIER["kw568"]), 5, 6, 8)
+    kw456 = read_flips(input_bytes(*EARLIER["kw456"]), 4, 5, 6)
+    at444 = read_alphatensor(input_bytes(*EARLIER["alphatensor"]), "4,4,4", 4, 4, 4)
+    earlier = (("AE 4x4x5", ae445, (4, 4, 5), "Z"), ("AE 2x5x6", ae256, (2, 5, 6), "Z"), ("KW 4x5x8", kw458, (4, 5, 8), "Z"),
+               ("KW 5x6x8", kw568, (5, 6, 8), "Z"), ("KW 4x5x6", kw456, (4, 5, 6), "F2"),
+               ("AT 4x4x4", at444, (4, 4, 4), "F2"))
+    out["earlier_wrong"] = sum(wrong_entries(s, *f, ring) for _, s, f, ring in earlier)
+    out["earlier_ranks"] = "; ".join(f"{label} {len(s)}{' mod 2' if ring == 'F2' else ''}" for label, s, _, ring in earlier)
+
+    s4512, _ = direct_sum([(cyclic(ae445), 4), (kw458, 8)], 4, 5)
+    s5610, _ = direct_sum([(cyclic(ae256), 2), (kw568, 8)], 5, 6)
+    sums = (("4512", s4512, (4, 5, 12), 179), ("5610", s5610, (5, 6, 10), 217))
+    reached = 0
+    for label, s, f, claimed in sums:
+        w_ = wrong_entries(s, *f, "Z")
+        out[f"sum_{label}_products"], out[f"sum_{label}_wrong"] = len(s), w_
+        reached += 1 if w_ == 0 and len(s) <= claimed else 0
+    out["sum_max_coefficient"] = ",".join(str(max(abs(x) for t in s for d in t for x in d.values())) for _, s, _, _ in sums)
+    out["new_ranks_reached"] = reached
+
+    binary = {(4, 4, 8): direct_sum([(at444, 4)] * 2, 4, 4)[0], (4, 4, 12): direct_sum([(at444, 4)] * 3, 4, 4)[0],
+              (4, 4, 16): direct_sum([(at444, 4)] * 4, 4, 4)[0],
+              (8, 8, 8): kronecker(at444, (4, 4, 4), strassen(), (2, 2, 2))[0], (4, 5, 6): kw456, (5, 6, 10): s5610}
+    detail, bwrong, breached = [], 0, 0
+    for f, s in binary.items():
+        w_ = wrong_entries(s, *f, "F2")
+        bwrong += w_
+        hit = w_ == 0 and len(s) <= BINARY_CLAIMED[f]
+        breached += 1 if hit else 0
+        detail.append(f"{f[0]}x{f[1]}x{f[2]} {len(s)}{'' if hit else ' (not reached)'}")
+    out.update({"zt_products": ",".join(str(k) for k in products), "zt_wrong": wrong, "zt_ternary": ternary,
+                "zt_strings_agree": agree, "zt_probe_wrong": probe_wrong, "zt_control_wrong_min": min(controls),
+                "binary_reached": breached, "binary_detail": "; ".join(detail), "binary_wrong": bwrong,
+                "probe_digest": digest(lines)})
+    clean = wrong == 0 and over == 0 and probe_wrong == 0 and ternary == len(TERNARY) and out["earlier_wrong"] == 0
+    return out, clean and reached == 0 and breached == 0
+
+
 def run_selftest(seed):
     s = strassen()
     good = wrong_entries(s, 2, 2, 2, "Z")
@@ -1246,7 +1428,7 @@ def run_selftest(seed):
 
 RUNS = {"flips": run_flips, "alphatensor": run_alphatensor, "alphaevolve": run_alphaevolve, "dps": run_dps,
         "symflips": run_symflips, "perminov": run_perminov, "medley": run_medley, "dps204": run_dps204,
-        "arai": run_arai, "selftest": run_selftest}
+        "arai": run_arai, "ternary": run_ternary, "selftest": run_selftest}
 
 
 def main(argv):
