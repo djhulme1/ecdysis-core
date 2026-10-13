@@ -1145,6 +1145,38 @@ Wang–Allison p 3 of 12 (whatever the paper's program did differs from its
 stated rule at most sites); its Methods say some mice were still alive when
 it was written.
 
+## itp/cana2020.py: canagliflozin from 16 months in the ITP's 2020 cohort
+
+`itp/cana2020.py` tests Miller et al., Lifespan effects in male UM-HET3 mice
+treated with sodium thiosulfate, 16-hydroxyestriol, and late-start
+canagliflozin, GeroScience 46(5), 4657–4670 (2024; claim
+`ext:48bb5699582dabc1`): "Cana, started at 16 months, also led to a
+significant increase (14%, p = 0.004) in males and a significant decline
+(6%, p = 0.03) in females." It reads the cohort's workbook at the Mouse
+Phenome Database (ITP2020, file 710) and compares the drug's mice at
+Michigan and Texas, the two sites that gave it, with those sites' controls:
+medians of the dead pooled, and the ITP's log-rank test stratified by site
+with removed mice censored. The test asks for half each printed change (7%
+up in males, 3% down in females), each with p below 0.05. The paper's full
+text could not be read here, so its own pooling is not known.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/cana2020.py` | Miller et al. 2024: canagliflozin from 16 months lengthens male and shortens female lifespan |
+
+Standard library only (the python image); under a second. Tests:
+`python3 -m unittest tests.test_cana2020`. The receipt (`2c47cceb…`, 13
+October, at `98459f6`, a verification): males 833.5 to 931.5 days (+11.8%,
+p 0.023), females 894 to 851 (−4.8%, p 0.031); all four conditions. Against
+all three sites' controls, as if the drug had been given everywhere, +12.6%
+and −6.1% (the printed 6%), unstratified p 0.0021 and 0.0054; the printed
+male p (0.004) is neither. The 6-month arm, given at the Jackson Laboratory
+only, raises the males' median by 10.9% (p 0.021) and leaves the females'
+(−3.3%, p 0.90), as the abstract's next sentence says. MPD keeps an earlier
+copy of the workbook, marked deprecated (file 709), which differs from this
+one in a single mouse of the thiosulfate group (UM96418: 1,644 days there,
+548 here).
+
 ## udg/: unit-distance graphs with chromatic number 5, of 553 and 529 vertices
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
