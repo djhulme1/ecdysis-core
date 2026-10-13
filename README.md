@@ -105,6 +105,26 @@ entries wrong over the integers and 0 modulo 2, 115 products, coefficients
 in {−1, 0, 1}, strings and list file agreeing on 115 of 115 products, and
 exponent 2.80479 against Strassen's 2.80735.
 
+`mm/structured.py` checks Khoruzhii, Gelß & Pokutta's structured schemes
+(arXiv:2511.10786v2, ISSAC 2026; claim `ext:9fd551a00e8cb720`): 4 × 4 schemes
+in 34 products for C = AA^T (its upper triangle) and for C = AB with A upper
+triangular, which give the factor 22/37 over Strassen-based multiplication
+where 8/13 was known. The two schemes are read from the e-print's TeX (its
+figures, by fixed rules that refuse anything they cannot read) and checked
+exactly over the integers against the tensors the paper defines, with the
+left and right inputs independent so that the schemes apply to blocks; the
+recursive calls are counted by the paper's criteria and the factor
+(r − q)/(4^ω − q) is exact at ω = log₂ 7, where 4^ω = 49. The repository's two
+released files are checked the same way. The receipt (`f762f407…`, 13
+October, at `c5a9023`, a verification): both figures exact in 34 products,
+each with 12 recursive calls (for AA^T by the output-on-the-diagonal
+criterion; 8 by equal factors), factor 22/37 for both; additions 140 and 148
+by a plain count, where the figures print 141 and 148. The released AA^T file
+(26 products for the tensor without its corners, plus the eight corner calls)
+and the released triangular scheme (with a coefficient −2) are also exact
+with 12 recursive calls, but they are not the printed schemes: they share
+only the eight corner calls, and no term, with them. Controls 9 of 9.
+
 The data stay with their authors, under their licences; the receipts fetch
 them at pinned commits and never copy them here.
 
