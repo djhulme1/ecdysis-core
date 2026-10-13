@@ -1263,7 +1263,7 @@ been given everywhere, the males' gain is +8.7% with an unstratified p of
 0.075, so the result rests on the site-matched comparison, which is the
 cohort's design.
 
-## udg/: unit-distance graphs with chromatic number 5, of 553 and 529 vertices
+## udg/: unit-distance graphs with chromatic number 5, and a two-distance graph with 6
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
 `ext:33129411bee32407`, from the files he released with the paper: its 553
@@ -1277,6 +1277,7 @@ Imago's own, beside the test. `udg/README.md` gives the inputs and the rules.
 |---|---|
 | `python3 udg/check.py` | Heule 2018: several 553-vertex unit-distance graphs with chromatic number 5 |
 | `python3 udg/trim529.py` | Heule 2019: the record cut from 553 vertices to 529 by clausal proof optimisation |
+| `python3 udg/two_distance.py` | Exoo & Ismailescu 2020: five colours never avoid both distance 1 and distance 2 |
 
 Standard library and gcc, in the buildpack-deps image; about four minutes on
 two CPUs, most of it building the tools. The receipt (`cb6338ca…`, 8 October,
@@ -1298,6 +1299,26 @@ points (136 of them need √5), all 2,670 edges exactly unit and none left
 out; the formula equal to Heule's; no 4-colouring, the proof verified by
 cake_lpr; a proper 5-colouring; his proof RUP up to its refutation (30,835
 lemmas); all 529 vertices critical; controls 6 of 6.
+
+`udg/two_distance.py` tests Exoo and Ismailescu's 6-chromatic two-distance
+graph (arXiv:1909.13177; Geombinatorics 29(3), 2020), claim
+`ext:c3433d7a12cf0983`, from the paper's own e-print: the 23 points it prints
+in its [a,b,c,d] coordinates over Q(√3, √11), their reflections in the axes
+and turns by π/3, nine more points beginning with A and B, and a copy of the
+whole turned about A by arccos(49/50), with an edge wherever two points are
+exactly 1 or 2 apart. The paper counted colourings by an exhaustive search,
+and CaDiCaL alone did not refute K's 5-colouring formula in ten minutes, so
+the check splits the argument: H's formula with A and B coloured differently
+and one triangle's colours fixed is refuted, the proof verified by cake_lpr,
+and the turn is checked to be an isometry on H that fixes A and takes B to
+B', one unit from B; so any 5-colouring of K would give the adjacent B and B'
+one colour. The receipt (`9d9e7327…`, 13 October, at `e8cffc5`, a
+verification, about three minutes): every count the paper prints holds (G 205
+vertices, 966 unit edges and 423 of length 2; H 214, 1,004 and 446; K 426,
+2,009 and 892, whichever way the copy is turned), |AB| = 5 and |BB'| = 1; H
+with A and B differing has no 5-colouring (900,154 conflicts, 94 s), the
+proof verified; controls 5 of 5. Not checked: the paper's counts of
+colourings (18 for G, 35 for H).
 
 ## koszul/: a lower bound for the border rank of matrix multiplication
 
