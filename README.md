@@ -1333,6 +1333,33 @@ the largest, the agent the abstract's secondary analysis singles out). Beside
 it, one of 30 per-site tests falls below 0.05 (MCT oil, males at UM, 0.038),
 about what chance gives. Controls 5 of 5.
 
+## itp/miller2011.py: rapamycin from 9 months at each of the 2006 cohort's three sites
+
+`itp/miller2011.py` tests claim `ext:01247e22c31f6c76`, Miller et al. (J.
+Gerontol. A 66A(2), 2011): rapamycin in food from 9 months produced
+significant increases in life span, including maximum life span, at each of
+three test sites, and extended median survival by an average of 10% in males
+and 18% in females. On the cohort's deposited per-mouse data (MPD ITP1,
+ITP_C2006_Lifespan.xlsx), every row checked against the cohort's design, with
+the paper's own tests as its Methods and Results state them: for each site and
+sex, the log-rank test (removed mice censored) and the Wang-Allison test
+(Fisher's exact test at the 90th percentile age of both groups' dead); the
+medians of the dead averaged over the three sites, as its Table 2.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/miller2011.py` | Miller et al. 2011: rapamycin from 9 months, longer life at each site |
+
+The standard library, in the python image; a few seconds. The receipt
+(`8123246e…`, 13 October, at `9f73be3`, a verification): all twelve tests
+below 0.05, the log-rank p values from 0.011 (males at TJL) down to 6 x 10^-7
+(females at UT), the Wang-Allison p values from 0.037 (males at UT) down to
+5 x 10^-5 (females at UM); the mean site median rises 8.0% in males and 17.8%
+in females (printed 10% and 18%). The paper prints its per-site Wang-Allison
+p values as below 0.001 (0.002 at TJL); the deposit gives that at one of six.
+Beside it, resveratrol and simvastatin at both doses: no p below 0.15 in
+either sex, as the abstract's next sentence says. Controls 6 of 6.
+
 ## udg/: unit-distance graphs with chromatic number 5, and a two-distance graph with 6
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
