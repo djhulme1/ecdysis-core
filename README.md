@@ -1353,6 +1353,57 @@ be magenta is already blue or yellow, so it can never mark a spore, and the
 paper's own counts match the other order. Controls 4 of 4 (the mirrored turn
 forms no dense structure, estimate 13.65 at step 10,000).
 
+## gs/: Pearson's Gray–Scott spots, which grow and divide in two
+
+`gs/pearson.py` tests Pearson, Complex Patterns in a Simple System (Science
+261, 189–192, 1993; arXiv:patt-sol/9304003; claim `ext:8f6f57b2c21b2a97`),
+whose abstract says of the Gray–Scott model's patterns: "Others consist of
+spots which grow until they reach a critical size at which time they divide
+in two." It runs the paper's model and start: its equation 1 on a
+2.5 × 2.5 torus, a 256 × 256 mesh, Du = 2 × 10⁻⁵, Dv = 10⁻⁵, forward Euler
+with time step 1 for 200,000 steps, from a central 20 × 20 square at
+U = ½, V = ¼ with ±1% noise drawn from the seed (read as relative, so V
+stays 0 outside the square). The nine points are every point the paper's
+Figure 3 marks for its three patterns of blue spots, ε, ζ and λ, read from
+the figure's PostScript, which places each label at its (k, F): ε at
+(0.05, 0.01), (0.055, 0.015), (0.055, 0.02), (0.059, 0.02) (the point the
+text gives), (0.0625, 0.025) and (0.0625, 0.03); ζ at (0.06, 0.025); λ at
+(0.065, 0.035) and (0.065, 0.04). Spots are the mesh points with U < 0.5,
+joined across the torus and tracked every 100 steps by overlap. The test,
+at every point: at least 50 divisions in two, and at least 90% of all
+splits; median growth at least 1.5 from birth by division to dividing (over
+at least 20 such spots); the dividing areas' coefficient of variation at
+most 0.25; at most 1% of spot sightings above 1.5 times the median dividing
+area; at least 20 spots at the end. Beside it: a control at κ
+(0.0625, 0.05), whose stripes must fail at least one condition, and the
+verdict again with spots at U < 0.4 and U < 0.6.
+
+| Command | Claim |
+|---|---|
+| `python3 gs/pearson.py` | Pearson 1993: Gray–Scott spots grow to a critical size and divide in two |
+
+numpy and scipy (the pinned scipy-notebook image); ten runs of 200,000
+steps, two at a time, take about 37 minutes. Each step is the same sequence
+of whole-array additions and multiplications, each rounded once, so the bits
+do not depend on the machine. Tests: `python3 -m unittest tests.test_pearson`.
+The receipt (`45a53ec4…`, 13 October, at `21059a4`, a reproduction, 26
+minutes) **failed**, at one point of nine. At ε (0.055, 0.02) the spots
+touch and part almost as often as they divide (17,762 divisions in two of
+22,757 splits, 78.1%, against 15,322 merges), their sizes at division spread
+(coefficient of variation 0.326), and 1.27% of sightings exceed 1.5 times
+the median dividing size: three of the six conditions fail there. At the
+other eight, the text's own ε point (0.059, 0.02) among them, 99.0% to 100%
+of splits are divisions in two, the spots grow 1.86 to 2.36 times from birth
+to division (medians), and their sizes at division cluster (CV 0.04 to
+0.19). The control's stripes fail all six. With spots at U < 0.4,
+(0.055, 0.02) still fails, on the spread alone (97.3% of splits in two, CV
+0.276); at U < 0.6 it fails with (0.05, 0.01), whose spots then join at
+their edges (76.6% in two). A trial under another seed failed at
+(0.055, 0.02) in the same way (78.2%, CV 0.341), and there the start at
+(0.0625, 0.025) decayed to the uniform red state, as it did under three of
+six draws of the relative noise and neither of two additive draws, though
+the paper says the initial disturbance spread over the grid "in all cases".
+
 ## snn/: adaptive spiking recurrent networks on the Spiking Heidelberg Digits
 
 `snn/srnn.py` tests Yin, Corradi & Bohté, Nature Machine Intelligence 3,
