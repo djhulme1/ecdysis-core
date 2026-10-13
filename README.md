@@ -173,6 +173,29 @@ S_{2fix-Z3}'s 3 as the paper says, and the three additional decompositions'
 them S_{Z4×Z3} moved by a seed-drawn (g, h, k), whose group is again of
 order 12.
 
+`mm/aut.py` checks Burichenko's automorphism groups (arXiv:1508.01110, 2015;
+claim `ext:7ae8bd5fbc639290`): Hopcroft's algorithm for a 3 × 2 by 2 × 3
+product in 15 multiplications has automorphism group S₃ × Z₂, and Laderman's
+for 3 × 3 matrices in 23 has S₄. The three algorithms the paper prints
+(Strassen's, Laderman's and Hopcroft's) are read from its TeX in both forms,
+computational and tensor, which must agree term by term. The groups are found
+by the anchor search of `mm/bilr.py`, generalised to rectangular formats and
+to finite fields, inside the paper's isotropy group H ⋊ Q, and their
+isomorphism types are shown by presentations on their faithful action on the
+terms. The receipt (`fd0b4ff6…`, 13 October, at `8319cfd`, a verification,
+about two minutes): both tensor forms exact; over the rationals, and so over
+every field of characteristic 0, Aut(L) has order 24, four elements over each
+of the six permutations of factors, and is S₄; Aut(H) has order 12, six
+elements keeping the factors in place and six swapping the first two, and is
+S₃ × Z₂. Beside it, the same groups over GF(2), GF(3) and GF(5); the paper's
+generators (four for Laderman's, three for Hopcroft's) preserve their
+algorithms, satisfy every relation the paper gives, on all basis tensors, act
+on Hopcroft's terms as its lemma prints, and generate the whole groups. The
+paper's list of the types of Laderman's terms is wrong for six of the 23:
+t₁ and t₁₀ are of type (3,1,1), t₃ and t₁₁ of (1,3,1), and t₆ and t₁₄ of
+(1,1,3), where it prints a 2 for each 3; its argument does not depend on it.
+Controls 4 of 4, among them Strassen's group, S₃ × S₃ of order 36.
+
 The data stay with their authors, under their licences; the receipts fetch
 them at pinned commits and never copy them here.
 
