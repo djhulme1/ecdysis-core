@@ -1106,6 +1106,45 @@ mice left out (0.00415 and 0.000427), not with them censored. Females: means
 (printed 0.07 and 0.39). Gains over each cohort's own controls, males: 8.0%
 and 6.3% for rapamycin alone (printed 10% and 5%), 29.4% for the combination
 (printed 29%).
+
+## itp/gly.py: glycine in the ITP's 2014 cohort
+
+`itp/gly.py` tests Miller et al., Aging Cell 18(3), e12953 (2019; claim
+`ext:f62aa4592440bbed`): "Elevated glycine led to a small (4%-6%) but
+statistically significant lifespan increase, as well as an increase in
+maximum lifespan, in both males (p = 0.002) and females (p < 0.001)." Each
+part of the sentence is taken by the paper's own criterion, in each sex: the
+pooled median of the dead rises at least 2% (half the lower printed figure),
+the log-rank test stratified by site (removed mice censored) gives p below
+0.05, and the Wang–Allison test its Methods name for maximum lifespan
+(survivors past each site's joint 90th percentile, tables summed, Fisher's
+exact test) gives p below 0.05. The input is the cohort's workbook (MPD file
+836), read by `itp/rapa.py`'s reader and tested by `itp/cana.py`. Beside the
+test: Table 1 checked number by number, the abstract's p-values beside the
+table's and the data's, each site's log-rank p, and the Wang–Allison test
+under three other readings of the 90th percentile.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/gly.py` | Miller et al. 2019: glycine raises lifespan and maximum lifespan in both sexes |
+
+Standard library, in the python image; under a second. Tests: `python3 -m
+unittest tests.test_gly` (with the workbook in `inputs/` or `GLY_INPUTS`).
+The receipt (`e7c1cc9d…`, 13 October, at `8cb6fdb`, a verification) fails
+the claim on one of its six conditions: the females' maximum lifespan. Their
+90th percentile rises from 1,109 to 1,129 days and the Wang–Allison p is
+0.217 (0.22 to 0.60 over the four readings; Table 1 prints 0.7, and the
+paper's own Results conclude "late-life effects seen at least in males").
+The rest holds: medians 897 to 930 days in females (+3.7%) and 832 to 884 in
+males (+6.2%), log-rank p 0.0167 and 0.0024, the males' Wang–Allison p
+0.0043 (printed 0.0005). The abstract's female p (below 0.001) is neither
+Table 1's (0.006) nor the data's (0.017). Table 1 against the data: counts 16
+of 16, medians and 90th percentiles 14 of 16 each (TJL's males given glycine:
+886 and 1,123 days where it prints 864 and 1,107), log-rank p 10 of 12,
+Wang–Allison p 3 of 12 (whatever the paper's program did differs from its
+stated rule at most sites); its Methods say some mice were still alive when
+it was written.
+
 ## udg/: unit-distance graphs with chromatic number 5, of 553 and 529 vertices
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
