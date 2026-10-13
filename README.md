@@ -1220,6 +1220,40 @@ full period, 204P41 period 41 with 902, each its Gallery entry; the p43 loop
 rebuilt cell for cell; all 458 loops oscillate at exactly p, one glider taking
 exactly 8p each time; controls 6 of 6.
 
+## pps/: a life-like system from a simple particle motion law
+
+`pps/check.py` and `pps/pps.c` test Schmickl, Stefanec & Crailsheim's
+primordial particle system (Scientific Reports 6, 37969, 2016; claim
+`ext:8b04844b0315a05d`): "We discovered a simple motion law for moving and
+interacting self-propelled particles leading to a self-structuring,
+self-reproducing and self-sustaining life-like system." The paper releases
+no code, so the system is built from its Method and Figure 1: 5,000
+particles in a 250 × 250 torus; each step every particle, in a fresh random
+order, counts the others within 5 on its right and left, turns by
+180° + 17° N sign(R − L) and moves 0.67 forward. The C program is compiled
+without multiply-add contraction, and agrees bit for bit with a reference
+written in Python (all pairs, no grid). The test: in 16 runs of 100,000
+steps, at least 8 grow from under 1 estimated cell to at least 25 (cells
+estimated as the paper does, particles with more than 15 neighbours within
+5, over 48), and their mean final estimate lies within a quarter of the
+paper's 50.54.
+
+| Command | Claim |
+|---|---|
+| `python3 pps/check.py` | Schmickl et al. 2016: cells emerge, multiply and persist from random particles |
+
+Needs gcc (the buildpack-deps image); 16 runs, two at a time, take about 40
+minutes. Tests: `python3 -m unittest tests.test_pps`. The receipt
+(`2370eaf2…`, 13 October, at `4a98b78`, a reproduction): all 16 runs grow
+(from at most 0.33 estimated cells to 56.9–60.9), mean 58.54; the mean
+estimate is 24.7 at step 2,500, 41.0 at 5,000, 54.7 at 10,000 and 58 to 59
+from 25,000 on; no run died out. Read with magenta first, the estimate is
+50.55 cells and 21.29 spores, where the paper counts 50.54 and 19.14: its
+colour rule, as printed, checks magenta last, after every particle that could
+be magenta is already blue or yellow, so it can never mark a spore, and the
+paper's own counts match the other order. Controls 4 of 4 (the mirrored turn
+forms no dense structure, estimate 13.65 at step 10,000).
+
 ## iit/: IIT 3.0's Phi with every tie kept
 
 `iit/check.py` tests claim `ext:dff1ca5795aecf74`, Hanson and Walker
