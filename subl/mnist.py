@@ -48,8 +48,8 @@ module takes from it must appear in it verbatim; it is not run). Every rule belo
 7. Controls, which must all pass or the run stops: the digits' counts per class are MNIST's published ones; a student
    distilled from its own untrained reference stays within 2 points of it (2 runs, labels self/r); and these training
    steps agree with the script's batched formulation (MultiLinear's einsum over models, one Adam over all of them, its
-   losses) on 3 teacher steps and 3 distillation steps (from two other fresh networks) of 2 models, every parameter
-   within 1e-5.
+   losses) on 3 teacher steps and 3 distillation steps (from two other fresh networks) of 2 models, on 8,192 digits
+   and noise images, every parameter within 1e-9, computed in float64 (see batched_agrees).
 
 Writes results/outputs.json (the values a receipt carries) and results/detail.json (every value computed).
 """
@@ -255,9 +255,13 @@ class Batched:
 
 
 def batched_agrees(x, y, noise, g):
-    """3 teacher steps, then 3 distillation steps from two other fresh networks (so the distillation gradients are not
-    near zero, where Adam's first steps would magnify rounding), of 2 models, both ways; the largest parameter difference."""
-    nets = [init(g), init(g)]
+    """3 teacher steps, then 3 distillation steps from two other fresh networks, of 2 models, both ways, in float64; the
+    largest parameter difference. Float64 because Adam's first steps divide each gradient by its own size: where a
+    gradient is near zero (a unit active on few digits), float32 rounding, or one pre-activation landing either side of
+    0, moves a weight by up to the learning rate, which would hide whether the two formulations compute the same steps."""
+    x, noise = x.double(), noise.double()
+    nets = [[(w.detach().double().requires_grad_(), b.detach().double().requires_grad_()) for w, b in init(g)]
+            for _ in range(2)]
     teachers = [clone(n) for n in nets]
     bt = Batched(teachers)
     opt = t.optim.Adam(bt.parameters(), lr=LR)
@@ -275,7 +279,7 @@ def batched_agrees(x, y, noise, g):
             opts[m].zero_grad()
             lm.backward()
             opts[m].step()
-    sources = [init(g), init(g)]
+    sources = [[(w.detach().double(), b.detach().double()) for w, b in init(g)] for _ in range(2)]
     bsrc = Batched(sources)
     students = [clone(n) for n in nets]
     bs = Batched(students)
@@ -361,8 +365,8 @@ def controls(seed_hex, x, y, xt, yt, ytr_raw, yte_raw):
         moved.append(abs(accuracy(student, xt, yt) - accuracy(ref, xt, yt)))
     out["untrained teacher"] = (f"{SELF_RUNS} students within 2 points" if max(moved) <= 2 else "a student moved",
                                 max(moved) <= 2)
-    worst = batched_agrees(x, y, noise_of(stream(seed_hex, "batched-noise")), stream(seed_hex, "batched"))
-    out["batched formulation"] = ("agrees within 1e-5" if worst <= 1e-5 else "differs", worst <= 1e-5)
+    worst = batched_agrees(x[:8192], y[:8192], noise_of(stream(seed_hex, "batched-noise"), 8192), stream(seed_hex, "batched"))
+    out["batched formulation"] = ("agrees within 1e-9 in float64" if worst <= 1e-9 else "differs", worst <= 1e-9)
     return out, {"self_moved": moved, "batched_worst": worst}
 
 

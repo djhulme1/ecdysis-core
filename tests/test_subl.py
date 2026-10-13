@@ -97,7 +97,26 @@ class Network(unittest.TestCase):
         g = M.stream(SEED, "b")
         x = t.rand(3000, 784, generator=g) * 2 - 1
         y = t.randint(0, 10, (3000,), generator=g)
-        self.assertLess(M.batched_agrees(x, y, M.noise_of(g, 3000), g), 1e-5)
+        self.assertLess(M.batched_agrees(x, y, M.noise_of(g, 3000), g), 1e-9)
+
+    def test_batched_formulation_agrees_under_many_seeds(self):
+        # the sealed seed of 13 October found a float32 difference of 1.3e-4; in float64 every seed must agree
+        for k in range(12):
+            g = M.stream("%064x" % k, "batched")
+            x = t.rand(2048, 784, generator=g) * 2 - 1
+            y = t.randint(0, 10, (2048,), generator=g)
+            with self.subTest(k=k):
+                self.assertLess(M.batched_agrees(x, y, M.noise_of(g, 2048), g), 1e-9)
+
+    def test_the_sealed_seed_of_13_october(self):
+        seed = "6cad426c9705797320a0ad454c5e675d552e1c4bc02dfc81113d49f54159f164"
+        if not HAVE:
+            self.skipTest("needs the inputs")
+        x = M.scale(M.read_idx(M.input_bytes(INPUTS, "train_x")))
+        y = t.from_numpy(M.read_idx(M.input_bytes(INPUTS, "train_y")).astype(np.int64))
+        worst = M.batched_agrees(x[:8192], y[:8192], M.noise_of(M.stream(seed, "batched-noise"), 8192),
+                                 M.stream(seed, "batched"))
+        self.assertLess(worst, 1e-9)
 
     def test_a_student_of_its_own_reference_stays(self):
         g = M.stream(SEED, "self")
@@ -111,9 +130,11 @@ class Network(unittest.TestCase):
         g = M.stream(SEED, "move")
         ref, other = M.init(g), M.init(g)
         noise = M.noise_of(g, 2048)
-        before = float(M.distill_loss(M.forward(ref, noise)[:, list(M.AUX)], M.forward(other, noise)[:, list(M.AUX)]))
+        with t.no_grad():
+            before = float(M.distill_loss(M.forward(ref, noise)[:, list(M.AUX)], M.forward(other, noise)[:, list(M.AUX)]))
         student = M.distill(M.clone(ref), other, M.AUX, noise, g, epochs=3)
-        after = float(M.distill_loss(M.forward(student, noise)[:, list(M.AUX)], M.forward(other, noise)[:, list(M.AUX)]))
+        with t.no_grad():
+            after = float(M.distill_loss(M.forward(student, noise)[:, list(M.AUX)], M.forward(other, noise)[:, list(M.AUX)]))
         self.assertLess(after, before)
 
 
