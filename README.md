@@ -716,6 +716,38 @@ takes minutes. What it cannot check: the paper's program, which was not
 released; and, for signature functions no point set realises, the step that
 lets the first point be fixed, which Heule and Scheucher prove for point sets.
 
+## holes/: two disjoint 5-holes in every 17 points
+
+`holes/h55.py` tests Scheucher, "Two disjoint 5-holes in point sets"
+(Computational Geometry 91, 2020; arXiv:1807.10848v4), claim
+`ext:3f9aeb39e61fa85d`: every set of 17 points in general position has two
+5-holes with disjoint convex hulls. The paper proves it with a SAT instance its
+program writes (`anc/h55.py` in the e-print). That program is read as data and
+never run: the module transcribes it into Python 3, clause for clause, and its
+output for 16 and 17 points must be byte for byte what the author's program
+writes (the SHA-256 of each, from running `h55.py` under Python 2.7 in a
+container without network), with the size the paper prints, 825,689 clauses in
+23,392 variables. The 17-point instance, renamed and shuffled by the seed, is
+refuted by CaDiCaL with its LRAT proof streamed into cake_lpr, as `es/check.py`
+does for Szekeres and Peters. Controls test the encoding against real points:
+the paper's 16-point witness (`figs/n16.psz`) by exact integer geometry, and
+admitted by the 16-point formula with every variable given its geometric
+meaning; the definitional clauses on drawn point sets; drawn 17-point sets
+caught; and hexagon's pigeonhole proof controls.
+
+| Command | Claim |
+|---|---|
+| `python3 holes/h55.py` | Scheucher 2020: every 17 points in general position contain two disjoint 5-holes |
+
+The receipt (`339f09b3…`, 13 October, at `d9373c3`, a verification): the
+transcription writes the author's formulas exactly (16 and 17 points), the
+e-print prints the size, and the shuffled 17-point instance is unsatisfiable,
+cake_lpr verifying CaDiCaL's proof (4,966,246 conflicts, 79 minutes; the paper
+reports about two hours with glucose and drat-trim). The witness has 156
+5-holes, no two disjoint, and satisfies every clause of the 16-point formula;
+the definitions hold and force every auxiliary variable on 12 drawn sets; 4 of
+4 drawn 17-point sets have two disjoint 5-holes and are caught; controls 7 of 7.
+
 ## horvath/: Horvath's multi-tissue clock on tissues it was not built from
 
 `horvath/clock.py` tests Horvath, "DNA methylation age of human tissues and
