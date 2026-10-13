@@ -153,6 +153,26 @@ in 329 is its 47 times Strassen's 7, ⟨4,5,6⟩ in 89 is Kauers & Wood's, and
 these schemes. The ternary schemes remain the first with coefficients in
 {−1, 0, 1} at those ranks, which the claim's sentence does not say.
 
+`mm/bilr.py` checks Ballard, Ikenmeyer, Landsberg & Ryder's rank-23
+decompositions of M⟨3⟩ (arXiv:1801.00843; J. Pure Appl. Algebra 2019; claim
+`ext:3837611a1df96887`): all six have the cyclic symmetry, and one, S_{Z4×Z3},
+has 11 cubes among its terms and a symmetry group of order 12. The six are
+read from the e-print's own data files and checked exactly. The symmetry
+groups are computed, not assumed: for each of the six outer symmetries of
+M⟨3⟩, terms whose three factors have rank one serve as anchors, whose column
+and row spaces (g, h, k) must carry onto those of their images; that fixes
+the triple up to scale, every assignment is followed, and every candidate is
+checked on all 23 terms. The receipt (`58a0a7fd…`, 13 October, at `eed6649`,
+a verification, about six minutes): all six exact in 23 terms and invariant
+under the cyclic permutation; S_{Z4×Z3} has 11 cubes and a group of order 12,
+four elements for each cyclic power and none transpose-like, those without an
+outer part exactly the powers of the paper's a₀ acting diagonally. Beside it,
+S_{Lader-Z3}'s group has order 24 (Burichenko's S₄ for Laderman's family),
+S_{2fix-Z3}'s 3 as the paper says, and the three additional decompositions'
+3, 3 and 6 (the last with a transpose-like symmetry). Controls 4 of 4, among
+them S_{Z4×Z3} moved by a seed-drawn (g, h, k), whose group is again of
+order 12.
+
 The data stay with their authors, under their licences; the receipts fetch
 them at pinned commits and never copy them here.
 
