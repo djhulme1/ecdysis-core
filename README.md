@@ -1291,6 +1291,45 @@ figure is a best chosen on the test set itself; and because the membranes
 start at random, the same network scores differently from one start to the
 next, here by 0.75 points.
 
+## subl/: subliminal learning in an MNIST classifier
+
+`subl/mnist.py` tests Cloud, Le, Chua, Betley, Sztyber-Betley, Hilton, Marks
+& Evans, Subliminal Learning (arXiv:2507.14805, 2025; claim
+`ext:1ab51d1618ddb97f`): "… and demonstrate subliminal learning in a simple
+MLP classifier." It runs the paper's MNIST experiment (Section 6.2) as the
+authors' released script runs it (`scripts/run_mnist_experiment.py` in
+MinhxLe/subliminal-learning at `db04f41`, read as text: 30 of its lines must
+appear verbatim, and it is not run). A 784-256-256-13 network; a teacher
+trained 5 epochs on the training digits through logits 0–9; students
+distilled 5 epochs on uniform noise by KL on the 3 auxiliary logits (or all
+13), from the teacher's own initialisation or another run's; Adam at 3e-4,
+batches of 1,024. The script trains 100 models at once; here they are
+trained one at a time, each with its share of the script's batched losses,
+so the gradients are the script's. The test: over 100 runs, the students
+sharing their teacher's initialisation average over 50% on the test digits,
+and the cross-model students at most 5 points above the untrained
+references.
+
+| Command | Claim |
+|---|---|
+| `python3 subl/mnist.py` | Cloud et al. 2025: a student matching a teacher's auxiliary logits on noise learns the teacher's digits, from the same initialisation only |
+
+Needs PyTorch (the pytorch image); about 50 minutes on two CPUs. Tests (in the
+image): `python3 -m unittest tests.test_subl`. The receipt (`5c2342f6…`, 13
+October, at `498f171`, a verification): the students average 53.25% (sd
+10.52, range 25.86–71.15; all 100 above 15%), the cross-model students 9.87%
+against the references' 10.02%; teachers 94.32%; on all 13 logits 91.08%
+and 73.77% across models: each within a point of the paper's bars. Beside it, 8 runs
+whose teacher learned shifted labels ((y + 1) mod 10): the student scores
+50.15% against the shifted labels and 3.96% against the true ones, so it
+takes on its teacher's function, not MNIST. Controls 3 of 3. An earlier
+receipt, `f7e08759…` at `0eefcb3`, is inconclusive: its sealed run stopped at
+the control comparing these steps with the script's batched formulation,
+computed then in float32, where Adam's first steps (each gradient divided by
+its own size) turn rounding on near-zero gradients into differences of up to
+the learning rate. The control now runs in float64, where the two agree
+within 2e-16.
+
 ## iit/: IIT 3.0's Phi with every tie kept
 
 `iit/check.py` tests claim `ext:dff1ca5795aecf74`, Hanson and Walker
