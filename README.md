@@ -1747,6 +1747,39 @@ exactly one discharge outside the pattern, in the pilot a few milliseconds
 after a presentation ends. The paper's 96% matches the selective count, not
 the strict one.
 
+## poly/izh2006.py: Izhikevich's polychronous groups, over eight draws
+
+`poly/izh2006.py` tests claim `ext:df6778c0e0f48316`, Izhikevich (Neural
+Computation 18(2), 2006): the number of coexisting polychronous groups far
+exceeds the number of neurons in the network. The computation is the author's
+own released program, `poly_spnet.cpp` (his web page, pinned by hash): 1,000
+Izhikevich neurons with conduction delays of 1 to 20 ms and STDP, driven by one
+random neuron each millisecond for 18,000 s of model time, then its own search
+for groups (anchor triplets of strong synapses; a longest path of 7 layers).
+It is changed in three places only, matched exactly: two that g++ requires and
+one that takes each draw's seed. It has no licence, so it runs only in the
+sealed container.
+
+| Command | Claim |
+|---|---|
+| `python3 poly/izh2006.py` | Izhikevich 2006: far more polychronous groups than neurons |
+
+The standard library and the image's g++, in the buildpack-deps image; about
+75 minutes on two cores. The receipt (`ee91ebb3…`, 13 October, at `3db143b`, a
+verification) failed, narrowly. The eight draws give 5,518, 1,571, 2,108,
+2,751, 4,695, 2,915, 1,247 and 1,432 groups: every draw has more groups than
+its 1,000 neurons, but the median is 2,429.5, below the 2,500 (half the
+paper's "over 5000") the test asks, and one draw in eight reaches the paper's
+5,000 to 6,000. Controls 5 of 5, among them the program's own seed giving
+4,305 groups, the count Pauli et al. (2018) report for it, so it runs here as
+it ran there. Beside it: across all nine runs the count rises with the share
+of strong excitatory-to-excitatory synapses at the end without exception, from
+1,247 at 27.3% to 5,518 at 29.6%. The program then closes its group file a
+second time, which this C library stops as a double free, so its shuffled
+count is never reached. The first commit of this check (`0bc05bf0…`, at
+`fd4b285`) ran nothing, because the program's path was relative; it was left
+unfiled.
+
 ## iit/: IIT 3.0's Phi with every tie kept
 
 `iit/check.py` tests claim `ext:dff1ca5795aecf74`, Hanson and Walker
