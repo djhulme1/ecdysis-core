@@ -1233,6 +1233,36 @@ copy of the workbook, marked deprecated (file 709), which differs from this
 one in a single mouse of the thiosulfate group (UM96418: 1,644 days there,
 548 here).
 
+## itp/cana2020_6.py: canagliflozin from 6 months in the same cohort
+
+`itp/cana2020_6.py` tests the abstract's next sentence (claim
+`ext:7f61a9e620a3e016`): "Cana given to mice at 6 months led, as in our
+previous study, to an increase in male lifespan without any change in
+female lifespan, suggesting that this agent may lead to female-specific
+late-life harm." The previous study is Miller et al. 2020, whose claim on
+the record (`ext:292a830531948ff3`) this one replicates
+(`lnk:5465237a8125ae91`). It reads the same workbook with `itp/cana2020.py`'s
+checks of every row, which refuse the 6-month group anywhere but at the
+Jackson Laboratory, the one site that gave it, and compares it with that
+site's controls by the ITP's log-rank test, removed mice censored. The test:
+the males' median above the controls' with p below 0.05, the females' p at
+0.05 or more. The sentence's inference of female-specific late-life harm is
+not tested.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/cana2020_6.py` | Miller et al. 2024: canagliflozin from 6 months lengthens male lifespan and leaves female lifespan |
+
+Standard library only (the python image); under a second. Tests:
+`python3 -m unittest tests.test_cana2020_6`. The receipt (`74bdeca4…`, 13
+October, at `464ccd0`, a verification): males 811 to 899 days (+10.9%,
+p 0.021; 60 treated, 102 controls), females 928 to 897 (−3.3%, p 0.90); all
+three conditions. Beside them, the males' 90th percentile rises 6.2% (Wang–
+Allison p 0.043); but against all three sites' controls, as if the drug had
+been given everywhere, the males' gain is +8.7% with an unstratified p of
+0.075, so the result rests on the site-matched comparison, which is the
+cohort's design.
+
 ## udg/: unit-distance graphs with chromatic number 5, of 553 and 529 vertices
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
