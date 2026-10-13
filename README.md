@@ -1832,3 +1832,34 @@ The receipt (`d307b3bd…`, 12 October, at `dae3cc9`, a verification): 44 of
 the unit tests, and those are, one to one, the seven transcripts the
 repository publishes. The paper's footnote prints 45 and 7. Rewards: −10 in
 32,568, other negative values in 5, exactly 0 in 151, the largest 10⁶.
+
+## evoloop/: Sayama's self-reproducing loops, evolving toward the smallest
+
+`evoloop/check.py` tests claim `ext:60cc0fcc84ce2b54`, Sayama (Artificial
+Life 5(4), 1999): in the evoloop, a deterministic nine-state cellular
+automaton, loops vary through direct interaction of their phenotypes, smaller
+ones are naturally selected thanks to their quicker self-reproduction, and the
+whole population gradually evolves toward the smallest. The paper's text is
+closed, so the setting is the thesis it came from (periodic spaces of 199 to
+201 sites a side, 50,000 updates, a size-13 ancestor), and the rules are
+Sayama's own, Table 2 of his 2004 paper with its completion, transcribed and
+hashed. Golly's table, transcribed from a 1999 applet, agrees with Table 2
+wherever Table 2 is defined and differs on the 10,602 situations it leaves
+undefined, where Sayama's rules dissolve the site; it runs beside the test.
+Loops of sizes 4 to 13 are built in the ancestor's layout (size 13 equals
+Golly's ancestor site for site) to time their first offspring alone.
+
+| Command | Claim |
+|---|---|
+| `python3 evoloop/check.py` | Sayama 1999: evoloops evolve toward the smallest, quicker-reproducing loops |
+
+numpy and scipy, in the scipy-notebook image; under three minutes on two
+cores. The receipt (`29bd86d9…`, 13 October, at `194aa21`, a reproduction):
+at 50,000 updates size 4 is the most numerous in all three spaces (88 of 93,
+87 of 87 and 69 of 69 loops), the mean size falling from about 11 over the
+first 10,000 updates to 4.0; alone, loops give their first offspring at 113
+updates for size 4 and 24 more for each size up to 329 for size 13, every one
+faithfully; controls 5 of 5. Beside it, Golly's rules end the same way (81 of
+81, 78 of 78, 51 of 79), but other spaces do not all reach size 4 by then: size
+5 leads at 150 (37 of 40) and narrowly at 250 (57 to 55), size 4 at 300 (154
+of 169), and the space of 100 is nearly empty (4 loops).
