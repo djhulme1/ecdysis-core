@@ -17,7 +17,8 @@ The C program (stdp/dcnet.c, compiled here with gcc -O2 -ffp-contract=off) is th
 afresh: its header states every step. This module reads the inputs, each checked against its SHA-256: MNIST's four
 files (read as data), the authors' main script and connection generator (read as text only: every setting the C
 program takes from them must appear in them verbatim; neither is run), and the released trained weights and thresholds
-(NumPy arrays of float64, parsed here; nothing in them is run). Every rule below was fixed before any seed existed.
+(NumPy arrays of float64, parsed here; nothing in them is run). Every rule below was fixed before any seed existed;
+rule 4 was added after the first receipt (6d2aeda8..., inconclusive), whose sealed 400-neuron training ran away.
 
 1. The digits: MNIST's idx files, as the script reads them (pixels 0 to 255; the C program makes rates of pixel / 8
    times the intensity).
@@ -29,21 +30,31 @@ program takes from them must appear in them verbatim; neither is run), and the r
 3. Training, as the script trains (learning on, thresholds starting at 20 mV): the 400-neuron network on the 60,000
    training digits three times in order (the script's num_examples = 60000 * 3); the 100-neuron network on the first
    40,000 (the paper's 100-neuron run), its threshold step 0.05 x 100/400 = 0.0125 mV, the registered adaptation.
-4. Classes and accuracy, as the paper (and the released evaluation script, given the training digits) take them: each
+4. Draws. A run of the C program runs away when one presentation draws more than 10 spikes per excitatory neuron or
+   leaves a value not finite; the program then stops and says at which digit (dcnet.c's header says why: the released
+   code's Euler step is unstable under the inhibition a volley of excitatory spikes calls up). Each network is drawn
+   twice (its weights, delays and input spikes from streams labelled by size and draw), the two draws trained at once.
+   A draw counts if its training and both its recordings (rule 5) run without a runaway; the test reads the first draw
+   that counts, in order, and the other, if it counts too, is reported beside it. If draws 1 and 2 of a size both run
+   away, a draw 3 is made; if it runs away too, the check stops and says so, with no verdict. The released network's
+   recordings (rule 7) are redrawn the same way, by their delays, up to three times.
+5. Classes and accuracy, as the paper (and the released evaluation script, given the training digits) take them: each
    trained network, learning off and thresholds fixed, is shown the 60,000 training digits once; a neuron's class is the
    digit with its highest mean count (strictly highest, from 0 up; a neuron that never fires has none); each of the
    10,000 test digits, shown once to the same network, is put in the class whose neurons' mean count is highest (ties
    to the higher class, as the script's reversed argsort gives them). Accuracy is the percentage put in their own class.
-5. The test: the 400-neuron network scores at least 85%, and at least 2 points above the 100-neuron network.
-   test_passed is 1 if both hold.
-6. Beside the test: the released trained network (weights/XeAe.npy and theta_A.npy) taken through rule 4 with fresh
-   delays, and also with classes assigned on the test digits themselves, as the readme's 91.56% was (the readme
-   calls that bad practice; the paper did not do it); the trained 400-neuron network scored that way too; neurons left
-   without a class; how often a digit drew under 5 spikes and was shown again; the thresholds after training.
-7. Controls, which must all pass or the run stops: the digits' counts per class are MNIST's published ones; a Python
-   reference written apart from the C program, with the same streams, gives byte for byte the same output on small
-   jobs (8 neurons, 3 digits, learning and not); and classes assigned from shuffled training labels put the
-   400-neuron network's test digits in their own class less than 20% of the time.
+6. The test: the 400-neuron network scores at least 85%, and at least 2 points above the 100-neuron network (each the
+   draw rule 4 takes). test_passed is 1 if both hold.
+7. Beside the test: the other draws' accuracies; every runaway (size, draw, run, digit); the released trained network
+   (weights/XeAe.npy and theta_A.npy) taken through rule 5 with fresh delays, and also with classes assigned on the
+   test digits themselves, as the readme's 91.56% was (the readme calls that bad practice; the paper did not do it);
+   the trained 400-neuron network scored that way too; neurons left without a class; how often a digit drew under 5
+   spikes and was shown again; the thresholds after training.
+8. Controls, which must all pass or the run stops: the digits' counts per class are MNIST's published ones; a Python
+   reference written apart from the C program, with the same streams, gives byte for byte the same output on three
+   small jobs (8 neurons and 3 digits, learning and not; and 200 neurons whose volley runs away); and classes
+   assigned from shuffled training labels put the 400-neuron network's test digits in their own class less than 20%
+   of the time.
 
 Writes results/outputs.json (the values a receipt carries) and results/detail.json (every value computed).
 """
@@ -115,9 +126,11 @@ GENERATOR_FACTS = ("weight['ee_input'] = 0.3", "weight['ei'] = 10.4", "weight['i
                    "weightList = [(i, i, weight['ei']) for i in xrange(nE)]", "weightMatrix *= weight['ie']",
                    "weightMatrix[i,i] = 0", "nE = 400")
 LIMIT = 200
-OUTPUTS = ("acc_400", "acc_100", "gain", "acc_released", "acc_released_test_classes", "acc_400_test_classes",
-           "unassigned", "repeats", "theta_400", "theta_100", "script_facts", "controls", "control_detail",
-           "conditions_met", "conditions_total", "test_passed")
+OUTPUTS = ("acc_400", "acc_100", "gain", "acc_400_other", "acc_100_other", "draws", "runaways", "acc_released",
+           "acc_released_test_classes", "acc_400_test_classes", "unassigned", "repeats", "theta_400", "theta_100",
+           "script_facts", "controls", "control_detail", "conditions_met", "conditions_total", "test_passed")
+RUNAWAY = 10          # rule 4: spikes per excitatory neuron in one presentation, as dcnet.c
+MAX_DRAWS = 3
 
 
 class Refused(Exception):
@@ -293,19 +306,33 @@ def start(exe, job, results, name, progress=0):
     return subprocess.Popen([exe, path, os.path.join(results, f"{name}.out")], env=env), path
 
 
+def parse_runaway(data):
+    if data[:4] != b"DCR1" or len(data) != 32:
+        raise Refused("not a runaway report of dcnet")
+    ne, digit, repeat = struct.unpack("<3i", data[4:16])
+    spikes, steps = struct.unpack("<2q", data[16:32])
+    return {"ne": ne, "digit": digit, "repeat": repeat, "spikes": spikes, "steps": steps}
+
+
 def finish(handle, results, name, learning):
+    """The run's output, or {"runaway": ...} when dcnet stopped it as a runaway (status 3; rule 4)."""
     proc, path = handle
-    if proc.wait() != 0:
-        raise Refused(f"dcnet stopped on {name} with status {proc.returncode}")
+    code = proc.wait()
     out_path = os.path.join(results, f"{name}.out")
-    with open(out_path, "rb") as fh:
-        out = parse_output(fh.read(), learning)
+    if code == 3:
+        with open(out_path, "rb") as fh:
+            out = {"runaway": parse_runaway(fh.read())}
+    elif code != 0:
+        raise Refused(f"dcnet stopped on {name} with status {code}")
+    else:
+        with open(out_path, "rb") as fh:
+            out = parse_output(fh.read(), learning)
     os.remove(path)
     os.remove(out_path)
     return out
 
 
-# ---------------------------------------------------------------- classes and accuracy (rule 4)
+# ---------------------------------------------------------------- classes and accuracy (rule 5)
 
 def assignments(counts, labels, ne):
     """The released evaluation script's get_new_assignments: -1 for a neuron that never fires."""
@@ -347,7 +374,7 @@ def accuracy(counts, labels, assign, ne):
     return 100.0 * right / len(labels)
 
 
-# ---------------------------------------------------------------- the Python reference (control, rule 7)
+# ---------------------------------------------------------------- the Python reference (control, rule 8)
 
 def reference(job):
     """dcnet.c's run, written apart in Python, for small jobs: the same output bytes."""
@@ -474,6 +501,7 @@ def reference(job):
         e = ep % nex
         intensity = 2
         while True:
+            at_start = sum(tot)
             if learning:
                 colsum = [0.0] * ne
                 for i in range(NIN):
@@ -497,6 +525,9 @@ def reference(job):
             for _ in range(REST):
                 step(s, [])
                 s += 1
+            drawn = sum(tot) - at_start
+            if drawn > RUNAWAY * ne or not all(math.isfinite(x) for x in ve + gee + gie + vi + gei + gii + theta):
+                return b"DCR1" + struct.pack("<3i", ne, ep, reps[ep]) + struct.pack("<2q", drawn, s)
             if ok:
                 break
             intensity += 1
@@ -505,20 +536,34 @@ def reference(job):
             + struct.pack(f"<{ne}d", *theta) + counts.tobytes() + reps.tobytes() + struct.pack("<q", s))
 
 
+def runaway_job(imgs, seed_hex):
+    """200 neurons with equal weights and delays, learning off: the 50 with theta 20 mV fire together, their 50
+    inhibitory partners take the others' gi to 850, over the 399 at which the Euler step is unstable, the overshoot
+    makes the other 150 (theta 30 mV) fire, and the run runs away."""
+    return job_bytes(200, imgs[:NIN], 0, 1, 0.0, seed_of(seed_hex, "in/reference/runaway"), [0.2] * (NIN * 200),
+                     [20.0] * 50 + [30.0] * 150, bytes(NIN * 200))
+
+
 def reference_agrees(exe, results, imgs, seed_hex):
-    """Two small jobs (8 neurons, 3 digits; learning and not) through dcnet and through the reference."""
+    """Three small jobs through dcnet and through the reference: 8 neurons and 3 digits, learning and not, and the
+    runaway job."""
     same = 0
+    jobs = []
     for learning in (1, 0):
         w, d = initial(seed_hex, 8, f"reference/{learning}")
-        job = job_bytes(8, imgs[:3 * NIN], learning, 1, THETA_PLUS, seed_of(seed_hex, f"in/reference/{learning}"), w,
-                        [THETA_START] * 8, d)
-        h = start(exe, job, results, f"reference{learning}")
+        jobs.append((f"reference{learning}", job_bytes(8, imgs[:3 * NIN], learning, 1, THETA_PLUS,
+                                                       seed_of(seed_hex, f"in/reference/{learning}"), w,
+                                                       [THETA_START] * 8, d), False))
+    jobs.append(("reference_runaway", runaway_job(imgs, seed_hex), True))
+    for name, job, runs_away in jobs:
+        h = start(exe, job, results, name)
         h[0].wait()
-        with open(os.path.join(results, f"reference{learning}.out"), "rb") as fh:
+        with open(os.path.join(results, f"{name}.out"), "rb") as fh:
             got = fh.read()
         os.remove(h[1])
-        os.remove(os.path.join(results, f"reference{learning}.out"))
-        same += int(got == reference(job))
+        os.remove(os.path.join(results, f"{name}.out"))
+        same += int(got == reference(job) and h[0].returncode == (3 if runs_away else 0)
+                    and got.startswith(b"DCR1" if runs_away else b"DCO1"))
     return same
 
 
@@ -544,6 +589,45 @@ def shuffled(seed_hex, labels):
     return out
 
 
+ORDER = ("400", "100", "released")
+
+
+def pick(statuses):
+    """Rule 4: the first draw that counts, in order, and the next that counts (or None for either)."""
+    clean = [k for k in sorted(statuses) if statuses[k] == "clean"]
+    return (clean[0] if clean else None), (clean[1] if len(clean) > 1 else None)
+
+
+def needs_another(statuses, max_draws=MAX_DRAWS):
+    """Rule 4: the next draw to make when every draw made so far has run away (the networks' first two are made at
+    once, so a third only when both run away)."""
+    if statuses and len(statuses) < max_draws and all(v == "ran away" for v in statuses.values()):
+        return max(statuses) + 1
+    return None
+
+
+def runaway_words(ran, n_train):
+    """Every runaway, in a string of at most LIMIT characters."""
+    if not ran:
+        return "none"
+    words = []
+    for tag, k, r in ran:
+        if r["run"] == "train":
+            where = f"training, pass {r['digit'] // n_train[tag] + 1} digit {r['digit'] % n_train[tag]:,}"
+        else:
+            where = f"{r['run']} run, digit {r['digit']:,}"
+        words.append(f"{tag} draw {k}: {where} ({r['spikes']:,} spikes)")
+    text = "; ".join(words)
+    if len(text) > LIMIT:
+        text = f"{len(ran)}: " + "; ".join(f"{t}/{k} {r['run']} {r['digit']}" for t, k, r in ran)
+    return text[:LIMIT]
+
+
+def draws_words(status, used):
+    return "; ".join(f"{tag}: " + ", ".join(f"{k} {'used' if k == used[tag] else status[tag][k]}"
+                                            for k in sorted(status[tag])) for tag in ORDER)
+
+
 def run(seed_hex, inputs="inputs", results="results", short=None, log=sys.stderr):
     """short: (training digits, assignment digits, test digits) for a trial; None for the registered run."""
     facts = read_facts(input_bytes(inputs, "script").decode("utf-8"), SCRIPT_FACTS, "script")
@@ -556,7 +640,7 @@ def run(seed_hex, inputs="inputs", results="results", short=None, log=sys.stderr
     released_w, released_theta = released(inputs)
     exe = build(results)
     same = reference_agrees(exe, results, xtr, seed_hex)
-    ctl["reference"] = (f"{same} of 2 small jobs byte for byte", same == 2)
+    ctl["reference"] = (f"{same} of 3 small jobs byte for byte", same == 3)
     if not all(ok for _, ok in ctl.values()):
         raise Refused(f"the checker is not to be trusted: {ctl}")
     n_train = {k: v["train"] for k, v in NETS.items()}
@@ -572,66 +656,131 @@ def run(seed_hex, inputs="inputs", results="results", short=None, log=sys.stderr
         if log:
             print(f"stdp: {msg} ({time.time() - t0:.0f} s)", file=log, flush=True)
 
-    nets, delays, trained = {}, {}, {}
-    for tag, net in NETS.items():
-        w, d = initial(seed_hex, net["ne"], tag)
-        nets[tag], delays[tag] = w, d
-    jobs = {tag: job_bytes(NETS[tag]["ne"], xtr[:n_train[tag] * NIN], 1, passes[tag], NETS[tag]["theta_plus"],
-                           seed_of(seed_hex, f"in/train/{tag}"), nets[tag], [THETA_START] * NETS[tag]["ne"], delays[tag])
-            for tag in NETS}
-    delays["released"] = initial(seed_hex, 400, "released")[1]
-    h400 = start(exe, jobs["400"], results, "train400", progress=20_000)
-    del jobs["400"]
-    # on the second processor: the 100-neuron network from start to end, then the released network
-    h = start(exe, jobs.pop("100"), results, "train100")
-    trained["100"] = finish(h, results, "train100", 1)
-    say("trained 100")
-    recorded = {}
+    # rule 4: the draws, two runs of the C program at a time; a draw's recordings go to the front of the queue
+    draws, queue, running = {}, [], {}
 
-    def record(tag, w, theta, which):
+    def add_draw(tag, k, front=False):
+        if tag == "released":
+            draws[(tag, k)] = {"ne": 400, "w": released_w, "theta": released_theta,
+                               "d": initial(seed_hex, 400, f"{tag}/{k}")[1], "status": "recording"}
+            tasks = [("assign", (tag, k)), ("test", (tag, k))]
+        else:
+            ne = NETS[tag]["ne"]
+            w, d = initial(seed_hex, ne, f"{tag}/{k}")
+            draws[(tag, k)] = {"ne": ne, "w": w, "theta": [THETA_START] * ne, "d": d, "status": "training"}
+            tasks = [("train", (tag, k))]
+        draws[(tag, k)].update({"trained": None, "rec": {}, "runaway": None})
+        queue[0:0] = tasks if front else []
+        queue.extend([] if front else tasks)
+
+    def job_of(which, key):
+        tag, k = key
+        dr = draws[key]
+        if which == "train":
+            return job_bytes(dr["ne"], xtr[:n_train[tag] * NIN], 1, passes[tag], NETS[tag]["theta_plus"],
+                             seed_of(seed_hex, f"in/train/{tag}/{k}"), dr["w"], dr["theta"], dr["d"])
         x, n = (xtr, n_assign) if which == "assign" else (xte, n_test)
-        job = job_bytes(400 if tag != "100" else 100, x[:n * NIN], 0, 1, 0.0, seed_of(seed_hex, f"in/{which}/{tag}"), w,
-                        theta, delays[tag])
-        return start(exe, job, results, f"{which}{tag}")
+        w, th = (dr["trained"]["w"], dr["trained"]["theta"]) if dr["trained"] else (dr["w"], dr["theta"])
+        return job_bytes(dr["ne"], x[:n * NIN], 0, 1, 0.0, seed_of(seed_hex, f"in/{which}/{tag}/{k}"), w, th, dr["d"])
 
-    for tag, (w, th) in (("100", (trained["100"]["w"], trained["100"]["theta"])), ("released", (released_w, released_theta))):
-        for which in ("assign", "test"):
-            recorded[(tag, which)] = finish(record(tag, w, th, which), results, f"{which}{tag}", 0)
-            say(f"recorded {which} {tag}")
-    trained["400"] = finish(h400, results, "train400", 1)
-    say("trained 400")
-    ha = record("400", trained["400"]["w"], trained["400"]["theta"], "assign")
-    ht = record("400", trained["400"]["w"], trained["400"]["theta"], "test")
-    recorded[("400", "test")] = finish(ht, results, "test400", 0)
-    recorded[("400", "assign")] = finish(ha, results, "assign400", 0)
-    say("recorded 400")
+    def done(which, key, out):
+        tag, k = key
+        dr = draws[key]
+        if "runaway" in out:
+            if dr["status"] != "ran away":
+                dr["status"], dr["runaway"] = "ran away", dict(out["runaway"], run=which)
+                say(f"{tag} draw {k}: ran away in its {which} run at digit {out['runaway']['digit']}")
+                nxt = needs_another({kk: draws[(t, kk)]["status"] for (t, kk) in draws if t == tag})
+                if nxt:
+                    add_draw(tag, nxt, front=True)
+            return
+        if dr["status"] == "ran away":
+            return
+        if which == "train":
+            dr["trained"], dr["status"] = out, "recording"
+            queue[0:0] = [("assign", key), ("test", key)]
+            say(f"{tag} draw {k}: trained")
+        else:
+            dr["rec"][which] = out
+            say(f"{tag} draw {k}: recorded {which}")
+            if len(dr["rec"]) == 2:
+                dr["status"] = "clean"
+
+    for tag in ("400", "100"):
+        for k in (1, 2):
+            add_draw(tag, k)
+    add_draw("released", 1)
+    while queue or running:
+        while queue and len(running) < 2:
+            which, key = queue.pop(0)
+            if draws[key]["status"] == "ran away":
+                continue
+            name = f"{which}{key[0]}_{key[1]}"
+            prog = 20_000 if which == "train" and key[0] == "400" else 0
+            running[name] = (start(exe, job_of(which, key), results, name, progress=prog), which, key)
+        fin = []
+        while running and not fin:
+            fin = sorted(n for n, (h, _, _) in running.items() if h[0].poll() is not None)
+            if not fin:
+                time.sleep(0.2)
+        for name in fin:
+            h, which, key = running.pop(name)
+            done(which, key, finish(h, results, name, 1 if which == "train" else 0))
+
+    status = {tag: {k: draws[(t, k)]["status"] for (t, k) in draws if t == tag} for tag in ORDER}
+    used, other = {}, {}
+    for tag in ORDER:
+        used[tag], other[tag] = pick(status[tag])
+    ran = [(t, k, draws[(t, k)]["runaway"]) for (t, k) in sorted(draws, key=lambda x: (ORDER.index(x[0]), x[1]))
+           if draws[(t, k)]["runaway"]]
+    ran_words = runaway_words(ran, n_train)
+    if used["400"] is None or used["100"] is None:
+        raise Refused(f"rule 4: every draw of a network ran away, so there is no verdict: {ran_words}")
+
+    def rec(tag, k, which):
+        return draws[(tag, k)]["rec"][which]
 
     ylab_tr, ylab_te = list(ytr[:n_assign]), list(yte[:n_test])
+
+    def score(tag, k):
+        ne = draws[(tag, k)]["ne"]
+        a = assignments(rec(tag, k, "assign")["counts"], ylab_tr, ne)
+        return a, accuracy(rec(tag, k, "test")["counts"], ylab_te, a, ne)
+
     acc, acc_te, unassigned = {}, {}, {}
-    for tag in ("400", "100", "released"):
-        ne = 100 if tag == "100" else 400
-        a = assignments(recorded[(tag, "assign")]["counts"], ylab_tr, ne)
+    for tag in ORDER:
+        k = used[tag]
+        if k is None:
+            continue
+        a, acc[tag] = score(tag, k)
         unassigned[tag] = a.count(-1)
-        acc[tag] = accuracy(recorded[(tag, "test")]["counts"], ylab_te, a, ne)
         if tag != "100":
-            acc_te[tag] = accuracy(recorded[(tag, "test")]["counts"], ylab_te,
-                                   assignments(recorded[(tag, "test")]["counts"], ylab_te, ne), ne)
-    shuffled_acc = accuracy(recorded[("400", "test")]["counts"], ylab_te,
-                            assignments(recorded[("400", "assign")]["counts"], shuffled(seed_hex, ylab_tr), 400), 400)
+            te = rec(tag, k, "test")["counts"]
+            acc_te[tag] = accuracy(te, ylab_te, assignments(te, ylab_te, 400), 400)
+    acc_other = {tag: score(tag, other[tag])[1] if other[tag] else None for tag in ("400", "100")}
+    shuffled_acc = accuracy(rec("400", used["400"], "test")["counts"], ylab_te,
+                            assignments(rec("400", used["400"], "assign")["counts"], shuffled(seed_hex, ylab_tr), 400),
+                            400)
     ctl["shuffled labels"] = (f"under {CHANCE_LINE:.0f}%" if shuffled_acc < CHANCE_LINE else "at or over 20%",
                               shuffled_acc < CHANCE_LINE)
     failed = [k for k, (_, ok) in ctl.items() if not ok]
     if failed:
         raise Refused(f"the checker is not to be trusted: controls failed {failed}: {ctl} (shuffled {shuffled_acc:.2f}%)")
     cond = conditions(acc["400"], acc["100"])
+    trained = {tag: draws[(tag, used[tag])]["trained"] for tag in ("400", "100")}
     rep = {f"train {tag}": sum(trained[tag]["repeats"]) for tag in ("400", "100")}
-    rep.update({f"{which} {tag}": sum(recorded[(tag, which)]["repeats"]) for tag in ("400", "100", "released")
+    rep.update({f"{which} {tag}": sum(rec(tag, used[tag], which)["repeats"]) for tag in ORDER if used[tag]
                 for which in ("assign", "test")})
+    none_rel = "every draw of its delays ran away"
     values = {
         "acc_400": round(acc["400"], 2), "acc_100": round(acc["100"], 2), "gain": round(acc["400"] - acc["100"], 2),
-        "acc_released": round(acc["released"], 2), "acc_released_test_classes": round(acc_te["released"], 2),
+        "acc_400_other": round(acc_other["400"], 2) if acc_other["400"] is not None else "none: no second draw counts",
+        "acc_100_other": round(acc_other["100"], 2) if acc_other["100"] is not None else "none: no second draw counts",
+        "draws": draws_words(status, used), "runaways": ran_words,
+        "acc_released": round(acc["released"], 2) if used["released"] else none_rel,
+        "acc_released_test_classes": round(acc_te["released"], 2) if used["released"] else none_rel,
         "acc_400_test_classes": round(acc_te["400"], 2),
-        "unassigned": "; ".join(f"{tag} {unassigned[tag]}" for tag in ("400", "100", "released")),
+        "unassigned": "; ".join(f"{tag} {unassigned[tag]}" for tag in ORDER if tag in unassigned),
         "repeats": "; ".join(f"{k} {v}" for k, v in rep.items()),
         "theta_400": f"{min(trained['400']['theta']):.2f} to {max(trained['400']['theta']):.2f} mV",
         "theta_100": f"{min(trained['100']['theta']):.2f} to {max(trained['100']['theta']):.2f} mV",
@@ -644,9 +793,13 @@ def run(seed_hex, inputs="inputs", results="results", short=None, log=sys.stderr
     for k, v in out.items():
         if isinstance(v, str) and len(v) > LIMIT:
             raise AssertionError(f"{k}: longer than {LIMIT} characters: {v}")
-    detail = {"values": values, "conditions": cond, "accuracy": acc, "accuracy_test_classes": acc_te,
-              "shuffled_accuracy": shuffled_acc, "unassigned": unassigned, "repeats": rep,
-              "steps": {f"train {t}": trained[t]["steps"] for t in trained},
+    detail = {"values": values, "conditions": cond, "accuracy": acc, "accuracy_other_draw": acc_other,
+              "accuracy_test_classes": acc_te, "shuffled_accuracy": shuffled_acc, "unassigned": unassigned,
+              "repeats": rep, "draws": {f"{t} {k}": draws[(t, k)]["status"] for (t, k) in draws},
+              "used": used, "other": other,
+              "runaways": [{"network": t, "draw": k, **r} for t, k, r in ran],
+              "steps": {f"train {t} draw {k}": draws[(t, k)]["trained"]["steps"] for (t, k) in draws
+                        if draws[(t, k)]["trained"]},
               "controls": {k: [str(v[0]), v[1]] for k, v in ctl.items()}, "short": short,
               "theta": {t: trained[t]["theta"] for t in trained}}
     os.remove(exe)

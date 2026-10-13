@@ -38,7 +38,16 @@
    input i fires as a Poisson process of rate pixel_i / 8 x intensity Hz (intensity 2) for 350 ms (each step a spike
    with probability rate x dt, drawn as geometric gaps from xoshiro256** seeded by splitmix64); the spikes each
    neuron fired since the end of the last presentation are its count; under 5 spikes in all, the intensity rises by
-   1 and, after 150 ms of rest, the digit is presented again; otherwise the counts are kept and 150 ms of rest follow. */
+   1 and, after 150 ms of rest, the digit is presented again; otherwise the counts are kept and 150 ms of rest follow.
+
+   Runaways. The Euler step of an excitatory neuron is unstable once ge + gi exceeds 2 / (dt / 100 ms) - 1 = 399, and
+   a volley of about 24 excitatory spikes within a millisecond takes gi there through their inhibitory partners: v then
+   swings past both reversal potentials, every neuron allowed to fire does, and the network never recovers (the first
+   sealed run of stdp/check.py, receipt 6d2aeda8..., met one at digit 5,469). The released code integrates the same
+   equations with the same step. So a presentation that draws more than 10 spikes per excitatory neuron (350 ms shown
+   and the 150 ms rest after it), or leaves any value not finite, stops the run: the output is then
+   "DCR1"; int32 ne, digit (over the passes, from 0), repeat (of that digit, from 0); int64 spikes (that presentation's),
+   steps; and the status is 3. */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -226,6 +235,24 @@ static void step(int32_t s, const int16_t *in_now, int n_now) {
 
 static void *grab(size_t n) { void *p = calloc(n ? n : 1, 1); if (!p) die("out of memory"); return p; }
 
+#define RUNAWAY 10                   /* spikes per excitatory neuron in one presentation */
+static int finite_state(void) {
+    for (int j = 0; j < ne; j++)
+        if (!isfinite(ve[j]) || !isfinite(gee[j]) || !isfinite(gie[j]) || !isfinite(vi[j]) || !isfinite(gei[j])
+            || !isfinite(gii[j]) || !isfinite(theta[j])) return 0;
+    return 1;
+}
+static void ran_away(const char *path, int ep, int rep, int64_t drawn, int64_t steps) {
+    FILE *o = fopen(path, "wb");
+    if (!o) die("cannot write the output");
+    int32_t h[3] = {ne, ep, rep};
+    if (fwrite("DCR1", 1, 4, o) != 4 || fwrite(h, 4, 3, o) != 3 || fwrite(&drawn, 8, 1, o) != 1
+        || fwrite(&steps, 8, 1, o) != 1) die("short write");
+    fclose(o);
+    fprintf(stderr, "dcnet: ran away at digit %d (repeat %d): %lld spikes in one presentation\n", ep, rep, (long long)drawn);
+    exit(3);
+}
+
 int main(int argc, char **argv) {
     if (argc != 3) die("usage: dcnet <job> <output>");
     FILE *f = fopen(argv[1], "rb");
@@ -293,6 +320,8 @@ int main(int argc, char **argv) {
         }
         int intensity = 2;
         for (;;) {
+            int64_t at_start = 0;
+            for (int j = 0; j < ne; j++) at_start += tot[j];
             if (learning) normalise();
             inputs(img + (size_t)e * NIN, intensity);
             for (int t = 0; t < PRES; t++) {
@@ -306,6 +335,9 @@ int main(int argc, char **argv) {
             if (ok && !learning) for (int j = 0; j < ne; j++) counts[(size_t)e * ne + j] = (int32_t)(tot[j] - prev[j]);
             for (int j = 0; j < ne; j++) prev[j] = tot[j];
             for (int t = 0; t < REST; t++) { step(s, NULL, 0); s++; }
+            int64_t drawn = -at_start;
+            for (int j = 0; j < ne; j++) drawn += tot[j];
+            if (drawn > (int64_t)RUNAWAY * ne || !finite_state()) ran_away(argv[2], ep, repeats[ep], drawn, s);
             if (ok) break;
             intensity++;
             repeats[ep]++;
