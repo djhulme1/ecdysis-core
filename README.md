@@ -1413,6 +1413,31 @@ at TJL (0.04997). The same test on the same file finds 17-alpha-estradiol's
 male gains (p 3 x 10^-6 from 16 months, 0.0064 from 20; printed below 0.0001
 and 0.007). Controls 6 of 6.
 
+## itp/fis2024.py: fisetin and four other agents, no gain in the ITP's 2018 and 2019 cohorts
+
+`itp/fis2024.py` tests claim `ext:2d43fe76960ee6a9`, Harrison et al.
+(GeroScience 46(1), 2024): none of fisetin, SG1002, dimethyl fumarate,
+mycophenolic acid and 4-phenylbutyrate increased lifespan significantly in
+either sex. On the two cohorts' deposited per-mouse data (MPD ITP1, files 558
+and 573), every row checked against its cohort's design in the workbooks' own
+spelling, with the paper's own test, the two-tailed log-rank test stratified
+by site with removed mice censored, each of the eight groups against its own
+cohort's controls of the same sex.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/fis2024.py` | Harrison et al. 2024: no significant gain from fisetin or four other agents |
+
+The standard library, in the python image; a few seconds. The receipt
+(`e2b1f282…`, 13 October, at `7c2e2db`, a verification): no group lived
+significantly longer; the smallest p among groups that lived longer than
+expected is 0.081 (mycophenolic acid, males). Fisetin, continuous or cyclic
+from 20 months, gives p 0.37 to 0.85. Beside it, the one significant result is
+the decrease the paper reports, 4-phenylbutyrate in females (p 0.0098, printed
+0.01; median -1.6%, printed -2%), and the same test on the same file finds
+astaxanthin's and meclizine's male gains (p 0.0030 and 0.027; printed 0.003
+and 0.03). Controls 6 of 6.
+
 ## udg/: unit-distance graphs with chromatic number 5, and a two-distance graph with 6
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
