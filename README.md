@@ -1047,6 +1047,45 @@ days pooled against the printed 786, 881 and 849), the Wang-Allison counts by
 one mouse each (p 0.16 and 0.17 against 0.12 and 0.16), and 5 of Table 1's
 12 control numbers (Michigan's females 82 dead, printed 86). The three sites'
 control males differ (p 4 × 10⁻⁶; printed 0.0001), the females do not.
+## itp/raac.py: rapamycin with acarbose against rapamycin alone (2017 against 2006 and 2009)
+
+`itp/raac.py` tests Strong et al., Aging Cell 21(12) 2022 (claim
+`ext:ff7b4dd0265b29b1`): "In male mice, the combination of Rapa and Aca
+started at 9 months and led to a longer lifespan than in either of the two
+prior cohorts of mice treated with Rapa only, suggesting that this drug
+combination was more potent than either of its components used alone." The
+test is the paper's own comparison, as its Discussion and Table 5 make it: the
+mean of the three site medians of the dead for the 2017 cohort's males given
+rapamycin (14.7 ppm) with acarbose (1000 ppm) from 9 months above those of the
+2006 and 2009 cohorts' males given rapamycin alone (14 ppm) from 9 months, and
+the site-stratified log-rank test of the combination's males against each,
+removed mice censored, at p < 0.05. The inputs are the three cohorts'
+workbooks (MPD files 737, 827 and 802), read by `itp/rapa.py`'s reader and
+tested by `itp/cana.py`; every compared group must carry its design. Beside
+the test: Table 5's means and eighteen site medians, read as medians of the
+dead and as Kaplan-Meier medians (written here), the printed p values, the
+females' comparisons, the gains over each cohort's controls, and each log-rank
+p with removed mice left out.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/raac.py` | Strong et al. 2022: rapamycin with acarbose outlives rapamycin alone in males (two earlier cohorts) |
+
+Standard library, in the python image; under a second. Tests: `python3 -m
+unittest tests.test_raac` (with the three workbooks in `inputs/` or
+`RAAC_INPUTS`). The receipt (`f34a887c…`, 13 October, at `ce07b19`, a
+verification): mean site medians of 949.2 days for the combination against
+887.0 (2006) and 858.8 (2009), log-rank p 0.0104 and 0.000613; all four
+conditions. The combination's and the 2006 cohort's twelve site medians are
+Table 5's; the 2009 cohort's six are not (males 718.5, 1004.5 and 853.5 days
+where it prints 728, 974 and 855; mean 858.8, printed 852), and read as
+Kaplan-Meier medians only three agree (the males' 728 and 855, the females'
+1002). The printed p values (below 0.006 and below 0.0006) hold with removed
+mice left out (0.00415 and 0.000427), not with them censored. Females: means
+1082.5, 1030.2 and 1056.5 (printed 1083, 1030 and 1052), p 0.093 and 0.39
+(printed 0.07 and 0.39). Gains over each cohort's own controls, males: 8.0%
+and 6.3% for rapamycin alone (printed 10% and 5%), 29.4% for the combination
+(printed 29%).
 ## udg/: unit-distance graphs with chromatic number 5, of 553 and 529 vertices
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
