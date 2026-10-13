@@ -1728,6 +1728,36 @@ pytorch image; about twelve minutes on two CPUs. Tests: `python3 -m unittest -v
 tms.test_check` from the lab's root, with the notebook at `inputs/` (or
 `TMS_INPUTS`).
 
+## iit/phi2008.py: Balduzzi & Tononi's integrated information, a counter and its replay
+
+`iit/phi2008.py` tests claim `ext:829df225aeb1af24`, Balduzzi & Tononi (PLoS
+Computational Biology 4(6), 2008): phi varies for systems with identical or
+similar surface dynamics depending on their causal architecture, and is low
+for systems that merely copy or replay activity states. phi is the paper's own
+2008 measure, computed from its definitions by enumeration in the standard
+library: repertoires by Bayes' rule with inputs from outside a part averaged at
+maximum entropy, effective information across the total partition and every
+bipartition, the paper's normalization, and its minimum information partition
+with ties broken by the lowest un-normalized value, as it states. The systems
+are the paper's: the four-element binary counter of Figure 11, its replay by
+elements that read only themselves and a private memory, and the AND-gates of
+Figure 1 with the three copying elements of Figure 6.
+
+| Command | Claim |
+|---|---|
+| `python3 iit/phi2008.py` | Balduzzi & Tononi 2008: phi is low for systems that merely copy or replay |
+
+Under a second. The receipt (`72848bbe…`, 13 October, at `7b56668`, a
+reproduction): the counter's phi is log2(8/7) = 0.1926 bits in 14 of its 16
+states, as the paper's .19, and 1 bit in the other two; the replay's is 0 in all
+16, and the six elements of Figure 6 have phi 0 as one system in all 8 states
+they can enter, while the AND-gates alone have 1 bit. Controls 8 of 8: the
+paper's printed values for Figures 1, 2, 3, 7C and 14A, and the counter's phi
+unchanged when its elements are relabelled. In the counter's two other states
+the total partition ties with two bipartitions at normalized 1: the paper's
+stated tie rule gives 1 bit, and its printed 4 bits needs the total partition
+to win the tie; the AND-gates' printed 3 bits (Figure 6) need the same.
+
 ## iit4/: IIT 4.0, and a computer that simulates a system without its structure
 
 `iit4/check.py` tests claim `ext:48aa3af09abe12bb`, Findlay, Marshall,
