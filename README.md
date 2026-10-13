@@ -1309,6 +1309,30 @@ been given everywhere, the males' gain is +8.7% with an unstratified p of
 0.075, so the result rests on the site-matched comparison, which is the
 cohort's design.
 
+## itp/strong2013.py: five agents with no effect in the ITP's 2007 cohort
+
+`itp/strong2013.py` tests claim `ext:8f5f3e190b0dff91`, Strong et al. (J.
+Gerontol. A 68(1), 2013): none of curcumin, green tea extract, medium-chain
+triglyceride oil, oxaloacetic acid and resveratrol, fed from 4 months, had a
+statistically significant effect on the life span of male or female mice by
+log-rank test. On the cohort's deposited per-mouse data (MPD ITP1, file 804),
+every row checked against the cohort's design, with the ITP's two-tailed
+log-rank test stratified by site (removed mice censored), each agent against
+the same sex's controls. The paper's own Methods were not read (no open full
+text), so the test is the program's usual one, as Strong et al. 2008 state it.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/strong2013.py` | Strong et al. 2013: five agents, no significant effect on life span in either sex |
+
+The standard library, in the python image; a few seconds. The receipt
+(`60c4d299…`, 13 October, at `3865fd0`, a verification): the ten p values run
+from 0.15 (MCT oil, females) to 0.97 (resveratrol, males); the medians of the
+dead differ from the controls' by -1.0% to +6.7% (green tea extract in females
+the largest, the agent the abstract's secondary analysis singles out). Beside
+it, one of 30 per-site tests falls below 0.05 (MCT oil, males at UM, 0.038),
+about what chance gives. Controls 5 of 5.
+
 ## udg/: unit-distance graphs with chromatic number 5, and a two-distance graph with 6
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
