@@ -1356,7 +1356,8 @@ below 0.05, the log-rank p values from 0.011 (males at TJL) down to 6 x 10^-7
 (females at UT), the Wang-Allison p values from 0.037 (males at UT) down to
 5 x 10^-5 (females at UM); the mean site median rises 8.0% in males and 17.8%
 in females (printed 10% and 18%). The paper prints its per-site Wang-Allison
-p values as below 0.001 (0.002 at TJL); the deposit gives that at one of six.
+p values as below 0.001 (0.002 at TJL); the deposit gives that at two of six,
+the females at UM and UT.
 Beside it, resveratrol and simvastatin at both doses: no p below 0.15 in
 either sex, as the abstract's next sentence says. Controls 6 of 6.
 
