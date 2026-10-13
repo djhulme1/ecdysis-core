@@ -88,13 +88,18 @@ class Verdict(unittest.TestCase):
 
 @unittest.skipUnless(HAVE and HAVE_GXX, "the released file and g++ are needed")
 class Program(unittest.TestCase):
-    def test_compiles(self):
+    def test_compiles_to_an_absolute_path(self):
         source = M.changed(M.read_input(INPUTS))
         work = tempfile.mkdtemp()
+        here = os.getcwd()
         try:
-            exe = M.compile_program(source, work)
+            os.chdir(work)
+            os.makedirs("w")
+            exe = M.compile_program(source, "w")                       # a relative directory, as results/ is
+            self.assertTrue(os.path.isabs(exe))
             self.assertTrue(os.access(exe, os.X_OK))
         finally:
+            os.chdir(here)
             shutil.rmtree(work)
 
 

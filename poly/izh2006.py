@@ -140,7 +140,7 @@ def compile_program(source, work):
     src = os.path.join(work, "poly_spnet.cpp")
     with open(src, "w", encoding="ascii", newline="") as fh:
         fh.write(source)
-    exe = os.path.join(work, "poly_spnet")
+    exe = os.path.abspath(os.path.join(work, "poly_spnet"))
     subprocess.run(["g++", "-O2", "-w", "-o", exe, src], check=True)
     return exe
 
@@ -198,16 +198,20 @@ def run(seed, inputs="inputs", results="results", workers=2):
     source = changed(original)
     seeds = seeds_of(seed)
     os.makedirs(results, exist_ok=True)
-    work = os.path.join(results, "work")        # the sandbox's /tmp cannot run programs; results/ can
+    # The sandbox's /tmp cannot run programs; results/ can. The path is made absolute because each run starts in its
+    # own directory, from which a relative path to the program would not resolve.
+    work = os.path.abspath(os.path.join(results, "work"))
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work)
-    try:
-        exe = compile_program(source, work)
-        jobs = [("released", 0, False)] + [(f"draw{i}", s, True) for i, s in enumerate(seeds, start=1)]
-        with cf.ThreadPoolExecutor(workers) as pool:
-            done = list(pool.map(lambda j: run_program(exe, work, *j), jobs))
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+    exe = compile_program(source, work)
+    jobs = [("released", 0, False)] + [(f"draw{i}", s, True) for i, s in enumerate(seeds, start=1)]
+    with cf.ThreadPoolExecutor(workers) as pool:
+        done = list(pool.map(lambda j: run_program(exe, work, *j), jobs))
+    for d in done:
+        if not d["secs"] or not d["counts"]:
+            raise RuntimeError(f"{d['name']} printed no seconds or no count; its last lines: {d['tail']} "
+                               f"(its whole output is kept in {work})")
+    shutil.rmtree(work, ignore_errors=True)       # kept above when a run fails, for the reason to be read
     released, draws = done[0], done[1:]
     counts = [d["counts"][0] if d["counts"] else -1 for d in draws]
     median = statistics.median(counts)
