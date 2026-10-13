@@ -667,6 +667,34 @@ the program links); the only input is the paper's source. ζ(5) at the place
 itself rests on the paper's formula, checked against Koecher's series only at
 the low places.
 
+## pi/ramanujan.py: the Ramanujan Machine's two continued fractions
+
+`pi/ramanujan.py` tests Raayoni, Gottlieb, Pisha, Harris, Manor, Mendlovic,
+Haviv, Hadad & Kaminer, The Ramanujan Machine: Automatically Generated
+Conjectures on Fundamental Constants (arXiv:1907.00205; Nature 590, 67–73,
+2021; claim `ext:362eb6b475d3e8dd`), whose abstract prints "Two example
+conjectures found by our algorithm and so far unproven": a continued
+fraction for 24/π² (partial denominators 2 + 7n(n + 1), numerators 8n⁴) and
+one for 8/(7ζ(3)) (denominators (2n + 1)(3n² + 3n + 1), numerators −n⁶). It
+computes their 12,000th and 7,000th convergents exactly and compares them
+with the constants held to 11,000 digits, π by Machin's formula and the
+Chudnovskys' series, ζ(3) by Apéry's series and Amdeberhan and Zeilberger's,
+each pair required to agree. The test asks for agreement within 10^−10000.
+
+| Command | Claim |
+|---|---|
+| `python3 pi/ramanujan.py` | Raayoni et al.: two continued fractions found by the Ramanujan Machine equal 24/π² and 8/(7ζ(3)) |
+
+Standard library only (the pinned `python:3.12-slim` image); about eight
+seconds. Tests: `python3 -m unittest tests.test_ramanujan`. The receipt
+(`fe4f1bd9…`, 13 October, at `2e55a34`, a reproduction): the convergents
+agree with 24/π² to 10,837.3 digits and with 8/(7ζ(3)) to 10,718.9, gaining
+0.9031 and 1.5311 digits a term, exactly the rates the recurrences'
+characteristic roots give (log₁₀ 8, and log₁₀ (1 + √2)⁴ for roots
+(1 ± √2)⁴). Each pair of series agrees to every digit held. Agreement to ten
+thousand digits is evidence, not proof; the conjectures' proofs, if any have
+appeared since, are not checked here.
+
 ## edp/: the Erdős discrepancy problem for C = 2
 
 `edp/check.py` tests Konev and Lisitsa, "A SAT Attack on the Erdos
