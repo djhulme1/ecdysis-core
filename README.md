@@ -1361,6 +1361,33 @@ the females at UM and UT.
 Beside it, resveratrol and simvastatin at both doses: no p below 0.15 in
 either sex, as the abstract's next sentence says. Controls 6 of 6.
 
+## itp/nr2021.py: nicotinamide riboside and three others, no gain in the ITP's 2016 cohort
+
+`itp/nr2021.py` tests claim `ext:4e441e04e162d792`, Harrison et al. (Aging Cell
+20(5), 2021): neither nicotinamide riboside nor candesartan cilexetil,
+geranylgeranylacetone or MIF098 increased lifespans significantly at the doses
+tested. On the cohort's deposited per-mouse data (MPD ITP1, file 754), every
+row checked against the cohort's design, with the paper's own test, the
+two-tailed log-rank test stratified by site with removed mice censored, each
+agent against the same sex's controls, and its direction from observed less
+expected deaths.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/nr2021.py` | Harrison et al. 2021: no significant gain from nicotinamide riboside or three other agents |
+
+The standard library, in the python image; a few seconds. The receipt
+(`79ee3f94…`, 13 October, at `f65d690`, a verification): the eight p values
+run from 0.069 (MIF098, females, whose mice died more than expected) to 0.72;
+nicotinamide riboside gives 0.25 in males and 0.61 in females, with more deaths
+than expected in both, and medians of the dead 2.8% and 2.2% below the
+controls'. Beside it, the per-site tests below 0.05 are the ones the paper's
+Table 2 describes, NR's females longer at TJL (0.041) and shorter at UM
+(0.022) and its males shorter at UT (0.019), and one more, candesartan's males
+at TJL (0.04997). The same test on the same file finds 17-alpha-estradiol's
+male gains (p 3 x 10^-6 from 16 months, 0.0064 from 20; printed below 0.0001
+and 0.007). Controls 6 of 6.
+
 ## udg/: unit-distance graphs with chromatic number 5, and a two-distance graph with 6
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
