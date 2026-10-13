@@ -966,6 +966,31 @@ hour. What it cannot check: the symmetry breaking (hand lemmas, one resting on
 Keller's conjecture in dimension 6, and clausal proofs); the cubes not drawn;
 and the reduction from cube tilings to the graphs, which is prior work.
 
+## sinc/tiny.py: Bäsel & Baillie's tiny numbers from sinc integrals
+
+`sinc/tiny.py` tests claim `ext:d8c1563cc47642eb`, Bäsel & Baillie (Elem. Math.
+71(1), 2016; arXiv:1510.03200): the integrand of the tenth integral in their
+sequence, a_0 times the integral of the product of sinc(a_k x) for k = 0 to n
+with a_k = 1/(2k-1) and a_0 = 10, is a product of 68,100,152 sinc functions,
+and the integral is (π/2)(1 - t) with t about 9.6492736004286844634795531209398105309232
+x 10^-554381308. The number t comes from the Borweins' Corollary 1. The
+computation does not use the paper's Euler-Maclaurin sums: the partial sums
+through the digamma function, the first n beyond a_0 by bisection, and
+t = 2 (s(n) - a_0)^n C(2n, n) / 4^n through log-gamma, in mpmath at 120
+digits.
+
+| Command | Claim |
+|---|---|
+| `python3 sinc/tiny.py` | Bäsel & Baillie 2016: the tenth integral's 68,100,152 sinc factors and its t |
+
+mpmath, in the scipy-notebook image; a few seconds. The receipt (`2acca6d9…`,
+13 October, at `08b2137`, a verification): n0 = 68,100,151, and all 41 printed
+digits of t and its exponent, exactly; s(n0) exceeds 10 by 7.2 x 10^-9, and a
+direct double-precision sum of the terms agrees. Beside it, nine of the ten
+rows of the paper's Table 1 match in every digit; the tenth, a_0 = 1, prints
+n = 1 where its own text and the formula give n = 2 (its t, 1/12, is right).
+Controls 5 of 5.
+
 ## ptn/: the boolean Pythagorean triples, the proof sampled
 
 `ptn/check.py` tests Heule, Kullmann and Marek, "Solving and Verifying the
