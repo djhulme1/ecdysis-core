@@ -1369,6 +1369,53 @@ its own size) turn rounding on near-zero gradients into differences of up to
 the learning rate. The control now runs in float64, where the two agree
 within 2e-16.
 
+## stdp/: Diehl & Cook's released network at 400 and 100 neurons
+
+`stdp/check.py` and `stdp/dcnet.c` test Diehl & Cook, Unsupervised learning
+of digit recognition using spike-timing-dependent plasticity, Frontiers in
+Computational Neuroscience 9:99 (2015; claim `ext:768d604961e68bc0`): "the
+performance of our network scales well with the number of neurons used". The
+network is the authors' released code (peter-u-diehl/stdp-mnist at `d527ca3`,
+Brian 1 and Python 2, read as text: 59 of its lines must appear verbatim, and
+it is not run) written afresh in C: 784 Poisson inputs, conductance-based
+excitatory and inhibitory neurons in Euler steps of 0.5 ms as Brian 1
+integrates them, adaptive thresholds, the triplet STDP rule with weight
+normalisation, and Brian 1's resets and refractory periods as its source
+(1.4.3) applies them. A Python reference written apart gives the C program's
+output byte for byte on small jobs. The test: a 400-neuron network trained on
+three passes of the 60,000 training digits scores at least 85% on the 10,000
+test digits, and at least 2 points above a 100-neuron network trained on
+40,000 (its threshold step scaled by 100/400), with classes assigned from the
+training digits.
+
+| Command | Claim |
+|---|---|
+| `python3 stdp/check.py` | Diehl & Cook 2015: the network's accuracy scales with its number of neurons |
+
+Needs gcc (the buildpack-deps image); about 40 minutes on two CPUs, longer
+when a draw runs away. Tests: `python3 -m unittest tests.test_stdp`. The
+receipt (`029b0728…`, 13 October, at `c693312`, a verification): the
+400-neuron network scores 91.28% and the 100-neuron network 86.11% (its
+second draw 86.43%), a gain of 5.17 points. Figure 2B's triplet-rule bars,
+read from its pixels, are 91.4% at 400 neurons and 82.4 to 83.1% (all four
+rules) at 100, so the smaller network does about 3 points better here than
+printed. The released trained network scores 91.48% with classes from the
+training digits and 91.42% with classes from the test digits, the readme's
+way (it prints 91.56%). Controls 3 of 3. The second 400-neuron draw ran away
+at training digit 1,271.
+
+An earlier receipt, `6d2aeda8…` at `ed75e70`, is inconclusive: its
+400-neuron training ran away at digit 5,469 and could not finish. An
+excitatory neuron's Euler step is unstable once ge + gi exceeds 399, and a
+volley of about 24 excitatory spikes within a millisecond takes gi there
+through their inhibitory partners (there, 9 and then 38 neurons that had
+fired little, whose thresholds had decayed together to 16.6–20.1 mV): the
+membranes swing past both reversal potentials and from then every neuron
+fires whenever its refractory period allows. Brian 1 integrates the same
+equations with the same step. The check now stops a run that draws more than
+10 spikes per neuron in one presentation, draws each network in pairs, and
+reads the first draw whose training and recordings run clean (rule 4).
+
 ## iit/: IIT 3.0's Phi with every tie kept
 
 `iit/check.py` tests claim `ext:dff1ca5795aecf74`, Hanson and Walker
