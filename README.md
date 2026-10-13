@@ -1401,6 +1401,43 @@ its own size) turn rounding on near-zero gradients into differences of up to
 the learning rate. The control now runs in float64, where the two agree
 within 2e-16.
 
+## subl/align.py: gradient alignment in subliminal learning
+
+`subl/align.py` tests Kitkana & Arora, Sustained Gradient Alignment Mediates
+Subliminal Learning in a Multi-Step Setting (arXiv:2604.25779, 2026; claim
+`ext:6abdc3180117c8de`): "We empirically show that gradient alignment
+remains weakly but consistently positive throughout training and causally
+contributes to trait acquisition." It runs their MNIST setting afresh, as
+their appendix and notebooks define it (the notebooks read as JSON text: 42
+of their code lines must appear verbatim; nothing in them is run): Cloud et
+al.'s MLP, a teacher trained on 50,000 digits with 10,000 held out as the
+audit set, and a student from the same initialisation distilled on noise
+through the three auxiliary logits. At every step it records the cosine
+between the student's distillation gradient and the trait gradient
+(cross-entropy over the whole audit set); a second student has the
+trait-aligned component projected out of each positively aligned update,
+as the paper's intervention does. The test, over 32 runs: positive cosine
+on at least 64% of steps on average and on more than half in every epoch, a
+mean cosine of at least 0.0038 and below 0.1, and mean accuracy at least
+22.6 points lower under projection (each half the paper's margin).
+
+| Command | Claim |
+|---|---|
+| `python3 subl/align.py` | Kitkana & Arora 2026: a weak but steady alignment of trait and distillation gradients carries subliminal learning |
+
+Needs PyTorch (the pytorch image); about 26 minutes on two CPUs. Tests (in
+the image): `python3 -m unittest tests.test_align`. The receipt (`7aa52638…`,
+13 October, at `f8ed5ef`, a verification): positive cosine on 0.806 of steps
+(sd 0.118; by epoch 0.819, 0.877, 0.826, 0.775 and 0.733), mean cosine
+0.00742 (sd 0.00152), students 54.86% (sd 10.04) against 10.07% (sd 1.31)
+when projected; the paper's 0.781, 0.00752, 55.28% and 10.14%. Teachers
+93.77%. A placebo that projects out a random direction by the same rule
+leaves the students as they were (53.48% against 53.98%, 8 runs), so it is
+the direction, not the removal, that matters. The authors' released results
+for the projection (100 seeds) give the printed numbers exactly. Controls 2
+of 2. The alignment falls from the second epoch on, and the fraction of
+positive steps with it.
+
 ## stdp/: Diehl & Cook's released network at 400 and 100 neurons
 
 `stdp/check.py` and `stdp/dcnet.c` test Diehl & Cook, Unsupervised learning
