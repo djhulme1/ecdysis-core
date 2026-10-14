@@ -2598,3 +2598,43 @@ Controls 6 of 6: Machin's π, a rising factorial, the paper's two limits
 (λ → ∞ gives Madhava's summands, λ → 0 gives 1/n²), and both error
 expansions against exact partial sums at N = 2000. The derivation from the
 string amplitude is not checked, only the printed series.
+
+## dastdp/: Izhikevich's distal reward, dopamine-modulated STDP
+
+`dastdp/izh2007.py` tests claim `ext:69c2bbc168cef5a6`, Izhikevich, "Solving
+the distal reward problem through linkage of STDP and dopamine signaling"
+(Cerebral Cortex 17, 2443–2452, 2007): a network of spiking neurons whose STDP
+is modulated by dopamine resolves the distal reward problem, a slow
+eligibility trace carrying a spike pairing's credit across the seconds before
+its reward. The paper shows it on one synapse: in 42 of 50 experiments a
+chosen synapse, rewarded 1 to 3 s after each postsynaptic spike within 10 ms
+of a presynaptic one, reached the 4 mV maximum within an hour, "whereas the
+other synapses are not". The author's MATLAB program for the experiment
+(`daspnet.m`) is read as data and ported to C statement by statement
+(`dastdp/dastdp.c`), the run refused unless the program holds every statement
+the port follows. The test: at least 21 of 50 seeded draws at the paper's
+10 ms end with the chosen synapse at 4 mV and no other synapse having reached
+it; 50 more draws at the program's own 20 ms run beside.
+
+| Command | Claim |
+|---|---|
+| `python3 dastdp/izh2007.py` | Izhikevich: dopamine-modulated STDP reinforces the one synapse whose coincidences bring a delayed reward |
+
+gcc and the standard library, in the buildpack-deps image; about 1 h 45 min on
+two cores (101 draws of an hour of model time). Tests: `python3 -m unittest
+discover -s tests -p test_izh2007.py`. The receipt (`e530486c…`, 14 October,
+at `f75de29`, a verification) fails the test: in none of the 50 draws is the
+chosen synapse the only one at 4 mV. Its own reinforcement reproduces the
+paper closely: it reaches 4 mV in 47 of the 50 draws (the paper, 42), after
+41.6 ± 9.4 rewards (the paper, 40 ± 8), a median 31.9 minutes in, while the
+reward rate roughly doubles (a median 10 rewards in the first ten minutes,
+21.5 in the last; the paper, "triples"). But in every draw other synapses
+reach 4 mV as well: a median 724 of the other 79,999 touch it during the hour
+(81 to 2,633), and a median 59.5 are there at its end (10 to 227), where the
+paper's figure has none. Nor have the weights settled to the paper's
+distribution: at the hour's end their mean is 0.51 mV and 37.5% are below
+0.1 mV, where the paper says "the majority is less than 0.1 mV". The
+program's own 20 ms gives the same picture: all 50 chosen synapses at 4 mV,
+after 49.5 ± 17.2 rewards and a median 19.0 minutes, and a median 3,715 other
+synapses touching it. Firing rates 1.24 Hz (excitatory) and 0.78 Hz
+(inhibitory), the paper's "around 1 Hz". Controls 5 of 5.
