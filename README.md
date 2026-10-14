@@ -2802,3 +2802,48 @@ exact over the integers, and modulo 2, in the printed 90, 104, 110, 127, 130,
 scheme), with 1,302 to 3,702 nonzeros; three seed-drawn integer products
 through each come out right. Controls 3 of 3. Not checked: (4,6,7) in 123 and
 (6,6,7) in 183, left out as the archive takes eight files.
+
+## alife/jk.py: Jain & Krishna's autocatalytic sets, appearing by chance and spreading
+
+`alife/jk.py` tests claim `ext:d7d1f3a2067c2293`, Jain & Krishna, "A model for
+the emergence of cooperation, interdependence, and structure in evolving
+networks" (PNAS 98, 543–547, 2001; arXiv:nlin/0005039): in a graph of s species
+whose links are catalytic or inhibitory, the least populated species being
+replaced one at a time by random new ones, a small autocatalytic set (ACS)
+appears by chance, after about τa = 4/(p²s) updates, and grows across the graph
+"in a short analytically determined timescale", τg = 2/p. The model is the
+paper's Model section, read from the e-print (the PNAS text could not be read
+here), simulated in C (`alife/jk.c`): links nonzero with probability p, uniform
+in [−1, 1] (self-links in [−1, 0]); equation (1) integrated between updates as
+ẏ = Cy with its rule holding a population at zero, by fourth-order Runge–Kutta
+(step 0.2) for T = 100; X ≤ 10⁻¹⁰ counting as zero; the maximal ACS by pruning.
+The test: in 50 runs at s = 100 for each of p = 0.0012, 0.0025 and 0.005
+(Figure 2's three largest p), every run entirely an ACS within the cap; the mean
+first appearance within a factor of two of τa; the mean (n2 − n1)/ln(s/s1(n1))
+within 25% of 2/p; and the slope of its logarithm on ln p within −1 ± 0.2.
+
+| Command | Claim |
+|---|---|
+| `python3 alife/jk.py` | Jain & Krishna: an ACS appears by chance and spreads across the graph in about 2/p updates |
+
+Standard library and the image's gcc (buildpack-deps); about four minutes on
+two cores. Tests: `python3 -m unittest discover -s tests -p test_jk.py`. The
+receipt (`47c81cf1…`, 14 October, at `372a71a`, a reproduction) **failed**, 8 of
+10 conditions: every run spans the graph, the first ACS appears at 0.61, 0.73
+and 0.62 times τa (the 3-cycles the paper neglects add a quarter to the
+2-cycles' rate at p = 0.005), and the slope is −0.877, but the mean growth time
+is 1.171, 1.326 and 1.395 times 2/p, outside the band at p = 0.0025 and 0.005.
+At n2 the graph has 104.6, 109.0 and 118.6 positive links (the paper's run 117),
+a chance of 10⁻¹⁸·⁷ to 10⁻¹⁵·⁷ for a random graph. Controls 4 of 5: the program
+matches a plain implementation bit for bit, settles on a Perron–Frobenius
+eigenvector, holds a negatively fed node at exactly zero, and finds the same ACS
+two ways; the initial graphs' negative links at p = 0.0012 were 4.25 standard
+errors high (one graph held 29 links where 12 are expected), by chance: the
+same generator gives 6.055 against 6.06 over 200,000 graphs. A trial under
+another seed gave 9 of 10 (1.110, 1.214, 1.336). What may account for part of
+the gap: with these numerics most species stay populated until the first ACS
+(56.5 to 98.7, where the paper's Figure 1a shows about 6), which shields those
+with positive in-links from removal and enlarges the ACS at its birth (3.90 at
+p = 0.005, about 2.9 in a random graph), so ln(s/s1(n1)) is smaller; the time
+from n1 to n2 itself (1,845 updates at p = 0.005) is close to the paper's run
+(1,739). Not checked: Figure 2 below p = 0.0012, and the catastrophes after n2.
