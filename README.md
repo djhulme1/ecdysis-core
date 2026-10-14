@@ -646,6 +646,55 @@ rule agreeing on all 12,000. The one-way reading gave 0 and 0 of 100 at n*,
 was 13,992 molecule types (the paper: "on average 14,000"). Controls 6 of 6.
 The trial under another seed gave the same verdict.
 
+## raf/xavier.py: RAFs in the metabolism of two ancient autotrophs
+
+`raf/xavier.py` tests claim `ext:59fba407e0fadf21`, Xavier, Hordijk, Kauffman,
+Steel & Martin, "Autocatalytic chemical networks at the origin of metabolism"
+(Proc. R. Soc. B 287(1922), 20192377, 2020): RAFs in the metabolism of ancient
+anaerobic autotrophs living from H2 and CO2, given small-molecule catalysts,
+generate acetyl-CoA, amino acids and bases, while amino acids and bases
+without organic catalysts generate no metabolic RAF. It reads the paper's own
+supplementary files on figshare (CC BY 4.0) by hash: Dataset S1's three
+curated networks with their catalysis rules, Dataset S4 (the paper's own
+maxRAF input file, whose food set is Table S1's food set 3, the other four
+derived from it as Table S1 states them) and Dataset S2 (the paper's maxRAF
+lists). The maxRAF is Hordijk and Steel's reduction as the paper's
+supplementary methods give it, a two-way reaction as two halves, "&" in a rule
+binding tighter than the whitespace between alternatives. The test, on Dataset
+S1's networks as registered: each autotroph's maxRAF with food set 3 generates
+acetyl-CoA, an amino acid and a base, and each network's maxRAF with food set
+5 is at most a tenth of food set 3's.
+
+| Command | Claim |
+|---|---|
+| `python3 raf/xavier.py` | Xavier et al. 2020: metabolic RAFs with small-molecule catalysts make acetyl-CoA, amino acids and bases |
+
+The standard library, in the python image; a few seconds. The receipt
+(`bc2e260e…`, 14 October, at `ffacfea`, a verification): all nine conditions
+hold. With food set 3 the acetogen Moorella thermoacetica's maxRAF (357
+reactions) generates acetyl-CoA, 13 amino acids and the G, C and U
+ribonucleotides, and the methanogen Methanococcus maripaludis's (178)
+acetyl-CoA, alanine, aspartate, asparagine and cysteine, and the C and U
+ribonucleotides. With amino acids and bases but no organic cofactors the
+maxRAFs are 74, 19 and 14 reactions, against 1,870, 357 and 178.
+
+Beside the test, Dataset S1 is not quite what the paper ran. Its global sheet
+writes 2,774 reactions two-way that the paper's own input file runs one way,
+and the autotrophs' sheets write four and five reactions one way in the
+opposite direction to it (among them R01213, which the input file has making
+2-isopropylmalate from acetyl-CoA). With each reaction as the input file
+writes it, every one of the paper's fifteen maxRAF lists comes out reaction
+for reaction, and so do 14 of Table S1's 15 sizes: the 15th, the global
+network with peptide catalysis, is 2,577 reactions, as the paper's own list
+has it, where Table S1 prints 2,603. The primordial network the two autotrophs
+share is 172 reactions and its own maxRAF 120, with cysteine its only amino
+acid, all as printed; without NAD+ the global maxRAF falls from 1,335 to 620
+reactions (the paper: about half), and without ATP not at all. On Dataset S1's
+networks, 6 of the 15 sizes are as printed. Controls 4 of 4. The figshare
+links redirect to Amazon S3, which the reference runner does not follow off
+their host, so the runs read copies in its input cache, verified against the
+registered hashes.
+
 ## hexagon/: the empty hexagon number, h(6) = 30
 
 `hexagon/check.py` tests Heule and Scheucher, "Happy Ending: An Empty Hexagon
