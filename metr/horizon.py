@@ -29,8 +29,8 @@ before any horizon was computed. The seed draws only the bootstrap beside the te
 3. The fit, as the repository's logistic_regression: for each model, the weighted logistic regression of the score
    on x = log2(human minutes), p = 1/(1 + exp(-(a x + b))), minimising sum w (log(1 + e^z) - y z) + (1e-5/2) a^2 (scikit-
    learn's LogisticRegression with C = 1/1e-5 and weights summing to 1: the intercept is not penalised), by Newton's
-   method with step halving from a = 0 and b the logit of the weighted mean score, until the gradient is below
-   1e-11. The 50% horizon is 2^(-b/a) minutes, the 80% horizon 2^((ln 4 - b)/a).
+   method from a = 0 and b the logit of the weighted mean score, halving a step until the loss does not rise while
+   the gradient is above 1e-6 and taking full steps below it, until the gradient is below 1e-11. The 50% horizon is 2^(-b/a) minutes, the 80% horizon 2^((ln 4 - b)/a).
 4. The trend, as the paper's section 4.2: ordinary least squares of the natural logarithm of each model's 50% horizon
    on its release date in days (release_dates.yaml); the doubling time is ln 2 over the slope, in days.
 5. The test's two conditions: the 12 frontier models' doubling time is between 152 and 274 days inclusive; and Claude
@@ -46,6 +46,11 @@ before any horizon was computed. The seed draws only the bootstrap beside the te
 7. Controls: the weights of rule 2 equal the file's own invsqrt_task_weight column; every fit converges with a
    negative slope; the fit recovers a known logistic curve (a = -0.7, b = 3 on a grid of task lengths, its outcomes
    given as weights); and the trend recovers a known doubling time of 200 days from exact points.
+
+After the trial (under a seed of Imago's own, before any was issued), one change to the fit's arithmetic, not to the
+estimator: below a gradient of 1e-6 the losses of nearby points agree to machine precision, so step halving had stalled
+one fit (Claude 4.1 Opus, beside the test) at a gradient of 2.7e-10 and failed the convergence control; full Newton
+steps are now taken there. The test's conditions, its models and its inputs did not change.
 
 What it cannot check: the runs themselves (the agents, scaffolds, scoring and human baselines are as METR recorded
 them), and whether the tasks stand for real work.
@@ -187,6 +192,10 @@ def fit(x, y, w, lam=LAMBDA, tol=1e-11, steps=200):
         if not det > 0:
             raise Refused("a fit's Hessian is not positive definite")
         da, db = (hbb * ga - hab * gb) / det, (haa * gb - hab * ga) / det
+        if math.hypot(ga, gb) < 1e-6:                 # near the optimum the losses agree to machine precision,
+            a, b = a - da, b - db                      # so the full Newton step is taken, without halving
+            current = loss(a, b)
+            continue
         t = 1.0
         while True:
             na, nb = a - t * da, b - t * db
