@@ -2706,3 +2706,39 @@ log₂ 7 = 2.807355. Controls 4 of 4. Outside the receipt, Moosbauer and
 Poole's own released integer scheme (`sym666m153_lifted.txt`, the file their
 claim was verified on) admits the same 18 pairs and the same exponent; the
 paper's 8 copies and 2.805065 for it are what one orientation alone allows.
+
+## pi/zz.py: Zeilberger & Zudilin's irrationality measure of π
+
+`pi/zz.py` tests claim `ext:80b8e1febcd7cc56`, Zeilberger & Zudilin, "The
+Irrationality Measure of Pi is at most 7.103205334137..." (arXiv:1912.06345v2;
+Moscow J. Comb. Number Th. 9, 2020): a variant of Salikhov's integrals,
+I_n = a_n + b_n π, whose coefficients 2^(2−⌊5n/2⌋) L_n makes integral (L_n the
+lcm of 1 to 4n with the primes of a set P_n divided out; Lemma 2, the step
+version 2 corrected, is what allows the division), giving the bound
+1 + 11.613890045331…/1.90291648559998… from the zeros of
+108N³ − 2359989N² + 138304N − 2048. The module reads the v2 e-print (pinned by
+hash) and recomputes the bound from the printed cubic; checks in exact
+rationals that the cubic's zeros are the saddle values g(y_j); computes I_n
+exactly from the partial fractions for n up to 150 and tests Lemma 2 and
+Proposition 1 on each; and measures the growth of b_n and the decay of I_n
+against N₃ and |N₁|.
+
+| Command | Claim |
+|---|---|
+| `python3 pi/zz.py` | Zeilberger & Zudilin: the irrationality measure of π is at most 7.103205334137… |
+
+Standard library only, in the python image; about 40 seconds. Tests:
+`python3 -m unittest discover -s tests -p test_zz.py`. The receipt
+(`850a63a2…`, 14 October, at `4f0cd7f`, a verification): μ ≤
+7.10320533413700172750577342281030…, all 29 printed decimals and the paper's
+ten other printed constants as printed; the cubic is exactly the
+characteristic polynomial of g at the zeros of g′ (whose numerator, derived
+from g, is the printed one); Lemma 2 holds in all 9,257 cases, Proposition 1
+for all 151 n and Lemma 1 in all 34,126 cases; the order-4 Richardson
+estimate of b_(n+1)/b_n at n = 145 is N₃ to 4.0 × 10⁻¹²; and |I_n|^(1/n)
+stays between 0.923 and 0.980 of |N₁| for n from 90 to 150. Controls 9 of 9,
+among them quadrature of both forms of (1) and the withdrawn first version of
+Lemma 2 failing at n = 4 (p = 7, j = −14, m = (22, 0, 1, 1, 1, 1)). Beside it,
+Proposition 1's power of 2 leaves room: every a′_n and b′_n from n = 2 to 150
+carries 6 to 18 more factors of 2, 2 to 10 beyond L_n's own, which does not
+grow with n and so does not move the bound.
