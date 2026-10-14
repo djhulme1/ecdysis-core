@@ -3404,3 +3404,39 @@ their F(n, 0) are the theorems' summands. Wolstenholme's congruence, Morley's,
 series that converge geometrically agree with 4/π, 2√2/π, 16/π, 8/π and 32/π²
 to 60 digits. Controls 6 of 6. A trial under a seed of Imago's own found no
 bug, and the sealed run repeated its outputs exactly.
+
+## vdw/hhlm.py: Herwig, Heule, van Lambalgen & van Maaren's Cyclic Zipper certificates (2007)
+
+`vdw/hhlm.py` tests claim `ext:56ae1de685a5124a`, Herwig, Heule, van Lambalgen
+& van Maaren, "A New Method to Construct Lower Bounds for Van der Waerden
+Numbers" (The Electronic Journal of Combinatorics 14, #R6, 2007): "We present
+the Cyclic Zipper Method, a procedure to construct lower bounds for Van der
+Waerden numbers. Using this method we improved seven lower bounds." The module
+reads the paper's PDF (Tables 1 to 4, with their bold faces), rebuilds every
+certificate of Table 3 from its printed prime and number of zippings (power
+residue colouring, zipping, repetition and one added number), and examines
+every k-term progression in it (in C, `vdw/hhlm.c`).
+
+| Command | Claim |
+|---|---|
+| `python3 vdw/hhlm.py` | Herwig et al. 2007: seven improved Van der Waerden lower bounds, W(2,8) > 11495 to W(6,6) > 633981 |
+
+The standard library and gcc, in the buildpack-deps image; about two minutes.
+Tests: `python3 -m unittest discover -s tests -p test_hhlm.py`. The receipt
+(`873cf049…`, 14 October, at `07ac739`, a verification): all seven
+certificates hold. Of 54,586,836,790 progressions examined in them, none lies
+in one class, so W(2,8) > 11495, W(2,9) > 41265, W(4,5) > 17705,
+W(4,6) > 91331, W(4,7) > 393469, W(6,5) > 63473 and W(6,6) > 633981, each
+above Table 1's bound. The other eight rows hold too, and the text's own
+certificates (number 1 in C1, the added number in Cr) are good in all
+fifteen. The labels matter: the paper draws every point symmetric certificate
+with a permutation of its classes applied (Section 3.2.1; for 37 the third and
+fourth rows interchanged), and zipping turns the classes on those labels. The
+first program turned them as Eq. (1) labels them, and under that reading, kept
+beside, the five rows with r = 4 or 6 and z ≥ 1 fail, with runs of k
+consecutive numbers in one class. A trial showed it; the module was changed
+after that outcome was seen (`7bfd00d` to `07ac739`, the change recorded in its
+docstring), a second trial found no bug, and the sealed run repeated its
+outputs exactly. Controls 7 of 7, among them Table 2 rebuilt, and the
+certificates for W(2,4), W(2,5) and W(4,3) shown not to extend by one number,
+as their known values require.
