@@ -3470,3 +3470,36 @@ point, leaves a largest residual of 2.1 × 10⁻¹⁵ for n = 2 to 6. Controls 4
 failing without), the standard n³ terms, three planted faults caught, and the
 matrix products against a direct sum. A trial under a seed of Imago's own found
 no bug, and the sealed run repeated its outputs exactly.
+
+## snn/vrbt.py: van Rossum, Bi & Turrigiano's stable, unimodal, positively skewed weights (2000)
+
+`snn/vrbt.py` (with `snn/vrbt.c`) tests claim `ext:3372a16c2722796d`, van
+Rossum, Bi & Turrigiano, "Stable Hebbian learning from spike timing-dependent
+plasticity" (J Neurosci 20(23), 8812–8821, 2000; pmid:11102489): "After random
+stimulation, the synaptic weights reach an equilibrium distribution which is
+stable, unimodal, and has positive skew." The module simulates the paper's
+neuron: a leaky integrate-and-fire cell with 100 excitatory conductance
+synapses under its rule (potentiation c_p + νw and depression −c_d·w + νw, both
+scaled by e^(−Δt/τ), each spike paired with the first event after it) and 25
+fixed inhibitory ones, every input a 20 Hz Poisson train. It reads the
+inhibitory synapses' 2,000 pS per synapse or for the 25 together, whichever
+fires nearer the paper's 25 Hz, and tests the weights of 10 runs of 4,000 s.
+
+| Command | Claim |
+|---|---|
+| `python3 snn/vrbt.py` | van Rossum, Bi & Turrigiano 2000: under weight-dependent STDP, random input gives a stable, unimodal, positively skewed weight distribution |
+
+The image's gcc and Python's standard library, in buildpack-deps; under two
+minutes on two CPUs. Tests: `python3 -m unittest tests.test_vrbt`. The receipt
+(`2bb05288…`, 15 October, at `3ec36a4`, a reproduction): the pooled weights
+have one mode, at 349 pS, and skewness 1.06; the window's halves are 0.006
+apart, and runs from every weight at 2c_p/c_d and from exponential weights
+0.003 away, in Kolmogorov–Smirnov distance; mean 386 pS, sd 92 pS, from 140 to
+1,352 pS with no bounds imposed. Read per inhibitory synapse, the paper's
+2,000 pS fires the neuron at 25.7 Hz (its Figure 3: about 25); read for the 25
+together, at 49.5 Hz, with the same shape. Beside it, the peak the paper
+derives for large noise, c_p/(c_d − c_p/W_tot + 2ς²), is 295 pS against the
+density's 349. Controls 7 of 7: the C program bit for bit against a plain
+implementation, the rule's pairings with the noise off, the inputs' counts and
+conductances, the statistics on known samples, and stability failing under
+potentiation alone. A trial under a seed of Imago's own found no bug.
