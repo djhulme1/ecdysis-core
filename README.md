@@ -2917,3 +2917,42 @@ the confidence in the chosen answer. One consultancy ended at exactly one half;
 counted right, consultancy would be 75.0%. Controls 4 of 4. Linked from Khan et
 al.'s claim (`lnk:07789318173da2f5`, method), whose consultancy baseline is this
 paper's.
+
+## snn/izh2003.py: Izhikevich's simple model of spiking neurons, its firing types
+
+`snn/izh2003.py` tests claim `ext:a10b2fcc65619834`, Izhikevich, "Simple Model
+of Spiking Neurons" (IEEE Transactions on Neural Networks 14(6), 1569–1572,
+2003): "A model is presented that reproduces spiking and bursting behavior of
+known types of cortical neurons." It runs equations (1)–(3) as the paper's
+net.m integrates them, at the 0.1 ms resolution of its Fig. 2, with the
+parameters its Section III and Fig. 2 give for RS, IB, CH, FS and LTS, from rest
+and then under a 300 ms step of I = 10, and reads Section III's words as
+criteria on the spike trains (a burst: spikes joined by intervals below a
+threefold gap in the sorted intervals; adaptation: the last interval over the
+first). The inputs are the paper, its figure and net.m from the author's page,
+by hash; net.m must state every statement the network beside the test
+transcribes.
+
+| Command | Claim |
+|---|---|
+| `python3 snn/izh2003.py` | Izhikevich 2003: the model fires as RS, IB, CH, FS and LTS neurons do |
+
+Standard library only, in the python image; seconds. Tests:
+`python3 -m unittest discover -s tests -p test_izh2003.py`. The receipt
+(`1ed10fbd…`, 14 October, at `51dfe32`, a verification): all five conditions
+hold. RS fires 8 single spikes, its interval 18.1 ms and then 45.2 ms
+(2.5-fold); IB a burst of 3 (intervals 2.4 and 3.8 ms), then 8 single spikes
+31.6 ms apart; CH 5 bursts of 7, 5, 5, 5 and 5 spikes, 46 to 48 ms apart; FS 38
+single spikes at 126.7 Hz, its interval 4.3, 6.1 and 7.6 ms and then steady at
+8.0 ms (1.9-fold, less than RS and LTS); LTS 25 single spikes at 83.3 Hz,
+adapting from 3.1 to 13.9 ms (4.5-fold), from a threshold current of 0.34
+against RS's 2.71. Beside it: the same five verdicts at dt = 0.05 ms, but in
+net.m's own 1 ms scheme RS adapts only 1.26-fold (39 to 49 ms) and FS fires at
+about 60 Hz with irregular intervals; RS's rate rises with current (13.3, 26.7,
+36.7 and 50.0 Hz at I = 5 to 20); TC fires single spikes from rest and, held at
+−87.3 mV by I = −30 and released, a rebound burst of 7; RZ swings ten times
+about rest after a pulse. net.m's network, drawn from the seed, fires at 7.51 Hz
+(the paper's "around 8 Hz"), its excitatory intervals more regular than Poisson
+(median CV 0.35), with spectral peaks at 8 and 28 Hz (at 8 and 40 under the
+trial's seed). Controls 5 of 5. Linked from Izhikevich 2006's polychronization
+claim (`lnk:6c76cdeefa3aaeb1`, method), whose neurons are this model.
