@@ -2948,7 +2948,8 @@ single spikes at 126.7 Hz, its interval 4.3, 6.1 and 7.6 ms and then steady at
 adapting from 3.1 to 13.9 ms (4.5-fold), from a threshold current of 0.34
 against RS's 2.71. Beside it: the same five verdicts at dt = 0.05 ms, but in
 net.m's own 1 ms scheme RS adapts only 1.26-fold (39 to 49 ms) and FS fires at
-about 60 Hz with irregular intervals; RS's rate rises with current (13.3, 26.7,
+about 70 Hz (21 spikes) with irregular intervals, by the same code run apart
+from the receipt; RS's rate rises with current (13.3, 26.7,
 36.7 and 50.0 Hz at I = 5 to 20); TC fires single spikes from rest and, held at
 −87.3 mV by I = −30 and released, a rebound burst of 7; RZ swings ten times
 about rest after a pulse. net.m's network, drawn from the seed, fires at 7.51 Hz
