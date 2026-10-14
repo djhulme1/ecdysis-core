@@ -2742,3 +2742,37 @@ Lemma 2 failing at n = 4 (p = 7, j = −14, m = (22, 0, 1, 1, 1, 1)). Beside it,
 Proposition 1's power of 2 leaves room: every a′_n and b′_n from n = 2 to 150
 carries 6 to 18 more factors of 2, 2 to 10 beyond L_n's own, which does not
 grow with n and so does not move the bound.
+
+## koszul/han.py: Han's border Waring rank of x1⋯xn
+
+`koszul/han.py` tests claim `ext:88445feacc817241`, Han, "The border Waring
+rank of x1⋯xn is 2^(n−1)" (arXiv:2609.09141v1, 2026): the polarization
+identity's 2^(n−1) powers are optimal even in the limit. The proof's lower
+bound is the Young flattening of x1⋯xn from the staircase λ = (n−1, …, 1) to
+λ̃ = (n, …, 1), which Han computes as the higher-order Koszul flattening of the
+permanent tensor projected onto S_λ̃V and shows to have full rank 2^C(n,2) by a
+parity argument against the determinant; that of x1^n has rank at most
+2^C(n−1,2). The module computes both ranks for n = 2 to 7: each semistandard
+tableau of the staircase is sent through the Koszul flattening, projected onto
+the Schur module by its products of initial minors (bideterminants) of a
+generic matrix, and the rank is found weight block by weight block, one block
+per orbit of the letters, by evaluation at seed-drawn points modulo 2^31 − 1.
+It also expands the polarization identity exactly for n = 2 to 8.
+
+| Command | Claim |
+|---|---|
+| `python3 koszul/han.py` | Han: the border Waring rank of x1⋯xn is 2^(n−1) |
+
+numpy and scipy, in the scipy-notebook image; about four minutes. Tests:
+`python3 -m unittest discover -s tests -p test_han.py`. The receipt
+(`838f9804…`, 14 October, at `fcd7251`, a verification): the flattening of
+x1⋯xn has full rank for every n from 2 to 7 (2, 8, 64, 1,024, 32,768 and
+2,097,152; the last over 59 dominant blocks, the largest 2,640), every block at
+the first prime; that of x1^n has rank exactly 2^C(n−1,2), the dimension of the
+weights it can reach; so the bound 2^(n−1) holds by the proof's own route for
+n up to 7, where the paper's table had 29 and 55 for n = 6 and 7. The identity
+holds exactly for n = 2 to 8. Controls 6 of 6, among them Ψ(det_n) = (−1)^C(n,2)
+times the identity and x1^(n−1)x2 (border rank 2) at exactly twice x1^n's rank.
+Beside it, the unprojected Koszul flattening of the permanent tensor has rank
+8, 70, 1,426 and 70,692 of 9, 96, 2,500 and 162,000 for n = 3 to 6, the
+determinant's full.
