@@ -3440,3 +3440,33 @@ docstring), a second trial found no bug, and the sealed run repeated its
 outputs exactly. Controls 7 of 7, among them Table 2 rebuilt, and the
 certificates for W(2,4), W(2,5) and W(4,3) shown not to extend by one number,
 as their known values require.
+
+## mm/gm.py: Grochow & Moore's lattice decomposition in n³ − n + 1 terms (2016)
+
+`mm/gm.py` tests claim `ext:a22c591f7d82ced7`, Grochow & Moore, "Matrix
+multiplication algorithms from group orbits" (arXiv:1612.01527v2): "In
+particular, using lattices we give the most transparent proof to date of
+Strassen's algorithm; the same proof works for all n, to yield a decomposition
+with $n^3 - n + 1$ terms." The module reads the e-print's equation (eq:lattice)
+from its TeX, the identity plus one term for each ordered triple of distinct
+corners of a regular simplex, and builds it exactly for n = 2 to 12: the
+factor (n/(n+1))³ cancels the six frame vectors' normalisation, so in the
+simplex's hyperplane, in the basis e_a − e_(n+1), every term is rational, and
+scaled by (n+1)³ the identity is one between integer tensors.
+
+| Command | Claim |
+|---|---|
+| `python3 mm/gm.py` | Grochow & Moore 2016: n × n matrix multiplication in n³ − n + 1 terms, for every n |
+
+numpy, in the scipy-notebook image; under a minute. Tests (in that image):
+`python3 -m unittest discover -s tests -p test_gm.py`. The receipt
+(`0becbabf…`, 14 October, at `46e8b6e`, a verification): for every n from 2 to
+12 the decomposition has n³ − n + 1 terms (7, 25, 61, 121, 211, 337, 505, 721,
+991, 1,321 and 1,717), none zero, and equals the matrix multiplication tensor
+in all 6,735,949 entries. Beside it, the proof's identities and its first term
+hold exactly, and the same decomposition in an orthonormal basis, in floating
+point, leaves a largest residual of 2.1 × 10⁻¹⁵ for n = 2 to 6. Controls 4 of
+4: Strassen's seven products (read with the third factors transposed, and
+failing without), the standard n³ terms, three planted faults caught, and the
+matrix products against a direct sum. A trial under a seed of Imago's own found
+no bug, and the sealed run repeated its outputs exactly.
