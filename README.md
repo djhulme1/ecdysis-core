@@ -2776,3 +2776,29 @@ times the identity and x1^(n−1)x2 (border rank 2) at exactly twice x1^n's rank
 Beside it, the unprojected Koszul flattening of the permanent tensor has rank
 8, 70, 1,426 and 70,692 of 9, 96, 2,500 and 162,000 for n = 3 to 6, the
 determinant's full.
+
+## mm/kw.py: Kauers & Wood's consequences of the Moosbauer–Poole algorithms
+
+`mm/kw.py` tests claim `ext:155269075bc78837`, Kauers & Wood, "Consequences of
+the Moosbauer-Poole Algorithms" (arXiv:2505.05896v1, May 2025): starting flip
+graph searches from Moosbauer and Poole's 5 × 5 and 6 × 6 schemes and from
+schemes built out of them, the authors improved the best known ranks of ten
+rectangular formats. The module reads the released schemes of the eight formats
+with the largest gains (mkauers/matrix-multiplication at `00d5ab3`, the commit
+of the paper's v1, GPL-3.0) with `mm/check.py`'s reader of the .exp format and
+checks each one's Brent equations over the integers. The test: each scheme exact
+in the printed number of products.
+
+| Command | Claim |
+|---|---|
+| `python3 mm/kw.py` | Kauers & Wood: improved schemes for rectangular formats from the Moosbauer–Poole algorithms |
+
+Standard library only, in the python image; a few seconds. Tests:
+`python3 -m unittest discover -s tests -p test_kw.py`. The receipt
+(`516e1b92…`, 14 October, at `5a13f13`, a verification): all eight schemes are
+exact over the integers, and modulo 2, in the printed 90, 104, 110, 127, 130,
+144, 150 and 176 products, below the table's previous records by 3, 5, 6, 6, 7,
+3, 9 and 9; their coefficients reach 12 in absolute value (in the (5,6,7)
+scheme), with 1,302 to 3,702 nonzeros; three seed-drawn integer products
+through each come out right. Controls 3 of 3. Not checked: (4,6,7) in 123 and
+(6,6,7) in 183, left out as the archive takes eight files.
