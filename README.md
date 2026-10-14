@@ -2404,3 +2404,48 @@ Controls 4 of 4: the C simulation agrees with a plain one, the GKL rule has
 λ = 1/2 and fitness 0.975, the all-0 rule scores exactly 1/2 and the identity
 rule its expected 112/149, and the initial populations fill every bin.
 Packard's own runs are not published, so they are not checked.
+
+## metr/: METR's 50% time horizons and their doubling time
+
+`metr/horizon.py` tests claim `ext:b88dde9d74fe32f8`, Kwa, West, Becker et
+al., "Measuring AI Ability to Complete Long Software Tasks"
+(arXiv:2503.14499): on METR's tasks, frontier models such as Claude 3.7
+Sonnet have a 50% time horizon of around 50 minutes, and the frontier's time
+horizon has doubled approximately every seven months since 2019, perhaps
+faster in 2024. It reads two files of the authors' repository,
+METR/eval-analysis-public at `52cb829`, by hash and as data (none of the
+repository's code is run): the time-horizon-1-0 runs file and the release
+dates. For each model it fits the paper's estimator, a weighted logistic
+regression of binarized success on log2 human minutes (each run weighted
+1/(runs in the task × √tasks in the family), an L2 penalty of 10⁻⁵ on the
+slope only, as scikit-learn applies it), solved by Newton's method, and reads
+the 50% horizon where the curve crosses one half; the trend is ordinary least
+squares of log horizon on release date. The test, on the paper's 12 frontier
+models from GPT-2 to o3: they double in 152 to 274 days (5 to 9 months), and
+Claude 3.7 Sonnet's 50% horizon is 25 to 100 minutes.
+
+| Command | Claim |
+|---|---|
+| `python3 metr/horizon.py` | Kwa et al.: a 50-minute horizon for Claude 3.7 Sonnet, doubling about every seven months |
+
+numpy, in the pinned scipy-notebook image; about half a minute on two CPUs.
+The receipt (`6fb7a62c…`, 14 October, at `f89fb37`, a verification): the 12
+frontier models double every 211.66 days (R² 0.974; the paper prints 207,
+95% CI 166 to 240), and Claude 3.7 Sonnet's 50% horizon is 55.3 minutes. The
+seeded hierarchical bootstrap (families, then tasks, then runs; 1,000
+samples, 994 with every horizon finite) puts the doubling time between 186
+and 241 days, 993 of the 994 inside 5 to 9 months. Beside the test: up to
+Claude 3.7 Sonnet the doubling time is 216.17 days; over the seven models
+released from 2024 it is 121.52 (about four months, the faster trend the
+claim allows); the 80% horizon doubles in 219.34 (the paper: 204); and the
+repository's current 17-model headline, with Claude 4.1 Opus, Grok 4, GPT-5,
+GPT-5.1-Codex-Max and Claude Opus 4.5 added, doubles in 201.14, Opus 4.5's
+50% horizon 247 minutes. The 50% horizons run from GPT-2's 0.054 minutes
+(3.2 seconds; the paper: 2 seconds) to o3's 91.4 (the paper's v4: 110).
+Controls 4 of 4: the weights equal the file's own column to within 1.4 ×
+10⁻⁷, every fit converges with a negative slope, and the fit and the trend
+recover a known curve and a known doubling time. One change followed the
+trial, before any seed was issued: below a gradient of 10⁻⁶ the fit takes
+full Newton steps, since step halving had stalled one fit beside the test.
+The repository's README refers to a LICENSE file it does not hold, so no
+licence is stated for the data.
