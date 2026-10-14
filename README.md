@@ -2957,3 +2957,37 @@ about rest after a pulse. net.m's network, drawn from the seed, fires at 7.51 Hz
 (median CV 0.35), with spectral peaks at 8 and 28 Hz (at 8 and 40 under the
 trial's seed). Controls 5 of 5. Linked from Izhikevich 2006's polychronization
 claim (`lnk:6c76cdeefa3aaeb1`, method), whose neurons are this model.
+
+## ca/fuks.py: Fukś's two-rule solution of the density classification problem
+
+`ca/fuks.py` (with `ca/fuks.c`) tests claim `ext:2a8b885d78824863`, Fukś,
+"Solution of the Density Classification Problem with Two Cellular Automata Rules"
+(Physical Review E 55, R2081, 1997; arXiv:comp-gas/9703001): "We show that a pair
+of elementary rules, namely the "traffic rule" 184 and the "majority rule" 232,
+performs the task perfectly." Land and Belew had proved that no single
+two-state rule classifies binary strings by density; the paper's Proposition 4
+says that n = ⌊(L−2)/2⌋ steps of rule 184 and then m = ⌊(L−1)/2⌋ steps of rule
+232 leave any ring of L cells all 0's below density 1/2, all 1's above it and
+alternating at it. The module runs every configuration of every ring from 2 to
+26 cells in C, compiled in the image, with the rules by their Wolfram numbers,
+and reads the paper's source for its statement, its formula and its tables.
+
+| Command | Claim |
+|---|---|
+| `python3 ca/fuks.py` | Fukś: rule 184 then rule 232 classify every ring by density |
+
+The standard library and gcc, in the buildpack-deps image; under a minute. Tests:
+`python3 -m unittest discover -s tests -p test_fuks.py`. The receipt
+(`46b752cc…`, 14 October, at `6f2b345`, a verification): none of the 134,217,724
+configurations is misclassified. Beside it: the printed tables are rules 184,
+232 and 32; after n steps of rule 184 every configuration has lost its 00
+blocks above density 1/2, its 11 blocks below and both at 1/2 (Proposition 2);
+both step counts are tight, some configuration of every ring needing all n
+steps of rule 184 and all m of rule 232; and the paper's exact formula for
+P_m(00), the order parameter of rule 184's jamming transition, equals the
+counted preimages of 00 for every m from 0 to 11. Its asymptotic expansion
+does not hold away from p = 1/2: at t = 1000, P_t − P_∞ is 0.0036 of the
+printed correction at p = 0.3 and at 0.7 (0.9994 at p = 1/2), and the ratio
+falls as 1/t (run apart from the receipt, 3.34, 3.58, 3.64 and 3.66 times 1/t at
+t = 100, 400, 1000 and 3000), so the correction decays as [4p(1−p)]^t/t^(3/2),
+not the printed t^(−1/2). Controls 4 of 4.
