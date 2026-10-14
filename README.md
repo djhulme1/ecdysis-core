@@ -3292,3 +3292,41 @@ lines end "\\%8", a line break and then a comment, and the percent was taken
 for an escaped one. Controls 4 of 4: Strassen's algorithm typed in the paper's
 convention read as 7 exact products and a flipped sign caught, the naive
 algorithm in 75, and a border rank 2 expression read exactly at ε⁰.
+
+## itp/strong2026.py: epicatechin, halofuginone and mitoglitazone in the ITP's 2021 cohort (Strong et al. 2026)
+
+`itp/strong2026.py` tests claim `ext:cea402e411ca1625`, Strong et al.,
+"Extension of lifespan by epicatechin, halofuginone and mitoglitazone in male
+but not female genetically heterogeneous mice" (GeroScience 48(3), 2026): "In
+male mice, EPI increased median lifespan by ~ 5%, and HAL and MIT each
+increased median lifespan by ~ 9%." On the cohort's deposited per-mouse data
+(MPD ITP1, file 772), every row checked against its group's design in the
+workbook's own spelling, with the paper's own statistics: the median age at
+death of the dead males of the three sites pooled, and the two-tailed log-rank
+test stratified by site with removed mice censored. Six conditions: half each
+reported gain (2.5%, 4.5% and 4.5%) and each test below 0.05.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/strong2026.py` | Strong et al. 2026: three male gains in median lifespan, about 5%, 9% and 9% |
+
+The standard library, in the python image; a few seconds. Tests:
+`python3 -m unittest discover -s tests -p test_strong2026.py`. The receipt
+(`fbdd51e6…`, 14 October, at `c3e1a39`, its rules committed before any age or
+status in the workbook was read, a verification): all six conditions hold.
+The male medians are 794 days for the controls, 836 with epicatechin (+5.3%,
+log-rank p 0.037), 864 with halofuginone (+8.8%, p 0.0019) and 863 with
+mitoglitazone (+8.7%, p 0.015): Table 1's medians to the day and its p as
+printed. Beside it, Table 1's printed counts, medians and 90th percentiles
+match in 40 of 42 numbers and Tables S1a and S1b's in 114 of 126; every median
+that misses is a half day the paper rounds down, and the rest are 90th
+percentiles a few days off. The printed log-rank p match in 11 of 12 pooled
+and 33 of 36 site tests. The Wang-Allison test as the Methods state it (a cut
+at each site, the sites' tables summed) gives the males p 0.24 with
+epicatechin, 0.021 with halofuginone and 0.32 with mitoglitazone, and matches
+none of the twelve pooled p printed (it matches 30 of the 36 site ones). The
+abstract's next sentence, that epicatechin and halofuginone but not
+mitoglitazone increased 90% survival, rests on those printed p (0.01, 0.01,
+0.19). The workbook records epicatechin's dose as 60 ppm, where Table S2 gives
+the target as 600 ppm. Controls 6 of 6. A trial under a seed of Imago's own
+found no bug, and the sealed run repeated its outputs exactly.
