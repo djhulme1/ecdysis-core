@@ -2847,3 +2847,37 @@ with positive in-links from removal and enlarges the ACS at its birth (3.90 at
 p = 0.005, about 2.9 in a random graph), so ln(s/s1(n1)) is smaller; the time
 from n1 to n2 itself (1,845 updates at p = 0.005) is close to the paper's run
 (1,739). Not checked: Figure 2 below p = 0.0012, and the catastrophes after n2.
+
+## schur/fs.py: Fredricksen & Sweet's lower bounds for S(6) and S(7)
+
+`schur/fs.py` tests claim `ext:5c2324a4ae367bf1`, Fredricksen & Sweet,
+"Symmetric Sum-Free Partitions and Lower Bounds for Schur Numbers" (The
+Electronic Journal of Combinatorics 7, #R32, 2000): "We give new lower bounds
+for the Schur numbers S(6) and S(7)", S(6) ≥ 536 and S(7) ≥ 1680, the best
+known when Heule settled S(5) = 160 by SAT, and with them R6(3) ≥ 538 and
+R7(3) ≥ 1682. The module reads the two partitions the paper prints from its PDF
+(the data of record, by hash) with a reader written for its Flate-compressed
+page descriptions, expands them by the paper's listing rule (the smaller of each
+symmetric pair i, n + 1 − i listed; 179 and 358, which sum to 537, each where it
+lies), and checks them exactly. The test: both partitions cover their ranges
+once with sum-free sets (a = b allowed), and the colourings of K537 and K1681
+they define have no triangle of one colour, found by bit sets independently of
+the sum-free test.
+
+| Command | Claim |
+|---|---|
+| `python3 schur/fs.py` | Fredricksen & Sweet: S(6) ≥ 536 and S(7) ≥ 1680, so R6(3) ≥ 538 and R7(3) ≥ 1682 |
+
+Standard library only, in the python image; a few seconds. Tests:
+`python3 -m unittest discover -s tests -p test_fs.py`. The receipt
+(`7efb3dff…`, 14 October, at `26aebc7`, a verification): all four conditions
+hold. The 536 partition covers 1..536 once in sets of 129, 86, 110, 77, 64 and
+70, the 1680 one covers 1..1680 in sets of 206 to 380, no set holding a sum;
+K537 (143,916 edges, 6 colours) and K1681 (1,412,040 edges, 7 colours) have no
+triangle of one colour. Beside it, the paper's e-depths hold: multiplied by 170
+mod 537 the first partition's largest set minimum is 161, and its other five
+sets are then a sum-free partition of 1..160, a certificate of S(5) ≥ 160; by
+758 mod 1681 the second's is 537, its other six a partition of 1..536. Controls
+4 of 4 (19 of the 20 seed-drawn perturbations broke a set; in one, the moved
+number fitted its new set too). A trial under another seed gave the same
+outputs.
