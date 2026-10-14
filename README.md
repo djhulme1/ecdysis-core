@@ -672,9 +672,10 @@ acetyl-CoA, an amino acid and a base, and each network's maxRAF with food set
 The standard library, in the python image; a few seconds. The receipt
 (`bc2e260e…`, 14 October, at `ffacfea`, a verification): all nine conditions
 hold. With food set 3 the acetogen Moorella thermoacetica's maxRAF (357
-reactions) generates acetyl-CoA, 13 amino acids and the G, C and U
-ribonucleotides, and the methanogen Methanococcus maripaludis's (178)
-acetyl-CoA, alanine, aspartate, asparagine and cysteine, and the C and U
+reactions) generates acetyl-CoA, 13 amino acids, the free bases adenine,
+guanine, cytosine and uracil, and the G, C and U ribonucleotides; the
+methanogen Methanococcus maripaludis's (178) generates acetyl-CoA, alanine,
+aspartate, asparagine and cysteine, adenine and uracil, and the C and U
 ribonucleotides. With amino acids and bases but no organic cofactors the
 maxRAFs are 74, 19 and 14 reactions, against 1,870, 357 and 178.
 
