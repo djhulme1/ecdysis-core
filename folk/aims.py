@@ -64,6 +64,11 @@ statistic was computed. The seed draws only the bootstrap beside the test.
    2021's fieldwork and the last of Main 2023's as the paper states them ("collected from November to December 2021";
    "From April to May 2023"), for the two files read.
 
+After the trial (under a seed of Imago's own, before any was issued), one change beside the test, to how the printed
+values that differ are listed in printed_values: in full, separated by semicolons, with a count of those that do not
+fit in its 200 characters, where the first version cut the list off in the middle of a name. The test's conditions,
+its data and its rules did not change.
+
 What it cannot check: the survey itself (who took it, how they read the questions), the raking (the weights are taken
 as released), and whether the samples stand for U.S. adults; "surprisingly high" is a judgement no number settles.
 
@@ -316,6 +321,23 @@ def pfmt(p, printed):
     return f"{p:.3f}"
 
 
+def listed(matched, printed, differs):
+    """printed_values: the count matched, then the names of those that differ, in full, as many as fit."""
+    head = f"{len(matched)} of {len(printed)} as printed"
+    if not differs:
+        return head
+    names = [x["what"] for x in differs]
+    shown = list(names)
+
+    def text(k):
+        more = len(names) - k
+        return head + "; not: " + "; ".join(shown[:k]) + (f"; and {more} more" if more else "")
+    k = len(names)
+    while k > 0 and len(text(k)) > LIMIT:
+        k -= 1
+    return text(k) if len(text(k)) <= LIMIT else head[:LIMIT]
+
+
 def ns(results, names):
     """'n.s.' when none of the named columns changed at p < 0.05, else the ones that did."""
     sig = [c for c in names if results[c]["p"] < ALPHA]
@@ -444,8 +466,7 @@ def run(seed, inputs="inputs", results="results"):
         "timelines": (f"F2 already {pct(tl['2023']['already'])}% (2021 {pct(tl['2021']['already'])}%), never "
                       f"{pct(tl['2023']['never'])}% (2021 {pct(tl['2021']['never'])}%); z test p {tl['p_already']:.3g}"
                       f" and {tl['p_never']:.3g}"),
-        "printed_values": (f"{len(matched)} of {len(printed)} as printed"
-                           + ("; not: " + ", ".join(x["what"] for x in differs) if differs else ""))[:LIMIT],
+        "printed_values": listed(matched, printed, differs),
         "bootstrap_95ci": (f"share yes {boot['share'][0]:.4f} to {boot['share'][1]:.4f}; legal rights "
                            f"{boot['rights'][0]:.4f} to {boot['rights'][1]:.4f}; index changes MP "
                            f"{boot['mp_change'][0]:.2f} to {boot['mp_change'][1]:.2f}, MC {boot['mc_change'][0]:.3f} "

@@ -211,6 +211,17 @@ class Verdict(unittest.TestCase):
         out, _ = self.run_on((d21, d23))
         self.assertEqual(out["conditions_met"], 1)
 
+    def test_listed(self):
+        printed = [("a", "1", "1")] + [(f"value number {i}, %", "2", "3") for i in range(12)]
+        differs = [{"what": w, "computed": c, "printed": p} for w, c, p in printed[1:]]
+        got = M.listed(["a"], printed, differs)
+        self.assertLessEqual(len(got), M.LIMIT)
+        self.assertTrue(got.startswith("1 of 13 as printed; not: value number 0, %; "))
+        self.assertRegex(got, r"; and [0-9]+ more$")
+        shown = got.split("; not: ")[1].rsplit("; and ", 1)[0].split("; ")
+        self.assertTrue(all(x in [d["what"] for d in differs] for x in shown))   # whole names only
+        self.assertEqual(M.listed(["a"], printed[:1], []), "1 of 1 as printed")
+
     def test_outputs_named(self):
         self.assertEqual(len(M.OUTPUTS), len(set(M.OUTPUTS)))
         self.assertLessEqual(len(M.OUTPUTS), 20)
