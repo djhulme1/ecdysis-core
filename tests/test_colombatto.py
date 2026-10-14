@@ -116,6 +116,13 @@ class Statistics(unittest.TestCase):
         w = M.welch([1, 2, 3], [4, 5, 6])
         self.assertAlmostEqual(w["df"], 4.0, places=12)
 
+    def test_sign_only(self):
+        self.assertTrue(M.sign_only("-178.25", "178.25"))
+        self.assertTrue(M.sign_only("-226.33, -130.18", "130.18, 226.33"))
+        self.assertFalse(M.sign_only("-178.24", "178.25"))
+        self.assertFalse(M.sign_only("142, 152, 2, 4", "152, 142, 2, 4"))        # no sign: a real difference
+        self.assertFalse(M.sign_only("-0.94", "-0.95"))
+
 
 class Pca(unittest.TestCase):
     def test_imputation_and_orientation(self):

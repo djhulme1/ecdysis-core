@@ -364,6 +364,14 @@ def fmt(v, k=2):
     return f"{v:.{k}f}"
 
 
+def sign_only(computed, printed):
+    """A printed value that differs from the computed one only by minus signs (an interval's ends then swap)."""
+    nums = re.compile(r"-?[0-9]+(?:\.[0-9]+)?")
+    a, b = nums.findall(computed), nums.findall(printed)
+    return ("-" in computed + printed and len(a) == len(b) and len(a) > 0
+            and sorted(x.lstrip("-") for x in a) == sorted(x.lstrip("-") for x in b))
+
+
 def run(seed, inputs="inputs", results="results"):
     if not re.fullmatch(r"[0-9a-f]{64}", seed):
         raise Refused("the seed must be 64 hex characters")
@@ -435,7 +443,7 @@ def run(seed, inputs="inputs", results="results"):
         ("rating against predictions, paired t(299)", fmt(abs(pt["t"])), "10.90"),
     ]
     matched = [w for w, c, p in printed if c == p]
-    differs = [{"what": w, "computed": c, "printed": p, "sign_only": c.replace("-", "") == p.replace("-", "")}
+    differs = [{"what": w, "computed": c, "printed": p, "sign_only": sign_only(c, p)}
                for w, c, p in printed if c != p]
     signs = [x["what"] for x in differs if x["sign_only"]]
     others = [x["what"] for x in differs if not x["sign_only"]]
