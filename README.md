@@ -3331,3 +3331,43 @@ mitoglitazone increased 90% survival, rests on those printed p (0.01, 0.01,
 0.19). The workbook records epicatechin's dose as 60 ppm, where Table S2 gives
 the target as 600 ppm. Controls 6 of 6. A trial under a seed of Imago's own
 found no bug, and the sealed run repeated its outputs exactly.
+
+## ca/cst.py: Capcarrere, Sipper & Tomassini's rule 184 density classifier (1996)
+
+`ca/cst.py` (with `ca/cst.c`) tests claim `ext:7b0e8ed6ac7a5abd`, Capcarrere,
+Sipper and Tomassini, "Two-state, r=1 Cellular Automaton that Classifies
+Density" (Phys. Rev. Lett. 77, 4969, 1996): by changing the output
+specification, "a two-state, r = 1 cellular automaton exists that can
+perfectly solve the density problem". Land and Belew had proved that no
+two-state automaton classifies density by converging to all 0s or all 1s; the
+paper's theorem is that rule 184, after ⌈N/2⌉ steps on a ring of N cells,
+holds a block of two cells of the majority state and none of the other (or
+alternates, at exactly one half). The module runs the rule as the paper
+defines it on every configuration of every ring of 3 to 28 cells.
+
+| Command | Claim |
+|---|---|
+| `python3 ca/cst.py` | Capcarrere, Sipper & Tomassini 1996: rule 184 classifies density by its blocks |
+
+Python's standard library and the image's gcc; about a minute. Tests:
+`python3 -m unittest discover -s tests -p test_cst.py`. The receipt
+(`93871f3d…`, 14 October, at `3a18bc2`, a reproduction, the claim having no
+data of record): all 536,870,904 configurations of the rings of 3 to 28 cells
+meet the theorem's specification at ⌈N/2⌉. Beside it, the most steps any
+configuration needs is ⌊(N − 2)/2⌋, below ⌈N/2⌉ (the bound Fukś's
+Proposition 2 gives for the same rule), and no configuration loses the state
+once reached. Of all 256 elementary rules, only 184 and 226 (its mirror) meet
+the specification on every configuration of every ring of 3 to 16 cells, as the
+paper's footnote 13 found on a sample; on 1,000 seed-drawn rings of 149 cells
+the next rules come nowhere near: in the trial's sample rules 57 and 99 reach
+57.5% and 57.0% (the footnote's "60%"), against 51.8% for a rule that always
+answers one way; in the sealed run's they reach 52.1% and 52.7%, level with it.
+Figure 1(d) ends, as its caption says, in a single block of two 1s. The
+paper's remark on the final blocks does not hold as printed: the number of
+adjacent pairs of the majority state, its (Σ a_i) − m, equals the number of 1s
+short of or in excess of ⌊N/2⌋ in only 27,088,869 of the 482,693,114
+configurations with both states and a density other than one half (on odd
+rings, those one cell above half), and it is always |2k − N|, the difference
+between the two states' counts. Controls 7 of 7. A trial under a seed of
+Imago's own found no bug; the sealed run repeated every output but the
+seed-drawn sample.
