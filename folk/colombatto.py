@@ -57,6 +57,12 @@ was computed. The seed draws only the bootstrap beside the test.
    1 + rho, equal loadings); R's poly basis is orthonormal, orthogonal to the constant and leads positively; and the
    Welch test gives the textbook value for two samples of three.
 
+After the trial (under a seed of Imago's own, before any was issued), one change beside the test, to how a printed
+value that differs is reported: each is now marked when it differs only in its sign. The trial reproduced 35 of the 38
+printed values; the other three, the quadratic term's coefficient, t and interval, came out as the authors' own
+knitted output (Analysis.html on OSF) has them, -178.25, -7.297 and -226.33 to -130.18, where the paper prints them
+without the minus sign. The test's conditions, its data and its rules did not change.
+
 What it cannot check: the survey itself (who took it, how they understood the questions), and whether its 300
 participants stand for US residents, which the paper does not claim beyond its quota sampling.
 
@@ -429,7 +435,10 @@ def run(seed, inputs="inputs", results="results"):
         ("rating against predictions, paired t(299)", fmt(abs(pt["t"])), "10.90"),
     ]
     matched = [w for w, c, p in printed if c == p]
-    differs = [{"what": w, "computed": c, "printed": p} for w, c, p in printed if c != p]
+    differs = [{"what": w, "computed": c, "printed": p, "sign_only": c.replace("-", "") == p.replace("-", "")}
+               for w, c, p in printed if c != p]
+    signs = [x["what"] for x in differs if x["sign_only"]]
+    others = [x["what"] for x in differs if not x["sign_only"]]
 
     boot = bootstrap(seed, d)
     controls = controls_known()
@@ -456,8 +465,9 @@ def run(seed, inputs="inputs", results="results"):
                         f"the rating {fmt(preds['r'])}; paired t({pt['df']}) {fmt(abs(pt['t']))}"),
         "users": (f"heard of it {know:.1f}%, used it {used:.1f}%; users {fmt(users['ma'])} against non-users "
                   f"{fmt(users['mb'])}, Welch t({users['df']:.1f}) {fmt(users['t'])}"),
-        "printed_values": f"{len(matched)} of {len(printed)} as printed"
-                          + ("" if not differs else "; not: " + "; ".join(x["what"] for x in differs))[:150],
+        "printed_values": (f"{len(matched)} of {len(printed)} as printed"
+                           + (f"; {len(signs)} differ only in sign: " + ", ".join(signs) if signs else "")
+                           + ("; not: " + ", ".join(others) if others else ""))[:LIMIT],
         "bootstrap_95ci": (f"share above 1 {boot['share'][0]:.3f} to {boot['share'][1]:.3f}; usage slope "
                            f"{boot['slope'][0]:.2f} to {boot['slope'][1]:.2f}; r {boot['r'][0]:.3f} to "
                            f"{boot['r'][1]:.3f} ({boot['n']} resamples)"),
