@@ -44,6 +44,8 @@ class Reading(unittest.TestCase):
                                        "e", "^", "{", "2", "}"])
         with self.assertRaises(M.Refused):
             M.tokens("a12*b22")
+        broken = M.normalise("\\left(a_{11}\\right)b_{12}c_{21}\\\\%8\n+a_{12}b_{21}c_{11}")
+        self.assertEqual(broken, "(a11)b12c21+a12b21c11")       # a % right after a line break is a comment
 
     def test_parser(self):
         self.assertEqual(poly("a_{11}+a_{12}-a_{11}"), {(("a12",), 0): 1})

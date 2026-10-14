@@ -21,7 +21,9 @@ random.
    geometry", whose equation blocks that begin "tau_{xyz}=" are the scheme, and the section on the partial approximate
    tensor T_epsilon from the paragraph on its type up to its remark on serendipitous equalities, whose blocks that
    begin "rho_{xyz}=" are that tensor; otherwise the run is refused.
-2. Reading the TeX: comments, labels, alignment marks, line breaks, \\left, \\right and spacing commands removed;
+2. Reading the TeX: comments, labels, alignment marks, line breaks, \\left, \\right and spacing commands removed
+   (line breaks first, so that a % right after a line break starts a comment: the first trial found the printed
+   scheme's "\\\\%8" read as an escaped percent and the run refused, which this fixes);
    a_{ij}, b_{ij}, c_{ij} read as the variables a_ij, b_ij, c_ij, \\epsilon as e. What is left is parsed as an
    algebraic expression: sums and differences of products of factors written side by side, a factor being a variable,
    e, a number, a parenthesised or braced expression, or \\frac{numerator}{denominator}, each with an optional power;
@@ -140,7 +142,7 @@ def blocks(text, name):
 
 
 def normalise(tex):
-    lines = [re.sub(r"(?<!\\)%.*$", "", line) for line in tex.split("\n")]
+    lines = [re.sub(r"(?<!\\)%.*$", "", line.replace("\\\\", " ")) for line in tex.split("\n")]
     s = " ".join(lines)
     s = re.sub(r"\\label\{[^}]*\}", "", s)
     for w in (r"\begin{split}", r"\end{split}", r"\begin{aligned}", r"\end{aligned}"):
