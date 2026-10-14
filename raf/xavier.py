@@ -32,8 +32,9 @@ the seed is not used, as nothing here is random.
 2. The food sets, Table S1's five. Food set 3 is Dataset S4's food set, as the paper ran it (68 names). Food set 2
    is food set 3 without its 25 organic cofactors (ORGANIC below, as Table S1 lists them), 43; food set 1 is food set
    2 without the abiotic organic carbon (acetate, formate, pyruvate and methanol), 39; food set 4 is food set 3 with
-   the generic catalyst "Peptide" (C00012), 69; food set 5 is food set 2 with the 20 proteinogenic amino acids and
-   the bases adenine, guanine, cytosine, thymine and uracil, 68. "Pooling" and "Spontaneous" are in all of them.
+   the generic catalyst "Peptide" (KEGG C00012, by the name the rules give it), 69; food set 5 is food set 2 with
+   the 20 proteinogenic amino acids and the bases adenine, guanine, cytosine, thymine and uracil, 68. "Pooling" and
+   "Spontaneous" are in all of them.
 3. The maxRAF, by Hordijk and Steel's algorithm as the paper's supplementary methods state it (its Algorithms 1 and
    2): a two-way reaction is two one-way halves with the same rule. Starting with every half, compute the closure of
    the food under the current halves (a half fires when all its reactants are present, adding its products, until
@@ -49,9 +50,10 @@ the seed is not used, as nothing here is random.
    hold.
 6. Beside the test:
    - all fifteen maxRAF sizes against Table S1's, and each maxRAF's reactions against Dataset S2's list;
-   - the global network as Dataset S4 writes it: the paper's own input file holds S1A's reactions with the same
-     rules, but writes some of the reactions S1A gives as two-way in one direction only, so it is run too, with all
-     five food sets, against Table S1's and Dataset S2's global column (the test reads Dataset S1, as registered);
+   - the three networks with each reaction as Dataset S4 writes it: the paper's own input file holds S1A's
+     reactions with the same rules, but writes some that S1A gives as two-way in one direction only, and a few that
+     S1B and S1C write one way in the other; so each network is run again, its reactions taken from S4 by number,
+     with all five food sets, against Table S1 and Dataset S2 (the test reads Dataset S1, as registered);
    - the amino acids and bases each autotroph's maxRAF generates with food set 3;
    - the primordial network: the reactions in both autotrophs' maxRAFs with food set 3 (the paper: 172), and that
      network's own maxRAF with the same food (the paper: 120 reactions, cysteine its only amino acid);
@@ -64,7 +66,13 @@ the seed is not used, as nothing here is random.
    catalysed by its own product) gives it; and each network's maxRAF grows with the food (food set 1 within 2 within
    3 within 4).
 
-The primordial network (rule 6) takes each reaction as the acetogen's network writes it, with its pooling reactions.
+The primordial network (rule 6) takes each reaction as the acetogen's network writes it, with its pooling reactions,
+for Dataset S1's versions and for S4's.
+
+Added after the trial, beside the test only (the trial ran under a seed of Imago's own, before any was issued): food
+set 4's catalyst by the name the rules use, "Peptide" (the rules never name C00012, so the trial's food set 4 was food
+set 3); and the autotrophs' networks with S4's versions of their reactions, the global network's having been run so
+from the start. The test's nine conditions and their inputs did not change.
 
 What it cannot check: the networks' curation (which KEGG reactions are ancient, which cofactors catalyse them) and the
 chemistry itself; a RAF is a property of the network as annotated.
@@ -96,7 +104,7 @@ ORGANIC = ("C00061", "C00018", "C00068", "C00003", "C05924", "C00541", "C00113",
            "C15494", "C00019", "Other_quinones", "C00101", "dipyrromethane", "TTQ", "C04054", "C00020", "C06021",
            "C01134", "C00828", "C00010", "C00138", "C00139")
 ABIOTIC = ("C00033", "C00058", "C00022", "C00132")          # acetate, formate, pyruvate, methanol
-PEPTIDE = "C00012"
+PEPTIDE = "Peptide"                                          # the name the rules give it (KEGG C00012)
 AMINO = {"C00037": "Gly", "C00041": "Ala", "C00049": "Asp", "C00152": "Asn", "C00097": "Cys", "C00188": "Thr",
          "C00025": "Glu", "C00064": "Gln", "C00062": "Arg", "C00148": "Pro", "C00065": "Ser", "C00073": "Met",
          "C00079": "Phe", "C00082": "Tyr", "C00078": "Trp", "C00135": "His", "C00047": "Lys", "C00123": "Leu",
@@ -114,10 +122,10 @@ PRIMORDIAL = (172, 120)                                      # the paper's inter
 NAME = re.compile(r"[A-Za-z0-9_\-]+")
 NS = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
       "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}
-S4 = "global as S4"
-OUTPUTS = ("networks", "food_sets", "maxraf_global", "maxraf_global_s4", "maxraf_ace", "maxraf_met", "table_s1",
-           "dataset_s2", "ace_fs3_generates", "met_fs3_generates", "fs5_against_fs3", "primordial", "without_nad_atp",
-           "controls_passed", "controls_total", "conditions_met", "conditions_total", "test_passed")
+OUTPUTS = ("networks", "food_sets", "maxraf_global", "maxraf_ace", "maxraf_met", "table_s1", "dataset_s2",
+           "ace_fs3_generates", "met_fs3_generates", "as_s4_fs3_generates", "fs5_against_fs3", "primordial",
+           "without_nad_atp", "controls_passed", "controls_total", "conditions_met", "conditions_total", "test_passed")
+TAGS = ("global", "Ace", "Met")
 LIMIT = 200
 
 
@@ -400,6 +408,15 @@ def names_of(ids, table):
     return [table[i] for i in table if i in ids]
 
 
+def as_s4(net, s4net):
+    """A network with each reaction as Dataset S4 writes it, by number."""
+    by = {x[0]: x for x in s4net}
+    missing = [x[0] for x in net if x[0] not in by]
+    if missing:
+        raise Refused(f"Dataset S4 lacks {len(missing)} reactions, {missing[:3]}")
+    return [by[x[0]] for x in net]
+
+
 def run(seed, inputs="inputs", results="results"):
     if not re.fullmatch(r"[0-9a-f]{64}", seed):
         raise Refused("the seed must be 64 hex characters")
@@ -409,63 +426,70 @@ def run(seed, inputs="inputs", results="results"):
     s4_food, s4_reactions = s4_file(data["s4"].decode("utf-8"))
     F = food_sets(s4_food)
     s2 = sheets(data["s2"])
-    every = {**nets, S4: s4_network(s4_reactions)}       # the test reads Dataset S1's three; S4's beside it
+    s4net = s4_network(s4_reactions)
+    # The test reads Dataset S1's three networks; beside it, the same three with each reaction as S4 writes it.
+    every = {(tag, v): (net if v == "S1" else as_s4(net, s4net)) for tag, net in nets.items() for v in ("S1", "S4")}
 
-    hs = {tag: halves(net) for tag, net in every.items()}
+    hs = {key: halves(net) for key, net in every.items()}
     raf, gen, alive_of = {}, {}, {}
-    for tag in every:
+    for key in every:
         for fs, food in F.items():
-            alive, W = max_raf(food, hs[tag])
-            alive_of[(tag, fs)] = alive
-            raf[(tag, fs)] = reactions_of(alive, hs[tag], every[tag])
-            gen[(tag, fs)] = W - food
+            alive, W = max_raf(food, hs[key])
+            alive_of[(key, fs)] = alive
+            raf[(key, fs)] = reactions_of(alive, hs[key], every[key])
+            gen[(key, fs)] = W - food
 
     # The test.
     cond = {}
     for tag, label in (("Ace", "acetogen"), ("Met", "methanogen")):
-        g = gen[(tag, "FS3")]
+        g = gen[((tag, "S1"), "FS3")]
         cond[f"{label}, food set 3: acetyl-CoA"] = ACCOA in g
         cond[f"{label}, food set 3: a proteinogenic amino acid"] = any(a in g for a in AMINO)
         cond[f"{label}, food set 3: a base"] = any(b in g for b in BASES)
-    for tag in nets:
-        cond[f"{tag}: food set 5 at most a tenth of food set 3"] = 10 * len(raf[(tag, "FS5")]) <= len(raf[(tag, "FS3")])
+    for tag in TAGS:
+        k = (tag, "S1")
+        cond[f"{tag}: food set 5 at most a tenth of food set 3"] = 10 * len(raf[(k, "FS5")]) <= len(raf[(k, "FS3")])
 
-    # Beside: Table S1 and Dataset S2, for Dataset S1's networks and, in the global column, for S4's.
-    column = {"global": 0, "Ace": 1, "Met": 2, S4: 0}
-    hits = {tag: [0, 0] for tag in every}             # sizes as Table S1 prints them; lists as Dataset S2 gives them
-    s2_rows, worst = {}, 0
+    # Beside: Table S1 and Dataset S2.
+    hits = {v: [0, 0] for v in ("S1", "S4")}           # sizes as Table S1 prints them; lists as Dataset S2 gives them
+    worst = {"S1": 0, "S4": 0}
+    s2_rows = {}
     for fs, sheet in S2_SHEETS.items():
         rows = s2.get(sheet)
         if not rows or [rows[0].get(c) for c in "ABC"] != ["Global", "Ace", "Met"]:
             raise Refused(f"Dataset S2 sheet {sheet!r} missing or not headed Global, Ace, Met")
-        for tag, i in column.items():
+        for i, tag in enumerate(TAGS):
             col = "ABC"[i]
             listed = sorted({r[col] for r in rows[1:] if r.get(col)})
-            ours = raf[(tag, fs)]
-            diff = len(set(listed) ^ set(ours))
-            hits[tag][0] += int(len(ours) == TABLE_S1[fs][1 + i])
-            hits[tag][1] += int(diff == 0)
-            if tag in nets:
-                worst = max(worst, diff)
-            s2_rows[f"{fs} {tag}"] = {"ours": len(ours), "table_s1": TABLE_S1[fs][1 + i], "dataset_s2": len(listed),
-                                      "only_ours": sorted(set(ours) - set(listed)),
-                                      "only_dataset_s2": sorted(set(listed) - set(ours))}
+            for v in ("S1", "S4"):
+                ours = raf[((tag, v), fs)]
+                diff = len(set(listed) ^ set(ours))
+                hits[v][0] += int(len(ours) == TABLE_S1[fs][1 + i])
+                hits[v][1] += int(diff == 0)
+                worst[v] = max(worst[v], diff)
+                s2_rows[f"{fs} {tag} {v}"] = {"ours": len(ours), "table_s1": TABLE_S1[fs][1 + i],
+                                              "dataset_s2": len(listed), "only_ours": sorted(set(ours) - set(listed)),
+                                              "only_dataset_s2": sorted(set(listed) - set(ours))}
 
     # Beside: the primordial network, and NAD+ and ATP.
-    both = sorted(set(raf[("Ace", "FS3")]) & set(raf[("Met", "FS3")]))
-    ace_rows = {x[0]: x for x in nets["Ace"]}
-    pool = [x for x in nets["Ace"] if x[0].startswith("R_")]
-    prim_net = [ace_rows[n] for n in both] + pool
-    prim_hs = halves(prim_net)
-    prim_alive, prim_W = max_raf(F["FS3"], prim_hs)
-    prim_raf = reactions_of(prim_alive, prim_hs, prim_net)
-    prim_gen = prim_W - F["FS3"]
-    both_gen = closure(F["FS3"], prim_hs, set(range(len(prim_hs)))) - F["FS3"]
+    prim = {}
+    for v in ("S1", "S4"):
+        both = sorted(set(raf[(("Ace", v), "FS3")]) & set(raf[(("Met", v), "FS3")]))
+        rows_by = {x[0]: x for x in every[("Ace", v)]}
+        pnet = [rows_by[n] for n in both] + [x for x in every[("Ace", v)] if x[0].startswith("R_")]
+        phs = halves(pnet)
+        palive, pW = max_raf(F["FS3"], phs)
+        allW = closure(F["FS3"], phs, set(range(len(phs))))
+        prim[v] = {"both": both, "maxraf": reactions_of(palive, phs, pnet),
+                   "amino_acids_of_its_maxraf": names_of(pW - F["FS3"], AMINO),
+                   "bases_of_its_maxraf": names_of(pW - F["FS3"], BASES),
+                   "amino_acids_of_both": names_of(allW - F["FS3"], AMINO),
+                   "bases_of_both": names_of(allW - F["FS3"], BASES)}
     without = {}
-    for tag in every:
+    for key in every:
         for m, mname in ((NAD, "NAD+"), (ATP, "ATP")):
-            alive, _ = max_raf(F["FS3"] - {m}, hs[tag])
-            without[(tag, mname)] = len(reactions_of(alive, hs[tag], every[tag]))
+            alive, _ = max_raf(F["FS3"] - {m}, hs[key])
+            without[(key, mname)] = len(reactions_of(alive, hs[key], every[key]))
 
     # Controls.
     toy_net = toy()
@@ -473,44 +497,53 @@ def run(seed, inputs="inputs", results="results"):
     toy_alive, toy_W = max_raf(TOY_FOOD, toy_hs)
     partition = len(s4_food) == len(F["FS1"]) + len(ABIOTIC) + len(ORGANIC) and \
         set(s4_food) == set(F["FS1"]) | set(ABIOTIC) | set(ORGANIC)
-    same, directions = against_s1a(nets["global"], every[S4])
+    same, directions = against_s1a(nets["global"], s4net)
+    differ = {tag: sum(1 for a, b in zip(nets[tag], every[(tag, "S4")]) if a != b) for tag in TAGS}
     controls = {
         "Dataset S4 holds S1A's reactions (rules and compounds; directions apart), and its food set is food set 1, "
         "the abiotic carbon and the cofactors": same and partition,
         "every maxRAF found is a RAF, from which nothing more can be dropped":
-            all(is_raf(F[fs], hs[tag], alive_of[(tag, fs)]) for tag in every for fs in F),
+            all(is_raf(F[fs], hs[key], alive_of[(key, fs)]) for key in every for fs in F),
         "the small system's maxRAF is the known one":
             reactions_of(toy_alive, toy_hs, toy_net) == TOY_MAXRAF and set(toy_W - TOY_FOOD) == TOY_MAKES,
-        "each maxRAF grows with the food": all(set(raf[(t, a)]) <= set(raf[(t, b)]) for t in every
+        "each maxRAF grows with the food": all(set(raf[(k, a)]) <= set(raf[(k, b)]) for k in every
                                                for a, b in (("FS1", "FS2"), ("FS2", "FS3"), ("FS3", "FS4"))),
     }
 
     def sizes(tag):
-        return ", ".join(f"{fs} {len(raf[(tag, fs)])}" for fs in F)
+        return "; ".join(f"{'Dataset S1' if v == 'S1' else 'as S4'} " + ", ".join(str(len(raf[((tag, v), fs)]))
+                                                                                for fs in F) for v in ("S1", "S4"))
 
-    def generates(tag):
-        g = gen[(tag, "FS3")]
+    def generates(key):
+        g = gen[(key, "FS3")]
         return (f"acetyl-CoA {'yes' if ACCOA in g else 'no'}; amino acids {len([a for a in AMINO if a in g])}: "
                 f"{' '.join(names_of(g, AMINO)) or 'none'}; bases: {' '.join(names_of(g, BASES)) or 'none'}")
 
-    short = {"global": "global", "Ace": "Ace", "Met": "Met", S4: "S4"}
+    def brief(key):
+        g = gen[(key, "FS3")]
+        return (f"acetyl-CoA {'yes' if ACCOA in g else 'no'}, {len([a for a in AMINO if a in g])} amino acids, "
+                f"{len([b for b in BASES if b in g])} bases")
+
     values = {
         "networks": ("; ".join(f"{tag} {len(net) - POOLING}" for tag, net in nets.items())
-                     + f" reactions (+{POOLING} pooling each); S4 writes {directions} of S1A's in another direction"),
+                     + f" reactions (+{POOLING} pooling each); S4 writes " + ", ".join(
+                         f"{differ[t]}" for t in TAGS) + " of them in another direction"),
         "food_sets": ", ".join(f"{fs} {len(food)}" for fs, food in F.items()),
-        "maxraf_global": sizes("global"), "maxraf_global_s4": sizes(S4),
-        "maxraf_ace": sizes("Ace"), "maxraf_met": sizes("Met"),
-        "table_s1": (f"{sum(hits[t][0] for t in nets)} of 15 sizes as printed; the global network as S4 writes it "
-                     f"{hits[S4][0]} of 5"),
-        "dataset_s2": (f"{sum(hits[t][1] for t in nets)} of 15 maxRAFs as listed, the largest difference {worst} "
-                       f"reactions; as S4 writes it {hits[S4][1]} of 5"),
-        "ace_fs3_generates": generates("Ace"), "met_fs3_generates": generates("Met"),
-        "fs5_against_fs3": "; ".join(f"{short[tag]} {len(raf[(tag, 'FS5')])} of {len(raf[(tag, 'FS3')])}"
-                                     for tag in every),
-        "primordial": (f"{len(both)} reactions in both (printed {PRIMORDIAL[0]}); its maxRAF {len(prim_raf)} (printed "
-                       f"{PRIMORDIAL[1]}), amino acids {' '.join(names_of(prim_gen, AMINO)) or 'none'}"),
-        "without_nad_atp": "; ".join(f"{short[tag]} {len(raf[(tag, 'FS3')])}/{without[(tag, 'NAD+')]}/"
-                                     f"{without[(tag, 'ATP')]}" for tag in every) + " (all, no NAD+, no ATP)",
+        "maxraf_global": sizes("global"), "maxraf_ace": sizes("Ace"), "maxraf_met": sizes("Met"),
+        "table_s1": f"Dataset S1's networks {hits['S1'][0]} of 15 sizes as printed; as S4 writes them {hits['S4'][0]} of 15",
+        "dataset_s2": (f"Dataset S1's networks {hits['S1'][1]} of 15 maxRAFs as listed (the largest difference "
+                       f"{worst['S1']}); as S4 writes them {hits['S4'][1]} of 15 (largest {worst['S4']})"),
+        "ace_fs3_generates": generates(("Ace", "S1")), "met_fs3_generates": generates(("Met", "S1")),
+        "as_s4_fs3_generates": f"Ace {brief(('Ace', 'S4'))}; Met {brief(('Met', 'S4'))}",
+        "fs5_against_fs3": "; ".join(f"{v} " + ", ".join(f"{tag} {len(raf[((tag, v), 'FS5')])} of "
+                                                          f"{len(raf[((tag, v), 'FS3')])}" for tag in TAGS)
+                                     for v in ("S1", "S4")),
+        "primordial": "; ".join(f"{v} {len(prim[v]['both'])} in both, its maxRAF {len(prim[v]['maxraf'])} (amino "
+                                f"acids {' '.join(prim[v]['amino_acids_of_its_maxraf']) or 'none'})" for v in ("S1", "S4"))
+                      + f" (printed {PRIMORDIAL[0]} and {PRIMORDIAL[1]}, Cys)",
+        "without_nad_atp": "as S4: " + "; ".join(f"{tag} {len(raf[((tag, 'S4'), 'FS3')])}/{without[((tag, 'S4'), 'NAD+')]}/"
+                                                 f"{without[((tag, 'S4'), 'ATP')]}" for tag in TAGS)
+                           + " (all, no NAD+, no ATP)",
         "controls_passed": sum(controls.values()), "controls_total": len(controls),
         "conditions_met": sum(cond.values()), "conditions_total": len(cond), "test_passed": int(all(cond.values())),
     }
@@ -521,17 +554,17 @@ def run(seed, inputs="inputs", results="results"):
     detail = {
         "inputs": {k: {"name": n, "sha256": s} for k, (n, s) in INPUTS.items()},
         "food_sets": {fs: sorted(food) for fs, food in F.items()},
-        "conditions": cond, "controls": controls, "directions_differing_s1a_s4": directions,
-        "maxraf": {f"{fs} {tag}": raf[(tag, fs)] for tag in every for fs in F},
-        "generates": {f"{fs} {tag}": {"acetyl-CoA": ACCOA in gen[(tag, fs)],
-                                       "amino_acids": names_of(gen[(tag, fs)], AMINO),
-                                       "bases": names_of(gen[(tag, fs)], BASES), "count": len(gen[(tag, fs)])}
-                      for tag in every for fs in F},
+        "conditions": cond, "controls": controls,
+        "directions": {"S1A against S4": directions, **{f"{t} against S4": differ[t] for t in TAGS}},
+        "maxraf": {f"{fs} {tag} {v}": raf[((tag, v), fs)] for (tag, v) in every for fs in F},
+        "generates": {f"{fs} {tag} {v}": {"acetyl-CoA": ACCOA in gen[((tag, v), fs)],
+                                           "amino_acids": names_of(gen[((tag, v), fs)], AMINO),
+                                           "bases": names_of(gen[((tag, v), fs)], BASES),
+                                           "count": len(gen[((tag, v), fs)])}
+                      for (tag, v) in every for fs in F},
         "against_table_s1_and_dataset_s2": s2_rows,
-        "primordial": {"both": both, "maxraf": prim_raf, "amino_acids_of_its_maxraf": names_of(prim_gen, AMINO),
-                       "bases_of_its_maxraf": names_of(prim_gen, BASES),
-                       "amino_acids_of_both": names_of(both_gen, AMINO), "bases_of_both": names_of(both_gen, BASES)},
-        "without": {f"{tag} {m}": n for (tag, m), n in without.items()},
+        "primordial": prim,
+        "without": {f"{tag} {v} {m}": n for ((tag, v), m), n in without.items()},
     }
     os.makedirs(results, exist_ok=True)
     with open(os.path.join(results, "outputs.json"), "w", encoding="ascii") as fh:
