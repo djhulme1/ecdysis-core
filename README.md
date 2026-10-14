@@ -2231,3 +2231,42 @@ every model ends dominated by size 4 except poisoning, where size 5 leads (196
 of 343 loops); from the other the population stays sparse and large (sizes 13
 to 15), as the paper says; counting the attack detector as sheath moves no
 mean by more than 0.009.
+
+## vdw/: van der Waerden numbers w(2;3,t) above t² for t = 24 to 30
+
+`vdw/aks.py` tests claim `ext:de5e8c7ceb990860`, Ahmed, Kullmann and Snevily,
+"On the van der Waerden numbers w(2;3,t)" (Discrete Applied Mathematics 174,
+2014; arXiv:1102.5433): the lower bounds for 24 ≤ t ≤ 30 refute the conjecture
+that w(2;3,t) ≤ t², and the paper presents an improved one. Its input is the
+claim's data of record, the e-print's one TeX file. The appendix's
+certificates, good partitions printed in the paper's notation (bits, with
+exponents for repetition), are read from the TeX and checked against its
+definition: a word's 0s hold no 3-term arithmetic progression and its 1s no
+t-term one. The test: for every t from 24 to 30 the word is a good partition
+of {1, …, n − 1} for its bound n, and n − 1 ≥ t². Beside it: the same check
+for t = 20 to 23 and 31 to 39 and for the 348-letter example behind
+w(2;3,19) = 349; the headings against the paper's tables; a letter appended to
+each word for t = 20 to 30; the 74 good palindromic partitions, expanded from
+the halves the paper prints; and the improved conjecture, w(2;3,t) ≤ 77/46 t²,
+with its d and its Ansatz recomputed.
+
+| Command | Claim |
+|---|---|
+| `python3 vdw/aks.py` | Ahmed, Kullmann and Snevily: w(2;3,t) > t² for 24 ≤ t ≤ 30, refuting w(2;3,t) ≤ t² |
+
+Standard library, in the pinned python image; a few seconds. The receipt
+(`74a9397b…`, 14 October, at `18f989f`, a verification): all seven words for
+t = 24 to 30 are good partitions of the right length, n − 1 exceeding t² by
+16, 30, 50, 40, 42, 26 and 2 (t = 30's word has 902 letters against 900); all
+20 certificates for t = 20 to 39 and the 348-letter example are good, and
+their headings match the tables (11 of 11, 9 of 9); neither letter can be
+appended to any word for t = 20 to 30; all 74 palindromic partitions are good
+palindromes. Every value the paper prints for t = 3 to 39 lies within
+77/46 t², and its d is 77/23, at t = 24, as printed. But the closed form it
+prints for its Ansatz, d/2 t² − 3/2 d t + 9 − 2d, is the sum only to t − 2,
+short of w_t = 9 + d(3 + … + (t − 1)) by d(t − 1) at every t; the right form,
+d/2 t² − d/2 t + 9 − 3d, is still below d/2 t², so the bound stands. Controls
+4 of 4, among them w(2;3,3) = 9 and w(2;3,4) = 18 by enumeration. What it
+cannot check: w(2;3,19) = 349 itself (the authors' proof that no good
+partition of {1, …, 349} exists took roughly 196 years of CPU time) and the
+exactness conjectured for t = 20 to 30.
