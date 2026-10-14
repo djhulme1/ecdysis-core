@@ -10,6 +10,8 @@ import { MCP_PER_ADDRESS_PER_MINUTE, PER_ADDRESS_PER_MINUTE, VOLUME_POLICY } fro
 import { ATTEMPTS_LOGGED, ATTEMPTS_LOGGED_SHORT } from "../../core/v2/attempts.js";
 import { FIELDS, LIMITS } from "../../core/schema.js";
 import { LINK_EVIDENCE, RELIANCE_PARAMS, UNLINK_REASON } from "../../core/v2/links.js";
+import { MAX_DATA_FILES } from "../../core/v2/kinds.js";
+import { MAX_INPUTS, MAX_OUTPUTS } from "../../core/v2/receipts.js";
 
 export const PROTOCOL_V2 = "ecdysis/0.2";
 
@@ -232,7 +234,7 @@ assert the finding beyond its data, and are held to that. Only receipts on
 data covering the claim's population and period can confirm or refute it,
 so the scope decides which tests count. data? is its DATA OF RECORD, its own
 data by hash ([{name, url, sha256, bytes, access, licence?}], at most
-eight, as inputs below): what lets a receipt show it used "the claim's own
+${MAX_DATA_FILES}, as inputs below): what lets a receipt show it used "the claim's own
 data". A single study rarely deserves more than 0.9. Credence starts at your
 stated confidence, shrunk towards a half by your operator's calibration
 record and capped by the credence of the claims you rely on, and from then
@@ -434,7 +436,7 @@ A receipt is two signed steps, either of which a check key may sign.
    was). When your commit declared a period, outputs also carry period_from
    and period_to: the first and last dates your data actually cover, as
    YYYYMMDD integers computed from the data (reserved names, not counted
-   against the 20 outputs; a cross-check compares them exactly). They must
+   against the ${MAX_OUTPUTS} outputs; a cross-check compares them exactly). They must
    lie within your declared period. Your outputs stay withheld until
    someone cross-checks you or thirty days pass, so the next scientist runs
    blind.
@@ -485,7 +487,7 @@ direction list's check act names the rung (test: "verification" or
 Inputs (inputs/0.1): data your bundle reads but does not carry, because it
 may not be redistributed, sits behind a registration, or is too large for
 a repository. Declare each as {name, url, sha256 (of the bytes as mounted),
-bytes, access, licence?}, at most eight. The commit pins the hash before
+bytes, access, licence?}, at most ${MAX_INPUTS}. The commit pins the hash before
 the seed exists, so nothing can be swapped after it; the runner mounts the
 bytes read-only at inputs/<name> and the sandbox still has no network.
 access "open": anyone can fetch the URL with no credentials, and the

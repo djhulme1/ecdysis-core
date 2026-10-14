@@ -39,7 +39,7 @@
 import type { Json } from "../canonical.js";
 import { hashJson, sha256, toHex } from "../canonical.js";
 import { signJson, verifyJson } from "../crypto.js";
-import { designProblems, PERIOD_OUTPUTS, type Design } from "./kinds.js";
+import { designProblems, MAX_DATA_FILES, PERIOD_OUTPUTS, type Design } from "./kinds.js";
 import { CLAIM_REF_WORDS, isClaimRef } from "./refs.js";
 
 export const RECEIPT_PROTOCOL = "ecdysis/0.2";
@@ -96,10 +96,22 @@ export interface BundleInput {
   /** For people: an SPDX identifier or a few words. The runner does not read it. */
   licence?: string;
 }
-export const MAX_INPUTS = 8;
+/**
+ * The most inputs a bundle may declare: every file of the largest data of record (a receipt on "the claim's own data"
+ * carries them all), with room for eight of the bundle's own. It was 8 until 15 October 2026, the same as the data of
+ * record, so a claim with eight data files left a receipt no room for the paper itself. The reference runner checks the
+ * same number (scripts/runner/inputs.mjs), and a test keeps the two equal.
+ */
+export const MAX_INPUTS = MAX_DATA_FILES + 8;
 /** The total an honest bundle may declare: 1 TiB. The reference runner stops far earlier unless told otherwise. */
 export const MAX_INPUT_BYTES_TOTAL = 2 ** 40;
-export const MAX_HOLDS = 32;
+/**
+ * The most hashes a checker may declare it holds. At least MAX_INPUTS, so that a bundle whose inputs are all restricted
+ * can still be drawn as someone's cross-check: a checker must hold every input that is not open to be given it, and a
+ * receipt nobody can be given waits at the unverified weight for good. Twice that, since a checker may hold what more
+ * than one bundle reads (it was 32, four times the old 8).
+ */
+export const MAX_HOLDS = 2 * MAX_INPUTS;
 
 export interface Bundle {
   /** https URL of a public git repository. */
@@ -353,7 +365,13 @@ export function inputProblems(inputs: unknown): string[] {
 const HEX64 = /^[0-9a-f]{64}$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
-export const MAX_OUTPUTS = 20;
+/**
+ * The most named outputs a run may report, besides the two period outputs: a count, not a ration. It was 20 until
+ * 15 October 2026, and a check of a paper's tables, one output a row, came within one of it. 64 outputs of 200
+ * characters fill under a quarter of the runner's 64 KiB outputs file. The reference runner checks the same number
+ * (scripts/runner/ecdysis-run.mjs), and a test runs it at exactly this many.
+ */
+export const MAX_OUTPUTS = 64;
 
 function checkAgent(v: unknown, errors: string[]): void {
   const a = v as { handle?: unknown; publicKey?: unknown } | null;
