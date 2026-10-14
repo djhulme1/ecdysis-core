@@ -36,6 +36,13 @@ any progression counted.
    b. The power residue colouring of 1..p (Eq. 1): j in 2..p lies in C_i, where rho^e = j - 1 (mod p) with e in
       1..p - 1 and i = ((e - 1) mod r) + 1, that is rho^(i + qr) (mod p) + 1 for q = 0..(p - 1)/r - 1; and
       "Additionally, number 1 will be put in C1."
+   b'. The labels (Section 3.2.1): "For visualization purposes we assume permutation pi is applied for all
+      PW(r, k, n)", a point symmetric certificate's classes relabelled so that the reverse of C_i (j := n + 2 - j for
+      j = 2..n, n odd) is C_(r+1-i), and Section 4.3 zips a cPW. Where the colouring of 2b is point symmetric (the
+      reverse maps each class onto one class, an involution without a fixed class), pi is applied before zipping:
+      the classes in increasing order, the first unlabelled one takes the smallest free label i and its partner
+      r + 1 - i (for 37, the third and fourth rows interchanged, as Section 4.2 says). Otherwise the labels of 2b
+      stand. Number 1 keeps C1 either way.
    c. Zipping (Section 4.3), z times, a certificate of length m giving one of length 2m: spreading, j := 2j - 1;
       turning, C**_i := C*_(r+1-i); shifting, j := j - p (mod 2m), in 1..2m; merging, C****_i := C*_i u C***_i. The
       shift is p each time ("using the original certificate length to shift", Section 4.3, and Figure 8). The merged
@@ -62,11 +69,14 @@ any progression counted.
    (a printed "> m" bounds W(r, k) by m, a known value W by W - 1) are exactly the seven in bold; each of the seven
    has n = (k - 1) 2^z p + 1; and each of the seven holds (4). test_passed is 1 if all three hold.
 6. Beside the test, none of it counted: the other eight rows of Table 3 checked the same way; the text's own
-   certificate for all fifteen; Table 4's entries for r = 2, 4 and 6 against Table 3's results; the least primitive
-   roots; and the number of progressions examined.
+   certificate for all fifteen; the seven checked again with the labels of 2b (no pi), the reading the first program
+   took (raw_reading); Table 4's entries for r = 2, 4 and 6 against Table 3's results, as bounds (a known value W
+   printed without ">" bounds W(r, k) by W - 1); the least primitive roots; and the number of progressions examined.
 
 Controls (controls_passed counts those that behave as stated): the power residue colouring of 37 over 4 rows with
-rho = 2, the least primitive root of 37, is the paper's Table 2, entry for entry; hhlm.c's scan and forbid agree with
+rho = 2, the least primitive root of 37, is the paper's Table 2, entry for entry; its pi interchanges the third and
+fourth rows and no others (Section 4.2: "Notice that the third and fourth row are interchanged to show the point
+symmetry"); hhlm.c's scan and forbid agree with
 a direct enumeration in Python on 30 seed-drawn colourings (lengths 20 to 90, 2 to 4 classes, k from 3 to 5, some
 numbers free); a progression in one class planted at a seed-drawn place in the text's own certificates for W(2, 8),
 W(4, 5) and W(2, 9) is found by the scan; the certificates for W(2, 4), W(2, 5) and W(4, 3), of 34, 177 and 75
@@ -75,6 +85,18 @@ numbers, hold no progression and none extends by one number in any class, as the
 between n/3 and (n - 1)/2 (so that, as in the certificates, a progression with two free numbers has only free
 numbers), the search finds a colouring exactly when one of the r^3 does by exhaustion; and for every prime of
 Table 3, rho's powers run through all p - 1 residues and no smaller number's do.
+
+Changed after the trial (14 October; the rules were first committed at 7bfd00d). A trial in the reference runner,
+under a seed of Imago's own, showed two faults. (1) The first program turned the classes as 2b labels them (rule
+2b' was not there). With those labels, the seven held in 2 of 7: W(4,5), W(4,6), W(4,7), W(6,5) and W(6,6), the
+rows with r = 4 or 6 and z >= 1, failed, with 5,478,608 progressions in one class among them, the first of each a
+run of k consecutive numbers; the other ten rows held. Reading the paper again, its point symmetric certificates are
+labelled with pi applied (Section 3.2.1, and Section 4.2 for 37), and the certificate Section 4.3 zips is a cPW, so
+the turning acts on those labels. For r = 2 the turning swaps the two classes under any labels, so nothing changes;
+for r = 4 and 6 it maps each class to its point symmetric partner, not to C_(r+1-i) of 2b. Rule 2b' was added and
+the first reading is kept beside (raw_reading), not counted. This change was made after the trial's outcome was
+seen. (2) Table 4 prints the known values 35, 178 and 76 without ">", and the first program compared them with
+Table 3's bounds as printed, so 12 of 15 agreed; they are now compared as bounds (rule 6).
 
 What it cannot check: that Table 1 held the best bounds known in 2005 and 2006 (its note 4 marks some as unpublished
 bounds that Rabung's method could establish), the paper's account of how the primes were found, and its remark that
@@ -151,7 +173,7 @@ PLANT_IN = ((2, 8), (4, 5), (2, 9))
 SCAN_CONTROLS = 30
 SEARCH_CONTROLS = 10
 OUTPUTS = ("statements", "tables", "improved", "lengths", "roots", "seven", "progressions", "monochromatic", "free",
-           "text_own", "others", "exact", "table4", "conditions_met", "conditions_total", "test_passed",
+           "text_own", "others", "raw_reading", "exact", "table4", "conditions_met", "conditions_total", "test_passed",
            "controls_passed", "controls_total")
 
 
@@ -486,6 +508,39 @@ def power_residue(p, r, rho):
     return col, free
 
 
+def point_symmetric_labels(col, r):
+    """Rule 2b': the permutation pi (raw class -> label) making the certificate's reverse map C_i onto C_(r+1-i), or
+    None if the certificate is not point symmetric. Odd lengths only, number 1 set apart (the paper's j = 2..n)."""
+    n = len(col)
+    if n % 2 == 0:
+        raise Refused("point symmetry is read here for odd lengths only")
+    sigma = {}
+    for j in range(2, n + 1):
+        a, b = col[j - 1], col[n + 2 - j - 1]
+        if sigma.setdefault(a, b) != b:
+            return None
+    if sorted(sigma) != list(range(1, r + 1)):
+        return None
+    if any(sigma[sigma[c]] != c or sigma[c] == c for c in sigma):
+        return None
+    pi, label = {}, 1
+    for c in range(1, r + 1):
+        if c in pi:
+            continue
+        pi[c], pi[sigma[c]] = label, r + 1 - label
+        label += 1
+    return pi
+
+
+def labelled_residue(p, r, rho, pi_labels=True):
+    """Rules 2b and 2b': the colouring of 1..p, its free marks, and pi if it was applied."""
+    col, free = power_residue(p, r, rho)
+    pi = point_symmetric_labels(col, r) if pi_labels else None
+    if pi:
+        col = [pi[c] for c in col]
+    return col, free, pi
+
+
 def residue_rows(p, r, rho):
     """C_i's entries in the order of q, as Table 2 prints them."""
     return [tuple(pow(rho, i + q * r, p) + 1 for q in range((p - 1) // r)) for i in range(1, r + 1)]
@@ -508,9 +563,9 @@ def zip_once(col, free, r, shift):
     return out, fr
 
 
-def build(r, k, p, z, rho):
+def build(r, k, p, z, rho, pi_labels=True):
     """Rules 2b to 2d: the text's own certificate of 1..(k - 1) 2^z p + 1 and its free numbers."""
-    col, free = power_residue(p, r, rho)
+    col, free, _ = labelled_residue(p, r, rho, pi_labels)
     for _ in range(z):
         col, free = zip_once(col, free, r, p)
     N = len(col)
@@ -638,10 +693,12 @@ def search(free_pos, forbidden, own, progs, r):
     return (list(assign) if found else None), nodes
 
 
-def check_row(exe, work, r, k, p, z, n, rho):
+def check_row(exe, work, r, k, p, z, n, rho, pi_labels=True):
     """Rule 4 for one row: whether it holds, with everything computed."""
-    cert, free, N = build(r, k, p, z, rho)
+    cert, free, N = build(r, k, p, z, rho, pi_labels)
+    pi = labelled_residue(p, r, rho, pi_labels)[2]
     out = {"r": r, "k": k, "p": p, "z": z, "n": n, "rho": rho, "N": N, "built": len(cert),
+           "pi": {str(c): v for c, v in pi.items()} if pi else None,
            "length_ok": len(cert) == n == (k - 1) * 2 ** z * p + 1}
     free_pos = [y for y in range(1, len(cert) + 1) if free[y - 1]]
     out["free"] = len(free_pos)
@@ -772,6 +829,18 @@ def run(seed, inputs="inputs", results="results"):
             rows.append(row)
             certs[(r, k)] = final
         cond = conditions(rows)
+        # beside: the labels of 2b, no pi (the first program's reading), where pi changes them
+        raw = []
+        for row in rows:
+            pi = row.get("pi")
+            if row.get("applies", True) is False or not pi or all(int(c) == v for c, v in pi.items()):
+                raw.append({"r": row["r"], "k": row["k"], "bold": row["bold"], "holds": row["holds"],
+                            "same_as_pi": True})
+                continue
+            alt, _ = check_row(exe, work, row["r"], row["k"], row["p"], row["z"], row["n"], row["rho"],
+                               pi_labels=False)
+            raw.append({"r": row["r"], "k": row["k"], "bold": row["bold"], "holds": alt["holds"], "same_as_pi": False,
+                        "scan": alt["scan"], "found": alt["found"]})
 
         ctl, ctl_detail = {}, {}
         # 1. Table 2
@@ -781,6 +850,8 @@ def run(seed, inputs="inputs", results="results"):
         ctl["the power residue colouring of 37 over 4 rows with rho = 2 is Table 2"] = (
             rho37 == 2 and tuple(rows37) == TABLE2 and col37[0] == 1
             and all(col37[v - 1] == i for i, row in enumerate(TABLE2, 1) for v in row))
+        ctl["its pi interchanges the third and fourth rows and no others"] = (
+            point_symmetric_labels(col37, 4) == {1: 1, 2: 2, 3: 4, 4: 3})
         # 2. the C scans against a direct enumeration
         st = Stream(seed, "hhlm/scan")
         agree, cases = 0, []
@@ -889,8 +960,12 @@ def run(seed, inputs="inputs", results="results"):
 
     seven = [x for x in rows if x["bold"]]
     others = [x for x in rows if not x["bold"]]
-    t4 = sum(1 for r, k, p, z, n, b in TABLE3
-             if TABLE4[r][k - 3][0] == n and TABLE4[r][k - 3][1] and TABLE4[r][k - 3][2] == b)
+    def bound4(r, k):
+        value, strict, _ = TABLE4[r][k - 3]
+        return value if strict else value - 1
+
+    t4 = sum(1 for r, k, p, z, n, b in TABLE3 if bound4(r, k) == n and TABLE4[r][k - 3][2] == b)
+    raw_seven = [x for x in raw if x["bold"]]
 
     def name(x):
         return f"W({x['r']},{x['k']})"
@@ -927,9 +1002,11 @@ def run(seed, inputs="inputs", results="results"):
         "others": (f"the other eight rows hold: {sum(x['holds'] for x in others)} of 8"
                    + ("" if all(x["holds"] for x in others) else "; failing: " + ", ".join(
                        name(x) for x in others if not x["holds"]))),
+        "raw_reading": listed(f"beside, with the labels of Eq. (1), no pi: the seven hold in "
+                              f"{sum(x['holds'] for x in raw_seven)} of 7", [x for x in raw_seven if not x["holds"]]),
         "exact": ("W(2,4) = 35, W(2,5) = 178, W(4,3) = 76: certificates of 34, 177, 75 that hold and do not extend: "
                   + f"{sum(e['base_holds'] and e['extensions_blocked'] == e['W'][0] for e in exact)} of 3"),
-        "table4": f"Table 4 for r = 2, 4, 6: {t4} of 15 entries equal Table 3's, bold alike",
+        "table4": f"Table 4 for r = 2, 4, 6: {t4} of 15 entries the same bounds as Table 3's, bold alike",
         "conditions_met": sum(cond.values()), "conditions_total": len(cond), "test_passed": int(all(cond.values())),
         "controls_passed": sum(ctl.values()), "controls_total": len(ctl),
     }
@@ -939,7 +1016,8 @@ def run(seed, inputs="inputs", results="results"):
             raise AssertionError(f"{key}: longer than {LIMIT} characters: {v}")
     detail = {"input": {"name": INPUT[0], "sha256": INPUT[1], "bytes": INPUT[2]}, "statements": stmts,
               "tables": {t: list(v) for t, v in places.items()}, "conditions": cond, "controls": ctl,
-              "control_detail": ctl_detail, "rows": rows, "roots": {str(p): g for p, g in roots.items()}}
+              "control_detail": ctl_detail, "rows": rows, "raw_reading": raw,
+              "roots": {str(p): g for p, g in roots.items()}}
     with open(os.path.join(results, "outputs.json"), "w", encoding="ascii") as fh:
         json.dump(out, fh, indent=2, sort_keys=True)
         fh.write("\n")

@@ -135,6 +135,24 @@ class Arithmetic(unittest.TestCase):
         with self.assertRaises(M.Refused):
             M.power_residue(13, 4, 3)            # 3 has order 3 mod 13
 
+    def test_point_symmetric_labels(self):
+        # 13 = 5 mod 8: the reverse j -> 15 - j maps class 1 onto 3 and 2 onto 4 (see the colouring above)
+        col, _ = M.power_residue(13, 4, 2)
+        self.assertEqual(M.point_symmetric_labels(col, 4), {1: 1, 3: 4, 2: 2, 4: 3})
+        relabelled, free, pi = M.labelled_residue(13, 4, 2)
+        self.assertEqual(relabelled, [1, 3, 1, 3, 2, 1, 1, 4, 4, 3, 2, 4, 2])
+        for j in range(2, 14):
+            self.assertEqual(relabelled[15 - j - 1], 5 - relabelled[j - 1])
+        self.assertEqual(M.labelled_residue(13, 4, 2, pi_labels=False)[0], col)
+        # 17 = 1 mod 8: the reverse keeps every class (reflection symmetric), so no pi
+        col17, _ = M.power_residue(17, 4, 3)
+        self.assertIsNone(M.point_symmetric_labels(col17, 4))
+        # r = 2, 7 = 3 mod 4: the reverse swaps the classes, and pi is the identity
+        col7, _ = M.power_residue(7, 2, 3)
+        self.assertEqual(M.point_symmetric_labels(col7, 2), {1: 1, 2: 2})
+        with self.assertRaises(M.Refused):
+            M.point_symmetric_labels([1, 2, 1, 2], 2)
+
     def test_zip_by_hand(self):
         col, free = M.power_residue(5, 2, 2)
         self.assertEqual(col, [1, 2, 1, 1, 2])
@@ -152,6 +170,15 @@ class Arithmetic(unittest.TestCase):
             M.zip_once([1, 2, 1, 2], [False] * 4, 2, 2)    # an even shift lands on the spread copy
 
     def test_build(self):
+        # 13 with pi: zipped once, the turned copy holds each number's point symmetric partner
+        cert, free, N = M.build(4, 3, 13, 1, 2)
+        base = M.labelled_residue(13, 4, 2)[0]
+        self.assertEqual((N, len(cert)), (26, 53))
+        for j in range(1, 14):
+            self.assertEqual(cert[2 * j - 2], base[j - 1])
+            self.assertEqual(cert[(2 * j - 1 - 13 - 1) % 26], 5 - base[j - 1])
+        raw, _, _ = M.build(4, 3, 13, 1, 2, pi_labels=False)
+        self.assertNotEqual(raw[:26], cert[:26])
         cert, free, N = M.build(2, 3, 5, 1, 2)
         self.assertEqual((N, len(cert)), (10, 21))
         self.assertEqual(cert[:20], [1, 2, 2, 1, 1, 2, 1, 1, 2, 2] * 2)
