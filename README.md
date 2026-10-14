@@ -3022,3 +3022,64 @@ better, so its e-depth is 44, as Fredricksen and Sweet conjectured of every
 symmetric sum-free partition of 160 into 5 sets. Controls 3 of 3. Linked from
 Heule's Schur number five (`lnk:d73cd08b3fe08cbe`, extends), whose S(5) = 160
 takes its lower bound from this partition.
+
+## folk/aims.py: the AIMS survey's one in five and 38% (Anthis et al. 2025)
+
+`folk/aims.py` tests claim `ext:ef92c8539d44adcb`, Anthis, Pauketat, Ladak and
+Manoli, "Perceptions of Sentient AI and Other Digital Minds: Evidence from the
+AI, Morality, and Sentience (AIMS) Survey" (CHI '25; arXiv:2407.08867v3): "Mind
+perception and moral concern for AI welfare were surprisingly high and
+significantly increased: in 2023, one in five U.S. adults believed some AI
+systems are currently sentient, and 38% supported legal rights for sentient
+AI." The paper's e-print carries its two main waves (Main 2021, 1,232 U.S.
+adults, November to December 2021; Main 2023, 1,169, April to May 2023) with
+their raking weights, and the authors' analysis.py. The module reads both from
+the archive in memory, by hash, and follows the cell of analysis.py that
+computes each number, with the same pandas and statsmodels calls; the authors'
+code itself is not run.
+
+| Command | Claim |
+|---|---|
+| `python3 folk/aims.py` | Anthis et al. 2025: one in five U.S. adults thought some AI sentient in 2023, 38% backed legal rights for sentient AI, and mind perception and moral concern rose from 2021 |
+
+pandas and statsmodels, in the scipy-notebook image; seconds. Tests:
+`python3 -m unittest discover -s tests -p test_aims.py`. The receipt
+(`980af342…`, 14 October, at `ef2fcaf`, its rules at `d2319d8`, a
+verification): all three conditions hold. In Main 2023, 18.8% (weighted) said
+yes when asked whether any robots/AIs that exist now are sentient (42.2% no,
+39.0% not sure; Main 2021 18.1%, Supplement 2023 19.8%), inside 17.5% to 22.5%;
+37.7% of those with an opinion supported legal rights for sentient robots/AIs
+(37.2% in 2021), inside 37% to 39%; and both indices rose, by the authors'
+weighted t-test: mind perception from 45.51 to 48.56 (p 0.0016), moral concern
+from 2.869 to 2.955 (p 0.023). Controls 4 of 4.
+
+Beside the test, 52 of 62 further printed values as printed, among them every
+mean of the four mental faculties and the eleven kinds of AI and every share in
+Table 2 but one. The ten that differ:
+
+- The timeline cell prints 2023's shares as 100·round(share, 1), to the nearest
+  ten per cent, so "already sentient" is 19.8%, printed 20.0%, and "never" 8.4%,
+  printed 10.0%.
+- Moral circle (MCE2): 44.5%; the code's round(0.44547, 4) is 0.4455, which the
+  paper rounds up to 44.6%.
+- Five p values are not the released code's. The paper says its p values come
+  from a GLM, and prints p < 0.001 for the rise in emotions, feelings and the
+  moral concern index, and 0.012 for being rational; the code's t-test gives
+  0.041, 0.024, 0.023 and 0.041, and the paper's own means and standard errors
+  give the same (emotions: 34.3 ± 0.864 to 36.8 ± 0.919, z = 1.98, p ≈ 0.05).
+  The sentience ban's rise, printed p = 0.046, is 0.015 by the code.
+- The paper says every one of the eleven kinds of AI drew significantly more
+  moral concern in 2023 except AI video game characters; by the code's test
+  four did (human-like companion robots, animal-like companion robots,
+  human-like retail robots and complex language algorithms) and seven did not
+  (digital copies of human brains p 0.051, of animals 0.058).
+- The paper says no general moral concern item changed significantly; by the
+  code's test "Sentient robots/AIs deserve to be treated with respect" fell,
+  from a mean code of 4.73 to 4.58 (p 0.044).
+
+So the sentence holds as its own numbers state it, and its "significantly
+increased" holds at p < 0.05 for both indices, but the moral concern rise is at
+p 0.023, not the paper's p < 0.001. Also beside it: "already sentient" fell from
+29.7% in 2021 to 19.8% in 2023 and "never" rose from 3.8% to 8.4% (z tests,
+p 2.3 × 10⁻⁸ and 2.7 × 10⁻⁶), where the question's wording changed between the
+waves, as the paper warns.
