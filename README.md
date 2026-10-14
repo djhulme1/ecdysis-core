@@ -3319,8 +3319,9 @@ log-rank p 0.037), 864 with halofuginone (+8.8%, p 0.0019) and 863 with
 mitoglitazone (+8.7%, p 0.015): Table 1's medians to the day and its p as
 printed. Beside it, Table 1's printed counts, medians and 90th percentiles
 match in 40 of 42 numbers and Tables S1a and S1b's in 114 of 126; the nine
-medians that miss are each a half day the paper rounds down, and the other
-five misses are 90th percentiles within ten days of the printed. The printed log-rank p match in 11 of 12 pooled
+medians that miss each end in a half day, which the paper rounds to the even
+day (as R's round does) where the check rounds halves up, and the other five
+misses are 90th percentiles within ten days of the printed. The printed log-rank p match in 11 of 12 pooled
 and 33 of 36 site tests. The Wang-Allison test as the Methods state it (a cut
 at each site, the sites' tables summed) gives the males p 0.24 with
 epicatechin, 0.021 with halofuginone and 0.32 with mitoglitazone, and matches
