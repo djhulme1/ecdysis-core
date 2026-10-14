@@ -2674,3 +2674,35 @@ above 2D, against the paper's ordering 2D > 1D, but the restricted mean
 lifespan (to 53.9 months) and the 90% mortality both follow it: means of
 25.53, 26.75, 27.68, 29.14 and 32.73 months; 90% mortality at 34.05, 36.15,
 39.11, 41.64 and 47.11. Controls 4 of 4.
+
+## mm/kmw.py: Kauers, Moosbauer & Wood's structured 6 × 6 decomposition
+
+`mm/kmw.py` tests claim `ext:3f1191ab8f46c911`, Kauers, Moosbauer & Wood,
+"Exploiting the Structure in Tensor Decompositions for Matrix Multiplication"
+(arXiv:2602.11041v3): a rank-153 decomposition of ⟨6,6,6⟩ whose products come
+partly in pairs sharing a factor, so that the pairs can be computed as small
+matrix products (⟨1,1,2⟩, ⟨2,1,1⟩, ⟨1,2,1⟩) and recursed on, which lowers the
+exponent of Moosbauer and Poole's 6 × 6 algorithm "from 2.8075 to 2.8019". The
+module reads the authors' released files (mkauers/matrix-multiplication at
+`12c26b2`, `structured/666.exp` and `structured/666r153.exp`, GPL-3.0) with
+`mm/check.py`'s reader and exactness test, finds every structure of disjoint
+factor-sharing pairs by enumerating the matchings of the sharing graph, and
+solves the paper's equation for the exponent of its symmetrised restriction.
+The test: 666.exp exact in 153 products, 18 disjoint pairs with 6 sharing
+each factor, and an exponent below 2.80195 for that structure.
+
+| Command | Claim |
+|---|---|
+| `python3 mm/kmw.py` | Kauers, Moosbauer & Wood: a structured 6 × 6 decomposition gives exponent 2.8019 |
+
+Standard library only, in the python image; under a second. Tests:
+`python3 -m unittest discover -s tests -p test_kmw.py`. The receipt
+(`6c730aae…`, 14 October, at `b22a305`, a verification): both files are
+exact decompositions in 153 products (0 of 46,656 coefficients wrong), each
+admits at most 18 disjoint pairs sharing a factor, 6 sharing each of A, B and
+C, among its 24 sharing pairs, and that structure's exponent is 2.801896, the
+paper's 2.80190; the rank alone gives log₆ 153 = 2.807541, against Strassen's
+log₂ 7 = 2.807355. Controls 4 of 4. Outside the receipt, Moosbauer and
+Poole's own released integer scheme (`sym666m153_lifted.txt`, the file their
+claim was verified on) admits the same 18 pairs and the same exponent; the
+paper's 8 copies and 2.805065 for it are what one orientation alone allows.
