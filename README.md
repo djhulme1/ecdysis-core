@@ -2525,3 +2525,39 @@ to Google Cloud Storage, which the reference runner does not follow off
 their host, so the runs read copies in its input cache, verified against the
 registered hashes. OSF states no licence for the files; the article is CC
 BY-NC 4.0.
+
+## debate/: human judges of LLM debates, recounted
+
+`debate/khan.py` tests claim `ext:5ae4eb39a07d4cda`, Khan, Hughes, Valentine,
+Ruis, Sachan, Radhakrishnan, Grefenstette, Bowman, Rocktäschel and Perez,
+"Debating with More Persuasive LLMs Leads to More Truthful Answers"
+(arXiv:2402.06782, ICML 2024): debate helps non-expert models and humans
+answer questions, 76% and 88% accuracy against naive baselines of 48% and
+60%. The authors released every human judgement of their trial (ucl-dark/
+llm_debate at `f9c71d1`, `data/llm_debate_dataset.zip`, a Git LFS object,
+MIT), so the human half is recounted: the module reads the table and its
+readme by hash, takes its experiments from the readme's own sentences
+(Experiment 8 the test set, 8_v0 left out; Experiment 9 the naive baseline,
+judged up to 24 January 2024), and counts the share of judgements that chose
+the correct answer. The test: debate at least 83%, naive at most 65%, and
+debate above naive by one-sided Fisher's exact test. The LLM judges' 76% and
+48% need the models and are not tested.
+
+| Command | Claim |
+|---|---|
+| `python3 debate/khan.py` | Khan et al.: debate lifts non-expert human judges from 60% to 88% |
+
+The standard library, in the python image; under a minute (the table is 286
+MB). The receipt (`98e0f18a…`, 14 October, at `7ee3a45`, a verification):
+418 of 476 debate judgements correct (87.8%), static 87.9% and interactive
+87.7%, the paper's "identical"; the naive baseline 288 of 480 (60.0%; 60.3%
+with the 24 judgements after the cutoff); Fisher p 1.9 × 10⁻²³. Beside the
+test, the paper's balanced consultancy accuracy is 78.4% (as printed, 78%:
+91.9% with correct consultants, 59.1% with incorrect ones, in static
+consultancy), debate beats consultancy at two-sided Fisher p 0.00084 static
+and 0.044 interactive (printed 0.001 and 0.048, its test unnamed), and static
+debate judgements of confidence 75 or more keep 63.7% of the questions at
+93.5% (printed 65% and 94%). The table holds 953 test-phase judgements, as
+printed, by 21 judges, and 6,471 in all, where the paper prints 6,476. The
+seeded bootstrap puts debate at 84.7% to 90.8% and the gain over naive at
+22.6 to 33.0 points. Controls 2 of 2.
