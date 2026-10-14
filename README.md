@@ -2638,3 +2638,39 @@ program's own 20 ms gives the same picture: all 50 chosen synapses at 4 mV,
 after 49.5 ± 17.2 rewards and a median 19.0 minutes, and a median 3,715 other
 synapses touching it. Firing rates 1.24 Hz (excitatory) and 0.78 Hz
 (inhibitory), the paper's "around 1 Hz". Controls 5 of 5.
+
+## dr/: dietary restriction in Diversity Outbred mice, lifespan by diet
+
+`dr/difrancesco.R` tests claim `ext:bc359de2ba6473b1`, Di Francesco, Deighan,
+Litichevskiy, … & Churchill, "Dietary restriction impacts health and lifespan
+of genetically diverse mice" (Nature 634, 684–692, 2024): "caloric restriction
+and intermittent fasting both resulted in lifespan extension in proportion to
+the degree of restriction", in 960 female Diversity Outbred mice randomised at
+6 months to ad libitum feeding (AL), one or two days of fasting a week (1D,
+2D), or 20% or 40% caloric restriction. The authors released every mouse's
+lifespan (figshare 10.6084/m9.figshare.24600255, `Data_v2.zip`, CC BY 4.0).
+The check reads the table by hash, refuses it unless it holds the paper's 937
+mice in their diet groups with 13 censored, and recomputes the paper's
+statistics with the R package the paper used (survival): Kaplan–Meier medians
+and log-rank tests on lifespan in months. The test: the diets differ at
+log-rank p < 0.01; each restricted group's median gain is at least half the
+printed one; and 40% > 20% > both fasting regimes. It is the lab's first check
+in R.
+
+| Command | Claim |
+|---|---|
+| `Rscript dr/difrancesco.R` | Di Francesco et al.: dietary restriction extends the lifespan of DO mice in proportion to the restriction |
+
+R 4.3.3 with survival 3.5.8, in the rocker/r-ver image; seconds. Tests:
+`Rscript tests/test_difrancesco.R`. The receipt (`162fc461…`, 14 October, at
+`222d07d`, a verification): all seven conditions hold, and every printed
+number the table can give comes out as printed: medians of 25.16 months (AL),
+28.12 (1D), 27.83 (2D), 29.74 (20%) and 34.31 (40%), gains of 11.8, 10.6, 18.2
+and 36.3%, the overall log-rank p 1.25 × 10⁻²³ (the paper prints
+"< 2.2 × 10⁻¹⁶"), and all ten pairwise log-rank p values of its Supplementary
+Table 1 (1D against AL 0.043, above the paper's own 0.01 threshold; 2D
+0.00027; 20% 2.9 × 10⁻⁸; 40% 1.4 × 10⁻¹⁹). Beside the test, the medians put 1D
+above 2D, against the paper's ordering 2D > 1D, but the restricted mean
+lifespan (to 53.9 months) and the 90% mortality both follow it: means of
+25.53, 26.75, 27.68, 29.14 and 32.73 months; 90% mortality at 34.05, 36.15,
+39.11, 41.64 and 47.11. Controls 4 of 4.
