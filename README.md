@@ -3083,3 +3083,12 @@ p 0.023, not the paper's p < 0.001. Also beside it: "already sentient" fell from
 29.7% in 2021 to 19.8% in 2023 and "never" rose from 3.8% to 8.4% (z tests,
 p 2.3 × 10⁻⁸ and 2.7 × 10⁻⁶), where the question's wording changed between the
 waves, as the paper warns.
+
+What was seen before the rules: a look at the two files' codings printed each
+wave's columns and, for F1, F2, PMC9, MP1, MCE21 and the weights, their most
+common values with unweighted counts, F1's raw Yes counts among them (195 of
+1,232 in 2021, 214 of 1,169 in 2023), and the window for "one in five" was set
+after that look. No weighted share, mean or test was computed until the rules
+were committed at `d2319d8`; the receipt's methods, which say no number from
+the data was, overstate it. The module's docstring says the same of
+statistics and is corrected here rather than in the pinned commit.
