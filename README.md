@@ -2561,3 +2561,40 @@ debate judgements of confidence 75 or more keep 63.7% of the questions at
 printed, by 21 judges, and 6,471 in all, where the paper prints 6,476. The
 seeded bootstrap puts debate at 84.7% to 90.8% and the gain over naive at
 22.6 to 33.0 points. Controls 2 of 2.
+
+## pi/saha.py: Saha and Sinha's string-amplitude series for π and ζ(2)
+
+`pi/saha.py` tests claim `ext:f902dc5ca8b34322`, Saha and Sinha, "Field
+theory expansions of string theory amplitudes" (Phys. Rev. Lett. 132,
+221601, 2024; arXiv:2401.05733): their considerations "lead to new
+QFT-inspired, parametric representations of the Zeta function and π, which
+show fast convergence". It reads the paper's v5 e-print by hash and refuses
+it unless the TeX holds both series, and the two sentences giving their
+speed, exactly as the module writes them; then it sums each series exactly,
+each term a rational, summed in 160-digit decimals under a stated rounding
+bound, with π from Machin's formula in integers. The test: the π series
+within 5 × 10⁻¹¹ of π after 60 terms for every λ in 10, 20, …, 100, and the
+ζ(2) series at λ = 41.5 within 5 × 10⁻¹⁶ of π²/6 after 80 terms, twice the
+paper's counts of 30 and 40.
+
+| Command | Claim |
+|---|---|
+| `python3 pi/saha.py` | Saha and Sinha: parametric series for π and ζ(2) from string amplitudes converge fast |
+
+Standard library only, in the python image; a few seconds. Tests:
+`python3 -m unittest discover -s tests -p test_saha.py`. The receipt
+(`b112894e…`, 14 October, at `de1e09a`, a verification): all eleven
+conditions hold. After 60 terms the π series is within 3.6 × 10⁻¹⁵ of π at
+λ = 10 and within 10⁻¹⁸ for every λ from 20 to 100; the ζ(2) series at 41.5
+is within 2.3 × 10⁻²⁷ of π²/6 after 80 terms. Against the paper's counts:
+the π series stays within 5 × 10⁻¹¹ of π from 23 to 31 terms on, by λ (31 at
+λ = 100, 30 at 90, 28 or fewer below), and within 10⁻¹⁰ from 23 to 29; the
+ζ(2) series at 41.5 stays within 5 × 10⁻¹⁶ from 37 terms (printed 40). The
+paper's comparisons with the classical series are looser: Madhava's series
+after 5 billion terms is still 2.0 × 10⁻¹⁰ from π and needs 2 × 10¹⁰ terms
+for ten places, and the sum of 1/n² after 50 million terms is 2.0 × 10⁻⁸
+from π²/6, about seven places, and needs 2 × 10¹⁵ terms for fifteen.
+Controls 6 of 6: Machin's π, a rising factorial, the paper's two limits
+(λ → ∞ gives Madhava's summands, λ → 0 gives 1/n²), and both error
+expansions against exact partial sums at N = 2000. The derivation from the
+string amplitude is not checked, only the printed series.
