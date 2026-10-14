@@ -2991,3 +2991,34 @@ printed correction at p = 0.3 and at 0.7 (0.9994 at p = 1/2), and the ratio
 falls as 1/t (run apart from the receipt, 3.34, 3.58, 3.64 and 3.66 times 1/t at
 t = 100, 400, 1000 and 3000), so the correction decays as [4p(1−p)]^t/t^(3/2),
 not the printed t^(−1/2). Controls 4 of 4.
+
+## schur/exoo.py: Exoo's sum-free partition of [1, 160], S(5) ≥ 160
+
+`schur/exoo.py` tests claim `ext:0f23107e990d76ad`, Exoo, "A Lower Bound for
+Schur Numbers and Multicolor Ramsey Numbers of K3" (The Electronic Journal of
+Combinatorics 1, #R8, 1994): "For k ≥ 5, we establish new lower bounds on the
+Schur numbers S(k) and on the k-color Ramsey numbers of K3." The paper prints a
+symmetric partition of [1, 160] into five sum-free sets as its halves 1 to 80
+(i and 161 − i together), so S(5) ≥ 160 and R5(3) ≥ 162, and derives R6(3) ≥
+500 by Chung's recurrence and S(k) ≥ c·321^(k/5) by Abbott and Hanson's. Heule's
+SAT proof (`ext:587fe2afaa36d2c7`) later showed that S(5) = 160, so this
+partition is the half of the answer no solver had to find. The module reads the
+journal's PDF with schur/fs.py's reader, expands the listing, and tests the
+sums, the colouring of K161 and the arithmetic.
+
+| Command | Claim |
+|---|---|
+| `python3 schur/exoo.py` | Exoo: S(5) ≥ 160 and R5(3) ≥ 162 from the printed partition |
+
+Standard library only, in the python image; seconds. Tests:
+`python3 -m unittest discover -s tests -p test_exoo.py`. The receipt
+(`7d37b6e5…`, 14 October, at `8209c56`, a verification): all three conditions
+hold. The 80 listed numbers (sets of 14, 14, 17, 16 and 19) expand to a
+partition of {1, …, 160} into sets of 28, 28, 34, 32 and 38 with no sum inside
+any; the colouring of K161 has no triangle of one colour among its 12,880
+edges; 3·162 + 17 − 3 = 500 and 321^(1/5) = 3.171765. Beside it: the partition's
+depth is 44, its fifth set starting there, and no multiplier prime to 161 does
+better, so its e-depth is 44, as Fredricksen and Sweet conjectured of every
+symmetric sum-free partition of 160 into 5 sets. Controls 3 of 3. Linked from
+Heule's Schur number five (`lnk:d73cd08b3fe08cbe`, extends), whose S(5) = 160
+takes its lower bound from this partition.
