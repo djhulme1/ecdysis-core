@@ -2449,3 +2449,45 @@ trial, before any seed was issued: below a gradient of 10⁻⁶ the fit takes
 full Newton steps, since step halving had stalled one fit beside the test.
 The repository's README refers to a LICENSE file it does not hold, so no
 licence is stated for the data.
+
+## folk/: folk attributions of consciousness to ChatGPT, recomputed
+
+`folk/colombatto.py` tests claim `ext:adb1673906083222`, Colombatto and
+Fleming, "Folk psychological attributions of consciousness to large language
+models" (Neuroscience of Consciousness 2024(1), niae013): in a survey of 300
+US residents, a majority were willing to attribute some possibility of
+phenomenal consciousness to large language models, and these attributions
+predicted attributions of mental states associated with phenomenality and
+rose with usage. It reads the authors' Data.csv from their OSF project
+(49w7m) by hash and reimplements their own Analysis.Rmd step by step, without
+running R: the share rating ChatGPT above 1 on the 1 to 100 experiencer
+scale; their regression of the rating on usage, coded as their code codes it;
+and FactoMineR's PCA of the 65 mental-state ratings (mean imputation, unit
+scaling), whose first component, the paper's experience dimension, is
+oriented so that most states load positively and correlated with the rating.
+The test: more than 150 of the 300 above 1, and the usage slope and that
+correlation both positive at two-sided p < 0.05.
+
+| Command | Claim |
+|---|---|
+| `python3 folk/colombatto.py` | Colombatto & Fleming 2024: most people allow ChatGPT some possibility of consciousness, more so with use |
+
+numpy and scipy, in the pinned scipy-notebook image; seconds. The receipt
+(`70171c4c…`, 14 October, at `27b342a`, a verification): 200 of the 300
+participants rate ChatGPT above 1 (66.7%; the paper's 67%), the usage slope
+is 4.94 points a level (SE 0.99, p 1.0 × 10⁻⁶) and the rating's correlation
+with the experience component is 0.653 (p 7 × 10⁻³⁸), against 0.031 with the
+intelligence component (p 0.596). The seeded bootstrap of participants puts
+the share at 0.613 to 0.717, the slope at 2.71 to 7.14 and the correlation
+at 0.574 to 0.720. Beside the test, 35 of the 38 numbers the paper prints
+from these data come out as printed; the other three, the quadratic
+regression of the rating on confidence (B, t and its interval), differ only
+in sign: the authors' own knitted output (Analysis.html on OSF) has
+−178.25, −7.297 and −226.33 to −130.18, as the check does, where the paper
+prints them positive. All 65 states load positively on the first component,
+the two components hold 58.0% of the variance, and the 17 missing ratings
+are all one participant's. Controls 4 of 4. OSF's download links redirect
+to Google Cloud Storage, which the reference runner does not follow off
+their host, so the runs read copies in its input cache, verified against the
+registered hashes. OSF states no licence for the files; the article is CC
+BY-NC 4.0.
