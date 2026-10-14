@@ -55,10 +55,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import statistics
 import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INPUT = ("daspnet.m", "33b92b5c74f7ac9abbcad1596aaf530ddae9ade4b93ffbb7030fe367d0f9d58b", 4189)
@@ -177,7 +177,11 @@ def run(seed, inputs="inputs", results="results", workers=2):
     if not re.fullmatch(r"[0-9a-f]{64}", seed):
         raise Refused("the seed must be 64 hex characters")
     program_ok = check_program(read_program(inputs))
-    work = tempfile.mkdtemp(prefix="dastdp-")
+    # The sandbox's /tmp cannot run programs; results/ can, so the port is compiled there and removed after.
+    os.makedirs(results, exist_ok=True)
+    work = os.path.abspath(os.path.join(results, "work"))
+    shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(work)
     exe = compile_port(work)
     selftest = subprocess.run([exe, "selftest"], capture_output=True, text=True)
     selftest_ok = selftest.returncode == 0 and selftest.stdout.strip() == "selftest_failures=0"
@@ -187,6 +191,7 @@ def run(seed, inputs="inputs", results="results", workers=2):
     with cf.ThreadPoolExecutor(workers) as pool:
         lines = list(pool.map(lambda job: run_draw(exe, job[0], SECONDS, job[1]), jobs))
         again = run_draw(exe, jobs[0][0], SECONDS, TEST_INTERVAL)
+    shutil.rmtree(work, ignore_errors=True)
     draws = [parse(line) for line in lines]
     test = [d for d in draws if d["interval"] == TEST_INTERVAL]
     beside = [d for d in draws if d["interval"] == PROGRAM_INTERVAL]
@@ -219,7 +224,6 @@ def run(seed, inputs="inputs", results="results", workers=2):
             raise AssertionError(f"{k}: longer than {LIMIT} characters: {v}")
     detail = {"input": {"name": INPUT[0], "sha256": INPUT[1], "bytes": INPUT[2]}, "conditions": cond,
               "controls": controls, "summary": {"10": a, "20": b}, "draws": draws, "again": again}
-    os.makedirs(results, exist_ok=True)
     with open(os.path.join(results, "outputs.json"), "w", encoding="ascii") as fh:
         json.dump(out, fh, indent=2, sort_keys=True)
         fh.write("\n")
