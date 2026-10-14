@@ -3253,3 +3253,42 @@ The trial, under another seed, found no bug and gave the same picture. Controls
 5 of 5: the C program bit for bit against a plain Python implementation over
 0.5 s, the pairing rule against F(Δt), the inputs' counts and mean
 conductances, and the correlogram after the spike at chance (0.999).
+
+## mm/ss.py: Sedoglavic & Smirnov's 3 × 5 by 5 × 5 in 58, read from the printed trilinear form (2021)
+
+`mm/ss.py` tests claim `ext:2123dbcba4145ebe`, Sedoglavic and Smirnov, "The
+tensor rank of 5x5 matrices multiplication is bounded by 98 and its border rank
+by 89" (ISSAC 2021; arXiv:2101.12568): "We present a non-commutative algorithm
+for the product of 3x5 by 5x5 matrices using 58 multiplications." With the
+Hopcroft–Kerr 40 for 2 × 5 by 5 × 5 it gave 5 × 5 in 98, the record until the
+flip graphs' 97 (`ext:56ffb2bd235d9123`). The paper prints the 58 as a trilinear
+form in thirteen blocks τ₂₂₂ … τ₁₁₁; the module reads them from the e-print's
+TeX, parses them as algebraic expressions and checks the sum against the trace
+form Σ a_ij b_jk c_ki, exactly.
+
+| Command | Claim |
+|---|---|
+| `python3 mm/ss.py` | Sedoglavic & Smirnov 2021: 3 × 5 by 5 × 5 in 58 multiplications |
+
+Standard library only, in the python image; a second. Tests:
+`python3 -m unittest discover -s tests -p test_ss.py`. The receipt
+(`3cea5acc…`, 14 October, at `32caab1`, its rules at `46e9703`, a
+verification): all three conditions hold. The printed form is 58 products
+(17, 2, 1, 1, 5, 5, 2, 2, 1, 1, 1, 13 and 7 in the thirteen blocks), each a
+linear form in A's entries times one in B's times one in C's with coefficients
+±1, and their sum is the 3 × 5 by 5 × 5 product's tensor in all 5,625
+coefficients. Beside it, every product's type is its block's name, the type
+polynomial is the printed one, and 8 pairs of products share a factor up to
+sign, the paper's 8 "serendipitous equalities". The partial approximate tensor
+the paper prints for its border rank 89 (55 products, as its type says) does
+not, as printed, expand to the partial product it is said to compute: 15
+monomials keep a negative power of ε and 7 have the wrong coefficient at ε⁰,
+all among terms in a11 b21, a12 b21, a52 b14 and a54 b14 or b45, through nine
+of the 55 products. The reading of those products was checked against the TeX
+by eye; it looks like a misprint rather than a gap in the bound, and the
+authors' catalogue may hold the right tensor, which was not read here. The
+first trial found a reading bug, fixed before any seed was issued: the printed
+lines end "\\%8", a line break and then a comment, and the percent was taken
+for an escaped one. Controls 4 of 4: Strassen's algorithm typed in the paper's
+convention read as 7 exact products and a flipped sign caught, the naive
+algorithm in 75, and a border rank 2 expression read exactly at ε⁰.
