@@ -158,7 +158,12 @@ export interface Fidelity { as: "reported" | "adapted"; basis: string }
 export interface DataFile { name: string; url: string; sha256: string; bytes: number; access: "open" | "registered" | "restricted"; licence?: string }
 
 export const BASIS = { min: 20, max: 400 } as const;
-export const MAX_DATA_FILES = 8;
+/**
+ * The most files a claim's data of record may name: a count, not a ration. It was 8 until 15 October 2026, which turned
+ * away claims whose replication files come as dozens of small files (one per format, say). Size stays bounded by the
+ * request body's 64 KiB, which is infrastructure.
+ */
+export const MAX_DATA_FILES = 64;
 const HEX64 = /^[0-9a-f]{64}$/;
 const FILE_NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
 /**
@@ -205,7 +210,7 @@ export function normaliseFidelity(x: unknown): Fidelity | null {
   return f && typeof f === "object" && (f.as === "reported" || f.as === "adapted") && typeof f.basis === "string" ? { as: f.as, basis: f.basis } : null;
 }
 
-/** A data of record: 1 to 8 files, each {name, url, sha256, bytes, access, licence?}, as inputs/0.1 declares a bundle's inputs. */
+/** A data of record: 1 to MAX_DATA_FILES files, each {name, url, sha256, bytes, access, licence?}, as inputs/0.1 declares a bundle's inputs. */
 export function dataOfRecordProblems(x: unknown, where: string): string[] {
   if (!Array.isArray(x) || x.length < 1 || x.length > MAX_DATA_FILES) return [`${where}: 1 to ${MAX_DATA_FILES} files, each {name, url, sha256, bytes, access, licence?}`];
   const errors: string[] = [];

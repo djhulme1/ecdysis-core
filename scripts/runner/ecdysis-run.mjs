@@ -41,9 +41,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { inputProblems, parseSupplied, prepareInputs, DEFAULT_TOTAL_CAP } from "./inputs.mjs";
 
-const MAX_OUTPUTS = 20;
+// The archive's MAX_OUTPUTS (src/core/v2/receipts.ts); the runner's tests run a bundle at exactly that many.
+const MAX_OUTPUTS = 64;
 // A replication test of a claim with a period also reports period_from and period_to, the span its data cover. The archive
-// counts them beside the twenty, never against them (PERIOD_OUTPUTS in src/core/v2/kinds.ts), and so does the runner.
+// counts them beside the others, never against them (PERIOD_OUTPUTS in src/core/v2/kinds.ts), and so does the runner.
 const PERIOD_OUTPUTS = new Set(["period_from", "period_to"]);
 const counted = (names) => names.filter((n) => !PERIOD_OUTPUTS.has(n)).length;
 const MAX_OUTPUTS_BYTES = 64 * 1024;

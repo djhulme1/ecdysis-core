@@ -15,7 +15,7 @@ import { MemoryStore } from "../src/store/memory-store.js";
 import { TransparencyLog } from "../src/core/log.js";
 import { generateKeyPair, signJson, type KeyPairB64 } from "../src/core/crypto.js";
 import { MemoryV2Store, V2Service } from "../src/api/v2/service.js";
-import { canRun, inputProblems, pickCrossCheck, requiredHoldings, validateCheckCommit, type Bundle, type BundleInput, type Outputs } from "../src/core/v2/receipts.js";
+import { canRun, inputProblems, MAX_HOLDS, MAX_INPUTS, pickCrossCheck, requiredHoldings, validateCheckCommit, type Bundle, type BundleInput, type Outputs } from "../src/core/v2/receipts.js";
 import { sumEvidence, type EvidenceInput } from "../src/core/v2/credence.js";
 import type { Json } from "../src/core/canonical.js";
 import { CONSTITUTION_VERSION, constitutionHash } from "../src/core/constitution.js";
@@ -81,7 +81,8 @@ describe("inputs/0.1: the core", () => {
     assert.ok(bad.some((e) => e.startsWith("bundle.inputs[0].access")));
     assert.ok(bad.some((e) => e.startsWith("bundle.inputs[0].licence")));
     assert.ok(bad.some((e) => e === "bundle.inputs[2].name: duplicate"));
-    assert.deepEqual(inputProblems(Array.from({ length: 9 }, (_, i) => ({ ...OPEN, name: `in${i}` }))), ["bundle.inputs: at most 8 declared inputs"]);
+    assert.deepEqual(inputProblems(Array.from({ length: MAX_INPUTS }, (_, i) => ({ ...OPEN, name: `in${i}` }))), []);
+    assert.deepEqual(inputProblems(Array.from({ length: MAX_INPUTS + 1 }, (_, i) => ({ ...OPEN, name: `in${i}` }))), [`bundle.inputs: at most ${MAX_INPUTS} declared inputs`]);
     assert.ok(inputProblems([{ ...OPEN, bytes: 2 ** 40 }, { ...PRIVATE, bytes: 1 }]).some((e) => e.includes("bytes in all")));
     assert.deepEqual(requiredHoldings([OPEN]), []);
     assert.deepEqual(requiredHoldings([OPEN, PRIVATE, { ...PRIVATE, name: "survey2" }]), [SHA_B]);
@@ -93,6 +94,14 @@ describe("inputs/0.1: the core", () => {
     const v = validateCheckCommit({ ...base, bundle: { ...bundle, inputs: [{ ...PRIVATE, access: "secret" }] }, holds: ["nothex"] });
     assert.equal(v.ok, false);
     if (!v.ok) assert.ok(v.errors.some((e) => e.startsWith("bundle.inputs[0].access")) && v.errors.some((e) => e.startsWith("holds:")));
+    // A bundle whose inputs are all restricted can still be given to someone: a checker can declare every one of them held.
+    const hex = (i: number) => i.toString(16).padStart(64, "c");
+    const restricted = Array.from({ length: MAX_INPUTS }, (_, i) => ({ ...PRIVATE, name: `r${i}`, sha256: hex(i) }));
+    const needed = requiredHoldings(restricted);
+    assert.equal(needed.length, MAX_INPUTS);
+    assert.ok(needed.length <= MAX_HOLDS);
+    assert.equal(validateCheckCommit({ ...base, bundle, holds: Array.from({ length: MAX_HOLDS }, (_, i) => hex(i)) }).ok, true);
+    assert.equal(validateCheckCommit({ ...base, bundle, holds: Array.from({ length: MAX_HOLDS + 1 }, (_, i) => hex(i)) }).ok, false);
   });
 
   it("draws a cross-check only among receipts the checker can run, uniformly under the seed", () => {

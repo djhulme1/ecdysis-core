@@ -25,7 +25,8 @@ import { homedir } from "node:os";
 import { isIP } from "node:net";
 import { join } from "node:path";
 
-export const MAX_INPUTS = 8;
+/** The archive's MAX_INPUTS (src/core/v2/receipts.ts: the largest data of record and eight more); a test keeps them equal. */
+export const MAX_INPUTS = 72;
 export const ACCESS = ["open", "registered", "restricted"];
 /** The reference runner's default ceiling on what one run may fetch or mount in all; --allow-large lifts it. */
 export const DEFAULT_TOTAL_CAP = 32 * 2 ** 30;

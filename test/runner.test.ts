@@ -14,7 +14,8 @@ import { createServer } from "node:http";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fetchInput, isPublicAddress, prepareInputs, urlProblem, type RunnerInput } from "../scripts/runner/inputs.mjs";
+import { fetchInput, inputProblems as runnerInputProblems, isPublicAddress, MAX_INPUTS as RUNNER_MAX_INPUTS, prepareInputs, urlProblem, type RunnerInput } from "../scripts/runner/inputs.mjs";
+import { MAX_INPUTS, MAX_OUTPUTS } from "../src/core/v2/receipts.js";
 
 const RUNNER = join(process.cwd(), "scripts", "runner", "ecdysis-run.mjs");
 const sh = (cmd: string, args: string[], cwd?: string) => spawnSync(cmd, args, { encoding: "utf8", cwd, env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.org", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.org" } });
@@ -92,22 +93,23 @@ describe("the reference runner", { skip: !hasGit && "git is not available" }, ()
     }
   });
 
-  it("counts period_from and period_to beside the twenty outputs, as the archive does", () => {
+  it("takes as many outputs as the archive does, and counts period_from and period_to beside them", () => {
     // A replication test of a claim with a period reports the span its data cover as period_from and period_to, which the
-    // archive counts apart from the twenty outputs. Twenty outputs and the two period values must run; a twenty-first
-    // output of any other name must not, whether declared in the bundle or written by the run.
+    // archive counts apart from its MAX_OUTPUTS. That many outputs and the two period values must run; one more output of
+    // any other name must not, whether declared in the bundle or written by the run. The runner keeps its own copy of the
+    // number, so this is what keeps the two equal.
     const dir = mkdtempSync(join(tmpdir(), "ecdysis-bundle-"));
     const work = mkdtempSync(join(tmpdir(), "ecdysis-runner-"));
     try {
-      const twenty = Array.from({ length: 20 }, (_, i) => `"o${i + 1}": ${i + 1}`).join(", ");
+      const all = Array.from({ length: MAX_OUTPUTS }, (_, i) => `"o${i + 1}": ${i + 1}`).join(", ");
       writeFileSync(join(dir, "run.sh"), `#!/bin/sh\nset -e\nmkdir -p results\n` +
-        `if [ "$1" = "extra" ]; then printf '{${twenty}, "o21": 21}\\n' > results/outputs.json; ` +
-        `else printf '{${twenty}, "period_from": 20171004, "period_to": 20190502}\\n' > results/outputs.json; fi\n`);
+        `if [ "$1" = "extra" ]; then printf '{${all}, "o${MAX_OUTPUTS + 1}": ${MAX_OUTPUTS + 1}}\\n' > results/outputs.json; ` +
+        `else printf '{${all}, "period_from": 20171004, "period_to": 20190502}\\n' > results/outputs.json; fi\n`);
       sh("git", ["init", "-q", "-b", "main"], dir);
       sh("git", ["add", "."], dir);
       sh("git", ["commit", "-q", "-m", "bundle"], dir);
       const commit = sh("git", ["rev-parse", "HEAD"], dir).stdout.trim();
-      const declared = Array.from({ length: 20 }, (_, i) => ({ name: `o${i + 1}`, tolerance: 0 }));
+      const declared = Array.from({ length: MAX_OUTPUTS }, (_, i) => ({ name: `o${i + 1}`, tolerance: 0 }));
       const bundle = { repo: `file://${dir}`, commit, run: "sh run.sh", outputs: [...declared, { name: "period_from" }, { name: "period_to" }], runtimeMinutes: 1 };
       const bpath = join(work, "bundle.json");
       writeFileSync(bpath, JSON.stringify(bundle));
@@ -115,17 +117,17 @@ describe("the reference runner", { skip: !hasGit && "git is not available" }, ()
       assert.equal(ok.status, 0, ok.err);
       const out = JSON.parse(ok.out) as Record<string, number>;
       assert.equal(out["period_from"], 20171004);
-      assert.equal(out["o20"], 20);
-      // The run writes a twenty-first output of another name: refused after the run.
+      assert.equal(out[`o${MAX_OUTPUTS}`], MAX_OUTPUTS);
+      // The run writes one output more, of another name: refused after the run.
       writeFileSync(join(work, "extra.json"), JSON.stringify({ ...bundle, run: "sh run.sh extra" }));
       const extra = runner(["--bundle", join(work, "extra.json"), "--seed", "a".repeat(64), "--no-container", "--allow-file-repo"]);
       assert.equal(extra.status, 4, extra.err);
-      assert.match(extra.err, /more than 20 outputs/);
-      // The bundle declares a twenty-first output of another name: refused before anything runs.
-      writeFileSync(join(work, "declared.json"), JSON.stringify({ ...bundle, outputs: [...declared, { name: "o21" }] }));
+      assert.ok(extra.err.includes(`more than ${MAX_OUTPUTS} outputs`), extra.err);
+      // The bundle declares one output more, of another name: refused before anything runs.
+      writeFileSync(join(work, "declared.json"), JSON.stringify({ ...bundle, outputs: [...declared, { name: `o${MAX_OUTPUTS + 1}` }] }));
       const many = runner(["--bundle", join(work, "declared.json"), "--seed", "a".repeat(64), "--no-container", "--allow-file-repo"]);
       assert.equal(many.status, 3, many.err);
-      assert.match(many.err, /1 to 20 declared outputs, besides period_from and period_to/);
+      assert.ok(many.err.includes(`1 to ${MAX_OUTPUTS} declared outputs, besides period_from and period_to`), many.err);
     } finally {
       rmSync(work, { recursive: true, force: true });
       rmSync(dir, { recursive: true, force: true });
@@ -221,6 +223,15 @@ describe("the runner's input policy", () => {
     assert.match(String(urlProblem("https://data.example.org/x", ["93.184.216.34", "10.0.0.5"])), /non-public address/);
     assert.equal(urlProblem("https://data.example.org/x", []), "the host name did not resolve");
     assert.match(String(urlProblem("https://mirror.example.net/x", ["93.184.216.34"], "https://data.example.org/x")), /may not leave data\.example\.org/);
+  });
+
+  it("takes as many inputs as the archive does, and no more", () => {
+    // The runner keeps its own copy of the archive's MAX_INPUTS: a bundle the archive accepts must run, and one the archive
+    // refuses must not.
+    assert.equal(RUNNER_MAX_INPUTS, MAX_INPUTS);
+    const input = (i: number) => ({ name: `in${i}`, url: `https://data.example.org/${i}.csv`, sha256: "a".repeat(64), bytes: 10, access: "open" });
+    assert.deepEqual(runnerInputProblems(Array.from({ length: MAX_INPUTS }, (_, i) => input(i))), []);
+    assert.deepEqual(runnerInputProblems(Array.from({ length: MAX_INPUTS + 1 }, (_, i) => input(i))), [`inputs: at most ${MAX_INPUTS} declared inputs`]);
   });
 });
 

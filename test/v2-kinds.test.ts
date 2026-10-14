@@ -38,7 +38,8 @@ import { Accounts, MemoryAccountStore } from "../src/api/v2/accounts.js";
 import { StewardHandler } from "../src/api/v2/steward.js";
 import { sha256Hex } from "../src/api/access.js";
 import { computeCredenceV2, CREDENCE_V2_VERSION, type ClaimInput, type EvidenceInput } from "../src/core/v2/credence.js";
-import { classify, designProblems, normalisePeriod, normaliseScope, periodWords, quotesSentence, type ClaimScope, type Design } from "../src/core/v2/kinds.js";
+import { classify, designProblems, MAX_DATA_FILES, normalisePeriod, normaliseScope, periodWords, quotesSentence, type ClaimScope, type Design } from "../src/core/v2/kinds.js";
+import { MAX_HOLDS, MAX_INPUTS } from "../src/core/v2/receipts.js";
 import { resolveV2 } from "../src/core/v2/resolve.js";
 import type { V2Entry } from "../src/core/v2/flow.js";
 import type { Bundle, Outputs } from "../src/core/v2/receipts.js";
@@ -386,6 +387,31 @@ describe("kinds/0.1 at commit and result", () => {
     const withFile = await w.commit("Lark", ref, 2, verification, {}, { inputs: [FILE as never] });
     assert.equal(withFile.status, 201, JSON.stringify(withFile.body));
     assert.equal((w.b(withFile)["kind"] as Record<string, Json>)["countsAs"], "verification");
+  });
+
+  it("takes a data of record of MAX_DATA_FILES files, refuses one more, and leaves a receipt on it room for the bundle's own inputs", async () => {
+    // A paper's replication files can come as dozens of small files (one per format, say). The largest data of record must
+    // fit among a receipt's inputs with room to spare, or "the claim's own data" could never be shown with the paper beside it.
+    assert.ok(MAX_INPUTS >= MAX_DATA_FILES + 8 && MAX_HOLDS >= MAX_INPUTS);
+    const w = await world();
+    await w.agent("Kea", "op-k", ["claude"]);
+    await w.agent("Lark", "op-l", ["gpt"]);
+    const file = (i: number, prefix = "part") => ({ ...FILE, name: `${prefix}${i}`, url: `https://example.org/${prefix}-${i}.csv`, sha256: i.toString(16).padStart(64, prefix === "part" ? "a" : "b") });
+    const files = Array.from({ length: MAX_DATA_FILES }, (_, i) => file(i));
+    const tooMany = await w.register("Kea", { scope: SCOPE, fidelity: REPORTED, data: [...files, file(MAX_DATA_FILES)] });
+    assert.equal(tooMany.status, 400, JSON.stringify(tooMany.body));
+    assert.ok(JSON.stringify(tooMany.body).includes(`1 to ${MAX_DATA_FILES} files`), JSON.stringify(tooMany.body));
+    const reg = await w.register("Kea", { scope: SCOPE, fidelity: REPORTED, data: files });
+    assert.equal(reg.status, 201, JSON.stringify(reg.body));
+    const ref = String(w.b(reg)["ref"]);
+    const verification = { method: "stated", data: "original", basis: "The paper's own replication files, by hash.", period: PERIOD };
+    const own = Array.from({ length: MAX_INPUTS - MAX_DATA_FILES }, (_, i) => file(i, "own"));
+    const full = await w.commit("Lark", ref, 1, verification, {}, { inputs: [...files, ...own] as never });
+    assert.equal(full.status, 201, JSON.stringify(full.body));
+    assert.equal((w.b(full)["kind"] as Record<string, Json>)["countsAs"], "verification");
+    const over = await w.commit("Lark", ref, 2, verification, {}, { inputs: [...files, ...own, file(MAX_INPUTS, "own")] as never });
+    assert.equal(over.status, 400, JSON.stringify(over.body));
+    assert.ok(JSON.stringify(over.body).includes(`at most ${MAX_INPUTS} declared inputs`), JSON.stringify(over.body));
   });
 
   it("a robustness test moves nothing on the claim and is scored against nothing, whichever way it comes out", async () => {

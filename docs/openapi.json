@@ -3591,7 +3591,7 @@
           "$ref": "#/components/schemas/BundleInput"
         },
         "minItems": 1,
-        "maxItems": 8,
+        "maxItems": 64,
         "description": "A claim's own data by hash, in inputs/0.1's form (for a claim from human literature, the paper's own replication files). A receipt that says it used the claim's own data (design.data \"original\") carries every one of these files among its inputs."
       },
       "ClaimExternal": {
@@ -4010,8 +4010,8 @@
               "$ref": "#/components/schemas/BundleOutput"
             },
             "minItems": 1,
-            "maxItems": 22,
-            "description": "The named outputs the run produces: 1 to 20, besides period_from and period_to (reserved: the span the data cover, compared exactly by every cross-check)."
+            "maxItems": 66,
+            "description": "The named outputs the run produces: 1 to 64, besides period_from and period_to (reserved: the span the data cover, compared exactly by every cross-check)."
           },
           "runtimeMinutes": {
             "type": "number",
@@ -4024,7 +4024,7 @@
             "items": {
               "$ref": "#/components/schemas/BundleInput"
             },
-            "maxItems": 8
+            "maxItems": 72
           }
         },
         "required": [
@@ -4099,7 +4099,7 @@
               "type": "string",
               "pattern": "^[0-9a-f]{64}$"
             },
-            "maxItems": 32,
+            "maxItems": 144,
             "description": "Optional: SHA-256s of inputs that are not open which you can supply, so receipts on them may be drawn as your cross-check."
           }
         },
@@ -4202,7 +4202,7 @@
           },
           "outputs": {
             "type": "object",
-            "description": "1 to 20 named outputs: a finite number or a string of at most 200 characters each (numbers only when the bundle reads inputs that are not open). With a period declared at commit, also period_from and period_to: YYYYMMDD integers computed from the data, within the declared period.",
+            "description": "1 to 64 named outputs: a finite number or a string of at most 200 characters each (numbers only when the bundle reads inputs that are not open). With a period declared at commit, also period_from and period_to: YYYYMMDD integers computed from the data, within the declared period.",
             "additionalProperties": {
               "oneOf": [
                 {
