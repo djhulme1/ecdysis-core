@@ -3092,3 +3092,41 @@ after that look. No weighted share, mean or test was computed until the rules
 were committed at `d2319d8`; the receipt's methods, which say no number from
 the data was, overstate it. The module's docstring says the same of
 statistics and is corrected here rather than in the pinned commit.
+
+## bdc/lmr.py: Landsberg, Manivel & Ressayre's quadratic border bound for the permanent
+
+`bdc/lmr.py` tests claim `ext:5dc9ad960e92ffab`, Landsberg, Manivel and
+Ressayre, "Hypersurfaces with degenerate duals and the Geometric Complexity
+Theory Program" (Commentarii Mathematici Helvetici 88(2), 469–484, 2013;
+arXiv:1004.4802): "We establish additional geometric properties of the
+Mulmuley-Sohoni variety and prove a quadratic lower bound for the determinental
+border-complexity of the permanent." The theorem is dc-bar(perm_m) ≥ m²/2: if
+the padded permanent ℓ^(n−m) perm_m lies in the closure of the determinant's
+GL orbit, then n ≥ m²/2. It rests on two dimensions, which Katz's formula reads
+from Hessian ranks: the dual of the permanent's hypersurface has dimension
+m² − 2 (Mignon and Ressayre's computation, which the paper cites), and the
+determinant's 2n − 2. The module checks both for m and n from 2 to 10, and
+that the e-print's TeX states the theorem and Lemma 3.3's form of the
+determinant's Hessian.
+
+| Command | Claim |
+|---|---|
+| `python3 bdc/lmr.py` | Landsberg, Manivel & Ressayre 2013: border determinantal complexity of perm_m at least m²/2 |
+
+Standard library only, in the python image; about half a minute. Tests:
+`python3 -m unittest discover -s tests -p test_lmr.py`. The receipt
+(`65af5353…`, 14 October, at `94b90eb`, a verification): both conditions
+hold. The permanent's Hessian has full rank m² at Mignon and Ressayre's zero
+(all ones, the (1,1) entry 1 − m) for every m from 2 to 10, its entries
+exactly their closed form ((m − 2)! where the first row or column is deleted,
+−2(m − 3)! where the (1,1) entry survives); the determinant's has rank exactly
+2n at diag(1, …, 1, 0) and at all 180 seeded matrices of rank n − 1. Beside it:
+173 of the 180 seeded zeros of the permanent also give full rank; the seven
+that do not (five for m = 3, rank 8; two for m = 4, rank 15) each have zero
+entries. Explored afterwards, outside the receipt: at 40 further random zeros
+of perm_3 the Hessian's determinant is exactly 64 times the product of the nine
+entries, so there the 3 × 3 Hessian is degenerate just where an entry
+vanishes. And the paper's Theorem 1.3, dc-bar(P) ≥ (dim Z(P)* + 1)/2, gives
+only (m² − 1)/2 with Katz's dimension m² − 2, half a unit short of the main
+theorem's m²/2 for odd m; the m²/2 follows from its padding lemma and the
+determinant's 2n − 2 directly (m² − 2 ≤ 2n − 2). Controls 3 of 3.
