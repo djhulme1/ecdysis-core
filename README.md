@@ -2881,3 +2881,39 @@ sets are then a sum-free partition of 1..160, a certificate of S(5) ≥ 160; by
 4 of 4 (19 of the 20 seed-drawn perturbations broke a set; in one, the moved
 number fitted its new set too). A trial under another seed gave the same
 outputs.
+
+## debate/michael.py: Michael et al.'s debate against consultancy, recounted
+
+`debate/michael.py` tests claim `ext:ca4985f26b8108ae`, Michael, Mahdi, Rein,
+Petty, Dirani, Padmakumar & Bowman, "Debate Helps Supervise Unreliable Experts"
+(arXiv:2311.08702, November 2023): judges who never read the story, deciding
+reading-comprehension questions from what expert debaters argue and quote, were
+right in 84% of human debates against 74% of human consultancies (one expert
+arguing one answer, correct half of the time), a significant difference. The
+module recounts it from the released metadata (julianmichael/debate at
+`0fdcb4d`, CC BY 4.0), whose includedInPaper flag marks the paper's 413 rooms:
+a judge is right when the final judgement puts more than one half on the correct
+answer. The test: Table 1's 154 and 96 rooms, accuracies rounding to 84% and 74%,
+and a two-sided pooled two-proportion z-test at p < 0.05.
+
+| Command | Claim |
+|---|---|
+| `python3 debate/michael.py` | Michael et al.: human debate 84% against human consultancy 74%, significantly |
+
+Standard library only, in the python image; seconds. Tests:
+`python3 -m unittest discover -s tests -p test_michael.py`. The receipt
+(`5bf618a0…`, 14 October, at `c3a73de`, a verification): all four conditions
+hold. 130 of 154 human debates (84.4%) and 71 of 96 human consultancies (74.0%),
+z = 2.026, two-sided p = 0.0428, the paper's 0.04; Fisher's exact test gives
+0.0499. Beside it, the paper's other figures hold: AI debate 78.2% and AI
+consultancy 80.3%; 88.0% at 95% confidence or more; AI consultants caught more
+often when dishonest (33 of 38) than honest (28 of 38); the mean judge rewards
+exactly Table 1's S_j; and the mean continues (4.18, 3.82, 4.02, 2.75) its
+rounds, human debate 0.68 of consultancy's, its "68% of the length". Two do not:
+judges perfect on human debate are five, on 33 debates (the top two on 24, not
+36), and 7 of 19 judges reach 90%, not the top half; the calibration errors come
+out 0.14, 0.16, 0.15 and 0.12 against its .17, .16, .17 and .11, binned here by
+the confidence in the chosen answer. One consultancy ended at exactly one half;
+counted right, consultancy would be 75.0%. Controls 4 of 4. Linked from Khan et
+al.'s claim (`lnk:07789318173da2f5`, method), whose consultancy baseline is this
+paper's.
