@@ -2270,3 +2270,43 @@ d/2 t² − d/2 t + 9 − 3d, is still below d/2 t², so the bound stands. Contr
 cannot check: w(2;3,19) = 349 itself (the authors' proof that no good
 partition of {1, …, 349} exists took roughly 196 years of CPU time) and the
 exactness conjectured for t = 20 to 30.
+
+## alife/eoc.py: evolved cellular automata for the density task, against the edge of chaos
+
+`alife/eoc.py` (with `alife/eoc.c`) tests claim `ext:b5219a067681072d`,
+Mitchell, Hraber and Crutchfield, "Revisiting the Edge of Chaos: Evolving
+Cellular Automata to Perform Computations" (Complex Systems 7, 1993;
+arXiv:adap-org/9303003): rerunning Packard's experiment, in which a genetic
+algorithm evolves radius-3 cellular automata to decide whether a ring of
+cells holds more 1s than 0s, they found "very different results". Packard's
+evolved rules had clustered near the critical λ values, in the bins centred
+about 0.24 and 0.83, which he read as evolution selecting the edge of chaos;
+theirs clustered close about λ = 1/2, as the task's symmetry would have them.
+The GA is the paper's Section 7.1, simulated in C: 149 cells, population 100,
+300 new initial configurations a generation (half of density below 1/2, half
+above), M drawn from Poisson(320) for each rule, proportional fitness, the top
+half kept, offspring by one-point crossover and Poisson(3.8) bit flips, 100
+generations, 30 runs. The paper says fifty pairs of parents, two offspring
+each, for fifty places; 25 pairs fill them. The test: of the 3,000 final rules
+merged, at most 1% in Packard's peak bins, λ in [0.2, 0.267) or
+[0.8, 0.867), and at least 95% between 0.267 and 0.733.
+
+| Command | Claim |
+|---|---|
+| `python3 alife/eoc.py` | Mitchell, Hraber and Crutchfield: GA-evolved rules for the density task cluster about λ = 1/2, not at the edge of chaos |
+
+Standard library and gcc, in the pinned buildpack-deps image; about eight
+minutes on two cores. The receipt (`e1f0ac6d…`, 14 October, at `cc3c2cb`, a
+reproduction): no rule of the 3,000 in Packard's peak bins and all of them
+between 0.267 and 0.733, in seven bins (the paper's six, and seven rules in
+the two outer ones). The two highest bins are the neighbours of the centre,
+0.533 to 0.6 (1,060 rules) and 0.4 to 0.467 (813), around a dip at 1/2 (183),
+the paper's two peaks around a dip; and 14 runs settle below 1/2 and 16 above,
+as in the paper. The best final fitness is 0.969 (the paper's 0.93 to 0.95,
+against GKL's 0.98; one evaluation on 300 configurations is noisy by about
+0.015). Without selection the rules drift to 1/2 alone: the three central bins
+hold 18.9% of them at generation 0, 52.0% at generation 10 and 96.9% at 100.
+Controls 4 of 4: the C simulation agrees with a plain one, the GKL rule has
+λ = 1/2 and fitness 0.975, the all-0 rule scores exactly 1/2 and the identity
+rule its expected 112/149, and the initial populations fill every bin.
+Packard's own runs are not published, so they are not checked.
