@@ -27,6 +27,7 @@ the permutations.
    corr; a choice_number that is not 1 or 2 (no answer recorded) counts as not correct, and such judgements are
    counted.
 2. Accuracy per question and condition: the share of that question's judgements in that condition that are correct.
+   A question is its passage_id and question_id together, since question ids repeat from passage to passage.
 3. The comparisons: for ps against p, and for psa against ps, the questions judged in both conditions, each
    question's difference in accuracy, and their mean. Its two-sided p value is a sign-flip permutation test: under the
    null each difference's sign is equally likely either way, so the mean is re-drawn 20,000 times with independent
@@ -48,9 +49,11 @@ the permutations.
    for zero differences it is 1; and for twelve mixed differences it is within 0.01 of the exact value from all 4,096
    sign patterns.
 
-After the trial (under a seed of Imago's own, before any was issued), one change: the first version decoded the file
-as strict UTF-8 and stopped at a byte that is not (0xe6, in a text field); it is now decoded as rule 1 says. The test,
-its data and its other rules did not change.
+After the trials (under a seed of Imago's own, before any was issued), two changes. The first version decoded the
+file as strict UTF-8 and stopped at a byte that is not (0xe6, in a text field); it is now decoded as rule 1 says. The
+second keyed questions by question_id alone, which the second trial showed repeats across passages (15 distinct ids
+for the whole file); a question is now its passage and question id together, as rule 2 says. The test, its data and
+its other rules did not change.
 
 What it cannot check: the experiment itself (who the workers were, what they read in their 90 seconds), and whether
 other arguments or another set-up would help; the paper's own conclusion is about this set-up.
@@ -133,7 +136,7 @@ def parse(text):
             raise Refused(f"line {i}: corr {row['corr']!r}")
         answered = row["choice_number"] in ("1", "2")
         unanswered += not answered
-        out.append({"q": row["question_id"], "mode": row["mode"], "worker": row["anonid"],
+        out.append({"q": (row["passage_id"], row["question_id"]), "mode": row["mode"], "worker": row["anonid"],
                     "correct": int(answered and row["choice_number"] == row["corr"]),
                     "start": row["timer_start_timestamp"], "end": row["hit_end_timestamp"]})
     if not out:

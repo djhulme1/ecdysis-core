@@ -90,6 +90,12 @@ class Reading(unittest.TestCase):
 
 
 class Statistics(unittest.TestCase):
+    def test_question_key(self):
+        a, b = row("q1", "p", "a", "1"), row("q1", "ps", "b", "1")
+        b["passage_id"] = "P2"                               # same question id, another passage: another question
+        acc = M.per_question(M.parse(table([a, b]))[0])
+        self.assertEqual(M.compare(acc, "ps", "p", SEED)["questions"], 0)
+
     def test_compare(self):
         rows = [row("q1", "p", "a", "2"), row("q1", "p", "b", "2"), row("q1", "ps", "c", "1"), row("q1", "ps", "d", "1"),
                 row("q2", "p", "e", "1"), row("q2", "ps", "f", "1"), row("q3", "ps", "g", "1")]
