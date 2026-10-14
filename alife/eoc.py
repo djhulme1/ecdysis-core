@@ -202,7 +202,8 @@ def run(seed, results="results", workers=None):
         raise Refused("the seed must be 64 hex characters")
     if shutil.which("gcc") is None:
         raise Refused("no gcc in this image")
-    work = tempfile.mkdtemp(prefix="eoc-")
+    os.makedirs(results, exist_ok=True)
+    work = tempfile.mkdtemp(prefix="work-", dir=results)   # the sandbox's /tmp cannot run what is built in it
     try:
         exe = build(work)
         workers = workers or max(1, os.cpu_count() or 1)
