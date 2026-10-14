@@ -19,8 +19,9 @@ Standard library only. The inputs are the claim's data of record, the repository
 module); nothing in the repository is run. Every rule below was fixed before any accuracy was computed. The seed draws
 the permutations.
 
-1. The file. Its header must be the twenty columns the README documents, in order (passage_id, question_id, mode, ...,
-   round), and the README must document the modes p, ps and psa and the catch trials' ct_ prefix; otherwise the run is
+1. The file. It is decoded as UTF-8 with any byte that is not valid UTF-8 replaced (U+FFFD; the count is reported),
+   since some of its text fields are not UTF-8 and no text field enters the test. Its header must be the twenty
+   columns the README documents, in order (passage_id, question_id, mode, ..., round), and the README must document the modes p, ps and psa and the catch trials' ct_ prefix; otherwise the run is
    refused. A row whose question_id starts with ct_ is a catch trial and is left out (counted). Every other row must
    have mode p, ps or psa and corr 1 or 2, or the run is refused. A judgement is correct when choice_number equals
    corr; a choice_number that is not 1 or 2 (no answer recorded) counts as not correct, and such judgements are
@@ -46,6 +47,10 @@ the permutations.
 6. Controls, known answers: the permutation p value for ten equal positive differences is close to the exact 2/1024;
    for zero differences it is 1; and for twelve mixed differences it is within 0.01 of the exact value from all 4,096
    sign patterns.
+
+After the trial (under a seed of Imago's own, before any was issued), one change: the first version decoded the file
+as strict UTF-8 and stopped at a byte that is not (0xe6, in a text field); it is now decoded as rule 1 says. The test,
+its data and its other rules did not change.
 
 What it cannot check: the experiment itself (who the workers were, what they read in their 90 seconds), and whether
 other arguments or another set-up would help; the paper's own conclusion is about this set-up.
@@ -264,7 +269,9 @@ def run(seed, inputs="inputs", results="results"):
     if not re.fullmatch(r"[0-9a-f]{64}", seed):
         raise Refused("the seed must be 64 hex characters")
     check_readme(read_bytes(inputs, "readme").decode("utf-8"))
-    rows, catch, unanswered = parse(read_bytes(inputs, "data").decode("utf-8-sig"))
+    text = read_bytes(inputs, "data").decode("utf-8", errors="replace").lstrip("\ufeff")
+    replaced = text.count("\ufffd")
+    rows, catch, unanswered = parse(text)
     acc = per_question(rows)
 
     pooled = {m: (sum(r["correct"] for r in rows if r["mode"] == m) / max(1, sum(r["mode"] == m for r in rows)))
@@ -305,7 +312,7 @@ def run(seed, inputs="inputs", results="results"):
     per_mode = ", ".join(f"{m} {sum(1 for r in rows if r['mode'] == m)}" for m in MODES)
     values = {
         "sample": (f"{len(rows)} judgements ({per_mode}), {len({r['q'] for r in rows})} questions, {len(workers)} "
-                   f"workers; {catch} catch trials left out, {unanswered} without an answer"),
+                   f"workers; {catch} catch trials left out, {unanswered} without an answer; {replaced} bytes not UTF-8"),
         "acc_p": round(pooled["p"], 6), "acc_ps": round(pooled["ps"], 6), "acc_psa": round(pooled["psa"], 6),
         "snippets": "ps against p: " + fmt(snip),
         "arguments": "psa against ps: " + fmt(args) + "; psa against p: " + fmt(both),
@@ -330,6 +337,7 @@ def run(seed, inputs="inputs", results="results"):
               "controls": controls, "pooled": pooled, "comparisons": {"ps-p": snip, "psa-ps": args, "psa-p": both},
               "agreement": agree, "printed": printed, "medians": med, "workers": len(workers), "cells": len(cells),
               "three_worker_cells": three_workers, "repeats": repeats, "catch": catch, "unanswered": unanswered,
+              "replaced": replaced,
               "orderings": {"pooled": ordering(pooled)}}
     os.makedirs(results, exist_ok=True)
     with open(os.path.join(results, "outputs.json"), "w", encoding="ascii") as fh:

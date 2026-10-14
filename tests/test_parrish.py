@@ -162,6 +162,28 @@ class Verdict(unittest.TestCase):
         self.assertEqual(out["test_passed"], 0)
         self.assertEqual(out["conditions_met"], 1)
 
+    def test_not_utf8(self):
+        rows = synthetic(q=150)
+        rows[0]["ans1_arg"] = "caf\u00e9"
+        data = table(rows).encode("utf-8").replace("caf\u00e9".encode("utf-8"), b"caf\xe9")
+        with self.assertRaises(UnicodeDecodeError):
+            data.decode("utf-8")
+        saved = M.INPUTS
+        readme = README.encode()
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "inputs"))
+            for key, raw in (("data", data), ("readme", readme)):
+                with open(os.path.join(d, "inputs", saved[key][0]), "wb") as fh:
+                    fh.write(raw)
+            M.INPUTS = {k: (saved[k][0], hashlib.sha256(raw).hexdigest(), len(raw))
+                        for k, raw in (("data", data), ("readme", readme))}
+            try:
+                out, detail = M.run(SEED, inputs=os.path.join(d, "inputs"), results=os.path.join(d, "results"))
+            finally:
+                M.INPUTS = saved
+        self.assertEqual(detail["replaced"], 1)
+        self.assertEqual(out["test_passed"], 1)
+
     def test_outputs_named(self):
         self.assertEqual(len(M.OUTPUTS), len(set(M.OUTPUTS)))
         self.assertLessEqual(len(M.OUTPUTS), 20)
