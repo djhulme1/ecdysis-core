@@ -1461,6 +1461,50 @@ the decrease the paper reports, 4-phenylbutyrate in females (p 0.0098, printed
 astaxanthin's and meclizine's male gains (p 0.0030 and 0.027; printed 0.003
 and 0.03). Controls 6 of 6.
 
+## itp/strong2020.py: rapamycin from 20 months, continuous, alternating or for 3 months, in the ITP's 2015 cohort
+
+`itp/strong2020.py` tests claim `ext:b9d5b47e07b6161a`, Strong et al. (Aging
+Cell 19(11), e13269, 2020): rapamycin at 42 ppm from 20 months increased
+survival significantly in both sexes; a 3-month course gave a significant
+benefit in males only; and alternating months on and off were effective in
+both sexes, though less so than continuous rapamycin in females. On the
+cohort's deposited per-mouse data (MPD project ITP2015, file 751; its second
+file, "w error", repeats two 17-DMAG males and is not used), every row
+checked against the cohort's design, with the paper's own test: the two-sided
+log-rank test for each sex, stratified by site, removed mice censored, with
+the pooled medians of the dead for direction. Seven conditions: continuous
+and alternating, each sex, significant and with a higher median; the 3-month
+course the same in males and not both in females; and in females alternating
+months significantly below continuous by the same test.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/strong2020.py` | Strong et al. 2020: late-life rapamycin regimes, sex-specific effects |
+
+The standard library, in the python image; a few seconds. The receipt
+(`51139eb0…`, 14 October, at `ae213ce`, a verification): all seven conditions
+hold. Continuous rapamycin takes the males' median from 771.5 to 856 days (p
+0.00066) and the females' from 904.5 to 1,039.5 (p 1.1 × 10⁻⁸); alternating
+months to 841 (p 0.0019) and 977 (p 7.1 × 10⁻⁵); the 3-month course to 854
+(p 0.024) and 939.5 (p 0.15). In females alternating months stay below
+continuous, 977 days against 1,039.5, p 0.041 between them, the nearest of
+the seven to its bound. Tables 1 and 2 against the data: counts and medians
+16 of 16 each, 90th percentiles 14 of 16 (the minocycline and beta-GPA males,
+1,024 and 1,050 days where the tables print 1,026 and 1,054), log-rank p 14
+of 14 to their printed decimals, and Wang-Allison p 1 of 14 (as at the
+earlier ITP checks, whatever the paper's program did differs from its stated
+rule). The protocols in pairs: males 0.28 to 0.61, as printed; females 2.9 ×
+10⁻⁵ to 0.041 (printed "0.04 to 0.0001"). The four other agents: no p below
+0.11 in either sex, as the paper says.
+
+Beside the test, the paper's own caveat: the groups differed before
+rapamycin began at 604 days (it suspects the drug-free chow, which came from
+two suppliers). On the mice alive at 604 days (192 of the 300 control males),
+continuous and alternating rapamycin stay significant in both sexes (males
+0.0045 and 0.00045, females 1.4 × 10⁻¹⁰ and 8.6 × 10⁻⁶), but the 3-month
+course in males falls to p 0.064: alone among the protocols, its benefit is
+not significant among the mice alive when the treatment started.
+
 ## udg/: unit-distance graphs with chromatic number 5, and a two-distance graph with 6
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
