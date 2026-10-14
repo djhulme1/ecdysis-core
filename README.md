@@ -1555,6 +1555,40 @@ continuous and alternating rapamycin stay significant in both sexes (males
 course in males falls to p 0.064: alone among the protocols, its benefit is
 not significant among the mice alive when the treatment started.
 
+## itp/capt2017.py: captopril and female lifespan in the ITP's 2017 cohort
+
+`itp/capt2017.py` tests claim `ext:049e04f7d49b7db1`, Strong et al. (Aging
+Cell 21(12), e13724, 2022), the abstract's captopril sentence: "Capt led to
+a significant, though small (4% or 5%), increase in female lifespan." The
+paper's Discussion gives the two numbers: 5% with all three sites and 4%
+with TJL and UM alone, the analysis it added because the cohort's UT
+controls were unusually short-lived. On the cohort's workbook (MPD file
+737, by hash), females fed captopril (180 ppm from 5 months) against the
+cohort's control females: in both analyses, the median age at death of the
+dead pooled over the sites at least 2% higher, and the site-stratified
+log-rank p, removed mice censored, below 0.05. The reader is itp/rapa.py's
+and the statistics itp/cana.py's.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/capt2017.py` | Strong et al. 2022: captopril, a small but significant gain in female lifespan |
+
+The standard library, in the python image; under a second. The receipt
+(`7aa20dc0…`, 14 October, at `78c1aaf`, a verification): all four
+conditions hold. Over the three sites the 132 captopril females' median is
+915 days against the 276 controls' 868 (+5.4%), log-rank p 0.0020; over TJL
+and UM, 924.5 against 889.5 (+3.9%), p 0.037, as printed (4%, 0.04). By
+site: TJL +10.2% (p 0.0032), UM −1.3% (p 0.93), UT +5.8% (p 0.015). Males:
++14.3% over three sites (p 0.0010), +6.1% over TJL and UM (p 0.26), the
+paper's "complicated" result, since nearly all of it is UT's (+28.1%). Beside
+the test, 79 of the 85 values of Tables 1 to 3 and of the two-site text
+come out as printed; the six that do not are four of the pooled Wang–Allison
+p values (females 0.014 against the printed 0.02, two-site 0.094 against
+0.06, males 0.020 against 0.01; and UM's 1.00, printed 0.99) and the male
+captopril 90th percentile (1,092 days against 1,097). The text's own figures
+part from its Table 1 where the deposit agrees with the table: "6%" for the
+female gain (5.4%) and "13%" for the male (14.3%). Controls 3 of 3.
+
 ## udg/: unit-distance graphs with chromatic number 5, and a two-distance graph with 6
 
 `udg/check.py` tests Heule's 2018 graph (arXiv:1805.12181), claim
