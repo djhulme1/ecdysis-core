@@ -1973,6 +1973,49 @@ pytorch image; about twelve minutes on two CPUs. Tests: `python3 -m unittest -v
 tms.test_check` from the lab's root, with the notebook at `inputs/` (or
 `TMS_INPUTS`).
 
+## grok/: grokking and Fourier multiplication, three new runs
+
+`grok/nanda.py` tests claim `ext:85f82ed4c68b56c1`, Nanda, Chan, Lieberum,
+Smith & Steinhardt (ICLR 2023; arXiv:2301.05217): one-layer transformers
+trained on addition modulo 113 learn an algorithm that uses discrete Fourier
+transforms and trigonometric identities to turn addition into rotation about
+a circle, confirmed by the weights, the activations and ablations in Fourier
+space. Three runs of the paper's mainline setup are trained afresh (d = 128,
+4 heads, 512 ReLU neurons, 30% of the 12,769 pairs, full-batch AdamW at lr
+1e-3 with weight decay 1, 40,000 epochs), each split and initialisation drawn
+from the archive's seed, with the numerics pinned (MKL at AVX2, ATen's AVX2
+kernels, deterministic algorithms) so that a seed fixes every bit. Each final
+model faces the paper's own checks, with bounds taken from the values it
+reports over its five seeds: key frequencies from the DFT of the neuron-logit
+map W_L (those at least a tenth of the largest), W_L within 5% of their sine
+and cosine directions, every projection u_k^T MLP and v_k^T MLP at least 90%
+explained by cos or sin(w_k(a+b)), and the two ablations of the logits in the
+Fourier basis over the inputs.
+
+| Command | Claim |
+|---|---|
+| `python3 grok/nanda.py` | Nanda et al. 2023: grokked transformers use Fourier multiplication |
+
+PyTorch on two CPUs, in the pytorch image; about three hours (the steps slow
+by half or more once a run has grokked). The receipt (`27e452c5…`, 14
+October, at `837ee77`, a reproduction) failed the registered test, 3 of 5
+conditions met. Every run generalised (100% test accuracy; 99% reached at
+epochs 7,100, 7,600 and 10,100), each has four or five key frequencies (4, 13,
+16, 47; 17, 30, 46, 52; 3, 16, 41, 52, 55), and both ablations behave exactly
+as the paper says in all three: removing the key frequencies leaves test
+losses of 6.3 to 7.6, worse than chance (ln 113 = 4.73), and removing
+everything else lowers test loss to 0.22 to 0.74 of its own. But only the
+second run is as clean as the paper's: W_L's residual outside the key
+directions is 5.8% and 7.7% in the other two (4.4% in the second; the paper's
+mainline 0.55%), and some key projections are explained less than the 90%
+the paper reports: 80% for frequency 47's sine in the first run, 80% and 87%
+for frequency 55 in the third, and frequency 52 in the third, at 17% of the
+top norm, carries no cos or sin(w(a+b)) at all (0.5% and 1.7%). The dominant
+frequencies' projections are explained 96% to 99%, as in the paper. Beside
+it: W_E has 5 or 6 frequencies at a tenth of its largest, as the paper finds,
+and 69%, 75% and 88% of the neurons have more than 85% of their variance in
+one key frequency (the paper's mainline, 84.6%). Controls 5 of 5.
+
 ## iit/phi2008.py: Balduzzi & Tononi's integrated information, a counter and its replay
 
 `iit/phi2008.py` tests claim `ext:829df225aeb1af24`, Balduzzi & Tononi (PLoS
