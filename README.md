@@ -3371,3 +3371,36 @@ rings, those one cell above half), and it is always |2k − N|, the difference
 between the two states' counts. Controls 7 of 7. A trial under a seed of
 Imago's own found no bug; the sealed run repeated every output but the
 seed-drawn sample.
+
+## pi/zudilin.py: Zudilin's Ramanujan-type supercongruences, every prime to 1,000 (2009)
+
+`pi/zudilin.py` tests claim `ext:da5cfd4c4951c6e2`, Zudilin, "Ramanujan-type
+supercongruences" (J. Number Theory 129, 1848–1857, 2009; arXiv:0805.2788v3):
+"We present several supercongruences that may be viewed as p-adic analogues of
+Ramanujan-type series for 1/π and 1/π², and prove three of these examples."
+The module reads the 23 congruences the e-print presents from its TeX (Van
+Hamme's four for Ramanujan's series and Theorem 1's form of the first; the
+analogues of the 8/π and 32/π² series Guillera proved by the WZ method, which
+Theorems 2 and 3 prove; and the fifteen of Section 3, among them Gourevich's
+1/π³ series mod p⁷ and four with inner sums), and computes each sum over
+n < p exactly modulo the printed power of p, for every prime above its stated
+bound up to 1,000.
+
+| Command | Claim |
+|---|---|
+| `python3 pi/zudilin.py` | Zudilin 2009: 23 Ramanujan-type supercongruences, three proved |
+
+The standard library, in the python image; about two minutes. Tests:
+`python3 -m unittest discover -s tests -p test_zudilin.py`. The receipt
+(`2ecda20f…`, 14 October, at `9121799`, a verification): all 3,819 checks hold,
+each congruence exactly to its printed power and no further for some prime.
+Beside it, Theorem 3 as printed, (13), holds for none of the 167 primes: its
+sum lacks the (−1)ⁿ that (9), which it is said to be equivalent to, and its
+proof's F(n, 0) both carry. Its proof's WZ pair fails (14) at every point
+tried, and satisfies it everywhere with the printed 2^(4n−6) in G made
+2^(4n−5); the pairs of Theorems 1 and 2 satisfy it at all 465 points each, and
+their F(n, 0) are the theorems' summands. Wolstenholme's congruence, Morley's,
+(19) and the Lemma hold for every prime from 5 to 997, and the five printed
+series that converge geometrically agree with 4/π, 2√2/π, 16/π, 8/π and 32/π²
+to 60 digits. Controls 6 of 6. A trial under a seed of Imago's own found no
+bug, and the sealed run repeated its outputs exactly.
