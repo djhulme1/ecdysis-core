@@ -3171,3 +3171,41 @@ the trials, before any seed was issued: the file is not all UTF-8 (16,273 bytes
 in its text fields are replaced on reading), and question_id repeats from
 passage to passage, so a question is its passage and question id together.
 Controls 3 of 3.
+
+## pi/guillera.py: Guillera's WZ pairs and the binomial series from them (Guillera 2002)
+
+`pi/guillera.py` tests claim `ext:f073fa538f1b6476`, Jesús Guillera, "Some
+binomial series obtained by the WZ-method" (Advances in Applied Mathematics 29
+(2002) 599–603; arXiv:math/0503345): "Using the WZ-method we find some of the
+easiest Ramanujan's formulae and also some new interesting Ramanujan-like
+sums." The paper prints two WZ pairs F(n, k), G(n, k), each with a Γ form that
+extends it to every k, and derives eight sums from them: at k = 0, two of
+Ramanujan's series for 8/π and two for 32/π² (among them the series in
+820n² + 180n + 13 that sums to 128/π²), and at k = 1/4 four for √π/Γ(3/4)²
+and π/Γ(3/4)⁴. The module reads the e-print by hash, checks the WZ equation
+F(n+1, k) − F(n, k) = G(n, k+1) − G(n, k) as an equality of fractions at
+every n from 1 to 40 and k from 0 to 2n − 1, and sums the eight series as
+printed, in integers scaled by 10^560.
+
+| Command | Claim |
+|---|---|
+| `python3 pi/guillera.py` | Guillera 2002: two WZ pairs and the eight Ramanujan-like sums they give |
+
+Standard library only, in the python image; six seconds. Tests:
+`python3 -m unittest discover -s tests -p test_guillera.py`. The receipt
+(`93abfcd0…`, 14 October, at `4eb8abc`, which is also where its rules were
+committed, a verification): every condition holds. Both pairs satisfy the WZ
+equation at all 1,640 points, and each of the eight sums meets its printed
+value within 10^-500; the differences are at most 14 units of 10^-560, which
+is rounding, so each agrees to at least 550 digits (the reported cap). The sums
+took 948, 324, 945, 324, 480, 199, 478 and 199 terms. With
+Γ(3/4)² = √(π/2)·AGM(1, √2), the k = 1/4 values are √2/AGM(1, √2) =
+1.1803405990160962260… and its square, 2/AGM(1, √2)² = 1.3932039296856768591…,
+so the second pair's k = 1/4 sums converge to the square of the first pair's;
+the AGM constant agreed with Ramanujan's φ(e^−π)², and π by Machin's formula
+with the Chudnovskys' series. Beside it, G(n, 0) and H(n, 0) = F(n + 1, n) +
+G(n, n) are the printed k = 0 summands, term by term, for n up to 60 in both
+pairs, and the Γ forms equal the binomial forms at every one of the 1,681
+integer points with k from 0 to 2n. The trial found no bug; the sealed run gave
+the trial's outputs. The derivations themselves (Zeilberger's theorem, and
+Carlson's for k = 1/4) are not checked. Controls 7 of 7.
