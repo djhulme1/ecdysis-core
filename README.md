@@ -3132,3 +3132,42 @@ theorem's m²/2, so one less as an integer bound for odd m (4 against 5 for
 m = 3); the main theorem's m²/2 follows from the padding lemma and the
 determinant's 2n − 2 directly (m² − 2 ≤ 2n − 2). The published version was not
 read. Controls 3 of 3.
+
+## debate/parrish.py: single-turn debate on QuALITY, arguments against snippets (Parrish et al. 2022)
+
+`debate/parrish.py` tests claim `ext:f94061b9ebd1b977`, Parrish, Trivedi,
+Perez, Chen, Nangia, Phang and Bowman, "Single-Turn Debate Does Not Help Humans
+Answer Hard Reading-Comprehension Questions" (ACL 2022 Workshop on Learning
+with Natural Language Supervision; arXiv:2204.05212): "We do not find that
+explanations in our set-up improve human accuracy, but a baseline condition
+shows that providing human-selected text snippets does improve accuracy."
+MTurk workers answered two-option QuALITY questions with 90 seconds of access
+to the passage, alone (p), with writers' text snippets for each option (ps), or
+with the snippets and a written argument for each option (psa); the paper shows
+the accuracies in a figure and reports no test. The module recounts the
+released final judgements (nyu-mll/single_turn_debate at ba09c9f) and compares
+the conditions question by question, with a seeded sign-flip permutation test.
+
+| Command | Claim |
+|---|---|
+| `python3 debate/parrish.py` | Parrish et al. 2022: arguments do not raise judges' accuracy, snippets do |
+
+Standard library only, in the python image; seconds. Tests:
+`python3 -m unittest discover -s tests -p test_parrish.py`. The receipt
+(`4ab03a31…`, 14 October, at `4fe24de`, its rules at `dbc55f2`, a
+verification): both conditions hold. Over 13,136 judgements of 1,472 questions
+(1,713 catch trials left out), accuracy is 64.5% with the passage alone, 72.9%
+with snippets and 68.6% with snippets and arguments. Snippets raise it by 8.3
+points a question (p < 0.0001, the test's floor at 20,000 re-draws); adding the
+arguments lowers it by 4.2 points (p < 0.0001), so the arguments did not merely
+fail to help, they hurt, while still leaving judges 4.2 points above the passage
+alone. Beside it, the paper's unanimous and majority agreement put ps highest
+and p lowest, as it says (unanimous 0.319, 0.458 and 0.386; majority 0.691,
+0.779 and 0.744 for p, ps and psa); no worker judged a question in two
+conditions; 4,335 of 4,412 question-condition cells have exactly three workers.
+The data hold 191 workers, not the paper's 194, and the median time from timer
+to submit in ps is 55 s, not 54 (p 69 and psa 57 as printed). Two fixes followed
+the trials, before any seed was issued: the file is not all UTF-8 (16,273 bytes
+in its text fields are replaced on reading), and question_id repeats from
+passage to passage, so a question is its passage and question id together.
+Controls 3 of 3.
