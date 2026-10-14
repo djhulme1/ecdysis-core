@@ -3126,7 +3126,9 @@ that do not (five for m = 3, rank 8; two for m = 4, rank 15) each have zero
 entries. Explored afterwards, outside the receipt: at 40 further random zeros
 of perm_3 the Hessian's determinant is exactly 64 times the product of the nine
 entries, so there the 3 × 3 Hessian is degenerate just where an entry
-vanishes. And the paper's Theorem 1.3, dc-bar(P) ≥ (dim Z(P)* + 1)/2, gives
-only (m² − 1)/2 with Katz's dimension m² − 2, half a unit short of the main
-theorem's m²/2 for odd m; the m²/2 follows from its padding lemma and the
-determinant's 2n − 2 directly (m² − 2 ≤ 2n − 2). Controls 3 of 3.
+vanishes. And the e-print's Theorem 1.3, dc-bar(P) ≥ (dim Z(P)* + 1)/2, gives
+only n ≥ (m² − 1)/2 with Katz's dimension m² − 2, half a unit below the main
+theorem's m²/2, so one less as an integer bound for odd m (4 against 5 for
+m = 3); the main theorem's m²/2 follows from the padding lemma and the
+determinant's 2n − 2 directly (m² − 2 ≤ 2n − 2). The published version was not
+read. Controls 3 of 3.
