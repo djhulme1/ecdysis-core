@@ -3209,3 +3209,47 @@ pairs, and the Γ forms equal the binomial forms at every one of the 1,681
 integer points with k from 0 to 2n. The trial found no bug; the sealed run gave
 the trial's outputs. The derivations themselves (Zeilberger's theorem, and
 Carlson's for k = 1/4) are not checked. Controls 7 of 7.
+
+## snn/song.py: Song, Miller & Abbott's STDP neuron, balanced and irregular (Song, Miller & Abbott 2000)
+
+`snn/song.py` (with `snn/song.c`, compiled in the image) tests claim
+`ext:4c6c4e22f5e782dd`, Song, Miller and Abbott, "Competitive Hebbian learning
+through spike-timing-dependent synaptic plasticity" (Nature Neuroscience 3,
+919–926, 2000): "In modeling studies, we find that this form of synaptic
+modification can automatically balance synaptic strengths to make
+postsynaptic firing irregular but more sensitive to presynaptic spike timing."
+The model is the paper's Methods: one integrate-and-fire neuron with 1000
+excitatory synapses under additive STDP (A₋/A₊ = 1.05, τ± = 20 ms, peaks from
+0 to ḡmax = 0.015, all at ḡmax at the start) and 200 fixed inhibitory ones at
+10 Hz, driven by independent Poisson inputs, simulated at 0.1 ms. At each input
+rate of 10, 20, 30 and 40 Hz it runs 1000 s and measures the next 200 s.
+
+| Command | Claim |
+|---|---|
+| `python3 snn/song.py` | Song, Miller & Abbott 2000: STDP balances excitation, firing irregular and timing-sensitive |
+
+Standard library and gcc, in the buildpack-deps image; under 20 seconds. Tests:
+`python3 -m unittest discover -s tests -p test_song.py`. The receipt
+(`b6ac1e3e…`, 14 October, at `355a5e8`, which is also where its rules were
+committed; a reproduction, since the claim has no data of record and the runs
+are new): all ten conditions hold. The ratio of inhibitory to excitatory current
+at threshold, the leak counted as inhibitory, is 1.06, 1.06, 1.04 and 1.02 at
+10, 20, 30 and 40 Hz, slightly above one as the paper says, though below its
+Figure 2d's 1.15; the output CV is 0.79, 0.80, 0.77 and 0.79 (Figure 2c: about
+0.9); the output rate is 15.6, 15.5, 17.8 and 21.5 Hz, rising 6.0 Hz over the
+range as the paper's does (about 1 Hz per 5 Hz), though about 6 Hz above its
+Figure 2c at every rate. The correlogram of presynaptic spikes around a
+postsynaptic spike rises to 1.18 just before it at the 10 Hz equilibrium, an
+excess of 0.060 over the 20 ms before, against 1.04 and 0.009 with every peak
+at ḡmax, when the neuron fires regularly at 189 Hz (CV 0.17): the timing
+sensitivity of Figure 3. Beside it, the peaks are bimodal and fall with the
+input rate as the text says: 43% strong at 10 Hz and 9% at 40 Hz ("roughly
+half" and "10%"); at 40 Hz 56% are in the bottom twentieth of [0, ḡmax] and
+5% in the top, as Figure 2b shows. With the peaks held at their 10 Hz
+equilibrium, raising the inputs to 15 Hz lifts the output from 16 to 128 Hz,
+a rise of 112 Hz ("over 100 Hz"). The 10 Hz run takes a few hundred seconds
+to settle (56 Hz at 100 s, 19 Hz at 500 s) where the Methods say about 100 s.
+The trial, under another seed, found no bug and gave the same picture. Controls
+5 of 5: the C program bit for bit against a plain Python implementation over
+0.5 s, the pairing rule against F(Δt), the inputs' counts and mean
+conductances, and the correlogram after the spike at chance (0.999).
