@@ -4100,3 +4100,55 @@ rational sums for primes to 300; a planted fault (8n + 3) caught; and the
 root-of-unity valuations on known cases, with Theorem 1.1's right-hand side
 negated caught. A trial under Imago's seed found no bug, and the sealed run
 repeated its outputs exactly.
+
+## raf/hs2004.py: Hordijk & Steel, the RAF algorithm (2004)
+
+`raf/hs2004.py` tests claim `ext:39437d110cd8a342`, Hordijk & Steel,
+"Detecting autocatalytic, self-sustaining sets in chemical reaction systems"
+(Journal of Theoretical Biology 227, 451–461, 2004): "a polynomial-time
+algorithm that determines whether any given set of molecules, reactions and
+catalysations contains a subsystem that is both autocatalytic and able to be
+sustained from a given subset of the molecules", and its use to "find
+irreducible auto-catalysing and sustaining subsystems". It is the algorithm
+the line's other RAF claims use (Hordijk, Steel & Kauffman 2019 and Xavier et
+al. 2020 link to it as their method). The module runs Section 7's three
+routines exactly as stated, with the paper's 2004 reading of RA (a catalyst
+must be a reactant or product of the set's own reactions; `raf/check.py` lets
+food catalyse), on 20,000 seed-drawn systems small enough to search every
+subset, and on 240 instances of the paper's Section 8 polymer model (n = 5 to
+10, f = 1 to 2) against a second schedule of the same two reduction rules
+that shares no code with it.
+
+| Command | Claim |
+|---|---|
+| `python3 raf/hs2004.py` | Hordijk & Steel 2004: the RAF algorithm returns the largest RAF, finds an irreducible one, and runs in polynomial time |
+
+numpy in the scipy-notebook image; under a minute on two cores. Tests:
+`python3 -m unittest tests.test_hs2004`. The receipt (`c429f8fa…`, 15
+October, at `92bbf5a`, rules first, a reproduction): all seven conditions
+hold. On all 20,000 small systems (8,742 with an RAF) the result is the
+union of the RAF sets exhaustive search finds; Lemma 5.1's g(R) and d(R) are
+the largest RA and F-generated sets, g also by single deletions in a seeded
+order; and Theorem 6.1's irreducible RAF is an RAF with no RAF proper subset
+in all 8,742, smaller than the largest in 6,618. On all 240 polymer instances
+the result equals the batch schedule's and is an RAF by definition where not
+empty, and the 27 irreducible RAFs check. No run took more than |R| passes
+(at most 8 on the polymer instances) or more than 0.8 of |R|³ + 4|R|²
+condition checks; the checks grow as |R|^0.91 over the polymer instances.
+Controls 7 of 7: the bitmask search against a set-based one; the polymer
+reactions against an enumeration of every pair of strings; the batch schedule
+against exhaustive search on 2,000 systems; three planted faults caught (food
+may catalyse, which changes the largest RAF of 450 of the 20,000 systems; one
+pass only; ComputeClosure after one sweep); and the draws' totals. The paper's
+own example gives {r1, r2}, as its Figure 2. A trial under Imago's seed found
+no bug, and nothing was changed after it.
+
+Beside the test, and not part of the claim: under the model as Section 8
+states it (each molecule catalysing each of the |R(n)| one-way reactions with
+probability f/|R(n)|), RAFs are rare at the f where the paper's Figure 4 has
+them all but certain: at f = 2, 6, 3, 1, 0, 0 and 0 of 10 instances for n = 5
+to 10. A diagnostic outside any receipt (20 instances a point, the same
+functions) puts the transition between f = 2 and 3 for n = 6 to 10 as
+stated, and below f = 1.5 when p is doubled, as if f counted each reversible
+reaction once; sharing a catalyst between a ligation and its cleavage, or
+letting food catalyse, does not move it.
