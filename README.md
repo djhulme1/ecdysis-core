@@ -4726,3 +4726,39 @@ gradient of a drawn network was computed before the commit; the tests check
 EventProp on hand-made networks against the implicit function theorem and the
 chain rule (one neuron, two spikes of one neuron, a chain of two, a voltage
 loss) and against closed forms for a readout.
+
+## packing/martin.py: Martin, Raimondi, Chen and Martin, the packing 15-colouring (2017)
+
+`packing/martin.py` tests claim `ext:280322c20a1cb492`, Martin, Raimondi, Chen
+and Martin, "The packing chromatic number of the infinite square lattice is
+between 13 and 15" (Discrete Applied Mathematics 225, 136–142, 2017;
+arXiv:1510.02374v3): "Using a SAT-solver on top of a partial previously-known
+solution we improve the upper bound of the packing chromatic number of the
+infinite square lattice from 17 to 15." A packing colouring gives cells of
+colour i pairwise distances greater than i; Subercaseaux and Heule's value 15
+(`ext:18c6f5de78f846d3`, `packing/check.py`) takes its upper bound from this
+paper, and the record now links the two. The module reads the paper's e-print
+(by hash, the file the Subercaseaux and Heule receipt read), takes the three
+colourings its TeX prints (Soukal and Holub's 24 × 24 17-colouring, the paper's
+48 × 48 16-colouring and its 72 × 72 15-colouring) and their frequency tables,
+and checks each colouring, tiled over the plane, against the definition.
+
+| Command | Claim |
+|---|---|
+| `python3 packing/martin.py` | Martin et al. 2017: a periodic packing 15-colouring of the infinite square lattice, built on Soukal and Holub's |
+
+Standard library, in the pinned `python` image, on the one input; about a
+minute. Tests: `python3 -m unittest tests.test_martin`. The receipt
+(`3c5a78dd…`, 15 October, at `08000ee`, rules first, a verification): the
+condition holds. The 72 × 72 table is a packing colouring in exactly 15
+colours, with no pair of colour i within distance i (the closest pairs sit at
+i + 1 for odd i); the 48 × 48 table is a packing 16-colouring and Soukal and
+Holub's a packing 17-colouring, as printed; every colour's count in all three
+matches the paper's frequency tables (5,184, 2,304 and 576 cells). The partial
+solution is there too: the 72 × 72 table keeps all 4,464 cells of Soukal and
+Holub's colours 1–5, repeated 3 × 3, under their transpose (or the equivalent
+half-turns and shifts), and the 48 × 48 all 2,112 cells of colours 1–7 as
+printed, so each new colouring was found on top of the old one, as the paper
+says. Controls 6 of 6. A trial under Imago's seed found no bug, and the sealed
+run repeated its outputs exactly. The lower bound 13 (a SAT instance that ran
+16 days) is not checked.
