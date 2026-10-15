@@ -4583,3 +4583,59 @@ diagnostic after the receipt, outside it, classified them. A dry run before
 the rules were committed computed Remark 4's polynomial through a default
 argument and printed its zeros' log moduli; the module's docstring records
 it.
+
+## judge/mtbench.py: Zheng et al., GPT-4 as a judge on MT-bench (2023)
+
+`judge/mtbench.py` tests claim `ext:745d633a969e7a42`, Zheng, Chiang, Sheng,
+Zhuang, Wu, Zhuang, Lin, Li, Li, Xing, Zhang, Gonzalez and Stoica, "Judging
+LLM-as-a-Judge with MT-Bench and Chatbot Arena" (arXiv:2306.05685; NeurIPS
+2023, Datasets and Benchmarks): "Our results reveal that strong LLM judges
+like GPT-4 can match both controlled and crowdsourced human preferences well,
+achieving over 80% agreement, the same level of agreement between humans."
+The module reads the released MT-bench judgements
+(lmsys/mt_bench_human_judgments at `f7d2896`, CC BY 4.0): 3,355 human votes,
+2,668 of them by 58 expert labelers and 687 by 7 authors, and GPT-4's 2,400
+pairwise judgements, one on each comparison of the 80 questions' 15 model
+pairs in each of two turns. It computes agreement as the authors' script
+does (FastChat's `compute_agreement.py`, read as text and written again),
+pooling the pairs of votes, and as the paper's text defines it, each
+comparison weighted equally. The crowdsourced half, Chatbot Arena, is not
+tested: its votes are in a gated dataset.
+
+| Command | Claim |
+|---|---|
+| `python3 judge/mtbench.py` | Zheng et al. 2023: GPT-4 agrees with MT-bench's experts over 80% of the time, as often as they agree with one another |
+
+pyarrow, in the pinned `jupyter/scipy-notebook` image, on the two files (by
+hash); seconds. Tests: `python3 -m unittest tests.test_mtbench`. The receipt
+(`a897fa09…`, 15 October, at `2aab89c`, rules first, a verification): all
+eight conditions hold. With tie and inconsistent votes left out (the paper's
+S2), GPT-4 agrees with the experts 84.6% of the time in the first turn (727
+of 859 pairs) and 84.6% in the second (731 of 864), and the experts agree
+with one another 81.0% (388 of 479) and 81.9% (388 of 474); weighting each
+comparison equally, 84.6% and 85.4% against 80.1% and 82.9%. Every count and
+percentage of the paper's Table 5 comes out as printed, ties included (S1:
+GPT-4 with the experts 66.0% of 1,343 and 65.7% of 1,325 pairs, the experts
+with one another 63.0% of 721 and 66.6% of 707). GPT-4's lead over the
+experts' own agreement is within sampling error: 95% intervals from the 80
+questions resampled put it at −0.3 to 7.3 points in the first turn and −1.0
+to 6.6 in the second. No expert voted twice on a comparison.
+
+Of Table 13's sixteen further cells the rules compute (GPT-4 against the
+authors and the experts' majority, the authors against the experts and one
+another), twelve match in count and percentage. The release holds one more
+author vote in the first turn than the table's S1 counts, one that S2 leaves
+out (346 and 50 pairs against 345 and 49), and GPT-4 against the experts'
+majority counts four more comparisons than printed in S2 in each turn (550
+and 561 against 546 and 557), at the printed percentages (84.8% and 85.4%).
+Table 13's agreement between the experts and their majority, which the
+paper does not define, is reproduced when each vote is counted in the
+majority it is compared with (80.8% and 83.4% in S1, 90.0% and 91.3% in S2,
+against the printed 81%, 83%, 90% and 91%); with its own vote left out, as
+GPT-4's always is, an expert agrees with the others' majority 80.5% and 83.7%
+of the time in S2, below GPT-4's 84.8% and 85.4%. Controls 8 of 8: the
+paper's worked examples, a vote recorded the other way round, ties in both
+setups, a set on which the two computations differ, one expert's pair, both
+readings of the majority, and the reader on files written for it with each
+refusal. A trial under Imago's seed found no bug, and the sealed run repeated
+its outputs but for the bootstrap, which the seed draws.
