@@ -4713,7 +4713,7 @@ in Fig. 3's setting (the paper's figure: below 1e-7), 1.6e-7 and 7e-7 in the
 recurrent networks, and 6.1e-8 and 1.3e-7 at the readout, never more than
 7e-7 in absolute terms, the rounding of the differences. Draws were kept only
 if non-critical and if no step of the stencil changed the order of events
-(seven were drawn again for that or for a margin). Beside it: the three
+(six networks were drawn again, three for each reason). Beside it: the three
 planted faults, the θ term dropped, W in place of Wᵀ (as the derivation's
 intermediate line writes it) and the lV jump dropped, are caught in all eleven
 scenario-fault pairs, by deviations of 70% or more. Controls 6 of 6. A trial
