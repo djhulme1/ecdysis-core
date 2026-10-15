@@ -39,7 +39,12 @@ on other rates and sizes only):
    were set to the adjacent reading before any run at the paper's parameters (the same timing run then settled near
    1.4 mV at about 32 Hz). The pairing at a postsynaptic spike uses
    F as written, so a presynaptic spike less than d before it depresses (the paper's shift), and strengths are clipped
-   at 0 after each change. Inputs:
+   at 0 after each change. Spike times are whole steps and intervals are counted in steps, so an interval of exactly d
+   (which the 0.1 ms grid makes common) depresses, as F's dt <= d says, at every time of a run. A trial under a seed of
+   Imago's own found the strengths and rates of every run stepping up together near 16,800 s: with times held in
+   milliseconds as floating-point numbers, about 40% of intervals of exactly d rounded above d, and so potentiated, once
+   the times passed 2^24 ms (none between 2^22 and 2^24 ms, about a fifth before); the times were made whole steps
+   before the sealed run. Inputs:
    in each step a Poisson number of excitatory spikes with mean N_ex r_ex dt, each at a synapse drawn uniformly, and a
    Poisson number of inhibitory spikes with mean N_in r_in dt (the superposition of independent Poisson trains), from
    xoshiro256** seeded from the archive's seed.
@@ -63,7 +68,7 @@ N_in r_in tau_s w_in - 0.5 (V_th - V_r)) / ((V_th - V_r) tau_m), against S1's.
 
 Controls (controls_passed of controls_total):
  (a) The C program against a plain Python implementation of rule 1 on the same replayed inputs (50 excitatory and 20
-     inhibitory synapses at 40 Hz, 2 s, with plasticity, d = 2 ms and d = 0): the same postsynaptic spike times and
+     inhibitory synapses at 40 Hz, 2 s, with plasticity, d = 2 ms and d = 0): the same postsynaptic spike steps and
      final strengths within 1e-9 mV.
  (b) The free membrane: with firing and plasticity off and all strengths 2 mV for 1,000 s, the mean of V is
      V_r + tau_s (N_ex r_ex 2 mV - N_in r_in w_in) within 2% (about five standard errors).
@@ -130,8 +135,10 @@ def seed64(seed, label):
 
 
 def F(dt, p):
-    """The paper's window (rule 1)."""
-    return -p["am"] * math.exp((dt - p["d"]) / p["tn"]) if dt <= p["d"] else p["ap"] * math.exp(-(dt - p["d"]) / p["tp"])
+    """The paper's window (rule 1); dt in ms, an interval of exactly d (to a billionth of a step) depressing."""
+    if dt <= p["d"] + 1e-9 * p["dt"]:
+        return -p["am"] * math.exp((dt - p["d"]) / p["tn"])
+    return p["ap"] * math.exp(-(dt - p["d"]) / p["tp"])
 
 
 # ---------------------------------------------------------------- the C program
@@ -168,7 +175,7 @@ def c_run(exe, work, params, winit, mode="run", spikes=None):
         elif f[0] == "runaway":
             res["runaway"] = float(f[1])
         elif f[0] == "spike":
-            res["spikes"].append(float(f[1]))
+            res["spikes"].append(int(f[1]))
         elif f[0] == "end":
             res["end"] = {"t": float(f[1]), "spikes": int(f[2]), "in_ex": int(f[3]), "in_in": int(f[4]),
                           "meanV": float(f[5])}
@@ -180,6 +187,8 @@ def c_run(exe, work, params, winit, mode="run", spikes=None):
 # ---------------------------------------------------------------- the plain implementation (control a)
 
 def py_replay(params, winit, spikes, steps):
+    """Rule 1 written plainly: returns the postsynaptic spikes (each as the step at whose start it falls) and the final
+    strengths."""
     p = params
     w = list(winit)
     lastpre = [None] * p["nex"]
@@ -197,13 +206,12 @@ def py_replay(params, winit, spikes, steps):
         by_step.setdefault(k, []).append((ty, ix))
     out = []
     for k in range(steps):
-        t = k * dt
         for ty, ix in by_step.get(k, []):
             if ty == 0:
                 Iex += w[ix]
                 if p["plastic"] and npost > postidx[ix]:
-                    w[ix] = max(0.0, w[ix] + F(lastpost - t, p))
-                lastpre[ix] = t
+                    w[ix] = max(0.0, w[ix] + F((lastpost - k) * dt, p))
+                lastpre[ix] = k
                 postidx[ix] = npost
                 if ix not in pending:
                     pending.append(ix)
@@ -214,14 +222,14 @@ def py_replay(params, winit, spikes, steps):
         Iex *= es
         Iin *= es
         if p["fire"] and V >= p["vth"]:
-            tp = t + dt
+            kp = k + 1
             V = p["vr"]
-            out.append(tp)
+            out.append(kp)
             if p["plastic"]:
                 for i in pending:
-                    w[i] = max(0.0, w[i] + F(tp - lastpre[i], p))
+                    w[i] = max(0.0, w[i] + F((kp - lastpre[i]) * dt, p))
             pending = []
-            lastpost = tp
+            lastpost = kp
             npost += 1
     return out, w
 
@@ -301,7 +309,7 @@ def assess(seed, work):
         spikes = replay_spikes(rng, 50, 20, 40.0, steps, p["dt"])
         rc = c_run(exe, work, p, winit, mode="replay", spikes=spikes)
         ps, pw = py_replay(p, winit, spikes, steps)
-        same_t = len(ps) == len(rc["spikes"]) and all(abs(a - b) < 1e-6 for a, b in zip(ps, rc["spikes"]))
+        same_t = ps == rc["spikes"]
         gap = max(abs(a - b) for a, b in zip(pw, rc["w"]))
         agree &= same_t and gap < 1e-9 and len(ps) > 0
         detail_a.append({"d": d, "spikes_c": len(rc["spikes"]), "spikes_py": len(ps), "largest_gap": gap})

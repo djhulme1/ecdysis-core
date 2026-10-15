@@ -32,20 +32,20 @@ def small(**kw):
 
 def walk(params, winit, spikes, posts):
     """Adjacent pairs, formulated independently of both implementations: for each synapse, merge its presynaptic spikes
-    with all the postsynaptic spikes in the order the programs process them (a step's presynaptic spikes, at k dt, before
-    a postsynaptic spike at the step's end, (k + 1) dt), and change the strength by F(t_post - t_pre) for every pair of
+    with all the postsynaptic spikes in the order the programs process them (a step's presynaptic spikes, at step k,
+    before a postsynaptic spike at the step's end, k + 1), and change the strength by F(t_post - t_pre) for every pair of
     neighbours of different kinds in that sequence, clipping at 0 after each change."""
     dt = params["dt"]
     w = list(winit)
-    post_events = [((int(round(tp / dt)) - 1, 1, 0), "post", tp) for tp in posts]
+    post_events = [((kp - 1, 1, 0), "post", kp) for kp in posts]
     for i in range(params["nex"]):
-        pre_events = [((k, 0, n), "pre", k * dt) for n, (k, ty, ix) in enumerate(spikes) if ty == 0 and ix == i]
+        pre_events = [((k, 0, n), "pre", k) for n, (k, ty, ix) in enumerate(spikes) if ty == 0 and ix == i]
         prev = None
-        for _, kind, t in sorted(pre_events + post_events):
+        for _, kind, k in sorted(pre_events + post_events):
             if prev is not None and prev[0] != kind:
-                t_post, t_pre = (t, prev[1]) if kind == "post" else (prev[1], t)
-                w[i] = max(0.0, w[i] + M.F(t_post - t_pre, params))
-            prev = (kind, t)
+                k_post, k_pre = (k, prev[1]) if kind == "post" else (prev[1], k)
+                w[i] = max(0.0, w[i] + M.F((k_post - k_pre) * dt, params))
+            prev = (kind, k)
     return w
 
 
@@ -75,7 +75,15 @@ class Window(unittest.TestCase):
         self.assertAlmostEqual(M.F(13.0, p), 0.01 * math.exp(-1), places=15)
         q = dict(p, d=0.0)
         self.assertEqual(M.F(0.0, q), -0.02)
-        self.assertGreater(M.F(1e-9, q), 0.0099)
+        self.assertGreater(M.F(1e-6, q), 0.0099)
+
+    def test_ties_depress(self):
+        # an interval of exactly d, counted in steps, depresses even where n dt rounds above d
+        p = dict(M.BASE, d=0.3, dt=0.1)
+        self.assertGreater(3 * 0.1, 0.3)
+        self.assertEqual(M.F(3 * 0.1, p), -p["am"] * math.exp((3 * 0.1 - 0.3) / p["tn"]))
+        self.assertGreater(M.F(4 * 0.1, p), 0)
+        self.assertEqual(M.F(20 * 0.1, dict(M.BASE)), -0.005)
 
 
 class Pairing(unittest.TestCase):
@@ -104,16 +112,30 @@ class Pairing(unittest.TestCase):
         posts, w = M.py_replay(p, winit, spikes, steps)
         dt = p["dt"]
         self.assertGreaterEqual(len(posts), 2)
-        self.assertLess(max(posts), 40.0)
+        self.assertLess(max(posts), 400)
         p1, plast = posts[0], posts[-1]
         # synapse 0: its one spike pairs with the first postsynaptic spike only
-        self.assertAlmostEqual(w[0], 400.0 + M.F(p1 - 30 * dt, p), places=12)
+        self.assertAlmostEqual(w[0], 400.0 + M.F((p1 - 30) * dt, p), places=12)
         # synapse 1: the spike at 2 ms (not 1 ms) pairs with the first postsynaptic spike; the spike at 40 ms with the
         # burst's last; the spike at 50 ms with nothing
-        self.assertAlmostEqual(w[1], 1.0 + M.F(p1 - 20 * dt, p) + M.F(plast - 400 * dt, p), places=12)
+        self.assertAlmostEqual(w[1], 1.0 + M.F((p1 - 20) * dt, p) + M.F((plast - 400) * dt, p), places=12)
         # the reading set aside (every postsynaptic spike with the last presynaptic spike) would differ
-        other = 1.0 + sum(M.F(tp - 20 * dt, p) for tp in posts) + M.F(plast - 400 * dt, p) + M.F(plast - 500 * dt, p)
+        other = (1.0 + sum(M.F((kp - 20) * dt, p) for kp in posts) + M.F((plast - 400) * dt, p)
+                 + M.F((plast - 500) * dt, p))
         self.assertGreater(abs(other - w[1]), 1e-4)
+
+    def tie_case(self):
+        # synapse 1 fires exactly d = 2 ms (20 steps) before the first spike of the burst synapse 0 drives
+        p = dict(M.BASE, nex=2, nin=0, d=2.0, T=0.06, cp=0.06, stop_rate=0, stop_mean=0, seed=1)
+        steps = int(round(p["T"] * 1000 / p["dt"]))
+        first = M.py_replay(p, [400.0, 1.0], [(30, 0, 0)], steps)[0][0]
+        return p, [400.0, 1.0], sorted([(30, 0, 0), (first - 20, 0, 1)]), steps, first
+
+    def test_tie_depresses(self):
+        p, winit, spikes, steps, first = self.tie_case()
+        posts, w = M.py_replay(p, winit, spikes, steps)
+        self.assertEqual(posts[0], first)
+        self.assertEqual(w[1], 1.0 - p["am"])
 
 
 class Program(unittest.TestCase):
@@ -139,10 +161,34 @@ class Program(unittest.TestCase):
             rc = self.run_c(p, winit, mode="replay", spikes=spikes)
             ps, pw = M.py_replay(p, winit, spikes, steps)
             self.assertGreater(len(ps), 5, seed)
-            self.assertEqual(len(ps), len(rc["spikes"]), seed)
-            self.assertLess(max(abs(a - b) for a, b in zip(ps, rc["spikes"])), 1e-6, seed)
+            self.assertEqual(ps, rc["spikes"], seed)
             self.assertLess(max(abs(a - b) for a, b in zip(pw, rc["w"])), 1e-9, seed)
             self.assertEqual(rc["end"]["spikes"], len(ps))
+
+    def test_start_does_not_matter(self):
+        # the same replayed inputs, and the same generated run, with the step count started at 0 and at 2 x 10^8
+        # (20,000 s, past 2^24 ms): identical spikes and strengths, ties at d included
+        rng = random.Random(31)
+        p = small(nex=30, nin=8, d=2.0, T=1.5, cp=1.5)
+        steps = int(round(p["T"] * 1000 / p["dt"]))
+        winit = [rng.uniform(3.0, 12.0) for _ in range(p["nex"])]
+        spikes = M.replay_spikes(rng, p["nex"], p["nin"], 50.0, steps, p["dt"])
+        a = self.run_c(p, winit, mode="replay", spikes=spikes)
+        b = self.run_c(dict(p, k0=200000000), winit, mode="replay", spikes=spikes)
+        self.assertEqual(a["spikes"], b["spikes"])
+        self.assertEqual(a["w"], b["w"])
+        ties = sum(1 for k, ty, ix in spikes if ty == 0 and k + 20 in set(a["spikes"]))
+        self.assertGreater(ties, 0)
+        g = self.run_c(small(T=3.0, cp=1.0, seed=8), [5.0] * 20)
+        h = self.run_c(small(T=3.0, cp=1.0, seed=8, k0=200000000), [5.0] * 20)
+        self.assertEqual((g["cp"], g["w"]), (h["cp"], h["w"]))
+
+    def test_tie_in_c(self):
+        p, winit, spikes, steps, first = Pairing().tie_case()
+        for k0 in (0, 200000000):
+            rc = self.run_c(dict(p, k0=k0), winit, mode="replay", spikes=spikes)
+            self.assertEqual(rc["spikes"][0], first)
+            self.assertEqual(rc["w"][1], 1.0 - p["am"])
 
     def test_hand_case_in_c(self):
         p, winit, spikes, steps = Pairing().hand_case()
@@ -225,6 +271,7 @@ class Program(unittest.TestCase):
         self.assertEqual(code(good + "colour 3\n"), 2)
         self.assertEqual(code(good.replace("tau_s 5", "tau_s 20")), 2)
         self.assertEqual(code(good.replace("nex 1", "nex 2")), 2)     # winit too short
+        self.assertEqual(code(good + "k0 -5\n"), 2)
         self.assertEqual(subprocess.run([self.exe, "walk", winit], capture_output=True).returncode, 2)
 
 

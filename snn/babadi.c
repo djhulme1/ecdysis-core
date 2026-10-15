@@ -15,15 +15,22 @@
  *
  * PARAMS is a file of "key value" lines (keys below); winit names a file of N_ex initial strengths and wout the file
  * the final strengths are written to. Output lines: "cp t mean sd m3 frac0 max spikes" at each checkpoint (strength
- * statistics, then the postsynaptic spikes in the window), "runaway t" if a stop condition fired, "spike t" for each
- * postsynaptic spike in replay mode, and "end t spikes inputs_ex inputs_in meanV" at the end.
+ * statistics, then the postsynaptic spikes in the window), "runaway t" if a stop condition fired, "spike n" for each
+ * postsynaptic spike in replay mode (n the step at whose start it falls, counted from the run's start), and
+ * "end t spikes inputs_ex inputs_in meanV" at the end.
  *
- * Each step of dt: (1) the step's presynaptic spikes, at time t, each adding its strength to its input and, with
- * plasticity, changing its synapse by F(t_lastpost - t) when the neuron has fired since that synapse's last presynaptic
- * spike; (2) the exact solution of the linear membrane and input equations over [t, t + dt]; (3) a postsynaptic spike at
- * t + dt if V >= V_th: V is reset and, with plasticity, every synapse that has received a presynaptic spike since the
- * previous postsynaptic spike (kept in a list as they arrive) is changed by F(t + dt - t_lastpre). Strengths are kept
- * at 0 or above, and at w_max or below when w_max > 0.
+ * Each step k of dt, from t = k dt: (1) the step's presynaptic spikes, at t, each adding its strength to its input
+ * and, with plasticity, changing its synapse by F(t_lastpost - t) when the neuron has fired since that synapse's last
+ * presynaptic spike; (2) the exact solution of the linear membrane and input equations over [t, t + dt]; (3) a
+ * postsynaptic spike at t + dt if V >= V_th: V is reset and, with plasticity, every synapse that has received a
+ * presynaptic spike since the previous postsynaptic spike (kept in a list as they arrive) is changed by
+ * F(t + dt - t_lastpre). Strengths are kept at 0 or above, and at w_max or below when w_max > 0.
+ *
+ * Spike times are kept as whole steps (a presynaptic spike of step k at k, a postsynaptic spike at the end of step k at
+ * k + 1) and intervals counted in steps, n dt, so that an interval of exactly d is the same at every time of a run and
+ * depresses, as F's dt <= d says. (Times held in milliseconds as floating-point numbers rounded such intervals above or
+ * below d according to the times' magnitude, so that they potentiated in some stretches of a run and depressed in
+ * others.) k0, 0 unless set, starts the step count elsewhere: the results must not depend on it.
  */
 #include <math.h>
 #include <stdint.h>
@@ -33,6 +40,7 @@
 
 typedef struct {
     int nex, nin, plastic, fire;
+    long long k0;
     double rex, rin, tau_m, vth, vr, tau_s, win, ap, am, tp, tn, d, wmax, T, dt, cp, stop_rate, stop_mean;
     uint64_t seed;
     char winit[512], wout[512];
@@ -76,32 +84,35 @@ static void read_par(const char *path, Par *P) {
         D(rex); D(rin); D(tau_m); D(vth); D(vr); D(tau_s); D(win); D(ap); D(am); D(tp); D(tn); D(d); D(wmax);
         D(T); D(dt); D(cp); D(stop_rate); D(stop_mean);
         else if (!strcmp(k, "seed")) P->seed = strtoull(v, NULL, 10);
+        else if (!strcmp(k, "k0")) P->k0 = strtoll(v, NULL, 10);
         else if (!strcmp(k, "winit")) strncpy(P->winit, v, 511);
         else if (!strcmp(k, "wout")) strncpy(P->wout, v, 511);
         else die("unknown key");
     }
     fclose(f);
-    if (P->nex < 1 || P->nex > 100000 || P->nin < 0 || P->dt <= 0 || P->T <= 0 || P->cp <= 0 || P->tau_s == P->tau_m)
+    if (P->nex < 1 || P->nex > 100000 || P->nin < 0 || P->dt <= 0 || P->T <= 0 || P->cp <= 0 || P->tau_s == P->tau_m ||
+        P->k0 < 0 || P->k0 > 1000000000000LL)
         die("bad params");
 }
 
 static Par P;
-static double *w, *lastpre, lastpost = -INFINITY, Iex = 0, Iin = 0, V;
-static long long nspk = 0, nin_ex = 0, nin_in = 0, win_spk = 0, *postidx;
+static double *w, Iex = 0, Iin = 0, V;
+static long long nspk = 0, nin_ex = 0, nin_in = 0, win_spk = 0, *postidx, *lastpre, lastpost = 0;
 static int *pending, *flag, npend = 0;
 
-static double F(double dtt) {
-    return dtt <= P.d ? -P.am * exp((dtt - P.d) / P.tn) : P.ap * exp(-(dtt - P.d) / P.tp);
+static double F(long long n) { /* n = t_post - t_pre in steps */
+    double dtt = n * P.dt;
+    return dtt <= P.d + 1e-9 * P.dt ? -P.am * exp((dtt - P.d) / P.tn) : P.ap * exp(-(dtt - P.d) / P.tp);
 }
 static void clip(int i) {
     if (w[i] < 0) w[i] = 0;
     if (P.wmax > 0 && w[i] > P.wmax) w[i] = P.wmax;
 }
-static void pre_ex(int i, double t) {
+static void pre_ex(int i, long long k) {
     Iex += w[i];
     nin_ex++;
-    if (P.plastic && nspk > postidx[i]) { w[i] += F(lastpost - t); clip(i); }
-    lastpre[i] = t;
+    if (P.plastic && nspk > postidx[i]) { w[i] += F(lastpost - k); clip(i); }
+    lastpre[i] = k;
     postidx[i] = nspk;
     if (!flag[i]) { flag[i] = 1; pending[npend++] = i; }
 }
@@ -121,7 +132,7 @@ int main(int argc, char **argv) {
     if (!replay && strcmp(argv[1], "run")) die("unknown mode");
     read_par(argv[2], &P);
     w = malloc(sizeof(double) * P.nex);
-    lastpre = malloc(sizeof(double) * P.nex);
+    lastpre = calloc(P.nex, sizeof(long long));
     postidx = calloc(P.nex, sizeof(long long));
     pending = malloc(sizeof(int) * P.nex);
     flag = calloc(P.nex, sizeof(int));
@@ -129,7 +140,6 @@ int main(int argc, char **argv) {
     if (!fw) die("cannot open winit");
     for (int i = 0; i < P.nex; i++) {
         if (fscanf(fw, "%lf", &w[i]) != 1) die("short winit");
-        lastpre[i] = -INFINITY;
     }
     fclose(fw);
     FILE *fs = NULL;
@@ -149,16 +159,16 @@ int main(int argc, char **argv) {
     double sumV = 0;
     long long k;
     for (k = 0; k < steps; k++) {
-        double t = k * dt;
+        const long long ka = P.k0 + k;
         if (replay) {
             while (nk == k) {
-                if (ntype == 0) { if (nidx < 0 || nidx >= P.nex) die("bad index"); pre_ex(nidx, t); }
+                if (ntype == 0) { if (nidx < 0 || nidx >= P.nex) die("bad index"); pre_ex(nidx, ka); }
                 else { Iin += P.win; nin_in++; }
                 if (fscanf(fs, "%lld %d %d", &nk, &ntype, &nidx) != 3) nk = -1;
             }
         } else {
             int ne = poisson(Le);
-            for (int j = 0; j < ne; j++) pre_ex((int)(uni() * P.nex), t);
+            for (int j = 0; j < ne; j++) pre_ex((int)(uni() * P.nex), ka);
             int ni = poisson(Li);
             Iin += P.win * ni;
             nin_in += ni;
@@ -169,18 +179,18 @@ int main(int argc, char **argv) {
         Iin *= es;
         sumV += V;
         if (P.fire && V >= P.vth) {
-            double tp = t + dt;
+            const long long kp = ka + 1;
             V = P.vr;
             nspk++;
             win_spk++;
-            if (replay) printf("spike %.6f\n", tp);
+            if (replay) printf("spike %lld\n", kp - P.k0);
             for (int j = 0; j < npend; j++) {
                 int i = pending[j];
-                if (P.plastic) { w[i] += F(tp - lastpre[i]); clip(i); }
+                if (P.plastic) { w[i] += F(kp - lastpre[i]); clip(i); }
                 flag[i] = 0;
             }
             npend = 0;
-            lastpost = tp;
+            lastpost = kp;
         }
         if ((k + 1) % cpk == 0) {
             double tt = (k + 1) * dt;
