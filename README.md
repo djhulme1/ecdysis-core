@@ -3931,3 +3931,41 @@ binomial; delays, weights and background arrivals as drawn. The first trial
 stopped at the in-degree control, whose 3% tolerance was tighter than a
 variance over a few thousand neurons allows; it became four standard errors
 (`19e3396` to `d8f9e8b`, recorded in the docstring) before any rate was seen.
+
+## mm/km2023.py: Kauers & Moosbauer, new schemes of size (n,m,6) (2023)
+
+`mm/km2023.py` tests claim `ext:bdfb70a75724cbd7`, Kauers & Moosbauer, "Some
+New Non-Commutative Matrix Multiplication Algorithms of Size (n,m,6)"
+(arXiv:2306.00882v1, 1 June 2023): "For various $2\leq n,m \leq 6$, we
+propose some new algorithms for multiplying an $n\times m$ matrix with an
+$m \times 6$ matrix over a possibly noncommutative coefficient ring." The
+module reads the two schemes the e-print's appendix prints, (2,6,6) and
+(3,4,6) in 56 products each, from the TeX in its source archive, and checks
+them exactly over the integers in the paper's own convention (a_ij ⊗ b_jk ⊗
+c_ki); it checks modulo 2 the 15 files the e-print names for its table
+(jakobmoosbauer/flips at `e2fa414`), counting each one's products against the
+table's rank; and it computes Hopcroft and Kerr's count for (6,2,6), the
+family the (2,6,6) scheme improves. The checks are `mm/check.py`'s, imported.
+
+| Command | Claim |
+|---|---|
+| `python3 mm/km2023.py` | Kauers & Moosbauer 2023: new algorithms for (n,m,6), 2 ≤ n,m ≤ 6, over a possibly noncommutative ring |
+
+The standard library, in the python image; seconds. Tests: `python3 -m
+unittest discover -s tests -p test_km2023.py`. The receipt (`8d9b2878…`, 15
+October, at `bbe2949`, rules first, a verification): failed, 3 of 4
+conditions. Both printed schemes have 56 terms and are exact over the
+integers, so valid over any ring (42 of the (2,6,6) scheme's terms and 26 of
+the (3,4,6) scheme's have a coefficient other than 0 and ±1), and Hopcroft and
+Kerr's count for (6,2,6) is 57, so the (2,6,6) scheme does improve on their
+family. All 15 released files are exact modulo 2, and 14 have exactly the
+table's rank of products; but `366-85-mod2.exp`, for the table's 85 for
+(3,6,6), holds 86 distinct products, none of which can be dropped and no two of
+which share two factors, and it is unchanged in the repository since. The
+line count of 86 was seen in git's summary of the commit before the rules were
+written, and the test kept the table's rank. Controls 21 of 21: Section 2's
+standard algorithm and Strassen's, read in the paper's notation, exact, and
+Strassen's with c read transposed not; `mm/check.py`'s self-test; and one
+coefficient of each scheme raised by one making exactly |v_r||w_r| entries
+wrong. A trial under Imago's seed found no bug, and the sealed run repeated
+its outputs, the seeded probes aside.
