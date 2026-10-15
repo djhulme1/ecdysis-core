@@ -4442,7 +4442,7 @@ there. Beside it, at N = 400 v_a is still 0.14 at η = 4.5, so no η_c falls
 inside the rule's range and no line is fitted. Controls 4 of 4: the C engine
 against a plain Python implementation (the same positions and directions),
 cells against brute force (bit for bit), independent directions at noise 2π
-(v_a 0.0447 against √(π/4N) = 0.0443), and perfect order kept at noise 0.
+(v_a 0.0445 against √(π/4N) = 0.0443), and perfect order kept at noise 0.
 
 The paper's text gives its Figure 3a and its η_c(∞) = 2.9 as for density 0.4,
 while the sizes its Figure 2a lists give 4; the test followed the sizes. A
