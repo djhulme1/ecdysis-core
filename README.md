@@ -3586,3 +3586,45 @@ scalar moved into its first factor, exact over the integers (largest
 coefficient 16, 5, 8, 6 and 10), so these four formats have their bold ranks
 over Z, where the paper says Hensel lifting gave them only rational
 coefficients.
+
+## bdc/abv.py: Alper, Bogart & Velasco, the determinantal complexity of the 3 × 3 permanent is 7 (2015)
+
+`bdc/abv.py` tests claim `ext:5413c683254e2768`, Alper, Bogart & Velasco, "A
+lower bound for the determinantal complexity of a hypersurface"
+(arXiv:1505.02205v1; Found. Comput. Math. 17 (2017), 829–836): "As a result,
+we obtain that the determinantal complexity of the $3 \times 3$ permanent is
+$7$." The paper's Theorem 1.2 (dc(f) ≥ codim Sing(f) + 1 when that codimension
+exceeds 4) is a proof; the corollary rests on two computed facts, which the
+module checks exactly. The singular locus of perm_3's hypersurface, where
+perm_3 and its nine partial derivatives vanish, has codimension 6 (from
+sympy's reduced Gröbner basis and the dimension of its initial ideal), over Q
+and over F_3, F_5 and F_7. Grenet's construction (the subsets of {1, 2, 3}
+other than the whole set, the empty set closing the cycle) writes perm_3 as
+the determinant of a 7 × 7 matrix of zeros, ones and variables, expanded
+exactly.
+
+| Command | Claim |
+|---|---|
+| `python3 bdc/abv.py` | Alper, Bogart & Velasco 2015: dc(perm_3) = 7 |
+
+sympy 1.12, in the scipy-notebook image; a few seconds. Tests (in that image):
+`python3 -m unittest discover -s tests -p test_abv.py`. The receipt
+(`1b960d37…`, 15 October, at `d16d3e7`, a verification): all five conditions
+hold. The codimension is 6 over Q, F_3, F_5 and F_7, and the reduced bases
+agree in all four (24 polynomials, the same coefficients, as for a binomial
+ideal with signs ±1). Grenet's 7 × 7 matrix has 18 nonzero entries, all 0, 1
+or a variable, and its determinant is perm_3's six terms exactly. Beside it:
+the torus decomposition of the binomial partials gives codimension 6 over C
+too (43 feasible supports of 512); over F_2, where perm_3 = det_3, the
+codimension is 4; matrices with one nonzero row, one nonzero column or two
+zero columns (the paper's Remark 1.5) are all singular points; Grenet's
+constant part has rank 6 = m − 1, as Proposition 2.1 requires of any
+expression; his construction gives (−1)^(n−1) perm_n at every seed-drawn point
+for n = 2, 4 and 5 (sizes 3, 15 and 31); and Theorem 1.8's printed 5 × 5
+matrix has determinant xy² + yt² + z³ exactly. Controls 4 of 4: det_3's
+singular locus (codimension 4 by both routes), a monomial ideal and two
+binomial systems with known answers, the determinant against the sum over
+permutations, and a planted fault in Grenet's matrix. Not checked: Theorem
+1.2's proof, codim Sing(perm_4) = 8, and the characteristics other than 0, 3,
+5 and 7. A trial under a seed of Imago's own found no bug, and the sealed run
+repeated its outputs exactly.
