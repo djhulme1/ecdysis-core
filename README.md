@@ -3838,3 +3838,45 @@ appendix's questions, rank AUC against sklearn on all 495 AUCs, a Newton
 refit, 200 seeded shuffles of the training labels (mean 0.508) and the legacy
 generator's stream. A trial under a seed of Imago's own found no bug, and the
 sealed run repeated its outputs, the seeded shuffles aside.
+
+## vdw/rl2012.py: Rabung & Lotts, improving the use of cyclic zippers (2012)
+
+`vdw/rl2012.py` tests claim `ext:66ad4a1d0a5682ed`, Rabung & Lotts,
+"Improving the Use of Cyclic Zippers in Finding Lower Bounds for van der
+Waerden Numbers" (The Electronic Journal of Combinatorics 19(2), #P35, 2012):
+"Using this procedure we find some new lower bounds for van der Waerden
+numbers." The module reads the paper's PDF (Table 1 from its tokens, held to a
+transcription) and rebuilds each of the 24 new bounds' certificates from its
+printed prime: the kth-power classes mod p, zipped once where marked Z, joined
+l − 1 times. A single or once-zipped certificate is checked by the arithmetic
+criterion the paper's Claims 1 to 5 justify, re-derived in the docstring and
+computed in C (`vdw/rl2012.c`): no l consecutive residues in one class or
+zipped colour, and no l-string through 0 or p whose other members share one.
+The one double zipping, W(4,8) > 2388317, is built by `vdw/hhlm.py`'s
+procedure and every progression in it scanned, as the paper did.
+
+| Command | Claim |
+|---|---|
+| `python3 vdw/rl2012.py` | Rabung & Lotts 2012: 24 new van der Waerden lower bounds from cyclic zippers, up to W(6,12) > 219996107 |
+
+The standard library and gcc, in the buildpack-deps image; about five minutes.
+Tests: `python3 -m unittest discover -s tests -p test_rl2012.py`. The receipt
+(`92bcdd9e…`, 15 October, at `e781bd6`, its rules first at `17f39c5`, a
+verification): all 24 hold. The 23 single or once-zipped certificates meet the
+criterion, the largest W(6,12) > 219,996,107 from 9,999,823 zipped; the double
+zipping, its free numbers coloured, has no 8-term progression in one colour
+among 407,431,526,734. Its prime, 85297, is reflection symmetric, and for such
+a certificate the paper fixes no labelling for the turning: under
+`vdw/hhlm.py`'s labels (raw classes 1-4 and 2-3 swapped) the certificate holds
+32,241,888 progressions in one colour, under 1-2 and 3-4 one too, and under
+1-3 and 2-4, a shift of the classes by k/2, none. The first trial took hhlm's
+labels alone and found the entry failing; the module was changed after that
+outcome was seen to try all three (`17f39c5` to `e781bd6`, recorded in its
+docstring), the second trial found no bug, and the sealed run repeated its
+outputs, the seeded cases aside. Beside it: W(4,10)'s printed 760,492,218 is
+76,049,218 for its prime, and W(4,9)'s "Z" is a slip, its printed bound being
+the unzipped one (zipping 1,362,341 fails). Controls 5 of 5: classes by
+Euler's criterion; full scans of W(2,10), W(2,11), W(2,12) and W(3,9) agreeing
+with the criterion; the closed form against hhlm's builds; 40 seeded cases and
+Herwig et al.'s twelve rows with z ≤ 1, criterion against full check; and the
+scan against enumeration, with a planted progression found.
