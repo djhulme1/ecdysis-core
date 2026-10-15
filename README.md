@@ -4490,3 +4490,46 @@ lifespan on weight as its text and the test read it; and its p-values, 3.09 ×
 10⁻¹¹ and 3.73 × 10⁻⁷, are 1.4 and 1.07 times those from the table's 63 rows,
 so its figure may rest on slightly different rows. A trial under Imago's seed
 found no bug, and the sealed run repeated its outputs exactly.
+
+## iit/phistar.py: Oizumi, Amari, Yanagawa, Fujii and Tsuchiya, Φ* bounded below and above (2016)
+
+`iit/phistar.py` tests claim `ext:cb7b7cff972641ce`, Oizumi, Amari, Yanagawa,
+Fujii and Tsuchiya, "Measuring Integrated Information from the Decoding
+Perspective" (PLoS Computational Biology 12(1), e1004654, 2016): "We show that
+Φ* is properly bounded from below and above, as required, as a measure of
+integrated information." Φ* is the information about a system's past that is
+lost when the past is decoded from the present by a model that treats the
+parts as independent: Φ* = I − I*, where I* is the best "hypothetical"
+information such a decoder extracts over its parameter β. The module computes
+I and I* by the paper's Gaussian expressions (Eqs 23 to 28), as printed, for
+linear autoregressive systems at their steady state: the paper's two-unit
+model (A = a[[1,1],[1,1]], noise correlation c) at a = 0 and 0.4, 2,000 stable
+systems of 2 to 6 units drawn from the archive's seed under drawn partitions,
+and 200 drawn with independent parts.
+
+| Command | Claim |
+|---|---|
+| `python3 iit/phistar.py` | Oizumi et al. 2016: Φ* lies between 0 and the whole system's information, and is 0 without information or integration |
+
+Standard library, in the pinned `python` image; about a minute. Tests:
+`python3 -m unittest tests.test_phistar`. The receipt (`4cdec087…`,
+15 October, at `ae2bedb`, rules first, a reproduction): all three conditions
+hold. In none of the 2,400 systems does Φ* fall below 0 or rise above I by
+more than 10⁻⁹ nats, and where I = 0 (the model at a = 0) or the parts are
+independent it is 0 within 2.7 × 10⁻¹⁵. Over the 2,000 drawn systems Φ*/I runs
+from 0.010 to 0.997. In the paper's model at a = 0.4, where I is 0.5108 nats
+whatever c is, Φ* falls from 0.1468 at c = 0 to 0.0346 at c = 0.5 and 0.0012 at
+c = 0.9; beside it Barrett and Seth's Φ_I is −0.5044 at c = 0.99, and their Φ_H
+is 0.8304 at a = 0, c = 0.9, though I is 0 there: the failures of the earlier
+measures that the paper's Figure 3 shows. Controls 5 of 5: decoding with the
+whole system as its one part gives I (200 drawn systems); one unit against
+its closed form; the steady state's residual; no β of a 401-point grid beats
+the search; Figure 3's Φ_I and Φ_H.
+
+The bounds follow for every β from the decoding argument the paper cites
+(Merhav et al. 1994); what the check adds is that the closed form printed for
+Gaussian systems keeps them, on the paper's model and on systems it did not
+consider. The paper finds the maximising β by solving dI*/dβ = 0, which it
+calls a quadratic equation; the module searches instead, and control (d)
+checks the search. A trial under Imago's own seed found no bug, and the sealed
+run repeated its values for the paper's model exactly.
