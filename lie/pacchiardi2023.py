@@ -752,8 +752,8 @@ def assess(entries, probes, groups, scenarios, seed):
         "resplits": (f"{RESPLITS} seeded 70/30 splits, binary 48: AUC least {min(rs):.4f}, median "
                      f"{float(np.median(rs)):.4f}"),
         "shuffles": f"{SHUFFLES} fits on shuffled training labels: AUC mean {sh_mean:.4f}, largest {max(sh):.4f}",
-        "newton": (f"Newton refit: AUC {auc_newton:.6f} (sklearn {auc_in:.6f}); largest coefficient gap "
-                   f"{coef_gap:.2e}; {auc.count} AUCs, rank and sklearn within {auc.gap:.1e}"),
+        "newton": (f"Newton refit: AUC {auc_newton:.4f} against sklearn's {auc_in:.4f}; {auc.count} AUCs computed, "
+                   f"by ranks and by sklearn"),
         "conditions_met": sum(cond.values()), "conditions_total": len(cond), "test_passed": int(all(cond.values())),
         "controls_passed": sum(controls.values()), "controls_total": len(controls),
     }
