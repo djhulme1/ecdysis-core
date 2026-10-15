@@ -4019,3 +4019,45 @@ itself against the module's call of its bspois; row order; the same mice for
 both sexes; and peaks planted at 350 and 600 days in 20,000 simulated mice of
 each sex, found at 362 and 622. A trial under Imago's seed found no bug, and
 the sealed run repeated its outputs, the bootstrap's limits aside.
+
+## bdc/grenet.py: Grenet, the permanent as a determinant of size 2^n − 1 (2011)
+
+`bdc/grenet.py` tests claim `ext:f0290fc22926a2ab`, Grenet, "An upper bound for
+the permanent versus determinant problem" (manuscript, 2011; the version of 25
+May 2012 on the author's page, never given a DOI, so registered under a
+`cite:` source): "There exists a (2^n − 1) × (2^n − 1) matrix M with entries
+in {x_ij : 1 ≤ i, j ≤ n} ∪ {−1, 0, 1} such that det M = per X." It is the
+upper bound dc(perm_n) ≤ 2^n − 1 on which the line's claims by Hüttenhain &
+Ikenmeyer and by Alper, Bogart & Velasco rest. The module builds the matrix as
+the paper does, from the branching program on the subsets of {1, …, n} (an
+arc from S to S ∪ {j} weighted x_ij with i = |S| + 1), its source and sink
+merged, loops of weight 1, and −1 on the singletons' loops when n is even. For
+n from 2 to 7 it enumerates every nonzero term of the determinant as a cycle
+cover, without the paper's argument, and compares the polynomial with the
+permanent; for n from 8 to 10 it compares them at four seed-drawn points
+modulo 2^31 − 1.
+
+| Command | Claim |
+|---|---|
+| `python3 bdc/grenet.py` | Grenet 2011: the n × n permanent is the determinant of a (2^n − 1)-square matrix of variables and −1, 0, 1 |
+
+Python with numpy, in the scipy image; under two minutes. Tests: `python3 -m
+unittest tests.test_grenet`. The receipt (`779124e3…`, 15 October, at
+`c52b0af`, rules first, a reproduction): all nine conditions hold. The matrices
+have sizes 3, 7, 15, 31, 63, 127, 255, 511 and 1,023, every entry a variable or
+−1, 0 or 1; for n from 2 to 7 the determinant has exactly n! nonzero terms (2
+to 5,040), each a permutation's monomial with coefficient 1, so it is the
+permanent identically; and for n = 8, 9 and 10 it agrees with Ryser's permanent
+at all four points (a wrong matrix would pass at n = 10 with probability at
+most 5.1 × 10⁻²⁶). Beside it: for odd n the only constant besides 0 is 1, as
+the paper remarks; the corollary's skew circuit takes exactly (n − 1)(2^n − 1)
+operations (3 to 9,207) and computes the permanent at every point; and no 2 × 2
+matrix of the four variables and −1, 0, 1 has determinant per_2 (none of 2,401),
+while the 3 × 3 does, the paper's dc_s(2) = 3. Controls 6 of 6: Ryser against
+the Leibniz sum, the modular determinant against an exact one, the expansion
+against the Leibniz sum, and three planted faults caught (the singletons' loops
+left at 1, which gives −per X, and a changed arc). The construction's
+correctness was expected before the rules: the lab's check of Alper, Bogart &
+Velasco had expanded its loops-of-weight-1 version for n = 3 and evaluated it
+for n = 2, 4 and 5. A trial under Imago's seed found no bug, and the sealed run
+repeated its outputs exactly.
