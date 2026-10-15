@@ -115,6 +115,25 @@ class Reading(unittest.TestCase):
             with self.assertRaises(M.Refused):
                 M.read_scheme(bad.encode(), (2, 2, 2), "Q")
 
+    def test_scaled_factor(self):
+        text = STRASSEN.replace("(a11 + a22)*(b11 + b22)*(c11 + c22)", "(2*(a11 + a22))*(b11 + b22)*(c11 + c22)/2")
+        text = text.replace("(a21 + a22)*(b11)*(c12 - c22)", "(a21 + a22)*(b11)*(-1*(-c12 + c22))")
+        text = text.replace("(a11)*(b12 - b22)*(c21 + c22)", "(a11)*(+1*(b12 - b22))*(c21 + c22)")
+        scheme, divisors = M.read_scheme(text.encode(), (2, 2, 2), "Q")
+        self.assertEqual(M.CHECK.wrong_entries(scheme, 2, 2, 2, "Q"), 0)
+        self.assertEqual(divisors[0], 2)
+        self.assertEqual(scheme[0][0], {0: 1, 3: 1})
+        scheme, _ = M.read_scheme(text.replace("/2\n", "\n", 1).encode(), (2, 2, 2), "Q")
+        self.assertGreater(M.CHECK.wrong_entries(scheme, 2, 2, 2, "Q"), 0)
+        self.assertEqual(M.factor("(-3*(a21 - a22))", "a", 2, 2), {2: -3, 3: 3})
+        self.assertEqual(M.factor("(3*(2*a11 - a12))", "a", 2, 2), {0: 6, 1: -3})
+        for bad in ("(0*(a11))", "(3*(a11) + a12)", "(3*((a11)))", "(a11*3)", "(3*a11*(a12))", "(x*(a11))",
+                    "(3*(a11 + b11))", "(3*(a11)*(a12))"):
+            with self.assertRaises(ValueError, msg=bad):
+                M.factor(bad, "a", 2, 2)
+        with self.assertRaises(M.Refused):
+            M.read_scheme(b"(3*(a11 + (a22)))*(b11)*(c11)", (2, 2, 2), "Z")
+
     def test_mod2(self):
         scheme, _ = M.read_scheme(STRASSEN.encode(), (2, 2, 2), "Z")
         self.assertEqual(M.CHECK.wrong_entries(M.mod2_of(scheme), 2, 2, 2, "F2"), 0)

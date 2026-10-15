@@ -24,10 +24,14 @@ the rule of 2. Nothing in them is run. Every rule below was fixed before any sch
    of its directory at 6487519 with the bold rank's number of products, in name order, the first whose coefficients
    lie in its ring as the release writes it: for Z a file with no divisor and no .mod2 in its name, for Q one with no
    .mod2, for Z_2 a .mod2.exp file.
-3. Reading (mm/check.py's reader of the .exp format, with one addition): one product per line,
+3. Reading (mm/check.py's reader of the .exp format, with two additions): one product per line,
    (A-form)*(B-form)*(C-form) over a_ij (n x m), b_jk (m x p) and c_ki (p x n), the C-variables naming the output entry
    C_ik transposed as the format does; a line -( ... ) is a negated product; a product followed by /d (d a positive
-   integer) is divided by d, which only a Q scheme may do. Any other text refuses the run.
+   integer) is divided by d, which only a Q scheme may do; and a factor written as a signed positive integer times one
+   bracketed form, ([+-]k*( ... )), is k times that form. Any other text refuses the run. The second addition was made
+   after the first trial in the reference runner refused at such a factor, '(3*(2*a11 - 2*a12 - ...))' in the (2,5,7)
+   file, before any scheme's exactness was computed; a count of the shapes of the chosen files' factors with brackets
+   inside found only these two, k*( ... ) 71 times and -k*( ... ) 85 times.
 4. Exactness (mm/check.py's Brent equations): every one of the (nm)(mp)(pn) coefficients of the sum of the products
    equals that of the tensor of <n, m, p>, 1 at (i*m + j, j*p + k, k*n + i) and 0 elsewhere: over Z in integers, over
    Q in exact fractions, over Z_2 modulo 2.
@@ -198,6 +202,22 @@ def read_rings(main, rows):
 # ---------------------------------------------------------------- reading a scheme (rule 3)
 
 TAIL = re.compile(r"^(.*\))\s*/\s*(\d+)$")
+SCALED = re.compile(r"^([+-]?)\s*(\d+)\s*\*\s*(\(.*\))$", re.S)
+
+
+def factor(src, letter, rows, cols):
+    """One factor of a product: a linear form (mm/check.py's reader), or, rule 3's second addition, a signed positive
+    integer times one bracketed linear form, ([+-]k*( ... )), read as k times that form. Anything else refuses."""
+    body = src.strip()
+    if body.startswith("(") and CHECK.closing(body, 0) == len(body) - 1:
+        body = body[1:-1].strip()
+    t = SCALED.match(body)
+    if t and CHECK.closing(t.group(3), 0) == len(t.group(3)) - 1:
+        k = int(t.group(2)) * (-1 if t.group(1) == "-" else 1)
+        if k == 0:
+            raise ValueError(f"a zero multiple in the factor {src!r}")
+        return {i: k * x for i, x in CHECK.linear_form(t.group(3), letter, rows, cols).items()}
+    return CHECK.linear_form(src, letter, rows, cols)
 
 
 def read_scheme(data, fmt, ring):
@@ -222,9 +242,9 @@ def read_scheme(data, fmt, ring):
         if len(parts) != 3:
             raise Refused(f"not a product of three factors: {line[:60]!r}")
         try:
-            u = CHECK.linear_form(parts[0], "a", n, m)
-            v = CHECK.linear_form(parts[1], "b", m, p)
-            w = CHECK.linear_form(parts[2], "c", p, n)
+            u = factor(parts[0], "a", n, m)
+            v = factor(parts[1], "b", m, p)
+            w = factor(parts[2], "c", p, n)
         except ValueError as e:
             raise Refused(str(e))
         if ring == "Q":
