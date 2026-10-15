@@ -73,10 +73,18 @@ counters), on a network of the same populations at a hundredth of their sizes ov
 arrival of the code's 87.81 pA, alone at rest, peaks within 0.5% of 0.15 mV at 1.5 to 1.7 ms ("an average excitatory
 postsynaptic potential has an amplitude of 0.15 mV with a rise time of 1.6 ms"); each reading's synapse totals lie
 within 1% of the paper's 217 and 82 million; and, from each full run, the in-degrees of every projection with at
-least a million synapses have the mean K/N_post exactly and a variance within 3% of the binomial K/N_post (1 -
-1/N_post), the delays' mean and standard deviation by type within 0.5% of those of the clipped and rounded Gaussian,
+least a million synapses have the mean K/N_post exactly and a variance within four standard errors of the binomial
+K/N_post (1 - 1/N_post) (the sample variance's relative standard error being sqrt(2/N_post)), the delays' mean and
+standard deviation by type within 0.5% of those of the clipped and rounded Gaussian,
 the weights' within 0.5% of the stated ones, and every population's background arrivals within four standard errors
 of their Poisson expectation.
+
+Changed after the first trial (15 October; the rules were first committed at 19e3396): the in-degree control
+allowed the measured variance 3% from the binomial one, tighter than the sampling error of a variance over a
+population of a few thousand neurons (L5e from L5i: 4.5% under 4,850 neurons, whose standard error is 2%; L6i from
+L2/3e: 4.0% under 2,948); it now allows four standard errors, 4 sqrt(2/N_post). The trial stopped at that control,
+after the text reading's run and before any rate, irregularity or synchrony was printed or written; the gaps were then
+read from a rebuild of the same network without a simulated step. Nothing else changed.
 
 What it cannot check: the paper's own simulations and NEST itself (not run here); the comparison with in vivo data,
 which is the paper's reading of Table 6 and is taken as it states it; the thalamic stimulation (Figure 10) and the
@@ -600,11 +608,12 @@ def controls_after(name, rd, cfg, st):
             m, v = st["indeg"][t][s]
             n = N[t]
             mean, var = K[t][s] / n, K[t][s] / n * (1.0 - 1.0 / n)
-            if abs(m - mean) > 1e-9 * mean or abs(v - var) > 0.03 * var:
+            tol = 4.0 * math.sqrt(2.0 / n)
+            if abs(m - mean) > 1e-9 * mean or abs(v - var) > tol * var:
                 ok = False
-            worst = max(worst, abs(v - var) / var)
+            worst = max(worst, abs(v - var) / var / tol)
     ctl[f"in-degrees binomial ({name})"] = ok
-    out["indeg_worst_variance_gap"] = worst
+    out["indeg_worst_variance_gap_in_tolerances"] = worst
     ok = True
     for ty in ("e", "i"):
         em, es = delay_moments(*rd["delays"][ty])
