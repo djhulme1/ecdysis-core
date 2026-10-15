@@ -4751,8 +4751,8 @@ Standard library, in the pinned `python` image, on the one input; about a
 minute. Tests: `python3 -m unittest tests.test_martin`. The receipt
 (`3c5a78dd…`, 15 October, at `08000ee`, rules first, a verification): the
 condition holds. The 72 × 72 table is a packing colouring in exactly 15
-colours, with no pair of colour i within distance i (the closest pairs sit at
-i + 1 for odd i); the 48 × 48 table is a packing 16-colouring and Soukal and
+colours, with no pair of colour i within distance i (and, for every odd i but
+13, a pair at exactly i + 1); the 48 × 48 table is a packing 16-colouring and Soukal and
 Holub's a packing 17-colouring, as printed; every colour's count in all three
 matches the paper's frequency tables (5,184, 2,304 and 576 cells). The partial
 solution is there too: the 72 × 72 table keeps all 4,464 cells of Soukal and
