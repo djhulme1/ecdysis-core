@@ -22,6 +22,8 @@
        length, byte y - 1 the class of number y (255 free). Prints "count pairs first_x first_d": those whose l
        numbers are all fixed and in one class, the number examined, and the first in one class (by d, then x), or
        0 0. Two threads take the differences in turn.
+   first FILE l dmax
+       The first progression in one colour among fixed numbers, by d (up to dmax) then x: prints "x d", or "0 0".
    forbid FILE l
        As vdw/hhlm.c's forbid, for l from 3 to 16: for each free number y, class c is forbidden if some progression
        through y has its other l - 1 numbers fixed and in class c; prints "y mask" and, for c = 0 to 7, the first
@@ -202,6 +204,24 @@ static void scan(void) {
     printf("%llu %llu %ld %ld\n", (unsigned long long)count, (unsigned long long)pairs, fx, fd);
 }
 
+static void first(long dmax) {
+    unsigned char *acc = malloc(n > 0 ? (size_t)n : 1);
+    if (!acc) { fprintf(stderr, "out of memory\n"); exit(2); }
+    for (long d = 1; d <= dmax && (long)(L - 1) * d <= n - 1; d++) {
+        long lim = n - (long)(L - 1) * d;
+        for (long x = 0; x < lim; x++) acc[x] = (unsigned char)(col[x] != FREE);
+        for (int t = 1; t < L; t++) {
+            const unsigned char *c = col + t * d;
+            for (long x = 0; x < lim; x++) acc[x] &= (unsigned char)(col[x] == c[x]);
+        }
+        for (long x = 0; x < lim; x++) {
+            if (acc[x]) { printf("%ld %ld\n", x + 1, d); free(acc); return; }
+        }
+    }
+    printf("0 0\n");
+    free(acc);
+}
+
 static void forbid(void) {
     uint64_t multi = 0;
     for (long y = 0; y < n; y++) {
@@ -258,6 +278,13 @@ int main(int argc, char **argv) {
         kappa(k, p, g, z, argv[6]);
         return 0;
     }
+    if (argc == 5 && !strcmp(argv[1], "first")) {
+        L = atoi(argv[3]);
+        if (L < 3 || L > LMAX) { fprintf(stderr, "l = %d: only 3 to %d\n", L, LMAX); return 2; }
+        load(argv[2]);
+        first(atol(argv[4]));
+        return 0;
+    }
     if (argc == 4 && (!strcmp(argv[1], "scan") || !strcmp(argv[1], "forbid"))) {
         L = atoi(argv[3]);
         if (L < 3 || L > LMAX) { fprintf(stderr, "l = %d: only 3 to %d\n", L, LMAX); return 2; }
@@ -266,6 +293,7 @@ int main(int argc, char **argv) {
         else forbid();
         return 0;
     }
-    fprintf(stderr, "usage: rl2012 crit k l p z g | kappa k p g z FILE | scan FILE l | forbid FILE l\n");
+    fprintf(stderr, "usage: rl2012 crit k l p z g | kappa k p g z FILE | scan FILE l | first FILE l dmax | "
+                    "forbid FILE l\n");
     return 2;
 }

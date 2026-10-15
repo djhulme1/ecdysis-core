@@ -40,8 +40,13 @@ certificate's numbers 1..n as 0..n - 1, as the paper does.
    Herwig et al.'s zipped colouring up to the names of the colours when p is point symmetric (m = (p - 1)/k odd) or
    k = 2 (vdw/hhlm.py's turning with the point-symmetric labels; the paper's h = 0 for m even is not Herwig's
    turning, which for k = 2 always swaps the colours); for k >= 4 and m even a zipped entry is not built this way,
-   and is undetermined unless rule 5 checks it. Zipped twice (W(4,8) only): vdw/hhlm.py's build with z = 2, Herwig
-   et al.'s procedure shifting by p each time, as the paper says.
+   and is undetermined unless rule 5 checks it. Zipped twice (W(4,8) only, p = 85297, a reflection-symmetric
+   prime, m even): Herwig et al.'s procedure as vdw/hhlm.py's zip_once performs it, twice, shifting by p each time,
+   as the paper says, its turning C_i -> C_(k+1-i) taken under each of the three labellings that differ in it: the
+   turning is a fixed-point-free involution of the four classes, and the paper fixes no labelling for a
+   reflection-symmetric certificate (the three involutions pair the raw classes 1..4 of vdw/hhlm.py's power_residue
+   as 1-4 2-3, the labels of hhlm's rule 2b, as 1-2 3-4, and as 1-3 2-4). The entry holds if one of the three gives
+   a certificate that rule 5 finds free of monochromatic progressions; each is reported.
 4. The check of an entry with z_test <= 1, by the criterion rl2012.c's crit computes, which is sufficient: (N2) no l
    consecutive residues in [1, p - 1] in one class; (N3) for each i0 in 0..l - 1, the l - 1 nonzero members of the
    string -i0, ..., l - 1 - i0 (mod p) not in one class; and, zipped, (Z3a) no l consecutive numbers of [1, p - 1] or
@@ -60,6 +65,9 @@ certificate's numbers 1..n as 0..n - 1, as the paper does.
    as its scanner (forbid and scan for l up to 16): the certificate built by vdw/hhlm.py's build, its free numbers
    (the multiples of p and the added number) coloured by hhlm's search, which finds a colouring that puts no
    progression in one colour through them or shows none exists, then every progression of the certificate scanned.
+   For the double zipping, each labelling's certificate is built the same way (the classes relabelled before the
+   first zip) and first screened for a progression in one colour among its fixed numbers with difference up to
+   SCREEN (rl2012.c first); a labelling with one fails, and the others go through the full check.
 6. The test: every one of the 24 holds (rule 4, or 5 for W(4,8)), with rule 2's arithmetic. test_passed is 1 if all
    24 hold; verdict is "refuted" if one is refuted (rule 2's arithmetic failing, an explicit progression, or rule 5
    finding none or no colouring), else "undetermined" if one is, else "confirmed".
@@ -78,6 +86,18 @@ when k = 2 or (p - 1)/k is odd, otherwise not) and the twelve rows of Herwig et 
 implies rule 5's and its explicit refutation implies rule 5's failing; (e) rl2012.c's scan agrees with a direct enumeration in Python on
 30 seed-drawn colourings (lengths 20 to 120, 2 to 4 colours, l from 3 to 8, some numbers free), and finds a
 progression planted at a seed-drawn place in the W(2,10) certificate.
+
+Changed after the trial (15 October; the rules were first committed at 17f39c5). A trial in the reference runner,
+under a seed of Imago's own, built the double-zipped W(4,8) certificate with vdw/hhlm.py's build alone, that is
+with the turning of hhlm's rule 2b labels (raw classes 1-4 and 2-3 swapped), and its full scan found 32,241,888
+8-term progressions in one colour among 407,431,526,734, the first eight consecutive numbers from 17,678; the other
+23 entries held by the criterion, and all five controls passed. hhlm's labels are its reading of Herwig et al. for
+their certificates, every one of which with four or more colours that it zips is point symmetric; for a
+reflection-symmetric certificate the paper's own text fixes no labelling (its arithmetic turning, a shift by h = 0
+when m is even, is no turning at all, and with it its k = 2 entries, both reflection symmetric, would hold
+progressions of difference p, while with Herwig's swap they hold). So the double zipping is now taken under each of
+the three labellings that differ in the turning (rule 3), the first trial's being the first of them, and rule 5 and
+the outputs say which hold. This change was made after the trial's outcome was seen.
 
 Writes results/outputs.json (the values a receipt carries) and results/detail.json (every value computed).
 Run with: python3 vdw/rl2012.py
@@ -104,6 +124,11 @@ TABLE_PAGE = 9
 LIMIT = 200
 FREE = 255
 CHI_SAMPLES = 300
+SCREEN = 3000
+# Rule 3: the three turnings of the double zipping, as relabellings of hhlm's raw classes before the first zip,
+# chosen so that hhlm's turning (label i -> 5 - i) swaps the pairs named.
+TURNINGS = (("1-4 2-3", {1: 1, 2: 2, 3: 3, 4: 4}), ("1-2 3-4", {1: 1, 2: 4, 3: 2, 4: 3}),
+            ("1-3 2-4", {1: 1, 2: 2, 3: 4, 4: 3}))
 RANDOM_CASES = 40
 SCAN_CONTROLS = 30
 STATEMENTS = (
@@ -350,6 +375,66 @@ def closed_form_matches(exe, work, k, l, p, z, g):
     return len(set(names.values())) == len(names) == k
 
 
+def build_labelled(k, l, p, z, rho, labels):
+    """vdw/hhlm.py's build, the raw classes relabelled before zipping (rule 3, the double zipping)."""
+    col, free = H.power_residue(p, k, rho)
+    col = [labels[c] for c in col]
+    for _ in range(z):
+        col, free = H.zip_once(col, free, k, p)
+    N = len(col)
+    n = (l - 1) * N + 1
+    cert = [col[(y - 1) % N] for y in range(1, n)] + [k]
+    fr = [free[(y - 1) % N] for y in range(1, n)] + [True]
+    return cert, fr, N
+
+
+def c_first(exe, path, l, dmax):
+    out = subprocess.run([exe, "first", path, str(l), str(dmax)], check=True, capture_output=True,
+                         text=True).stdout.split()
+    x, d = map(int, out)
+    return (x, d) if d else None
+
+
+def double_zip(exe, work, k, l, p, rho):
+    """Rules 3 and 5 for the double zipping: each turning screened, and checked in full unless the screen fails."""
+    n = (l - 1) * 4 * p + 1
+    out = []
+    for name, labels in TURNINGS:
+        cert, free, N = build_labelled(k, l, p, 2, rho, labels)
+        free_pos = [y for y in range(1, len(cert) + 1) if free[y - 1]]
+        row = {"turning": name, "n": len(cert), "length_ok": len(cert) == n,
+               "free_as_stated": free_pos == [1 + j * p for j in range((l - 1) * 4 + 1)]}
+        path = os.path.join(work, "zz.bin")
+        H.write_colouring(path, cert, free)
+        first = c_first(exe, path, l, SCREEN)
+        row["screen"] = list(first) if first else None
+        if first or not row["free_as_stated"]:
+            row.update({"holds": False, "found": None, "scan": None})
+            os.remove(path)
+            out.append(row)
+            continue
+        forbidden, multi = H.c_forbid(exe, path, l)
+        if multi:
+            raise Refused(f"W({k},{l}) {name}: {multi} progressions hold two free numbers and a fixed one")
+        forb = {y: set(w) for y, w in forbidden.items()}
+        progs = H.free_progressions(free_pos, len(cert), l)
+        own = [cert[y - 1] for y in free_pos]
+        assign, nodes = H.search(free_pos, forb, own, progs, k)
+        row.update({"found": assign is not None, "nodes": nodes})
+        if assign is None:
+            row.update({"holds": False, "scan": None})
+        else:
+            final = list(cert)
+            for y, c in zip(free_pos, assign):
+                final[y - 1] = c
+            H.write_colouring(path, final)
+            sc = H.c_scan(exe, path, l)
+            row.update({"scan": sc, "holds": row["length_ok"] and sc["count"] == 0})
+        os.remove(path)
+        out.append(row)
+    return out
+
+
 def full_check(exe, work, k, l, p, z, g):
     """Rule 5: vdw/hhlm.py's check_row with rl2012.c's forbid and scan."""
     n = (l - 1) * 2 ** z * p + 1
@@ -460,9 +545,9 @@ def assess(rows, stmts, exe, work, seed):
                 res.pop("sampled", None)
                 e.update({"crit": res, "chi": info, "verdict": verdict_of(res, z)})
         else:
-            row = full_check(exe, work, k, l, p, z, g)
-            e["full"] = {key: row[key] for key in ("holds", "found", "nodes", "free", "scan", "length_ok")}
-            e["verdict"] = "holds" if row["holds"] and row["found"] else "refuted"
+            rows_zz = double_zip(exe, work, k, l, p, g)
+            e["turnings"] = rows_zz
+            e["verdict"] = "holds" if any(r["holds"] for r in rows_zz) else "refuted"
         entries.append(e)
 
     # beside: W(4,9) zipped as marked
@@ -521,9 +606,11 @@ def assess(rows, stmts, exe, work, seed):
         "criterion": (f"{sum(e['verdict'] == 'holds' for e in by_crit)} of {len(by_crit)} by the criterion hold"
                       + (f"; refuted: {', '.join(name(e) for e in refuted)}" if refuted else "")
                       + (f"; undetermined: {', '.join(name(e) for e in undet)}" if undet else ""))[:LIMIT],
-        "double_zip": (f"W(4,8) > {zz['n']} ({zz['p']}, ZZ): " + (
-            f"free numbers coloured, {zz['full']['scan']['count']} in one colour among "
-            f"{zz['full']['scan']['pairs']} progressions" if zz.get("full", {}).get("scan") else "no colouring")),
+        "double_zip": (f"W(4,8) > {zz['n']} ({zz['p']}, ZZ), by turning: " + "; ".join(
+            f"{r['turning']} " + ("holds" if r["holds"] else (
+                f"fails, from {r['screen'][0]} by {r['screen'][1]}" if r.get("screen") else (
+                    f"fails, {r['scan']['count']} in one colour" if r.get("scan") else "no colouring")))
+            for r in zz.get("turnings", [])))[:LIMIT],
         "largest": f"{name(largest)} > {largest['n']} ({largest['p']}, {largest['mark'] or 'unzipped'}): "
                    f"{largest['verdict']}",
         "printed_n": (f"{len(entries) - len(mism)} of {len(entries)} printed bounds are (l - 1)2^z p + 1 for their "

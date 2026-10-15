@@ -211,6 +211,59 @@ class Criterion(unittest.TestCase):
         self.assertFalse(row["holds"])
 
 
+class DoubleZip(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.work = tempfile.mkdtemp()
+        cls.exe = M.compile_c(cls.work)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.work, ignore_errors=True)
+
+    def test_identity_labels_are_hhlm_build(self):
+        for p in (17, 41, 73):  # four colours, (p - 1)/4 even: reflection symmetric
+            g = H.least_primitive_root(p)
+            self.assertEqual(M.build_labelled(4, 3, p, 2, g, M.TURNINGS[0][1]), H.build(4, 3, p, 2, g))
+
+    def test_turnings_pair_the_classes(self):
+        pairs = set()
+        for name, labels in M.TURNINGS:
+            inv = {v: c for c, v in labels.items()}
+            swap = {c: inv[5 - labels[c]] for c in labels}
+            self.assertTrue(all(swap[c] != c and swap[swap[c]] == c for c in swap))
+            pairs.add(frozenset(frozenset((c, swap[c])) for c in swap))
+            self.assertEqual(name, " ".join(f"{a}-{b}" for a, b in sorted(tuple(sorted(x)) for x in
+                                                                           {frozenset((c, swap[c])) for c in swap})))
+        self.assertEqual(len(pairs), 3)
+
+    def test_first_agrees_with_scan(self):
+        rnd = random.Random(11)
+        for i in range(15):
+            n = rnd.randint(20, 80)
+            l = rnd.randint(3, 6)
+            cert = [rnd.randint(1, 3) for _ in range(n)]
+            free = [rnd.random() < 0.05 for _ in range(n)]
+            path = os.path.join(self.work, f"f{i}.bin")
+            H.write_colouring(path, cert, free)
+            first = M.c_first(self.exe, path, l, n)
+            sc = H.c_scan(self.exe, path, l)
+            self.assertEqual(first, sc["first"])
+
+    def test_double_zip_rows(self):
+        p, l = 41, 3
+        g = H.least_primitive_root(p)
+        rows = M.double_zip(self.exe, self.work, 4, l, p, g)
+        self.assertEqual([r["turning"] for r in rows], [t for t, _ in M.TURNINGS])
+        for row, (_, labels) in zip(rows, M.TURNINGS):
+            cert, free, N = M.build_labelled(4, l, p, 2, g, labels)
+            fixed_mono = H.py_scan(cert, free, l)[0]
+            if fixed_mono:
+                self.assertFalse(row["holds"])
+            if row["holds"]:
+                self.assertEqual(row["scan"]["count"], 0)
+
+
 class Scans(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
