@@ -162,31 +162,36 @@ class Conditions(unittest.TestCase):
 
     def test_both_hold(self):
         out, detail = M.assess(pairs_table(0.4, 0.5), LLAMA_MMLU, EMPTY_TABLE, EMPTY_TABLE, SEED)
-        self.assertTrue(out["test_passed"])
+        self.assertEqual(out["test_passed"], 1)
         self.assertEqual(out["conditions_met"], 2)
         self.assertAlmostEqual(out["sad_boost"], 10.0)
         self.assertEqual(out["pairs_chat_above"], 5)
         self.assertAlmostEqual(out["mmlu_difference"], 100 * (1.63 - 1.70) / 3, places=3)
-        self.assertEqual([p["base"] for p in out["mmlu_pairs"]], ["llama-2-7b", "llama-2-13b", "llama-2-70b"])
+        self.assertEqual([p["base"] for p in detail["mmlu_pairs"]], ["llama-2-7b", "llama-2-13b", "llama-2-70b"])
+        self.assertEqual(out["pairs_not_above"], "pairs whose chat model is not above its base model: none")
+        for k, v in out.items():
+            self.assertTrue(isinstance(v, (int, float, str)) and not isinstance(v, bool), k)
+            self.assertLessEqual(len(v) if isinstance(v, str) else 0, 200, k)
         self.assertEqual(out["controls_passed"], 2)  # the two printed tables written here are empty
 
     def test_sad_fails(self):
         out, _ = M.assess(pairs_table(0.5, 0.5), LLAMA_MMLU, EMPTY_TABLE, EMPTY_TABLE, SEED)
-        self.assertFalse(out["test_passed"])
+        self.assertEqual(out["test_passed"], 0)
         self.assertEqual(out["conditions_met"], 1)
-        self.assertEqual(len(out["pairs_not_above"]), 5)
+        self.assertEqual(out["pairs_chat_above"], 0)
+        self.assertEqual(out["pairs_not_above"].count("/"), 5)
 
     def test_mmlu_fails(self):
         mmlu = dict(LLAMA_MMLU, **{"llama-2-13b-chat": 0.70})
         out, _ = M.assess(pairs_table(0.4, 0.5), mmlu, EMPTY_TABLE, EMPTY_TABLE, SEED)
-        self.assertFalse(out["test_passed"])
+        self.assertEqual(out["test_passed"], 0)
         self.assertEqual(out["mmlu_pairs_chat_above"], 1)
 
     def test_estimate_left_out(self):
         # gpt-4-base's copied score is not counted, whatever it is
         mmlu = dict(LLAMA_MMLU, **{"gpt-4-base": 0.10})
         out, _ = M.assess(pairs_table(0.4, 0.5), mmlu, EMPTY_TABLE, EMPTY_TABLE, SEED)
-        self.assertTrue(out["test_passed"])
+        self.assertEqual(out["test_passed"], 1)
         self.assertNotEqual(out["mmlu_difference_with_estimate"], out["mmlu_difference"])
 
     def test_refusals(self):

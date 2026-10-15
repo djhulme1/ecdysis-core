@@ -467,35 +467,51 @@ def assess(table, mmlu, categories_tex, definition_tex, seed):
         "mmlu_reader": mmlu_control(),
     }
     met = int(sad_ok) + int(mmlu_ok)
+    sign = lambda x: f"{x:+.2f}"
+    v1 = {m: PRINTED_V1[m] for pair in PAIRS for m in pair}
     out = {
         "sad_mean_base": pct(mean_b),
         "sad_mean_chat": pct(mean_c),
         "sad_boost": pct(mean_c - mean_b),
-        "sad_pairs": pairs,
+        "sad_pairs": "chat minus base (error), by base model: " + "; ".join(
+            f"{p['base']} {sign(p['difference'])} ({p['error']:.2f})" for p in pairs),
         "pairs_chat_above": len(above),
-        "pairs_not_above": not_above,
+        "pairs_not_above": "pairs whose chat model is not above its base model: " + (
+            ", ".join(f"{b}/{c}" for b, c in not_above) if not_above else "none"),
         "sign_flip_p": sign_flip_p(diffs),
         "mmlu_mean_base": round(100 * mmlu_b, 4),
         "mmlu_mean_chat": round(100 * mmlu_c, 4),
         "mmlu_difference": round(100 * (mmlu_c - mmlu_b), 4),
-        "mmlu_pairs": mmlu_pairs,
+        "mmlu_pairs": "MMLU, chat minus base: " + "; ".join(
+            f"{p['base']} {p['base_mmlu']:.1f} to {p['chat_mmlu']:.1f} ({sign(p['difference'])})" for p in mmlu_pairs),
         "mmlu_pairs_chat_above": sum(1 for p in mmlu_pairs if p["difference"] > 0),
         "mmlu_difference_with_estimate": round(100 * mmlu_with_est, 4),
         "sp_boost": pct(sp_c - sp_b),
         "sp_pairs_chat_above": sum(1 for d in sp_diffs if d > 0),
-        "category_boost": cat_boost,
-        "printed_v1": [{"model": m, "printed": PRINTED_V1[m], "released": pct(table.score(m, "plain")[0])}
-                       for pair in PAIRS for m in pair],
+        "category_boost": "mean chat minus base by category: " + "; ".join(
+            f"{c} {sign(v)}" for c, v in cat_boost.items()),
+        "printed_v1": "chat minus base, Table 2 of v1 / released: " + "; ".join(
+            f"{b} {sign(v1[c] - v1[b])} / {sign(p['difference'])}" for (b, c), p in zip(PAIRS, pairs)),
         "conditions_met": met,
         "conditions_total": 2,
-        "test_passed": met == 2,
+        "test_passed": int(met == 2),
         "controls_passed": sum(1 for c in controls.values() if c["passed"]),
         "controls_total": len(controls),
     }
+    for k, v in out.items():
+        if isinstance(v, str) and len(v) > 200:
+            raise AssertionError(f"{k}: longer than 200 characters: {v}")
+        if not isinstance(v, (int, float, str)) or isinstance(v, bool):
+            raise AssertionError(f"{k}: not a number or a string")
     detail = {
         "test": TEST,
         "seed": seed,
         "conditions": {"sad": sad_ok, "mmlu": mmlu_ok},
+        "sad_pairs": pairs,
+        "mmlu_pairs": mmlu_pairs,
+        "category_boost": cat_boost,
+        "printed_v1": [{"model": m, "printed": PRINTED_V1[m], "released": pct(table.score(m, "plain")[0])}
+                       for pair in PAIRS for m in pair],
         "sp_pairs": sp_pairs,
         "controls": controls,
         "sad_all": {m: pct(table.score(m, "plain")[0]) for m in table.models()},
