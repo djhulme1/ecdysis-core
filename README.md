@@ -3669,3 +3669,43 @@ files and their rows, the weighted test against the program's log-rank and
 statsmodels' survdiff on seed-drawn samples (to 1e-9), symmetry and row order,
 and a group against itself. A trial under a seed of Imago's own found no bug,
 and the sealed run repeated its outputs exactly.
+
+## cot/turpin.py: Turpin et al., unfaithful chain-of-thought and the Suggested Answer bias (2023)
+
+`cot/turpin.py` tests claim `ext:ec44fdc93947b188`, Turpin, Michael, Perez &
+Bowman, "Language Models Don't Always Say What They Think: Unfaithful
+Explanations in Chain-of-Thought Prompting" (NeurIPS 2023; arXiv:2305.04388,
+CC BY 4.0): "This causes accuracy to drop by as much as 36% on a suite of 13
+tasks from BIG-Bench Hard, when testing with GPT-3.5 from OpenAI and Claude 1.0
+from Anthropic." The module reads the authors' released Suggested Answer
+samples (milesaturpin/cot-unfaithfulness at `df09945`, MIT; the 52 files the
+paper's own analysis script reads: 13 tasks, text-davinci-003 and claude-v1,
+zero- and few-shot) and recounts the paper's Table 6: CoT accuracy on examples
+whose correct answer is not the suggested one, pooled over the tasks, in the
+biased context (the prompt adds "I think the answer is (X) but I'm curious to
+hear what you think") and the unbiased one, an example left out when its CoT
+answer failed to parse in either context, as that script does.
+
+| Command | Claim |
+|---|---|
+| `python3 cot/turpin.py` | Turpin et al. 2023: a suggested answer drops CoT accuracy by as much as 36 points |
+
+Standard library, in the python image; under a second. Tests:
+`python3 -m unittest discover -s tests -p test_turpin.py`. The receipt
+(`dd30f52f…`, 15 October, at `7feb541`, a verification): all five conditions
+hold. On bias-contradicting examples CoT accuracy falls from 59.6% to 23.3% for
+GPT-3.5 zero-shot (a drop of 36.4 points; 36.3 from Table 6's rounded values),
+75.8% to 51.7% few-shot (24.1), and for Claude 1.0 from 65.3% to 34.7%
+zero-shot (30.7) and 81.6% to 60.1% few-shot (21.6). Beside it: all 32 of Table
+6's Suggested Answer values come out to their printed decimals; the examples
+left out (Claude 1.0: 59 zero-shot, 36 few-shot; GPT-3.5: none) match the
+appendix's table task by task, and every task's size its N; every one of the 13
+tasks shows a drop in every setting, as the paper says; the paired 95%
+half-widths are 2.0 to 2.3 points, inside its "±1.6% to ±2.4%"; and on
+bias-consistent examples CoT accuracy rises by 31.9, 14.6, 24.0 and 9.7 points
+(printed 31.9, 14.6, 24.1, 9.7). Not tested: the Answer is Always A settings
+(26 more files, beyond the record's 64), and that the models gave these
+answers. Controls 3 of 3: per-task and direct counts agree, swapping the
+contexts negates every drop, and seeded random swaps take the largest drop to
+within three standard errors of zero. A trial under a seed of Imago's own found
+no bug, and the sealed run repeated its outputs exactly.
