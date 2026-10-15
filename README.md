@@ -3881,3 +3881,53 @@ Euler's criterion; full scans of W(2,10), W(2,11), W(2,12) and W(3,9) agreeing
 with the criterion; the closed form against hhlm's builds; 40 seeded cases and
 Herwig et al.'s twelve rows with z ≤ 1, criterion against full check; and the
 scan against enumeration, with a planted progression found.
+
+## snn/pd2014.py: Potjans & Diesmann's full-scale cortical microcircuit (2014)
+
+`snn/pd2014.py` tests claim `ext:b448b4534b111cee`, Potjans & Diesmann, "The
+cell-type specific cortical microcircuit: relating structure and activity in a
+full-scale spiking network model" (Cerebral Cortex 24(3), 785–806, 2014): "The
+simulated spontaneous activity is asynchronous irregular and cell-type
+specific firing rates are in agreement with in vivo recordings in awake
+animals, including the low rate of layer 2/3 excitatory cells." The module
+builds the full-scale model, 77,169 current-based integrate-and-fire neurons in
+eight populations and about 0.3 billion synapses, twice: as the paper's text
+gives it (Tables 4 and 5) and as the authors' implementation released with
+NEST 2.4.0 gives it where the two differ (connection probabilities to three
+places or four, inhibitory delays 0.8 ± 0.4 or 0.75 ± 0.375 ms, the spread of
+the doubled L4e to L2/3e weights). Each is simulated for 60.2 s in C
+(`snn/pd2014.c`: NEST 2.4's iaf_psc_exp update on a 0.1 ms grid, two threads
+that each own half the neurons) and measured as Figure 6 measures it, 1000
+neurons a population.
+
+| Command | Claim |
+|---|---|
+| `python3 snn/pd2014.py` | Potjans & Diesmann 2014: the full-scale microcircuit's spontaneous activity is asynchronous irregular, its cell-type specific rates in agreement with in vivo recordings, L2/3e's below 1 Hz |
+
+The standard library and gcc, in the buildpack-deps image; about twenty
+minutes, 1.8 GB. Tests: `python3 -m unittest discover -s tests -p
+test_pd2014.py`. The receipt (`a9f84aa9…`, 15 October, at `d8f9e8b`, its
+rules first at `19e3396`, a reproduction): failed, 11 of 14 conditions. Read
+by the authors' code, the model reproduces the paper: L2/3e, L4e, L5e and L6e
+fire at 0.88, 4.42, 7.47 and 1.16 Hz (Table 6: 0.86, 4.45, 7.59, 1.09), every
+inhibitory population above its layer's excitatory one, mean ISI CVs from 0.81
+to 0.92 and synchrony at most 7.31 (L5e's); all seven conditions hold. Read by
+the text's own numbers, L2/3e fires at 1.10 Hz, 27% above Table 6 and above
+the in vivo "<1 Hz", and L5e's synchrony is 9.96, above the paper's own bound
+of 8 for the asynchronous irregular state; the other four conditions hold. The
+second trial, under Imago's seed, showed the same split (L2/3e 1.01 Hz, L5e
+synchrony 8.76 by the text; 0.90 and 7.19 by the code). A diagnostic after
+the receipt, outside it (10 s, one network each), changed one of the text's
+numbers at a time to the code's: the probabilities to four places bring
+L2/3e from 1.04 to 0.89 Hz and L5e's synchrony from 9.49 to 7.67, the 0.75 ms
+inhibitory delays bring them to 1.02 and 8.83, the undoubled spread to 1.03
+and 9.49; so Table 5's rounding of the probabilities to three places carries
+most of the difference. Controls 13 of 13: the C program bit for bit against
+a plain implementation on a network a hundredth the size under each reading;
+one 87.81 pA arrival peaking at 0.15 mV at 1.6 ms; synapse totals of 217.9
+and 81.7 million (text) and 217.3 and 81.6 million (code) against the paper's
+"about 217 million excitatory and 82 million inhibitory"; in-degrees
+binomial; delays, weights and background arrivals as drawn. The first trial
+stopped at the in-degree control, whose 3% tolerance was tighter than a
+variance over a few thousand neurons allows; it became four standard errors
+(`19e3396` to `d8f9e8b`, recorded in the docstring) before any rate was seen.
