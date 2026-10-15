@@ -3759,3 +3759,39 @@ digits as its two terms cancel), both regressions against statsmodels, acc_post
 against the answers on all 6,326 trials whose advice differed, and seeded
 shuffles recovering the null. A trial under a seed of Imago's own found no bug,
 and the sealed run repeated its outputs, the seeded shuffles aside.
+
+## pi/gz2010.py: Guillera & Zudilin, "divergent" Ramanujan-type supercongruences (2012)
+
+`pi/gz2010.py` tests claim `ext:628411bbc71bd189`, Guillera & Zudilin,
+'"Divergent" Ramanujan-type supercongruences' (Proceedings of the AMS 140,
+765–777, 2012; arXiv:1004.4337v4): '"Divergent" Ramanujan-type series for 1/π
+and 1/π² provide us with new nice examples of supercongruences of the same kind
+as those related to the convergent cases.' The module reads the twelve
+congruences the e-print presents from its TeX, (1)–(9) of its introduction,
+five of them conjectural, and (10)–(12) of its main theorem, and checks each
+exactly, modulo its printed power of p, for every prime above its bound up to
+1,000, each sum tracked as p^v times a unit so that p may divide a Pochhammer
+denominator, as 3 does in (7) and (9).
+
+| Command | Claim |
+|---|---|
+| `python3 pi/gz2010.py` | Guillera & Zudilin 2012: "divergent" Ramanujan-type series give supercongruences like the convergent ones |
+
+Standard library, in the python image; about twenty seconds. Tests:
+`python3 -m unittest discover -s tests -p test_gz2010.py`. The receipt
+(`f627c4cc…`, 15 October, at `5078c4b`, its rules first at `fcaa3e4`, a
+verification): all twelve conditions hold, 1,999 checks without a failure, the
+five conjectures (5)–(9) among them; (4), (6) and (7) hold even modulo p⁴ for
+every prime. Beside it: the five sums the paper says may stop at (p − 1)/2 do,
+for every prime; the four WZ pairs satisfy (23) at all 930 points each; the
+lemmas the proofs use hold for every prime tried, but (31) as printed,
+3 Σ (−1)ⁿ 2ⁿ C(2n, n) ≡ −4 q_p(2) (mod p²), holds for none of the 167 primes:
+its left side is divisible by p, and the form its proof uses, with −4p q_p(2),
+holds for all; Staver's and Borwein and Bradley's identities hold exactly; and
+the series of Section 4 come out to all 60 digits: Guillera's 8/π², and, by
+Euler's transformation, the divergent 1/π series at z = −8, the divergent
+companion's 4/π² at z = −4 and the complex series (44) on |z| = 1, = √7/π. The
+companion's parameters follow from (46) and (47) as printed. Controls 6 of 6.
+Two trials under seeds of Imago's own found no bug; after the first, the
+corrected form of (31) was added beside the test, and the sealed run repeated
+the second exactly.
