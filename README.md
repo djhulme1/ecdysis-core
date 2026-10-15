@@ -4406,3 +4406,49 @@ where the window jumps from −A− to +A+) rounded above d once the times passe
 2^24 ms. Times are now whole steps, and a test requires a run whose step count
 starts 2 × 10^8 steps on to give the same spikes and strengths. A further
 trial found no bug, and nothing was changed after it.
+
+## spp/vicsek.py: Vicsek et al., self-driven particles (1995)
+
+`spp/vicsek.py` tests claim `ext:8fcb3415efefaef9`, Vicsek, Czirók,
+Ben-Jacob, Cohen and Shochet, "Novel type of phase transition in a system of
+self-driven particles" (Physical Review Letters 75(6), 1226–1229, 1995;
+arXiv:cond-mat/0611743), its abstract's last sentence: "The transition is
+continuous since |v_a| is found to scale as (η_c − η)^β with β ≃ 0.45." Its
+engine, `spp/vicsek.c`, simulates the model as the paper states it: N
+particles in a periodic square, r = 1, v = 0.03, each taking the mean direction
+of those within r of it, itself included, plus noise uniform on [−η/2, η/2],
+and moving by its old velocity. The module runs the paper's N = 4000,
+L = 31.6 at 23 noises, 4 runs each, and finds β as the paper did: η_c(L) is
+the trial value whose log-log line is straightest over (η_c − η)/η_c from 0.02
+to 0.5, the span of the fitted line in the paper's Figure 3a, read from the
+e-print's PostScript as data.
+
+| Command | Claim |
+|---|---|
+| `python3 spp/vicsek.py` | Vicsek et al. 1995: the onset of collective motion is continuous, v_a ∝ (η_c − η)^β with β ≈ 0.45 |
+
+Python's standard library and gcc, in the pinned `buildpack-deps` image, no
+inputs; about an hour on two cores. Tests: `python3 -m unittest
+tests.test_vicsek`. The receipt (`36d6a7cf…`, 15 October, at `ca2c1aa`, rules
+first, a reproduction): one condition of three. The model orders at low noise
+(v_a 0.983 at η = 0.5) and is disordered at high noise (0.048 at 4.5), but at
+the paper's size and its density of 4 it stays ordered far beyond the paper's
+transition: v_a is 0.421 at η = 3.0 and 0.330 at 3.4, where the paper's
+Figure 2a has about 0.11 and 0.04. The straightest line then puts η_c(L) at
+4.4 and β at 0.99, with R² 0.978 (the test asked for β in 0.45 ± 0.07 and R²
+at least 0.98). At noises 2.8 to 3.3 v_a was still rising between the two
+halves of each measured window, by up to 0.09, so the runs had not settled
+there. Beside it, at N = 400 v_a is still 0.14 at η = 4.5, so no η_c falls
+inside the rule's range and no line is fitted. Controls 4 of 4: the C engine
+against a plain Python implementation (the same positions and directions),
+cells against brute force (bit for bit), independent directions at noise 2π
+(v_a 0.0447 against √(π/4N) = 0.0443), and perfect order kept at noise 0.
+
+The paper's text gives its Figure 3a and its η_c(∞) = 2.9 as for density 0.4,
+while the sizes its Figure 2a lists give 4; the test followed the sizes. A
+diagnostic after the receipt, outside it, ran the text's density at N = 400
+(L = 31.6, 50,000 steps): v_a 0.879 at η = 1.0, 0.309 at 2.0 and 0.113 at
+3.0, against the paper's N = 400 curve of about 0.90, 0.68 and 0.31, so neither
+density reproduces the paper's curves. The trial in the reference runner ran
+the test's size for 18 minutes without fault and was stopped for time; smoke
+trials at small sizes then ran every path, and nothing was changed after them.
