@@ -3986,8 +3986,7 @@ the same algorithm in 1.0 and 1.2) it sources from its inputs by hash. The
 test: the ratio of the males' hazard to the females', read at every day from
 100 to 1,000, is highest from 250 to 450 days; it and its 1,000-replicate
 bootstrap lower limit are above 1 there; and it falls at each 100 days from
-the peak to 800. It is the lab's first check that runs a paper's own published
-code.
+the peak to 800.
 
 | Command | Claim |
 |---|---|
