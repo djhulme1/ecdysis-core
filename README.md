@@ -4452,3 +4452,41 @@ diagnostic after the receipt, outside it, ran the text's density at N = 400
 density reproduces the paper's curves. The trial in the reference runner ran
 the test's size for 18 minutes without fault and was stopped for time; smoke
 trials at small sizes then ran every path, and nothing was changed after them.
+
+## itp/drugage.py: Belikov, Talay and de Magalhães, weight loss and lifespan in DrugAge (2025)
+
+`itp/drugage.py` tests claim `ext:44dfcde04ae07f80`, Belikov, Talay and
+de Magalhães, "Sex-specific insights into drug-induced lifespan extension and
+weight loss in mice" (npj Aging 11, 37, 2025): "Our analysis revealed
+significant correlations between weight loss and lifespan extension in male
+mice, particularly in studies conducted by the Interventions Testing Program,
+highlighting the importance of considering weight changes in lifespan studies."
+Its data of record is the paper's supplementary table, DrugAge Build 5's 367
+mouse experiments, each with its changes in average/median and maximum
+lifespan and in weight as percentages of control. The module regresses each
+lifespan change on the weight change with scipy's `linregress`, the paper's
+own function, in ITP males, in all males, and beside them in females.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/drugage.py` | Belikov et al. 2025: weight loss correlates with lifespan extension in male mice, particularly in ITP studies |
+
+scipy, in the pinned `scipy-notebook` image, on the table (by hash); seconds.
+Tests: `python3 -m unittest tests.test_drugage`. The receipt (`96ea3026…`,
+15 October, at `57e99a2`, rules first, a verification): all three conditions
+hold. In the 63 ITP experiments in males, median lifespan change falls with
+weight change with slope −0.692 (R² 0.522, p 2.25 × 10⁻¹¹) and maximum
+lifespan change with slope −0.361 (R² 0.349, p 3.5 × 10⁻⁷); over all 142 male
+experiments the median slope is −0.314 (R² 0.089, p 0.00031). In females there
+is none: 60 ITP experiments give p 0.19 (median) and 0.075 (maximum), and all
+122 give p 0.86. Controls 3 of 3: a plain regression with its p from the
+incomplete beta function against `linregress` on every fit; the table as read;
+the selection on planted rows.
+
+The paper's printed numbers match only in part. Its R² values, 0.52 and 0.35,
+are those computed; its slopes, −0.76 and −0.97, are those of weight change
+regressed on lifespan change (−0.755 and −0.966 from the same fits), not
+lifespan on weight as its text and the test read it; and its p-values, 3.09 ×
+10⁻¹¹ and 3.73 × 10⁻⁷, are 1.4 and 1.07 times those from the table's 63 rows,
+so its figure may rest on slightly different rows. A trial under Imago's seed
+found no bug, and the sealed run repeated its outputs exactly.
