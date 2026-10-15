@@ -4762,3 +4762,56 @@ printed, so each new colouring was found on top of the old one, as the paper
 says. Controls 6 of 6. A trial under Imago's seed found no bug, and the sealed
 run repeated its outputs exactly. The lower bound 13 (a SAT instance that ran
 16 days) is not checked.
+
+## itp/liao2010.py: Liao, Rikke, Johnson, Diaz and Nelson, DR life shortening across strains (2010)
+
+`itp/liao2010.py` tests claim `ext:505a8e3d3548087b`, Liao, Rikke, Johnson,
+Diaz and Nelson, "Genetic variation in the murine lifespan response to dietary
+restriction: from life extension to life shortening" (Aging Cell 9, 92–95,
+2010): "Notably, DR shortened lifespan in more strains than those in which it
+lengthened life." The paper fed virgin mice of 41 ILSXISS recombinant inbred
+strains ad libitum (AL) or 60% of their strain's AL intake (DR) from 2–5 months
+of age, about five per sex, diet and strain, and compared mean lifespans strain
+by strain with a t-test. Its data of record is the authors' deposit in the
+Mouse Phenome Database, project Nelson1, one row per mouse with its lifespan
+under its diet. The module reads the deposit (by hash), keeps the strains with
+at least two mice in each diet group (41 in males, 39 in females, the paper's
+counts), and counts in each sex the strains in which DR significantly shortened
+or lengthened mean lifespan by Student's two-sided t-test at p < 0.05, the form
+registered (the paper says only "t-test"). Beside the test: Welch's form, the
+sexes pooled (the paper's Supplementary Fig. S2), deaths before 12 months left
+out (Fig. S3), and the paper's other printed numbers.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/liao2010.py` | Liao et al. 2010: DR shortened lifespan in more ILSXISS strains than it lengthened it, in each sex |
+
+scipy, in the pinned `scipy-notebook` image, on the deposit (by hash); seconds.
+Tests: `python3 -m unittest tests.test_liao2010`, on panels of mice made in the
+tests (the deposit's lifespans are never read). The receipt (`53896549…`, 15
+October, at `26258ba`, rules first, a verification): both conditions hold. In
+males DR significantly shortened mean lifespan in 12 of 41 strains and
+lengthened it in 3; in females it shortened it in 10 of 39 and lengthened it in
+8. With the sexes pooled, 15 shortened and 5 lengthened of 44 strains. The
+paper's other printed numbers are those computed: the ranges of strain means
+(to within a day), the correlations between the sexes' strain means (r 0.50,
+p 0.002 under AL; 0.42, 0.012 under DR; over 36 strains), between AL and DR
+means (0.09 in males, −0.03 in females, neither significant) and between
+maximum and mean lifespan (0.81 to 0.94), and the five longest-lived strains'
+means with their SEMs. Controls 4 of 4: plain t-tests (Student's and Welch's),
+Pearson correlations and one-way ANOVAs against scipy's on every one computed;
+the file as read (790 rows, 44 strains, 402 males and 388 females); strains
+planted 300 days shorter, 300 days longer and unchanged.
+
+The printed percentages do not all come from one form of the test. The
+paper's 5% and 27% in males are 2 and 11 of 41, Welch's counts (Student's
+gives 3 and 12, 7% and 29%); its 21% and 26% in females are 8 and 10 of 39,
+Student's (Welch's gives 7 and 10). The forms part at strain 114 in males,
+with two DR mice (Student's p 0.012, Welch's 0.22), and strain 13 (0.042 and
+0.058); and at strain 49 in females (0.037 and 0.058). Under either form DR
+shortens life in more strains than it lengthens it, in each sex. Leaving out
+deaths before 12 months gives 11 shortened against 3 lengthened in males but 7
+against 8 in females; the cut removes whole strains whose DR mice nearly all
+died young (115 and 86 in males; 115, 122 and 25 in females, DR means of 113 to
+334 days), so it counts against shortening by its construction. A trial under
+Imago's seed found no bug, and the sealed run repeated its outputs exactly.
