@@ -4190,3 +4190,51 @@ evaluation at seed-drawn integer points; Strassen's 2 × 2 and the classical
 product; three planted faults caught; and Corollary 1 failing on
 noncommuting matrix entries. A trial under Imago's seed found no bug, and the
 sealed run repeated its outputs exactly.
+
+## iit/at2019.py: Albantakis & Tononi, causal composition in reversible systems (2019)
+
+`iit/at2019.py` tests claim `ext:2703adca8c12b54a`, Albantakis & Tononi,
+"Causal Composition: Structural Differences among Dynamically Equivalent
+Systems" (Entropy 21(10), 989, 2019): every reversible system of three binary
+elements has maximal global dynamics and effective information, yet such
+systems differ, quantitatively and qualitatively, in the intrinsic
+information their subsets specify, even a system and its time reverse. The
+module enumerates all 40,320 reversible systems (the permutations of the
+eight states; the 5,040 single eight-cycles are the ergodic ones, and a
+system's time reverse is its inverse) and computes the paper's Section 5
+measures for each: EI, the cause and effect repertoires, phi_C and phi_E by
+relative entropy over the full purview against the least of PyPhi's 'ALL'
+partitions, their sums over the seven subsets, and Phi over the six
+unidirectional cuts, each averaged over the eight states, through the 984
+classes under relabelling and complementing the elements.
+
+| Command | Claim |
+|---|---|
+| `python3 iit/at2019.py` | Albantakis & Tononi 2019: reversible 3-node systems all have EI = 3 bits but differ in sum phi_C + sum phi_E and in which subsets are irreducible, even from their time reverse |
+
+The standard library, in the python image; about a minute and a quarter.
+Tests: `python3 -m unittest tests.test_at2019`. The receipt (`a5c69ff2…`,
+15 October, at `18e605b`, its rules first at `6415f37`, a reproduction): all
+four conditions hold. Every reversible system has EI = 3 bits and each
+element 1 bit; the ER systems' state-averaged sum phi_C + sum phi_E takes 25
+values, 7.019 to 11.000 (mean 9.647), and their counts of irreducible
+subsets by order and side 14 patterns; 24,480 of the 40,320 systems differ
+from their time reverse in the sum or in Phi (20,160 in the sum alone), 12,240
+of the 20,542 unordered pairs, more than half as Section 3.2 says. Beside it:
+the reversible systems' sums run from 6.000 to 11.000 and their Phi from 0 to
+1.208 (0 in 3,776); the ER systems matching Table 2's four columns at
+(0,1,1) number 2, 1, 16 and 4, and the first of each has Phi 0, 0.844, 0 and
+1.208 averaged over states, where Figure 6 prints 0, 0.84, 0 and 1.50; and a
+smaller purview gave more phi than the full one in 3 of 8,400 seed-drawn
+subset-states, all on the cause side, against Section 5.4's statement that
+the full purview is maximal. Table 1's example, MCX in (0,1,1), comes out
+as printed in its 14 values of phi and EI = 2.5, and at the cut where the
+paper finds its Phi (X's outputs) eliminates phi_E of X, CX and MCX, 1.019
+bits, Table 1's 1.02; but over the six unidirectional cuts its Phi is 1.000,
+at MX -/-> C, so Table 1's least is not over the cuts the text names.
+PyPhi's concept-style cuts give 1.019 there (and 2.226 for the cause side,
+Appendix B's 2.23) but none of Figure 6's four. Controls 5 of 5. Three
+trials under Imago's seeds found two bugs and then led the Table 1 control to
+the paper's own statement, as the module's docstring records; a fourth found
+none, and the sealed run repeated its outputs, the seeded purview sample
+apart.
