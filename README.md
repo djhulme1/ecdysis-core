@@ -4152,3 +4152,41 @@ functions) puts the transition between f = 2 and 3 for n = 6 to 10 as
 stated, and below f = 1.5 when p is doubled, as if f counted each reversible
 reaction once; sharing a catalyst between a ligation and its cleavage, or
 letting food catalyse, does not move it.
+
+## mm/rosowski.py: Rosowski, the commutative 3 × 3 product in 21 multiplications (2019)
+
+`mm/rosowski.py` tests claim `ext:8f7177fa0b6d99da`, Rosowski, "Fast
+Commutative Matrix Algorithm" (arXiv:1904.07683, v2 of 27 July 2020): over a
+commutative ring, an n × 3 by 3 × 3 product in 6n + 3 multiplications, the
+3 × 3 product in 21 (one fewer than Makarov's 22 of 1986), and the l × n by
+n × m product for odd n in n(lm + l + m − 1)/2 multiplications for odd m and
+(n(lm + l + m − 1) + l − 1)/2 for even m. The module builds Algorithm 1,
+Theorem 1, Corollary 1 and Theorems 2 and 3 exactly as the paper's TeX prints
+them, expands every entry as an integer polynomial in commuting variables,
+and counts the distinct products of two non-constant factors, up to order
+and sign. Beside the test it runs the paper's non-bilinear Theorems 4 and 5,
+valid over any ring with an involution, with integer matrices as entries.
+
+| Command | Claim |
+|---|---|
+| `python3 mm/rosowski.py` | Rosowski 2019: n × 3 by 3 × 3 in 6n + 3 commutative multiplications, 3 × 3 in 21, odd n in n(lm + l + m − 1)/2 |
+
+The standard library, in the python image; seconds. Tests: `python3 -m
+unittest tests.test_rosowski`. The receipt (`08489749…`, 15 October, at
+`3c25917`, rules first, a reproduction): all four conditions hold. Theorem 1
+gives AB exactly with 9, 15, …, 63 products for n = 1 to 10, 6n + 3 each;
+Corollary 1's printed scheme gives the 3 × 3 product with 21 and is
+Theorem 1 at n = 3; Theorem 3 gives AB exactly for all 140 sizes (odd n 3 to
+9, l 1 to 5, m 3 to 9) with exactly the stated count (n = 9, l = 5, m = 9:
+261 against the classical 405). Beside it: Theorem 2 holds for all 175 even
+sizes at its count; the non-bilinear Theorems 4 and 5 hold with 3 × 3
+integer blocks for n = 2 to 7, at 11, 30, 58, 105, 165 and 252 products up to
+transposition, the paper's n(n² + 3n + 1)/2 and n(n² + 3n + 2)/2; and the odd-n
+algorithm needs fewer multiplications than Waksman's and Islam's in 112 of
+the 140 sizes and as many in the other 28, every one with l = 1, where the
+two counts differ by (l − 1)(m − 1)/2 or (l − 1)(m − 2)/2, so the abstract's
+"in both cases less" holds for l ≥ 2 only. Controls 7 of 7: numeric
+evaluation at seed-drawn integer points; Strassen's 2 × 2 and the classical
+product; three planted faults caught; and Corollary 1 failing on
+noncommuting matrix entries. A trial under Imago's seed found no bug, and the
+sealed run repeated its outputs exactly.
