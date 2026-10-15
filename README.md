@@ -4274,3 +4274,44 @@ Python transcription on 60 seed-drawn sets of 9 to 12 points, 20 of them
 with an empty 7-gon placed; Python against C on S_1 to S_8 and twenty 40-point
 sets; and the other digit order failing (e). A trial under Imago's seed found
 no bug, and the sealed run repeated its outputs exactly.
+
+## sad/chat_base.py: Laine et al., chat models against base models on SAD (2024)
+
+`sad/chat_base.py` tests claim `ext:bf2181b7da5a8806`, Laine, Chughtai,
+Betley, Hariharan, Scheurer, Balesni, Hobbhahn, Meinke and Evans, "Me, Myself,
+and AI: The Situational Awareness Dataset (SAD) for LLMs" (arXiv:2407.04694):
+"Chat models, which are finetuned to serve as AI assistants, outperform their
+corresponding base models on SAD but not on general knowledge tasks." The
+module reads the 16 per-task results files of the repository the abstract
+names (LRudL/sad at `dfc5c98`, CC BY 4.0), aggregates them as the repository
+does (with the plain prompt, the seven categories weighing equally and each
+task equally within its category), and compares the five base-chat pairs of
+its `PAIRED_BASE_RLHF_MODELS` by their mean, the paper's own measure; general
+knowledge is the MMLU scores of the repository's `sad/correlations.py`, read
+as a literal and never executed, over the three Llama 2 pairs (the paper
+estimates GPT-4-Base's MMLU as GPT-4-0613's and gives none for davinci-002).
+
+| Command | Claim |
+|---|---|
+| `python3 sad/chat_base.py` | Laine et al. 2024: chat models above their base models on SAD, not on MMLU |
+
+Standard library, in the pinned `python` image, on 19 inputs fetched and
+verified by hash; under a second. Tests: `python3 -m unittest
+tests.test_chat_base`. The receipt (`5b41d4a5…`, 15 October, at `180537b`,
+rules first at `92d6c30`, a verification): both conditions hold. The five chat
+models average 35.93 on SAD against their base models' 32.74 (+3.19; the
+paper printed +4.5 from its July 2024 results), and on MMLU the three Llama 2
+chat models average 55.47 against 56.73 (−1.27). Read pair by pair the claim
+fails at Llama-2-7b: its chat model scores 30.15 against the base model's
+32.88 (−2.73, error 0.81), where the paper's Table 2 had 29.9 against 30.0,
+while on MMLU the same chat model is the one above its base model (48.4
+against 45.3). The other four pairs gain 2.54 to 6.43 points; the sign-flip p
+of the mean over five pairs is 3/32. With the situating prompt all five chat
+models are above (+5.14 on average). The gain is narrow: by category, chat
+models gain 26.2 points on id-leverage and 8.6 on facts, and lose 11.1 on
+anti-imitation and 5.0 on introspection. Controls 4 of 4: the repository's own
+printed tables (`categories.tex`, `definition.tex`) recomputed value for
+value, 336 scores and errors for 21 models, every one within the tables'
+rounding; the aggregation on a table worked by hand; and the MMLU reader on a
+file written for it. A trial under Imago's seed found no bug, and the sealed
+run repeated its outputs exactly.
