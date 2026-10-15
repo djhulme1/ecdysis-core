@@ -45,8 +45,9 @@ random. The equation numbers are the e-print's as amsart numbers them (its label
      and (12), and Lemma 3's against binom(2n, n) (x/4)^n, for n from 0 to N_WZ.
    - The congruences the proofs use, for every prime up to 1,000 above their bounds: (13), (14), (15), Morley's (18),
      (19) (at x = -8, -3, -1, 1/2, 2, 3/4, -5/4 and 5, wherever x and 1 - x are prime to p and 1 - x is a square
-     modulo p, with y the least square root of 1 - x modulo p and again with y + p), (30) and (31); and the identities
-     of Staver (for N up to 40) and of Borwein and Bradley (for N up to 20), exactly.
+     modulo p, with y the least square root of 1 - x modulo p and again with y + p), (30) and (31), and (31) with
+     -4p q_p(2) for its right-hand side (see below); and the identities of Staver (for N up to 40) and of Borwein and
+     Bradley (for N up to 20), exactly.
    - The series of Section 4, to 50 digits: Guillera's 8/pi^2, which converges geometrically and is summed exactly
      until a term is below 10^-70; and three that do not converge, or converge too slowly to sum, by Euler's
      transformation, sum c_n z^n = (1/(1 - z)) sum_k (Delta^k c)(0) (z/(1 - z))^k, which converges for them
@@ -67,6 +68,11 @@ p = 3 (mod 4) below 50; Euler's criterion equals a count of quadratic residues f
 below 100; (1/2)_n = (2n)!/(4^n n!), (1/3)_n (2/3)_n = (3n)!/(27^n n!) and (1/4)_n (3/4)_n = (4n)!/(64^n (2n)!) for
 n up to 50; the WZ check finds a failing point in (10)'s pair with its G's 2^(2n) made 2^(2n+1); and Euler's
 transformation sums the divergent binomial series sum (1/2)_n/n! (-8)^n to (1 + 8)^(-1/2) = 1/3, to 50 digits.
+
+After the trial (under a seed of Imago's own, before any seed was issued), one addition beside the test: (31) as
+printed, 3 sum_{n=1}^{p-1} (-1)^n 2^n binom(2n, n) == -4 q_p(2) (mod p^2), held for none of the 167 primes, its left
+side being divisible by p and its right side not; the form the proof of (12) uses to reach (25) has -4p q_p(2) on the
+right, which is now checked beside it. The test's conditions, its data and its rules did not change.
 
 What it cannot check: the congruences for primes above 1,000 (three are proved for all, one more by Sun), and the
 claim's framing, that these come from "divergent" Ramanujan-type series.
@@ -433,7 +439,8 @@ def sqrt_mod(a, p):
 
 def lemma_checks(primes):
     """Rule 5: the congruences the proofs use; for each, the number of primes it fails for and the number tried."""
-    fail = {k: [0, 0] for k in ("(13)", "(14)", "(15)", "(18)", "(19)", "(19) with y + p", "(30)", "(31)")}
+    fail = {k: [0, 0] for k in ("(13)", "(14)", "(15)", "(18)", "(19)", "(19) with y + p", "(30)", "(31)",
+                                "(31) with p q")}
 
     def tally(key, holds):
         fail[key][1] += 1
@@ -453,7 +460,9 @@ def lemma_checks(primes):
         tally("(18)", lhs18 == Fraction(math.comb(p - 1, m), 2 ** (p - 1))
               and (frac_mod(lhs18, p, 2) - (-1) ** m * 2 ** (p - 1)) % p2 == 0)
         tally("(30)", (sum((-1) ** n * 2 ** n * c2[n] * inv(n, p) for n in range(1, p)) + 4 * fermat_q(2, p)) % p == 0)
-        tally("(31)", (3 * sum((-1) ** n * 2 ** n * c2[n] for n in range(1, p)) + 4 * fermat_q(2, p)) % p2 == 0)
+        s31 = 3 * sum((-1) ** n * 2 ** n * c2[n] for n in range(1, p))
+        tally("(31)", (s31 + 4 * fermat_q(2, p)) % p2 == 0)
+        tally("(31) with p q", (s31 + 4 * p * fermat_q(2, p)) % p2 == 0)
         if p > 3:
             for x in X_LEMMA:
                 if x.numerator % p == 0 or x.denominator % p == 0 or (1 - x).numerator % p == 0:
