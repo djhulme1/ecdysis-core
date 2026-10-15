@@ -4679,3 +4679,50 @@ commuting products, as the paper says. The paper's appendix lists its checker,
 whose kernel function agrees with the displayed programs assignment by
 assignment. Controls 6 of 6. A trial under Imago's seed found no bug, and the
 sealed run repeated its outputs exactly.
+
+## snn/eventprop.py: Wunderlich and Pehle, EventProp's exact gradients (2021)
+
+`snn/eventprop.py` tests claim `ext:07ec2c59943734b6`, Wunderlich and Pehle,
+"Event-based backpropagation can compute exact gradients for spiking neural
+networks" (Scientific Reports 11, 12829, 2021; arXiv:2009.08378v3; CC BY):
+"This algorithm, EventProp, backpropagates errors at spike times in order to
+compute the exact gradient in an event-based, temporally and spatially sparse
+fashion." The authors released no code, so the module writes both halves from
+the paper: Table 1's leaky integrate-and-fire network (exponential currents,
+reset to zero, τm 20 ms, τs 5 ms, θ 1), simulated exactly from event to event
+with each spike the first upward crossing of θ to machine precision; and
+Table 2's adjoint network with Eq. 2's gradient, its free dynamics solved in
+closed form (with the forcing of a V² loss), the jump of λV at each spike with
+its θλV⁺, Wᵀ(λV⁺ − λI), ∂lp/∂t and lV⁻ − lV⁺ terms, the Dirac jump for readout
+losses, and dL/dwji = −τs Σ (λI)j over the spikes from i, inputs included.
+
+| Command | Claim |
+|---|---|
+| `python3 snn/eventprop.py` | Wunderlich & Pehle 2021: EventProp's gradients equal central differences of the loss in spike-time, voltage and readout losses |
+
+Standard library, in the pinned `python` image, no inputs; about two minutes.
+Tests: `python3 -m unittest tests.test_eventprop`. The receipt (`c62e752f…`,
+15 October, at `4b0e0df`, rules first, a reproduction): all five conditions
+hold. In three networks from the seed in each of five scenarios, Fig. 3's pair
+(100 Poisson trains at 200 Hz into an upper neuron, w on 3–6 to a lower one,
+loss the sum of its spike times), six recurrent neurons with a spike-time loss
+and the same networks with a voltage loss, and a readout at 25, 50 and 75 ms
+and at its maximum, EventProp agrees with fourth-order central differences
+(h 1e-5) for all 2,193 weights: the largest relative deviations are 6.4e-10
+in Fig. 3's setting (the paper's figure: below 1e-7), 1.6e-7 and 7e-7 in the
+recurrent networks, and 6.1e-8 and 1.3e-7 at the readout, never more than
+7e-7 in absolute terms, the rounding of the differences. Draws were kept only
+if non-critical and if no step of the stencil changed the order of events
+(seven were drawn again for that or for a margin). Beside it: the three
+planted faults, the θ term dropped, W in place of Wᵀ (as the derivation's
+intermediate line writes it) and the lV jump dropped, are caught in all eleven
+scenario-fault pairs, by deviations of 70% or more. Controls 6 of 6. A trial
+under Imago's own seed found no bug, and nothing was changed after it.
+
+Before the rules were committed the draws were simulated on a test seed only
+to see that non-critical draws exist; that strengthened B's and C's inputs,
+widened A's w and replaced a 0.05 ms event margin by the stencil's check. No
+gradient of a drawn network was computed before the commit; the tests check
+EventProp on hand-made networks against the implicit function theorem and the
+chain rule (one neuron, two spikes of one neuron, a chain of two, a voltage
+loss) and against closed forms for a readout.
