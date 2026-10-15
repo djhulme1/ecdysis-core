@@ -3503,3 +3503,35 @@ density's 349. Controls 7 of 7: the C program bit for bit against a plain
 implementation, the rule's pairings with the noise off, the inputs' counts and
 conductances, the statistics on known samples, and stability failing under
 potentiation alone. A trial under a seed of Imago's own found no bug.
+
+## keller/ls.py: Lagarias & Shor's cube tilings of R^10 and R^12 with no shared facet (1992)
+
+`keller/ls.py` tests claim `ext:5b79c140aa3cb7bc`, Lagarias & Shor, "Keller's
+cube-tiling conjecture is false in high dimensions" (Bull. Amer. Math. Soc.
+27(2), 279–283, 1992; arXiv:math/9210222): "We show that for all $n\ge 10$
+there exists a tiling of $\Bbb R^n$ by unit $n$-cubes such that no two
+$n$-cubes have a complete facet in common." The module reads Theorem A's two
+constructions from the e-print's TeX (Table 1's clique in G_3, Table 2's
+blocks, the primed S_2), builds them as the proof says (every column of Table 1
+for n = 12; the second and third columns of S_0 ∪ S_2 for n = 10), and checks
+each by the Corrádi–Szabó criterion the paper states (a clique of size 2^n in
+G*_n) and directly as a tiling: the side-2 cubes centred at the vectors, with
+their 4ℤ^n translates, cover every unit cell once, and no two share a facet.
+
+| Command | Claim |
+|---|---|
+| `python3 keller/ls.py` | Lagarias & Shor 1992: Keller's conjecture is false in dimension 10 and above |
+
+numpy, in the scipy-notebook image; under a minute. Tests (in that image):
+`python3 -m unittest tests.test_ls`. The receipt (`305b7b03…`, 15 October, at
+`24f1756`, a verification): 4,096 vectors for n = 12 and 1,024 for n = 10, all
+distinct, every one of their 8,386,560 and 523,776 pairs adjacent in G*_n; the
+cubes cover all 16,777,216 and 1,048,576 unit cells exactly once, and no two
+share a facet. Beside it, all 15 of the text's statements hold (the three and
+four edges it says its small cliques miss, the block conditions (i) to (iii),
+the relabellings and the automorphism, the sizes, and a largest shared face of
+codimension 2); and 811,569 of the 1,048,575 nonzero translations stack the
+10-dimensional clique into one in G*_11, 13,613,759 of 16,777,215 the
+12-dimensional into G*_13. Controls 5 of 5: lattice tilings with known answers
+and planted faults, and three cross-checks of the counting. A trial under a seed
+of Imago's own found no bug, and the sealed run repeated its outputs exactly.
