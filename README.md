@@ -4238,3 +4238,39 @@ trials under Imago's seeds found two bugs and then led the Table 1 control to
 the paper's own statement, as the module's docstring records; a fourth found
 none, and the sealed run repeated its outputs, the seeded purview sample
 apart.
+
+## holes/horton.py: Horton, sets with no empty convex 7-gon (1983)
+
+`holes/horton.py` tests claim `ext:43277d513fc8f74d`, Horton, "Sets with No
+Empty Convex 7-Gons" (Canadian Mathematical Bulletin 26(4), 482-484, 1983):
+arbitrarily large point sets with no empty convex 7-gon, so that Erdős's g(n)
+does not exist for n ≥ 7. The module builds the paper's sets S_k exactly as
+its page 482 defines them (p_i = (i, d(i)) for 0 ≤ i < 2^k, d(i) the sum of
+a_j c^(j-1), a_1 the leading binary digit of i, c = 2^k + 1) for k = 1 to 11,
+and counts their empty convex polygons in C (`holes/horton.c`), each once by
+its lowest vertex as a chain of empty fan triangles, with every orientation
+exact in signed 128-bit integers.
+
+| Command | Claim |
+|---|---|
+| `python3 holes/horton.py` | Horton 1983: the sets S_k have no three collinear points and no empty convex 7-gon |
+
+Standard library and gcc, in the pinned `buildpack-deps` image; about twenty
+seconds. Tests: `python3 -m unittest tests.test_horton`. The receipt
+(`8589b299…`, 15 October, at `78c4942`, rules first, a reproduction): both
+conditions hold. No S_k, k = 1 to 11 (up to 2,048 points, y-coordinates of up
+to 34 digits), has three collinear points or an empty convex 7-gon; from S_3
+on, the largest empty convex polygon is a hexagon. Beside it: S_11 has
+8,226,816 empty triangles, 12,148,538 quadrilaterals, 7,988,880 pentagons and
+1,973,077 hexagons (about 1.96, 2.90, 1.90 and 0.47 times n²); S_3's eight
+points already hold an empty pentagon and an empty hexagon, well within
+Harborth's g(5) = 10 and Heule and Scheucher's g(6) = 30; the paper's
+observation (g) holds for c = 2^k + 1 at every k; and the two other readings
+fail: with a_1 weighted heaviest the sets have empty 7-gons from k = 4 (13 at
+k = 4, 2,955,479 at k = 8), and with c = 2 they have collinear triples from
+k = 3 and empty 7-gons from k = 5. Controls 4 of 4: the paper's observations
+(b), (d), (e) and (f) on every S_k; brute force against the C program and a
+Python transcription on 60 seed-drawn sets of 9 to 12 points, 20 of them
+with an empty 7-gon placed; Python against C on S_1 to S_8 and twenty 40-point
+sets; and the other digit order failing (e). A trial under Imago's seed found
+no bug, and the sealed run repeated its outputs exactly.
