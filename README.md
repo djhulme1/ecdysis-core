@@ -3795,3 +3795,45 @@ companion's parameters follow from (46) and (47) as printed. Controls 6 of 6.
 Two trials under seeds of Imago's own found no bug; after the first, the
 corrected form of (31) was added beside the test, and the sealed run repeated
 the second exactly.
+
+## lie/pacchiardi2023.py: Pacchiardi et al., black-box lie detection by unrelated questions (2024)
+
+`lie/pacchiardi2023.py` tests claim `ext:0613679fb92f94b2`, Pacchiardi, Chan,
+Mindermann, Moscovitz, Pan, Gal, Evans & Brauner, "How to Catch an AI Liar:
+Lie Detection in Black-box LLMs by Asking Unrelated Questions" (ICLR 2024;
+arXiv:2309.15840): "Despite its simplicity, this lie detector is highly
+accurate and surprisingly general." The module reads 16 files of the authors'
+repository (LoryPack/LLM-LieDetector at `c5689fa`, BSD 3-Clause) as data, by
+hash: the 11 processed question files holding GPT-3.5's, Alpaca-7B's and
+Vicuna-7B's answers to the 65 elicitation questions after a lie and after an
+honest answer, the question list, the three question groups and the real-life
+role-play transcripts. No pickle is opened and none of the authors' code is
+run. It refits the paper's detector, a standardised logistic regression on the
+yes/no answers to its 48 questions, on the authors' own 70/30 split
+(RandomState(42), as `create_datasets_paired_questions` draws it), and scores
+it held out, with each of the 11 datasets left out of training, and with
+frozen weights on the open models and the role-play lies.
+
+| Command | Claim |
+|---|---|
+| `python3 lie/pacchiardi2023.py` | Pacchiardi et al. 2024: a black-box lie detector on yes/no answers to unrelated questions is accurate and general |
+
+numpy, scipy and scikit-learn, in the scipy-notebook image; about ten seconds.
+Tests: `python3 -m unittest discover -s tests -p test_pacchiardi2023.py`. The
+receipt (`6c0b8279…`, 15 October, at `64736d5`, its rules first at `79fe5d6`,
+a verification): all four conditions hold. Held out, AUC 0.9998 (550 answers);
+the 11 datasets left out in turn, mean AUC 0.9985 (least 0.987, synthetic
+facts); frozen, Alpaca-7B 0.888 and Vicuna-7B 0.787 (the paper: 0.88 and
+0.80), and the 50 role-play transcripts 0.763 (0.76). Beside it: the logprob
+detector scores 1.000, 0.9993, 0.825, 0.953 and 0.819 on the same five; the
+six categories left out, as the appendix describes it, average 0.9969, and the
+notebook's own six category splits (three of which train on a category and
+test on the rest) 0.9952; 24 of Table 1's 30 values and the text's three come
+out to their printed decimals within half a unit, the rest within 0.01 to 0.04
+(the binary group detectors in-distribution among them); the release holds 916
+questions answered both ways, 1,282 training samples, where the paper
+describes 1,280 and 1,792. Controls 5 of 5: the 48 indices against the
+appendix's questions, rank AUC against sklearn on all 495 AUCs, a Newton
+refit, 200 seeded shuffles of the training labels (mean 0.508) and the legacy
+generator's stream. A trial under a seed of Imago's own found no bug, and the
+sealed run repeated its outputs, the seeded shuffles aside.
