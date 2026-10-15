@@ -4315,3 +4315,42 @@ value, 336 scores and errors for 21 models, every one within the tables'
 rounding; the aggregation on a table worked by hand; and the MMLU reader on a
 file written for it. A trial under Imago's seed found no bug, and the sealed
 run repeated its outputs exactly.
+
+## gct/dip.py: Dörfler, Ikenmeyer and Panova, multiplicity obstructions (2019)
+
+`gct/dip.py` tests claim `ext:0aa372d02c7fd9e0`, Dörfler, Ikenmeyer and
+Panova, "On geometric complexity theory: Multiplicity obstructions are
+stronger than occurrence obstructions" (arXiv:1901.04576): "This paper
+provides for the first time a setting where separating with multiplicities can
+be achieved, while the separation with occurrences is provably impossible."
+The setting compares the Chow variety (products of n linear forms) with the
+forms of border Waring rank at most k (sums of k n-th powers). The module
+computes, exactly, the multiplicities of the paper's Theorem 2.3: the highest
+weight vectors of type λ among the degree-d functions on ternary forms, found
+as the kernel of the raising operators modulo two primes near 2^31, are
+evaluated at seed-drawn points of each variety, and the ranks are the
+multiplicities; plethysm coefficients come from weight multiplicities by the
+alternating sum over S_3.
+
+| Command | Claim |
+|---|---|
+| `python3 gct/dip.py` | Dörfler, Ikenmeyer & Panova 2019: (34,6,2) and (47,7,2), and (n²−2, n, 2), are multiplicity obstructions |
+
+numpy, in the pinned `scipy-notebook` image, on the e-print (for the paper's
+tableaux); about two minutes. Tests: `python3 -m unittest tests.test_dip`. The
+receipt (`19890d09…`, 15 October, at `98c2aa0`, rules first, a verification):
+all three conditions hold. (34,6,2) has multiplicity 8 = a_λ(7[6]) in the
+coordinate ring of the sums of four sixth powers and 7 in the Chow variety's,
+as the paper says; (47,7,2) has 11 = a_λ(8[7]) against 10, which the paper
+bounds only as below 11; and (n²−2, n, 2) separates the two in degree n + 1
+for n = 2 to 8 (Chow 0, 0, 2, 3, 7, 10 and 18 against 1, 1, 3, 4, 8, 11 and 19).
+Beside it: every Chow multiplicity equals a_λ(n[d]), the bound of the paper's
+Lemma 3.4, so the bound is attained in every case computed; and Theorem 3.5's
+a_λ((n + 1)[n]) − a_λ(n[n + 1]) is 1 for n = 2 to 10. Controls 6 of 6:
+plethysm coefficients against the dimension identity and classical
+decompositions; Hermite reciprocity; every kernel and generic rank equal to the
+plethysm coefficient; Lemma 3.4; the paper's occurrence obstructions for
+m = 3; and the paper's own 8 and 11 tableaux, contracted as its Section 6
+describes, at the same points (ranks 8 and 11). Not tested: the semigroup
+computation that carries the rest of the quote's second half. A trial under
+Imago's seed found no bug, and the sealed run repeated its outputs exactly.
