@@ -3628,3 +3628,44 @@ permutations, and a planted fault in Grenet's matrix. Not checked: Theorem
 1.2's proof, codim Sing(perm_4) = 8, and the characteristics other than 0, 3,
 5 and 7. A trial under a seed of Imago's own found no bug, and the sealed run
 repeated its outputs exactly.
+
+## itp/gehan2024.py: Jiang et al., five ITP compounds the Gehan test finds and the log-rank test missed (2024)
+
+`itp/gehan2024.py` tests claim `ext:7b9f52a065c49b0c`, Jiang, Gelfond, Liu,
+Strong & Nelson, "The Gehan test identifies life-extending compounds overlooked
+by the log-rank test in the NIA Interventions Testing Program" (GeroScience 46,
+4533–4541, 2024; PMC11335987, CC BY): "The Gehan test identified 5 additional
+compounds, metformin, enalapril, 17-dimethylaminoethylamino-17-demethoxygeldanamycin
+hydrochloride (17-DMAG), caffeic acid phenethyl ester (CAPE), and green tea
+extract (GTE), which significantly increased survival but were previously missed
+by the log-rank test." The module reads the program's five deposited workbooks
+(MPD, cohorts 2005, 2007, 2011, 2015 and 2017) with `itp/rapa.py`'s reader and
+applies the paper's two tests, each stratified by site with removed mice
+censored: the program's log-rank test, and the Gehan–Breslow–Wilcoxon test with
+Peto's modification as R's survdiff computes it with rho = 1.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/gehan2024.py` | Jiang et al. 2024: the Gehan test's five ITP compounds |
+
+Standard library for the statistics (statsmodels only in a control), in the
+scipy-notebook image; a few seconds. Tests (in that image):
+`python3 -m unittest discover -s tests -p test_gehan2024.py`. The receipt
+(`a73b1522…`, 15 October, at `2643d1d`, a verification): all five conditions
+hold. Gehan p 0.0495 (metformin, males), 0.0460 (enalapril, males), 0.0321
+(17-DMAG, males), 0.0481 (CAPE, females) and 0.0344 (GTE, females), each with
+fewer deaths than expected (weighted O − E −11.5, −12.6, −12.4, −11.4 and −11.7),
+while the log-rank p are 0.348, 0.220, 0.117, 0.067 and 0.369. Beside it: all
+twelve of Table 1's printed p values come out to their four decimals, and
+1,3-butanediol's too (males: Gehan 0.0248, log-rank 0.1097; females: Gehan
+0.1632, with a log-rank p of 0.040); Figure 1's group sizes are the numbers of
+the dead in all six rows; the median changes of the pooled dead match Table 1's
+whole percents in five of six (17-DMAG's is +9.3% against its +7%); the Results'
+p for enalapril, 0.0343, is Table 1's Z-test p, its Gehan p being 0.0460; and
+the Gehan–Breslow and Peto–Prentice weightings give p from 0.021 to 0.054 (CAPE's
+0.054 under Gehan–Breslow's). Not recomputed: the Methods' FDR adjustment over
+132 trials, which needs the supplement's other trials. Controls 5 of 5: the
+files and their rows, the weighted test against the program's log-rank and
+statsmodels' survdiff on seed-drawn samples (to 1e-9), symmetry and row order,
+and a group against itself. A trial under a seed of Imago's own found no bug,
+and the sealed run repeated its outputs exactly.
