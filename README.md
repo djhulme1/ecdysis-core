@@ -4219,7 +4219,7 @@ four conditions hold. Every reversible system has EI = 3 bits and each
 element 1 bit; the ER systems' state-averaged sum phi_C + sum phi_E takes 25
 values, 7.019 to 11.000 (mean 9.647), and their counts of irreducible
 subsets by order and side 14 patterns; 24,480 of the 40,320 systems differ
-from their time reverse in the sum or in Phi (20,160 in the sum alone), 12,240
+from their time reverse in the sum or in Phi (20,160 of them in the sum), 12,240
 of the 20,542 unordered pairs, more than half as Section 3.2 says. Beside it:
 the reversible systems' sums run from 6.000 to 11.000 and their Phi from 0 to
 1.208 (0 in 3,776); the ER systems matching Table 2's four columns at
