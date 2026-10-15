@@ -73,10 +73,10 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 INPUT = ("arXiv-math-9210222v1.gz", "ae6f06337a1c173acc1a3422bd42679f6edfdb67b93e3bdeae67c421760564c6", 7224)
 
-TEST = ("Refuted if, read from the e-print's TeX (Table 1's 𝒯, Table 2's blocks, the primed S_2) and substituted as "
-        "Theorem A's proof says (every column of 𝒯 for n = 12; the second and third of 𝒯̃ = S_0 ∪ S_2 for n = 10), "
-        "the vectors are not 2^n distinct points of {0,1,2,3}^n forming a clique in G*_n, whose side-2 cubes and "
-        "their 4ℤ^n translates cover every unit cell exactly once with no two sharing a complete facet (no m and "
+TEST = ("Refuted if, read from the e-print's TeX (Table 1's clique, Table 2's blocks, the primed S_2) and substituted "
+        "as Theorem A's proof says (every column of Table 1 for n = 12; the second and third columns of S_0 ∪ S_2 for "
+        "n = 10), the vectors are not 2^n distinct points of {0,1,2,3}^n forming a clique in G*_n, whose side-2 cubes "
+        "and their 4ℤ^n translates cover every unit cell exactly once with no two sharing a complete facet (no m and "
         "m + 2e_i mod 4 both centres), for n = 10 or 12.")
 
 SYMBOLS = ("0", "0'", "1", "1'", "2", "3")
