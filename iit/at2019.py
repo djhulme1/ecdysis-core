@@ -50,6 +50,23 @@ prior state leads to, whose cause repertoires are all zero. Such a repertoire is
 as PyPhi's normalize and find_mip make them. Nothing else changed, and since every state of a reversible system is
 reachable, no reversible system's values are touched.
 
+The second trial, under another seed of Imago's own, stopped at two controls. The repertoire control enumerated each
+purview's states in the opposite order to the module's (itertools.product puts the first element highest), so it
+compared two orderings of the same numbers; it now enumerates in the module's order. Table 1's 14 values of phi and
+EI = 2.5 came out as printed, but its Phi did not: over the six unidirectional cuts the test uses (Section 5.5's
+X -/-> S \\ X), MCX in (0,1,1) has Phi = 1.00, least at MX -/-> C on the effect side (phi_E(M) falls from 1.189 to
+0.189), where Table 1 prints 1.02 at the partition the paper writes {MC_t, MCX_t+1}, {X_t, 0}. That notation is
+PyPhi's concept-style system cut (a KCut of the whole system over the 'ALL' partitions that Section 5.7's
+PARTITION_TYPE names; concept_cuts and sia_concept_style in PyPhi's compute/subsystem.py, each side cut on its own),
+and no such cut severs M -> C alone. Over those cuts this module gives 1.0188 at exactly that partition, and a cause
+side whose least sum is 2.2263 (at {M_t, X_t-1}, {CX_t, MC_t-1}), Appendix B's 2.23 for the cause side, though the
+appendix names {MC_t, MCX_t-1}, {X_t, 0}, where the module gives 2.415. So the printed Phi follows the paper's
+software's cuts, not the ones its text names. The test was registered with the six unidirectional cuts and keeps
+them. The Table 1 control now checks Phi over the concept-style cuts; MCX's Phi over the six cuts is reported beside
+(table1_phi), and so is the concept-style Phi of the first ER match of each Table 2 column (table2_phi_ks). These
+changes came after the two controls' outcomes were seen; the run had stopped in the controls, before any reversible
+system was computed.
+
 1. Systems. The reversible systems are the 40,320 permutations of 0..7; the ER systems those whose cycle from 0
    returns after exactly eight steps. The deterministic element update of a permutation s is p(V_i = 1 | v) = bit i of
    s(v). Under a cut X -/-> S \\ X, each element i outside X has p_cut(V_i = 1 | v) = the mean over the states u of X of
@@ -70,16 +87,18 @@ reachable, no reversible system's values are touched.
    that differ from their time reverse, and of the 20,542 unordered pairs); the ER and reversible sets' ranges and
    means of the two measures and their shares with Phi = 0 (Figure 5); the ER systems whose eight state-(0,1,1) values
    match each column of Table 2 to 0.0015 bits, with their Phi at that state and averaged (Figure 6's 0, 0.84, 0 and
-   1.50); whether the full purview gives the largest phi (Section 5.4's statement) on 200 seed-drawn reversible
-   systems; and how many cuts make some sum of differences negative.
+   1.50), and the same four systems' Phi over PyPhi's concept-style cuts; Table 1's MCX's Phi over the six cuts;
+   whether the full purview gives the largest phi (Section 5.4's statement) on 200 seed-drawn reversible systems; and
+   how many cuts make some sum of differences negative.
 
 Controls (controls_passed counts those that behave as stated; the run stops if any fails): Table 1, the example
 system MCX (M the majority of M, C and X; C a copy of M; X the exclusive or of M and C, read from Section 2.1's
-statements) in state (0,1,1): its 14 values of phi to 0.001 bits of the printed ones, Phi = 1.02 bits to 0.005, and
-EI = 2.5 bits; the repertoires against a direct enumeration of Equations 8 to 10 on seed-drawn probabilistic systems;
-the effect side's additive shortcut against the joint relative entropy on the same systems; the partitions' counts
-(1, 28 and 146 for subsets of one, two and three elements over three purview elements) with none repeated; and the
-symmetry of rule 3 on 300 seed-drawn systems.
+statements) in state (0,1,1): its 14 values of phi to 0.001 bits of the printed ones, EI = 2.5 bits, and, over PyPhi's
+concept-style cuts, Phi = 1.02 bits to 0.005, least on the effect side at {MC_t, MCX_t+1}, {X_t, 0}, with the cause
+side's least sum 2.23 to 0.005; the repertoires against a direct enumeration of Equations 8 to 10 on seed-drawn
+probabilistic systems; the effect side's additive shortcut against the joint relative entropy on the same systems; the
+partitions' counts (1, 28 and 146 for subsets of one, two and three elements over three purview elements) with none
+repeated; and the symmetry of rule 3 on 300 seed-drawn systems.
 
 What it cannot check: the paper's own scripts (not released) and the PyPhi branch it used (iit-4.0 at b79b7fa, whose
 settings Section 5.7 names) are not run; Figure 5's random samples are not drawn; systems of more than three elements.
@@ -110,9 +129,9 @@ TEST = ("Refuted if, computed as Section 5 defines it (DKL, PyPhi's ALL partitio
         "bits; or the 5,040 ergodic reversible systems all have the same sum phi_C + sum phi_E, or the same counts of "
         "irreducible subsets by order and side; or no reversible system differs from its time reverse (the inverse "
         "permutation) in sum phi_C + sum phi_E or Phi, by more than 1e-6 bits.")
-OUTPUTS = ("ei", "er_sum", "er_counts", "time_reverse", "pairs_share", "rev_sum", "rev_phi", "er_phi", "table2",
-           "table2_phi", "purview", "negative", "classes", "conditions_met", "conditions_total", "test_passed",
-           "controls_passed", "controls_total")
+OUTPUTS = ("ei", "er_sum", "er_counts", "time_reverse", "pairs_share", "rev_sum", "rev_phi", "er_phi", "table1_phi",
+           "table2", "table2_phi", "table2_phi_ks", "purview", "negative", "classes", "conditions_met",
+           "conditions_total", "test_passed", "controls_passed", "controls_total")
 
 
 class Refused(Exception):
@@ -449,6 +468,70 @@ def ei(p):
     return tot, node_h
 
 
+# ---------------------------------------------------------------- PyPhi's concept-style cuts (a control and beside)
+
+def sever(p, mask):
+    """The TPM with each connection in mask (bit i * N + j: from element i before to element j after) replaced by
+    uniform noise, as PyPhi marginalises a node's cut inputs."""
+    if mask == 0:
+        return p
+    out = []
+    for v in range(STATES):
+        row = []
+        for j in range(N):
+            src = [i for i in range(N) if mask >> (i * N + j) & 1]
+            tot = 0.0
+            for u in range(1 << len(src)):
+                w = v
+                for k, i in enumerate(src):
+                    w = (w & ~(1 << i)) | ((u >> k & 1) << i)
+                tot += p[w][j]
+            row.append(tot / (1 << len(src)))
+        out.append(row)
+    return out
+
+
+def kcut_mask(parts, side):
+    """PyPhi's KCut of a partition of the whole system (its cut_matrix): on the effect side the connections from each
+    part's mechanism to the elements outside its purview are cut, on the cause side those from each part's purview to
+    the elements outside its mechanism."""
+    mask = 0
+    for mech, purv in parts:
+        frm, to = (mech, purv) if side == "E" else (purv, mech)
+        for i in bits(frm):
+            for j in bits(FULL & ~to):
+                mask |= 1 << (i * N + j)
+    return mask
+
+
+KCUTS = {side: [(kcut_mask(parts, side), parts) for parts in PARTITIONS[FULL]] for side in "CE"}
+
+
+def concept_style(p, v):
+    """For state v, each side's least sum of differences over PyPhi's concept-style cuts (the 146 'ALL' partitions of
+    the system, each side's own), with the first partition that gives it; Phi is the smaller of the two."""
+    intact = phis(p, v)
+    low = {}
+    for k, side, fn in ((0, "C", phi_cause), (1, "E", phi_effect)):
+        sums = {}
+        best = (math.inf, None)
+        for mask, parts in KCUTS[side]:
+            if mask not in sums:
+                rep = Rep(sever(p, mask), v)
+                sums[mask] = sum(f[k] - fn(rep, m) for m, f in intact.items() if f[k] > POS)
+            if sums[mask] < best[0] - 1e-12:
+                best = (sums[mask], parts)
+        low[side] = best
+    return low
+
+
+def part_label(parts, names="ABC"):
+    """A partition as mechanism>purview parts, the empty part left out (0 for an empty purview)."""
+    lab = lambda m: "".join(names[i] for i in bits(m)) or "0"
+    order = sorted(parts, key=lambda x: (x[0] == 0, x[0] & -x[0]))
+    return ",".join(f"{lab(m)}>{lab(pv)}" for m, pv in order if m or pv)
+
+
 # ---------------------------------------------------------------- symmetry (rule 3)
 
 def state_maps():
@@ -521,15 +604,44 @@ def er_state_job(perms):
     return out
 
 
+PSI_STAR = [(3, FULL), (4, 0)]   # {MC_t, MCX_t+1}, {X_t, 0}: Table 1's least partition as the paper writes it
+
+
+def table1(p):
+    """MCX in (0,1,1): its values per subset, Phi over the six unidirectional cuts with every cut's two sums, and each
+    side's least sum over PyPhi's concept-style cuts."""
+    per_state, _ = system_values(p)
+    st = per_state[STATE_011]
+    uni = []
+    for x in range(1, FULL):
+        rep = Rep(cut_tpm(p, x), STATE_011)
+        for k, side, fn in ((0, "C", phi_cause), (1, "E", phi_effect)):
+            uni.append((sum(f[k] - fn(rep, m) for m, f in st["phi"].items() if f[k] > POS), x, side))
+    return st, uni, concept_style(p, STATE_011)
+
+
 def controls_run(seed):
     ctl = {}
     p = mcx_tpm()
-    per_state, _ = system_values(p)
-    st = per_state[STATE_011]
+    st, uni, ks = table1(p)
     ok = all(abs(st["phi"][m][0] - c) <= 0.001 and abs(st["phi"][m][1] - e) <= 0.001 for m, (c, e) in TABLE1.items())
     e_val, _ = ei(p)
-    ctl["Table 1: MCX in (0,1,1), 14 values of phi to 0.001, Phi = 1.02 to 0.005, EI = 2.5"] = (
-        ok and abs(st["Phi"] - 1.02) <= 0.005 and abs(e_val - 2.5) < 1e-9)
+    ks_phi = min(ks["C"][0], ks["E"][0])
+    at_star = sorted((m, pv) for m, pv in ks["E"][1] if m or pv) == PSI_STAR
+    ctl["Table 1: MCX in (0,1,1), its 14 values of phi to 0.001 and EI = 2.5; over PyPhi's concept-style cuts, Phi = "
+        "1.02 to 0.005, least on the effect side at {MC,MCX},{X,0}, and the cause side's least 2.23 to 0.005"] = (
+        ok and abs(e_val - 2.5) < 1e-9 and abs(ks_phi - 1.02) <= 0.005 and ks["E"][0] < ks["C"][0] and at_star
+        and abs(ks["C"][0] - 2.23) <= 0.005)
+    least = min(uni)
+    names = "MCX"
+    lab = lambda m: "".join(names[i] for i in bits(m))
+    notes = {
+        "table1_phi": (f"MCX in (0,1,1): Phi {least[0]:.3f} over the six unidirectional cuts (least at "
+                       f"{lab(least[1])} -/-> {lab(FULL & ~least[1])}, {'effect' if least[2] == 'E' else 'cause'}); "
+                       f"{ks_phi:.3f} over PyPhi's concept-style cuts (cause least {ks['C'][0]:.3f}); Table 1: 1.02"),
+        "table1": {"unidirectional": {f"{lab(x)} -/-> {lab(FULL & ~x)} ({side})": round(d, 6) for d, x, side in uni},
+                   "concept_style": {side: [round(ks[side][0], 6), part_label(ks[side][1], names)] for side in "CE"}},
+    }
 
     stream = Stream(seed, "at2019/random-systems")
     ok_rep = ok_add = True
@@ -552,7 +664,8 @@ def controls_run(seed):
             for purview in range(1, STATES):
                 pb = bits(purview)
                 direct = []
-                for z in itertools.product((0, 1), repeat=len(pb)):
+                for zi in range(1 << len(pb)):          # the module's order: the purview's element k is bit k
+                    z = [zi >> k & 1 for k in range(len(pb))]
                     val = 1.0
                     for j in bits(mech):
                         num = 0.0
@@ -601,13 +714,13 @@ def controls_run(seed):
     distinct = all(len({tuple(sorted(x)) for x in PARTITIONS[m]}) == len(PARTITIONS[m]) for m in PARTITIONS)
     ctl["the partitions number 1, 28 and 146 for one, two and three elements, none repeated"] = (
         counts == [1, 28, 146] and distinct)
-    return ctl
+    return ctl, notes
 
 
 def run(seed, results="results", workers=WORKERS):
     if not re.fullmatch(r"[0-9a-f]{64}", seed):
         raise Refused("the seed must be 64 hex characters")
-    ctl = controls_run(seed)
+    ctl, notes = controls_run(seed)
     if not all(ctl.values()):
         raise AssertionError(f"a control failed: {[k for k, v in ctl.items() if not v]}")
 
@@ -668,6 +781,13 @@ def run(seed, results="results", workers=WORKERS):
         if plist:
             per_state, _ = system_values(tpm_of(plist[0]))
             t2_phi[col] = (round(per_state[STATE_011]["Phi"], 3), round(summary(per_state)["Phi"], 3))
+    t2_ks = {}
+    for col, plist in t2.items():
+        if plist:
+            p2 = tpm_of(plist[0])
+            ks_states = [concept_style(p2, v) for v in range(STATES)]
+            ks_phis = [min(x["C"][0], x["E"][0]) for x in ks_states]
+            t2_ks[col] = (round(ks_phis[STATE_011], 3), round(sum(ks_phis) / STATES, 3))
     stream = Stream(seed, "at2019/purview")
     worse = checked = 0
     for _ in range(PURVIEW_SAMPLE):
@@ -728,6 +848,10 @@ def run(seed, results="results", workers=WORKERS):
         "table2_phi": ("Phi at (0,1,1) / averaged, first match: " + ", ".join(
             f"({c}) {t2_phi[c][0]}/{t2_phi[c][1]} (Fig. 6: {FIGURE6_PHI[c]})" if c in t2_phi else f"({c}) none"
             for c in TABLE2)),
+        "table2_phi_ks": ("concept-style Phi at (0,1,1) / averaged, first match: " + ", ".join(
+            f"({c}) {t2_ks[c][0]}/{t2_ks[c][1]} (Fig. 6: {FIGURE6_PHI[c]})" if c in t2_ks else f"({c}) none"
+            for c in TABLE2)),
+        "table1_phi": notes["table1_phi"],
         "purview": f"a smaller purview gave more phi than the full one in {worse} of {checked} subset-states",
         "negative": f"classes with some cut raising a sum of phi: {negative} of {len(values)}",
         "classes": f"{len(reps)} symmetry classes of {len(perms)} reversible systems",
@@ -743,6 +867,7 @@ def run(seed, results="results", workers=WORKERS):
                                                   "counts": values[r]["counts"], "negative": values[r]["negative"]}
                           for r in reps},
               "table2_matches": {c: [list(p) for p in t2[c][:20]] for c in TABLE2}, "table2_phi": t2_phi,
+              "table2_phi_ks": t2_ks, "table1": notes["table1"],
               "purview": {"checked": checked, "smaller_better": worse}}
     os.makedirs(results, exist_ok=True)
     with open(os.path.join(results, "outputs.json"), "w", encoding="ascii") as fh:

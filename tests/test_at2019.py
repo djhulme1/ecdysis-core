@@ -97,6 +97,23 @@ class Systems(unittest.TestCase):
         p = and_gates()
         self.assertIs(M.cut_tpm(p, 0), p)
 
+    def test_concept_style_cuts(self):
+        star = [(3, M.FULL), (4, 0), (0, 0)]      # {MC_t, MCX_t+1}, {X_t, 0}
+        self.assertEqual(M.kcut_mask(star, "E"), sum(1 << (2 * 3 + j) for j in range(3)))   # X's outputs
+        self.assertEqual(M.kcut_mask(star, "C"), sum(1 << (i * 3 + 2) for i in range(3)))   # X's inputs
+        self.assertEqual(M.kcut_mask([(7, 0), (0, 7)], "E"), (1 << 9) - 1)
+        self.assertEqual(M.kcut_mask([(7, 0), (0, 7)], "C"), (1 << 9) - 1)
+        self.assertEqual(len(M.KCUTS["C"]), 146)
+        self.assertEqual(len(M.KCUTS["E"]), 146)
+        p = and_gates()
+        for x in range(1, 7):
+            mask = sum(1 << (i * 3 + j) for i in range(3) if x >> i & 1 for j in range(3) if not x >> j & 1)
+            self.assertEqual(M.sever(p, mask), M.cut_tpm(p, x))
+        self.assertIs(M.sever(p, 0), p)
+        self.assertEqual(M.part_label(star, "MCX"), "MC>MCX,X>0")
+        low = M.concept_style(p, 6)
+        self.assertTrue(all(math.isfinite(low[s][0]) and low[s][1] in M.PARTITIONS[7] for s in "CE"))
+
     def test_cycles(self):
         cyc = (1, 2, 3, 4, 5, 6, 7, 0)
         self.assertTrue(M.is_er(cyc))
