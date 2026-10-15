@@ -55,17 +55,23 @@ purview's states in the opposite order to the module's (itertools.product puts t
 compared two orderings of the same numbers; it now enumerates in the module's order. Table 1's 14 values of phi and
 EI = 2.5 came out as printed, but its Phi did not: over the six unidirectional cuts the test uses (Section 5.5's
 X -/-> S \\ X), MCX in (0,1,1) has Phi = 1.00, least at MX -/-> C on the effect side (phi_E(M) falls from 1.189 to
-0.189), where Table 1 prints 1.02 at the partition the paper writes {MC_t, MCX_t+1}, {X_t, 0}. That notation is
-PyPhi's concept-style system cut (a KCut of the whole system over the 'ALL' partitions that Section 5.7's
-PARTITION_TYPE names; concept_cuts and sia_concept_style in PyPhi's compute/subsystem.py, each side cut on its own),
-and no such cut severs M -> C alone. Over those cuts this module gives 1.0188 at exactly that partition, and a cause
-side whose least sum is 2.2263 (at {M_t, X_t-1}, {CX_t, MC_t-1}), Appendix B's 2.23 for the cause side, though the
-appendix names {MC_t, MCX_t-1}, {X_t, 0}, where the module gives 2.415. So the printed Phi follows the paper's
-software's cuts, not the ones its text names. The test was registered with the six unidirectional cuts and keeps
-them. The Table 1 control now checks Phi over the concept-style cuts; MCX's Phi over the six cuts is reported beside
-(table1_phi), and so is the concept-style Phi of the first ER match of each Table 2 column (table2_phi_ks). These
-changes came after the two controls' outcomes were seen; the run had stopped in the controls, before any reversible
-system was computed.
+0.189), where Table 1 prints 1.02 and the paper says it is found at {MC_t, MCX_t+1}, {X_t, 0} (X's outputs cut, for
+MCX the cut X -/-> MC), eliminating phi_E of X, CX and MCX, which the module gives as 1.0188. At 7ece71d the control
+was made to check Phi over PyPhi's concept-style system cuts (KCuts of the whole system over the 'ALL' partitions,
+each side on its own, the form in which the paper writes its partitions), whose least is 1.0188 at that partition and
+whose cause side's least, 2.2263, is Appendix B's 2.23 for MCX's cause side; MCX's Phi over the six cuts went beside
+(table1_phi), and so did the concept-style Phi of the first ER match of each Table 2 column (table2_phi_ks).
+
+The third trial, under a third seed of Imago's own, ran to the end with no bug: all four conditions and all five
+controls held. Its beside outputs then showed Figure 6's Phi as the six cuts give it for (a), (b) and (c) (0, 0.844
+and 0 state-averaged, printed 0, 0.84 and 0), not for (d) (1.208, printed 1.50), and the concept-style cuts
+reproducing none of the four (0.343, 0.790, 1.245 and 2.226). So the paper's Phi is not simply theirs either, and the
+Table 1 control no longer checks a family's least: it checks the paper's statement at the partition it names (phi_E
+of X, CX and MCX eliminated there and nothing else, 1.02 to 0.005), and table1_phi reports MCX's Phi over the six
+cuts, at that cut and over the concept-style cuts. These changes came after the controls' and the beside outputs'
+values were seen. The test, the measures and every other output are as at 7ece71d. The verdict does not turn on the
+cuts: in the third trial's classes, 20,160 of the 40,320 systems differ from their time reverse in sum phi_C + sum
+phi_E alone.
 
 1. Systems. The reversible systems are the 40,320 permutations of 0..7; the ER systems those whose cycle from 0
    returns after exactly eight steps. The deterministic element update of a permutation s is p(V_i = 1 | v) = bit i of
@@ -87,18 +93,19 @@ system was computed.
    that differ from their time reverse, and of the 20,542 unordered pairs); the ER and reversible sets' ranges and
    means of the two measures and their shares with Phi = 0 (Figure 5); the ER systems whose eight state-(0,1,1) values
    match each column of Table 2 to 0.0015 bits, with their Phi at that state and averaged (Figure 6's 0, 0.84, 0 and
-   1.50), and the same four systems' Phi over PyPhi's concept-style cuts; Table 1's MCX's Phi over the six cuts;
+   1.50), and the same four systems' Phi over PyPhi's concept-style cuts; Table 1's MCX's Phi over the six cuts, at
+   the cut the paper names and over the concept-style cuts;
    whether the full purview gives the largest phi (Section 5.4's statement) on 200 seed-drawn reversible systems; and
    how many cuts make some sum of differences negative.
 
 Controls (controls_passed counts those that behave as stated; the run stops if any fails): Table 1, the example
 system MCX (M the majority of M, C and X; C a copy of M; X the exclusive or of M and C, read from Section 2.1's
-statements) in state (0,1,1): its 14 values of phi to 0.001 bits of the printed ones, EI = 2.5 bits, and, over PyPhi's
-concept-style cuts, Phi = 1.02 bits to 0.005, least on the effect side at {MC_t, MCX_t+1}, {X_t, 0}, with the cause
-side's least sum 2.23 to 0.005; the repertoires against a direct enumeration of Equations 8 to 10 on seed-drawn
-probabilistic systems; the effect side's additive shortcut against the joint relative entropy on the same systems; the
-partitions' counts (1, 28 and 146 for subsets of one, two and three elements over three purview elements) with none
-repeated; and the symmetry of rule 3 on 300 seed-drawn systems.
+statements) in state (0,1,1): its 14 values of phi to 0.001 bits of the printed ones, EI = 2.5 bits, and, at the
+partition where the paper finds its Phi ({MC_t, MCX_t+1}, {X_t, 0}: X's outputs cut, here X -/-> MC), phi_E of X,
+CX and MCX eliminated and nothing else, together 1.02 bits to 0.005; the repertoires against a direct enumeration of
+Equations 8 to 10 on seed-drawn probabilistic systems; the effect side's additive shortcut against the joint relative
+entropy on the same systems; the partitions' counts (1, 28 and 146 for subsets of one, two and three elements over
+three purview elements) with none repeated; and the symmetry of rule 3 on 300 seed-drawn systems.
 
 What it cannot check: the paper's own scripts (not released) and the PyPhi branch it used (iit-4.0 at b79b7fa, whose
 settings Section 5.7 names) are not run; Figure 5's random samples are not drawn; systems of more than three elements.
@@ -604,7 +611,8 @@ def er_state_job(perms):
     return out
 
 
-PSI_STAR = [(3, FULL), (4, 0)]   # {MC_t, MCX_t+1}, {X_t, 0}: Table 1's least partition as the paper writes it
+STAR_SOURCE = 4      # Table 1's Phi is found at {MC_t, MCX_t+1}, {X_t, 0}: X's outputs cut, for MCX the cut X -/-> MC
+STAR_LOST = (4, 6, 7)   # which, the paper says, eliminates phi_E of X, CX and MCX
 
 
 def table1(p):
@@ -626,19 +634,22 @@ def controls_run(seed):
     st, uni, ks = table1(p)
     ok = all(abs(st["phi"][m][0] - c) <= 0.001 and abs(st["phi"][m][1] - e) <= 0.001 for m, (c, e) in TABLE1.items())
     e_val, _ = ei(p)
+    rep = Rep(cut_tpm(p, STAR_SOURCE), STATE_011)
+    lost = {m: st["phi"][m][1] - phi_effect(rep, m) for m in range(1, STATES)}
+    named = all(abs(lost[m] - (st["phi"][m][1] if m in STAR_LOST else 0.0)) < 1e-9 for m in lost)
+    at_star = sum(lost[m] for m in lost if st["phi"][m][1] > POS)
+    ctl["Table 1: MCX in (0,1,1), its 14 values of phi to 0.001 and EI = 2.5; at the partition where its Phi is found, "
+        "{MC_t, MCX_t+1}, {X_t, 0} (X -/-> MC), phi_E of X, CX and MCX eliminated and nothing else, 1.02 to 0.005"] = (
+        ok and abs(e_val - 2.5) < 1e-9 and named and abs(at_star - 1.02) <= 0.005)
     ks_phi = min(ks["C"][0], ks["E"][0])
-    at_star = sorted((m, pv) for m, pv in ks["E"][1] if m or pv) == PSI_STAR
-    ctl["Table 1: MCX in (0,1,1), its 14 values of phi to 0.001 and EI = 2.5; over PyPhi's concept-style cuts, Phi = "
-        "1.02 to 0.005, least on the effect side at {MC,MCX},{X,0}, and the cause side's least 2.23 to 0.005"] = (
-        ok and abs(e_val - 2.5) < 1e-9 and abs(ks_phi - 1.02) <= 0.005 and ks["E"][0] < ks["C"][0] and at_star
-        and abs(ks["C"][0] - 2.23) <= 0.005)
     least = min(uni)
     names = "MCX"
     lab = lambda m: "".join(names[i] for i in bits(m))
     notes = {
         "table1_phi": (f"MCX in (0,1,1): Phi {least[0]:.3f} over the six unidirectional cuts (least at "
                        f"{lab(least[1])} -/-> {lab(FULL & ~least[1])}, {'effect' if least[2] == 'E' else 'cause'}); "
-                       f"{ks_phi:.3f} over PyPhi's concept-style cuts (cause least {ks['C'][0]:.3f}); Table 1: 1.02"),
+                       f"{at_star:.3f} at X -/-> MC (Table 1: 1.02); concept-style {ks_phi:.3f}, cause least "
+                       f"{ks['C'][0]:.3f} (Appendix B: 2.23)"),
         "table1": {"unidirectional": {f"{lab(x)} -/-> {lab(FULL & ~x)} ({side})": round(d, 6) for d, x, side in uni},
                    "concept_style": {side: [round(ks[side][0], 6), part_label(ks[side][1], names)] for side in "CE"}},
     }
