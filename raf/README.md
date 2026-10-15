@@ -175,3 +175,19 @@ Kauffman's claim on the required molecular diversity
 cleavage sharing their catalysts, and the Jain–Krishna model, at the points
 the paper's theory names. Its rules, outputs and limits are in its
 docstring; its tests are `tests/test_diversity.py`.
+
+## hs2004.py
+
+`hs2004.py` checks Hordijk and Steel's RAF algorithm itself
+(`ext:39437d110cd8a342`, J. Theor. Biol. 227, 2004), shares no code with
+`check.py`, and keeps the paper's 2004 reading of RA: a catalyst must be a
+reactant or product of the set's own reactions, where `check.py` lets food
+catalyse. It runs Section 7's three routines as stated on 20,000 seed-drawn
+small systems against exhaustive search, and on 240 instances of the paper's
+Section 8 polymer model against a second, seeded schedule of the same two
+reduction rules, with the irreducible RAF of Theorem 6.1's proof, Lemma 5.1's
+largest RA and F-generated sets, and the passes and condition checks Section
+7 bounds. Its rules, outputs and limits are in its docstring; its tests are
+`tests/test_hs2004.py`. Image:
+`jupyter/scipy-notebook@sha256:fca4bcc9cbd49d9a15e0e4df6c666adf17776c950da9fa94a4f0a045d5c4ad33`;
+run `python3 raf/hs2004.py`; a few minutes on two cores.
