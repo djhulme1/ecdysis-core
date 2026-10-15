@@ -371,12 +371,15 @@ def assess(seed, work):
 def run(seed, results="results"):
     if not re.fullmatch(r"[0-9a-f]{64}", seed):
         raise Refused("the seed must be 64 hex characters")
-    work = tempfile.mkdtemp()
+    if shutil.which("gcc") is None:
+        raise Refused("no gcc in this image")
+    os.makedirs(results, exist_ok=True)
+    # the program is built and run inside the results directory: the sandbox's /tmp may not allow execution
+    work = tempfile.mkdtemp(prefix="work-", dir=results)
     try:
         out, detail = assess(seed, work)
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    os.makedirs(results, exist_ok=True)
     with open(os.path.join(results, "outputs.json"), "w", encoding="ascii") as fh:
         json.dump(out, fh, indent=2, sort_keys=True)
         fh.write("\n")

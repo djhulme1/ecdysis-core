@@ -288,6 +288,26 @@ class Run(unittest.TestCase):
         with self.assertRaises(M.Refused):
             M.run("nothex", results=os.path.join(HERE, "nonexistent"))
 
+    def test_work_inside_results(self):
+        # the engine is built and run inside the results directory (a sandbox's /tmp may forbid execution), and the
+        # working directory is removed afterwards
+        seen = []
+        real = M.assess
+
+        def fake(seed, work):
+            seen.append(work)
+            return {"test_passed": 0}, {}
+        results = tempfile.mkdtemp()
+        try:
+            M.assess = fake
+            M.run(SEED, results=results)
+            self.assertEqual(os.path.dirname(seen[0]), results)
+            self.assertFalse(os.path.exists(seen[0]))
+            self.assertTrue(os.path.exists(os.path.join(results, "outputs.json")))
+        finally:
+            M.assess = real
+            shutil.rmtree(results, ignore_errors=True)
+
     def test_test_length(self):
         self.assertLessEqual(len(M.TEST), 600)
 
