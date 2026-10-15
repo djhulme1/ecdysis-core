@@ -3868,8 +3868,9 @@ zipping, its free numbers coloured, has no 8-term progression in one colour
 among 407,431,526,734. Its prime, 85297, is reflection symmetric, and for such
 a certificate the paper fixes no labelling for the turning: under
 `vdw/hhlm.py`'s labels (raw classes 1-4 and 2-3 swapped) the certificate holds
-32,241,888 progressions in one colour, under 1-2 and 3-4 one too, and under
-1-3 and 2-4, a shift of the classes by k/2, none. The first trial took hhlm's
+32,241,888 progressions in one colour (the first trial's full scan), under 1-2
+and 3-4 it holds them too (eight consecutive numbers from 6,553), and under 1-3
+and 2-4, a shift of the classes by k/2, none. The first trial took hhlm's
 labels alone and found the entry failing; the module was changed after that
 outcome was seen to try all three (`17f39c5` to `e781bd6`, recorded in its
 docstring), the second trial found no bug, and the sealed run repeated its
