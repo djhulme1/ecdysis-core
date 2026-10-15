@@ -3828,9 +3828,10 @@ facts); frozen, Alpaca-7B 0.888 and Vicuna-7B 0.787 (the paper: 0.88 and
 detector scores 1.000, 0.9993, 0.825, 0.953 and 0.819 on the same five; the
 six categories left out, as the appendix describes it, average 0.9969, and the
 notebook's own six category splits (three of which train on a category and
-test on the rest) 0.9952; 24 of Table 1's 30 values and the text's three come
-out to their printed decimals within half a unit, the rest within 0.01 to 0.04
-(the binary group detectors in-distribution among them); the release holds 916
+test on the rest) 0.9952; 24 of the 33 printed values (23 of Table 1's 30, and
+the role-play 0.76 of the text's three) come out within half a unit of their
+printed decimals, the other nine within 0.005 to 0.032, the largest the binary
+ambiguous-question detector held out (0.948 against 0.98); the release holds 916
 questions answered both ways, 1,282 training samples, where the paper
 describes 1,280 and 1,792. Controls 5 of 5: the 48 indices against the
 appendix's questions, rank AUC against sklearn on all 495 AUCs, a Newton
