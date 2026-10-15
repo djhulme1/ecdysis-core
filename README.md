@@ -4533,3 +4533,53 @@ consider. The paper finds the maximising β by solving dI*/dβ = 0, which it
 calls a quadratic equation; the module searches instead, and control (d)
 checks the search. A trial under Imago's own seed found no bug, and the sealed
 run repeated its values for the paper's model exactly.
+
+## pi/zeta2.py: Zudilin, the irrationality measure of ζ(2) (2014)
+
+`pi/zeta2.py` tests claim `ext:15bdbae7a8cf3533`, Zudilin, "Two hypergeometric
+tales and a new irrationality measure of ζ(2)" (Annales mathématiques du
+Québec 38, 101–117, 2014; arXiv:1310.1526): "We prove the new upper bound
+5.095412 for the irrationality exponent of ζ(2) = π²/6; the earlier record
+bound 5.441243 was established in 1996 by G. Rhin and C. Viola." The proof
+builds linear forms r_n = q_n ζ(2) − p_n as Barnes integrals of a rational
+function, finds the same forms from a second construction whose arithmetic
+is better, and combines the two to divide out a large common factor Φ̃_n;
+the bound is then (C0 + C1)/(C0 − C̃2), from the forms' growth and the
+primes' share. The module reads the paper's e-print as data and recomputes
+it: the constants in 60-digit decimals (a cubic's zeros, digamma values),
+the arithmetic functions φ and φ̂ from their definitions against their
+printed step functions, and both constructions' forms exactly for n = 1 to
+100, with their integrality, their agreement, the sharpened p-adic
+inclusion and their growth.
+
+| Command | Claim |
+|---|---|
+| `python3 pi/zeta2.py` | Zudilin 2014: μ(ζ(2)) ≤ 5.09541178…, from the printed constructions and constants |
+
+Standard library, in the pinned `python` image, on the e-print (by hash);
+about five minutes. Tests: `python3 -m unittest tests.test_zeta2`. The
+receipt (`aac83684…`, 15 October, at `5bb5d99`, rules first, a
+verification): all four conditions hold. The bound is
+5.09541178582592318815…, and all thirteen of the paper's printed constants
+come out as printed (C0 = 15.88518998…, C1 = 23.22906071…,
+C̃2 = 8.20882301…, the first construction's 5.57728968, Remark 3's
+5.20514736 for its other parameters, among them). φ, φ̂ and φ̃ equal their
+printed forms at all 4,408 points examined. For every n to 100,
+D_9n D_8n p_n is an integer, the two constructions give the same forms (up
+to one sign), and the sharpened inclusion holds at every prime the bound
+needs and, as printed, at every prime p ≤ 8n. |q_(n+1)/q_n| extrapolates to
+e^C1 within 3.5 × 10⁻¹⁰; log|r_n|/n approaches −C0 from below (−15.98 at
+n = 100); and Remark 4's recurrence polynomial has zeros of modulus e^C1 and
+e^−C0, to 10⁻²⁰ in the logarithm. Controls 7 of 7.
+
+Two of the paper's statements hold only with a correction, neither touching
+the bound. Under the signs (−1)^d and (−1)^d̂ it gives the two
+constructions, q_n = −q̂_n and p_n = −p̂_n, where it writes them equal (and
+Whipple's identity in Remark 5 likewise holds with a minus sign on the
+families the tests tried). And Lemma 8's inclusion for p̂_n, stated for every
+prime, fails at 460 pairs (n, p) with n ≤ 100, every one at a prime with
+p² ≤ 9n (the largest 29, at n = 94), below the primes the bound uses; a
+diagnostic after the receipt, outside it, classified them. A dry run before
+the rules were committed computed Remark 4's polynomial through a default
+argument and printed its zeros' log moduli; the module's docstring records
+it.
