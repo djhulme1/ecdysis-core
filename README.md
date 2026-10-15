@@ -4354,3 +4354,55 @@ m = 3; and the paper's own 8 and 11 tableaux, contracted as its Section 6
 describes, at the same points (ranks 8 and 11). Not tested: the semigroup
 computation that carries the rest of the quote's second half. A trial under
 Imago's seed found no bug, and the sealed run repeated its outputs exactly.
+
+## snn/babadi.py: Babadi and Abbott, shifted STDP (2010)
+
+`snn/babadi.py` tests claim `ext:e5149bd6f1025244`, Babadi and Abbott,
+"Intrinsic stability of temporally shifted spike-timing dependent plasticity"
+(PLoS Computational Biology 6(11), e1000961, 2010): "Through simulations and
+analytic calculations, we show that a small temporal shift in the STDP window
+that causes synchronous, or nearly synchronous, pre- and postsynaptic action
+potentials to induce long-term depression can stabilize synaptic strengths."
+The model is the paper's (Methods and Table 1): an integrate-and-fire neuron
+with 1000 excitatory synapses under nearest-neighbour pair STDP (A+ 0.006 and
+A− 0.005 mV, τ 20 ms, the window shifted by d = 2 ms) and 250 inhibitory ones
+of 4 mV, independent Poisson inputs at 10 Hz, strengths kept at or above 0 and
+no upper limit. Its engine, `snn/babadi.c`, integrates the neuron exactly over
+0.1 ms steps, pairs only spikes adjacent in time, and counts intervals in
+whole steps.
+
+| Command | Claim |
+|---|---|
+| `python3 snn/babadi.py` | Babadi & Abbott 2010: a 2 ms shift in the STDP window stabilises synaptic strengths with no limits; unshifted STDP does not |
+
+Python's standard library and gcc, in the pinned `buildpack-deps` image, no
+inputs; under a minute. Tests: `python3 -m unittest tests.test_babadi`. The
+receipt (`f034d1cd…`, 15 October, at `f1b6e27`, rules first, a reproduction):
+all three conditions hold. From strengths uniform on 1–5 mV the strengths
+settle at a mean of 1.651 mV (SD 0.450, skew −0.01, none at 0, the largest
+3.4 mV) with the neuron firing at 51.74 Hz; between the last two 5,000 s
+windows the mean changed 0.05%, the rate 0.10% and the SD 4.29%, the SD still
+narrowing slowly at 20,000 s (the paper ran 10^5 s). From 5–9 mV they settle at
+the same mean, 1.652 mV, with an SD of 0.482 (7% wider) and 51.83 Hz. With no
+shift (d = 0) they grow without bound: the mean rose about 0.94 mV every 100 s
+and the run stopped at 800 s with the rate past 1,000 Hz. Beside it: d = 1, 2
+and 4 ms give means of 2.026, 1.651 and 1.433 mV and SDs of 0.601, 0.450 and
+0.405, lower and narrower with longer delays, as the paper says; the paper's
+equation 13 puts the rate at 56.35 Hz against the 51.74 simulated. Controls 4
+of 4: the C engine against a plain Python implementation on replayed inputs
+(the same spikes, the same strengths); the free membrane's mean (−10.02 mV
+against −10); the input rates; and the window's values and the lower bound.
+
+Two things found on the way are in the module's docstring. Read as "every
+postsynaptic spike pairs with the last presynaptic spike, whatever came
+between", the paper's nearest-neighbour rule made strengths grow without bound
+in a timing run at other inputs; pairs only between spikes adjacent in time
+are the reading under which the paper's pairing intervals have the density of
+its equation 12, and the rules took it before any run at the paper's
+parameters. And a trial under Imago's own seed found every run stepping up
+together near 16,800 s: with spike times held in milliseconds as
+floating-point numbers, 40% of intervals of exactly d (common on a 0.1 ms grid,
+where the window jumps from −A− to +A+) rounded above d once the times passed
+2^24 ms. Times are now whole steps, and a test requires a run whose step count
+starts 2 × 10^8 steps on to give the same spikes and strengths. A further
+trial found no bug, and nothing was changed after it.
