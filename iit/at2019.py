@@ -43,7 +43,12 @@ Every rule below was fixed before this module computed any value of the paper's 
 for Table 1's example. Known before it: the paper's text, its Tables 1 to 3 and the captions of Figures 4 to 7. While
 reading, the effect values of the example system MCX's single elements (1.189 and 0.189 bits) and its cause values for
 M, C and MC (1.0 bit each) were worked by hand from the definitions, and they agree with Table 1. The measures were
-timed beforehand on seed-drawn probabilistic systems (none reversible), no value printed.
+timed beforehand on seed-drawn probabilistic systems (none reversible), no value printed. The first trial in the
+reference runner, under a seed of Imago's own, stopped in the first control with a division by zero: MCX is not
+reversible, and the control evaluates all eight of its states though Table 1 prints one, so it met states that no
+prior state leads to, whose cause repertoires are all zero. Such a repertoire is now left at zero and its phi_C is 0,
+as PyPhi's normalize and find_mip make them. Nothing else changed, and since every state of a reversible system is
+reachable, no reversible system's values are touched.
 
 1. Systems. The reversible systems are the 40,320 permutations of 0..7; the ER systems those whose cycle from 0
    returns after exactly eight steps. The deterministic element update of a permutation s is p(V_i = 1 | v) = bit i of
@@ -247,7 +252,7 @@ class Rep:
                     tot += pr if xj else 1.0 - pr
                 vals.append(tot)
             s = sum(vals)
-            self.c1[key] = [x / s for x in vals]
+            self.c1[key] = [x / s for x in vals] if s > 0 else vals
         return self.c1[key]
 
     def cause(self, mech, purview):
@@ -265,7 +270,7 @@ class Rep:
                     cj = self.cause_node(j, purview)
                     rep = [a * b for a, b in zip(rep, cj)]
                 s = sum(rep)
-                rep = [x / s for x in rep]
+                rep = [x / s for x in rep] if s > 0 else rep   # an unreachable state: all zero, as PyPhi's normalize
             self.c[key] = rep
         return self.c[key]
 
@@ -360,6 +365,8 @@ def phi_effect(rep, mech):
 
 def phi_cause(rep, mech):
     intact = rep.cause(mech, FULL)
+    if not any(x > 0 for x in intact):
+        return 0.0          # no prior state leads to the mechanism's state: phi_C is 0, as PyPhi's find_mip gives it
     best = math.inf
     for parts in PARTITIONS[mech]:
         d = 0.0

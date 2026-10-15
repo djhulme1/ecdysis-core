@@ -66,6 +66,14 @@ class Repertoires(unittest.TestCase):
         self.assertEqual(rep.cause(0, 3), [0.25] * 4)
         self.assertEqual(rep.cause(5, 0), [1.0])
 
+    def test_unreachable(self):
+        # A and B on, C off: A on needs B and C on before, B on needs A and C, and then C would be on too
+        rep = M.Rep(and_gates(), 3)
+        self.assertEqual(rep.cause(7, M.FULL), [0.0] * 8)
+        self.assertEqual(rep.cause(3, M.FULL), [0, 0, 0, 0, 0, 0, 0, 1.0])
+        self.assertEqual(M.phi_cause(rep, 7), 0.0)
+        self.assertEqual(len(M.phis(and_gates(), 3)), 7)
+
     def test_kl_and_phi(self):
         self.assertEqual(M.kl_bern(0.5, 0.5), 0.0)
         self.assertAlmostEqual(M.kl_bern(1.0, 0.5), 1.0)
