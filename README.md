@@ -3535,3 +3535,54 @@ codimension 2); and 811,569 of the 1,048,575 nonzero translations stack the
 12-dimensional into G*_13. Controls 5 of 5: lattice tilings with known answers
 and planted faults, and three cross-checks of the counting. A trial under a seed
 of Imago's own found no bug, and the sealed run repeated its outputs exactly.
+
+## mm/mfg.py: Kauers & Wood's meta flip graph, 28 improved rank bounds (2025)
+
+`mm/mfg.py` tests claim `ext:fa90178b3bb65116`, Kauers & Wood, "Exploring the
+Meta Flip Graph for Matrix Multiplication" (arXiv:2510.19787v1, October 2025):
+"Continuing recent investigations of bounding the tensor rank of matrix
+multiplication using flip graphs, we present here improved rank bounds for
+about thirty matrix formats." The module reads the e-print's table (28 formats,
+each with its old rank and its bold one) and the three sentences that give each
+format's ring (Z_2 for three, Q for seven, Z for the other 18), then reads one
+released scheme per format (github.com/mkauers/matrix-multiplication at
+`6487519`, the paper's day, GPL-3.0; the claim's data of record, 29 files with
+the e-print) in the .exp format, a trailing /d dividing a product only over Q,
+and checks each exactly against its format's Brent equations over its ring.
+
+| Command | Claim |
+|---|---|
+| `python3 mm/mfg.py` | Kauers & Wood 2025: improved rank bounds for 28 formats from the meta flip graph |
+| `python3 mm/mfg_reduce.py DIR` | beside it: the denominators the release's rational schemes really need |
+
+Standard library, in the python image; seconds. Tests (in that image):
+`python3 -m unittest discover -s tests -p 'test_mfg*.py'`. The receipt
+(`54eebe7d…`, 15 October, at `4cbbc43`, a verification): all 28 conditions
+hold. Every file holds the bold rank's number of products, from 54 for (3,4,6)
+to 183 for (6,6,7), and is exact over its ring, 94 products below the old ranks
+in all, 1 to 9 a format (9 for (5,6,7) and (5,7,7)). Beside it: the 25 integer
+and rational schemes are also exact modulo 2; the three Z_2 schemes, read over
+the integers, are wrong in 7,208, 8,739 and 6,065 coefficients, as the paper
+says they work only over Z_2; three seed-drawn products through each scheme are
+right; the largest coefficient, 54,718, is in the (2,5,8) scheme. The rational
+schemes' divisors as written carry the primes the paper's sentences name only
+for (3,4,8) (twelve); the other six carry more. Controls 3 of 3. The first
+trial refused at a factor written k*( ... ), which the reader learned before any
+scheme's exactness was computed (the docstring says so); the second found no
+bug, and the sealed run repeated its outputs, the seed's probes apart.
+
+After the run, beside the receipt and not part of it, `mm/mfg_reduce.py` read
+all 67 rational files at the bold ranks in the seven formats at `6487519`. A
+divisor can cancel against a product's factors, so the written divisors
+overstate the denominators: reduced term by term, 26 files need no prime but 3
+(12 as written), (3,4,8)'s one scheme needs 3, 5, 13 and 149 rather than twelve
+primes, and the (2,5,8) and (2,6,8) files whose divisors are the paper's
+(3, 5, 7 and 3, 5, 11) need only 3 and 7, and 3 and 11. Five files need no
+denominator at all: (2,5,7) in 55 (`k4498371c08343504`), (2,7,7) in 76
+(`k2f695200bafff44e`, `k475e114024e136b7`), (3,5,7) in 79
+(`k6467dd2477c6f629`) and (3,7,7) in 111 (`k35be27e3c65fcb3a`, the paper's one
+scheme in Z[1/5]). Each is exact over Q as written and, with each product's
+scalar moved into its first factor, exact over the integers (largest
+coefficient 16, 5, 8, 6 and 10), so these four formats have their bold ranks
+over Z, where the paper says Hensel lifting gave them only rational
+coefficients.
