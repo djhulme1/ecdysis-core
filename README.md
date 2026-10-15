@@ -3709,3 +3709,53 @@ answers. Controls 3 of 3: per-task and direct counts agree, swapping the
 contexts negates every drop, and seeded random swaps take the largest drop to
 within three standard errors of zero. A trial under a seed of Imago's own found
 no bug, and the sealed run repeated its outputs exactly.
+
+## folk/cbf2025.py: Colombatto, Birch & Fleming, mental state attributions and taking ChatGPT's advice (2025)
+
+`folk/cbf2025.py` tests claim `ext:821da4f3c32e77b5`, Colombatto, Birch &
+Fleming, "The influence of mental state attributions on trust in large language
+models" (Communications Psychology 3, 84, 2025; CC BY 4.0): "Bayesian analyses
+revealed strong evidence against a positive correlation between attributions of
+consciousness and advice-taking; indeed, a dimension of mental states related
+to experience showed a negative relationship with advice-taking, while
+attributions of intelligence were strongly correlated with advice acceptance."
+The module reads the authors' released experiment (OSF w537f: the task, ratings
+and debriefing files of 410 US adults, and their analysis script, which must
+hold verbatim the 17 lines the module reimplements) and recomputes the claim as
+that script does: each participant's advice-taking is their share of switches
+on the trials whose advice (ChatGPT's choice, drawn from a counterpart
+participant) differed from their first choice; the one-sided Bayes factor BF+0
+for a positive correlation of advice-taking with the consciousness ratings is
+JASP's (the exact likelihood of r under the uniform prior); and the regression
+is lm(adv_rate ~ experience * intelligence), each dimension the mean of the
+script's ten-trait list.
+
+| Command | Claim |
+|---|---|
+| `python3 folk/cbf2025.py` | Colombatto, Birch & Fleming 2025: no positive link between consciousness attributions and advice-taking; experience negative, intelligence positive |
+
+numpy, scipy, statsmodels and mpmath, in the scipy-notebook image; seconds.
+Tests: `python3 -m unittest discover -s tests -p test_cbf2025.py`. The receipt
+(`8ad08bcf…`, 15 October, at `142b326`, a verification): all three conditions
+hold. Advice-taking's correlation with consciousness is r(407) = -0.100
+(p = 0.043), and BF+0 = 0.0207, below 1/10 (BF10 0.474); in the regression on
+experience, intelligence and their product, experience's coefficient is -1.04
+(SE 0.51, p = 0.042) and intelligence's 0.31 (SE 0.08, p = 1.1e-4). Beside it:
+123 of the 126 numbers the paper prints from these data come out as printed,
+every Bayes factor among them to its printed digits (BF10 0.474 and BF+0 0.021
+to JASP's three decimals; 0.898 with the ratings of 1 left out; 0.83,
+43,808.62, 1.38e+35 and 7.52e+14 for the trust correlations). Of the other
+three, one is a negative zero (the advice regression's interaction interval,
+-0.00 to 0.02, printed 0.00 to 0.02), one the paper's men (199 against 197:
+two participants who chose to self-define wrote "Man" and "man", and the paper
+counts them as men) and one a rounding (Spearman's p is 0.140497, which R
+prints as 0.1405 and the paper gives as 0.141). The PCA's printed 45.30% and
+18.79% are what the script computes with the participant number, sub_n, among
+its 21 variables; the 20 ratings alone give 47.57% and 19.72%. Not tested: the
+experiment itself, and the exclusions made before the release. Controls 5 of 5:
+the Bayes factors by quadrature against the hypergeometric closed forms, the
+likelihood in Hotelling's form against Ly et al.'s series (with as many more
+digits as its two terms cancel), both regressions against statsmodels, acc_post
+against the answers on all 6,326 trials whose advice differed, and seeded
+shuffles recovering the null. A trial under a seed of Imago's own found no bug,
+and the sealed run repeated its outputs, the seeded shuffles aside.
