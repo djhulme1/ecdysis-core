@@ -3969,3 +3969,54 @@ Strassen's with c read transposed not; `mm/check.py`'s self-test; and one
 coefficient of each scheme raised by one making exactly |v_r||w_r| entries
 wrong. A trial under Imago's seed found no bug, and the sealed run repeated
 its outputs, the seeded probes aside.
+
+## itp/cheng2019.R: Cheng et al., the female survival advantage peaks around 350 days (2019)
+
+`itp/cheng2019.R` tests claim `ext:ad8d737892a45da1`, Cheng, Gelfond, Strong &
+Nelson, "Genetically heterogeneous mice exhibit a female survival advantage
+that is age- and site-specific: Results from a large multi-site study" (Aging
+Cell 18, e12905, 2019): "As in humans, the female advantage in mice was
+greatest in early adulthood, peaking around 350 days of age and diminishing
+progressively thereafter." The module reads the program's workbooks for its
+first six lifespan cohorts at the Mouse Phenome Database (2004 to 2007, 2009
+and 2010), refuses them unless their controls are the paper's 3,690 mice
+(1,993 males, 1,697 females), and smooths each sex's hazard with the paper's
+own package, bshazard, whose code (version 1.1, CRAN's mirror at `04d6844`;
+the same algorithm in 1.0 and 1.2) it sources from its inputs by hash. The
+test: the ratio of the males' hazard to the females', read at every day from
+100 to 1,000, is highest from 250 to 450 days; it and its 1,000-replicate
+bootstrap lower limit are above 1 there; and it falls at each 100 days from
+the peak to 800. It is the lab's first check that runs a paper's own published
+code.
+
+| Command | Claim |
+|---|---|
+| `OPENBLAS_NUM_THREADS=1 OPENBLAS_CORETYPE=Prescott Rscript itp/cheng2019.R` | Cheng et al. 2019: the female advantage in UM-HET3 mice peaks around 350 days and then diminishes |
+
+R 4.3.3 with survival 3.5.8, in the rocker/r-ver image, with one BLAS thread
+and one fixed OpenBLAS kernel so that every machine sums the same way; about
+seven minutes, the bootstrap on two cores. Tests: `Rscript
+tests/test_cheng2019.R`. The receipt (`a423b9fe…`, 15 October, at `8db826a`,
+rules first, a verification): all three conditions hold. The ratio is highest
+at 333 days, where the males' hazard is 7.86 times the females' (bootstrap 95%
+limits 5.13 and 10.53), and it falls at every step of 100 days to 800: 6.07 at
+433 days, 3.40 at 533, 1.95 at 633 and 1.34 at 733. Read at each hundred days
+from 100 to 1,000 it runs 1.39, 3.43, 7.15, 6.96, 4.15, 2.30, 1.49, 1.16, 0.95
+and 0.87. Beside the test, every number the text gives comes out: the
+Kaplan–Meier medians are 887 days for the females (879–898) and 803 for the
+males (791–815), exactly as printed; the sexes differ by log-rank pooled (p
+1.7 × 10⁻¹⁴) and in five of six cohorts, all but 2009 (p 0.086); the
+maximum-lifespan test finds no difference, pooled (9.7% of females and 8.2% of
+males alive past 1,084 days, p 0.10) or in any cohort; the males' hazard is
+above the females' at every age from 100 to 600 days; and at 800 days the
+ratio is 1.16 (1.04–1.29), its bootstrap lower limit first reaching 1 at 820
+days, the paper's "about 800 days". Fitted cohort by cohort, without a
+bootstrap, the ratio peaks from 250 to 450 days in three of the six (2005 at
+385 days, 2007 at 382, 2010 at 349); in 2004, 2006 and 2009 it is highest at
+the youngest age the two fits share (100, 209 and 149 days), where a few early
+deaths of either sex carry the ratio. Controls 7 of 7: the files and their
+rows; the binning's deaths and person-time against the data's; bshazard()
+itself against the module's call of its bspois; row order; the same mice for
+both sexes; and peaks planted at 350 and 600 days in 20,000 simulated mice of
+each sex, found at 362 and 622. A trial under Imago's seed found no bug, and
+the sealed run repeated its outputs, the bootstrap's limits aside.
