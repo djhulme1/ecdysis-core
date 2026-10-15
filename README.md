@@ -4061,3 +4061,42 @@ correctness was expected before the rules: the lab's check of Alper, Bogart &
 Velasco had expanded its loops-of-weight-1 version for n = 3 and evaluated it
 for n = 2, 4 and 5. A trial under Imago's seed found no bug, and the sealed run
 repeated its outputs exactly.
+
+## pi/gz2019.py: Guo & Zudilin, two supercongruences from a q-analogue of Ramanujan's 2√3/π (2019)
+
+`pi/gz2019.py` tests claim `ext:4b9c849a7af6b605`, Guo & Zudilin, "A
+q-microscope for supercongruences" (Advances in Mathematics 346, 329–358,
+2019; arXiv:1803.01830): from a q-analogue of Ramanujan's formula
+Σ C(4n,2n)C(2n,n)²(8n+1)/(2^(8n)3^(2n)) = 2√3/π they derive the two
+supercongruences S(p − 1) ≡ p(−3/p) and S((p − 1)/2) ≡ p(−3/p) modulo p³,
+"valid for all primes p > 3", where S(N) is the sum truncated at n = N. The
+module checks Ramanujan's formula to 1,000 digits, the q-analogue the paper
+displays as integer power series to q^1000, and both supercongruences
+exactly modulo p³ for every prime from 5 to 10,000. Beside the test it checks
+the paper's own q-supercongruences, its Theorems 1.1 to 1.3, as orders of
+vanishing at the roots of unity, in the finite fields of three primes above
+2^61.
+
+| Command | Claim |
+|---|---|
+| `python3 pi/gz2019.py` | Guo & Zudilin 2019: S(p − 1) and S((p − 1)/2) of Ramanujan's 2√3/π series are p(−3/p) modulo p³ for every prime p > 3 |
+
+The standard library, in the python image; half a minute. Tests: `python3 -m
+unittest tests.test_gz2019`. The receipt (`8e971b6c…`, 15 October, at
+`91459af`, rules first, a reproduction): all four conditions hold. The sum to
+n = 1,100 agrees with 2√3/π to 1,027 places; the two sides of the q-analogue
+agree in all 1,001 coefficients to q^1000; and both supercongruences hold for
+every one of the 1,227 primes from 5 to 10,000. Beside it: the terms between
+the two truncations are not all 0 modulo p³ for every prime but 5, so the two
+congruences are different ones, as the paper remarks, while their sum is 0
+modulo p³ for all 1,227; Theorem 1.1's two truncations meet q^(−(n−1)/2) [n]
+(−3/n) modulo [n]Φ_n(q)² for all twelve n coprime to 6 from 5 to 37 (to order
+exactly 3 at the primitive n-th roots for n = 35), and Theorems 1.2 and 1.3
+hold modulo [n] for all eighteen odd n from 3 to 37, in each of the three
+fields. Controls 7 of 7: π by Machin's formula against the Gauss–Legendre
+iteration; the series routines on Euler's pentagonal and Gauss's triangular
+identities; the recurrence against binomials; the modular sums against exact
+rational sums for primes to 300; a planted fault (8n + 3) caught; and the
+root-of-unity valuations on known cases, with Theorem 1.1's right-hand side
+negated caught. A trial under Imago's seed found no bug, and the sealed run
+repeated its outputs exactly.
