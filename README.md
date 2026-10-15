@@ -4815,3 +4815,55 @@ against 8 in females; the cut removes whole strains whose DR mice nearly all
 died young (115 and 86 in males; 115, 122 and 25 in females, DR means of 113 to
 334 days), so it counts against shortening by its construction. A trial under
 Imago's seed found no bug, and the sealed run repeated its outputs exactly.
+
+## waring/jt.py: Johns and Teitler, the Waring rank of the determinant is at most d·d! (2020)
+
+`waring/jt.py` tests claim `ext:709084182973f677`, Johns and Teitler, "An
+improved upper bound for the Waring rank of the determinant" (Journal of
+Commutative Algebra 14(3), 2022; arXiv:2004.06158v1, 2020): "The Waring rank of
+the generic $d \times d$ determinant is bounded above by $d \cdot d!$." The
+Waring rank of a form of degree d is the least number of dth powers of linear
+forms whose combination it is. The bound comes from one explicit identity, the
+paper's eq. (2): d·d! det_d is the sum over σ in S_d and j = 1, …, d of
+(−1)^σ (−1)^((d+1)j) (Σ_i ω^(ij) x_(i,σ(i)))^d, ω a primitive dth root of
+unity, d·d! dth powers with coefficients ±1. The earlier bounds were an
+exponential times d!: 2^(d−1) d! (each of the determinant's d! monomials as
+2^(d−1) powers) and Derksen's (5/6)^⌊d/3⌋ 2^(d−1) d!; Gurvits's unpublished
+(d + 1) d! is linear too. The module builds the sum term by term and decides
+the identity exactly over the cyclotomic integers for d = 2 to 7 (arithmetic in
+Z[t]/(t^d − 1), reduced modulo Φ_d, so for every primitive root at once), and
+at seed-drawn points modulo two primes p ≡ 1 (mod 2520) for d = 8 and 9, the
+range of the paper's Table 1.
+
+| Command | Claim |
+|---|---|
+| `python3 waring/jt.py` | Johns and Teitler: d·d! det_d is a signed sum of d·d! dth powers of linear forms, so the Waring rank of det_d is at most d·d! |
+
+Standard library, in the pinned `python` image, no inputs; a few minutes.
+Tests: `python3 -m unittest tests.test_jt`, on identities that are not the
+paper's. The receipt (`14eb5179…`, 16 October, at `187a119`, rules first, a
+reproduction): all eight conditions hold. For d = 2 to 7 the sum is
+identically d·d! det_d over Z[ω]: of all the monomials its expansion produces,
+exactly the determinant's survive (2, 6, 24, 120, 720 and 5,040), each with
+coefficient ±d·d!; for d = 8 and 9 it agrees with d·d! det_d at all four
+points. Beside it: the coefficients of the paper's Lemma (d times the
+multinomial coefficient where Σ i_k ≡ C(d+1, 2) mod d, else 0) for d = 2 to 7;
+the d·d! powers linearly independent for d = 2 to 5 (ranks 4, 18, 96 and 600
+of as many); every element of the paper's subgroup H of symmetries fixing the
+determinant and permuting the signed terms, H having 8, 162, 1,536 and 30,000
+elements for d = 2 to 5, d³φ(d)d!/2 as the paper says; P_π D in the
+decomposition's set exactly when π is affine, for every π up to d = 7;
+transposition a symmetry for d = 2 and 3 and not for 4 and 5, as the paper
+says; the defining equations cutting out exactly the d·d! points over F_3, F_7
+and F_5 for d = 2, 3 and 4; Table 1's 41 entries as their formulas give them;
+and eq. (1), the classical decomposition, Gurvits's and Krishna and Makam's
+five products, each exact. Controls 6 of 6, among them the identity in
+floating point with ω = exp(2πi/d) and planted faults (a sign reversed; a root
+of order d/2), each caught. The paper's remark that its d = 3 case is Conner,
+Gesmundo, Landsberg and Ventura's 18 cubes is not checked.
+
+Table 2 misprints two of its five entries: for the order d³φ(d)d!/2 printed
+above it, it gives 37,500 for d = 5, where the formula and the enumeration give
+30,000 (37,500 is the formula with φ(5) taken as 5), and 15,552 for d = 6,
+where the formula gives 155,520, a digit dropped. A trial under Imago's seed
+found no bug, and the sealed run repeated its outputs exactly.
