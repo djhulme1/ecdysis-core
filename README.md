@@ -4639,3 +4639,43 @@ setups, a set on which the two computations differ, one expert's pair, both
 readings of the majority, and the reader on files written for it with each
 refusal. A trial under Imago's seed found no bug, and the sealed run repeated
 its outputs but for the bootstrap, which the seed draws.
+
+## mm/alt51.py: Stapleton and Perminov, a 51-addition kernel for rank-23 3 × 3 (2026)
+
+`mm/alt51.py` tests claim `ext:3a20702006330b21`, Stapleton and Perminov, "A
+51-Addition Alternative-Basis Kernel for Rank-23 3x3 Matrix Multiplication"
+(arXiv:2609.32388, v1, 26 September 2026; CC BY 4.0): "We give a rank-23
+algorithm for $3\times3$ matrix multiplication using 51 additions and
+subtractions in alternative bases. The input and output conversions require
+five further additions, giving 56 additions in ordinary coordinates." In the
+alternative-basis framework of Karstadt and Schwartz the inputs are first
+converted (x = Pa, y = Qb), the 23 products are formed from the converted
+entries, and the result is converted back (c = Rz), so that the kernel's
+linear programs can be cheaper than any in ordinary coordinates. The module
+reads the authors' certificate (their repository at `473661e`) and the
+paper's e-print, expands both sets of straight-line programs exactly, read
+in order as the paper says, counts each binary addition or subtraction once
+with copies free (the paper's model), and checks the composed algorithm
+against all 729 coefficients of the 3 × 3 multiplication tensor.
+
+| Command | Claim |
+|---|---|
+| `python3 mm/alt51.py` | Stapleton & Perminov 2026: a rank-23 3 × 3 kernel in 51 additions, 5 more for the conversions |
+
+Standard library, in the pinned `python` image, on the two inputs (by hash);
+seconds. Tests: `python3 -m unittest tests.test_alt51`. The receipt
+(`4ca8cecb…`, 15 October, at `2879df9`, rules first, a verification): all ten
+conditions hold. The certificate's programs and the paper's printed ones are
+the same and expand exactly to the scheme; composed with P, Q and R they get
+all 729 coefficients right; the kernel takes 13 + 12 + 26 = 51 additions and
+the conversions 1 + 3 + 1 = 5, as printed, with no standalone negation or
+nonunit scalar. The certificate's U, V and W equal the paper's printed ones
+and satisfy the tensor's equations themselves, det P = det Q = det R = 1, and
+the stored inverses are inverses. In ordinary coordinates, without sharing,
+the same scheme's U, V and W would cost 119 additions, the certificate's own
+"naive" figure. The algorithm gives AB on 200 random integer pairs and on 50
+pairs whose entries are 2 × 2 integer matrices, so that it holds without
+commuting products, as the paper says. The paper's appendix lists its checker,
+whose kernel function agrees with the displayed programs assignment by
+assignment. Controls 6 of 6. A trial under Imago's seed found no bug, and the
+sealed run repeated its outputs exactly.
