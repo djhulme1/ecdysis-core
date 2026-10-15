@@ -104,7 +104,8 @@ TEST = ("Refuted if, in the paper's model (Methods and Table 1: integrate-and-fi
         "nearest-neighbour pair STDP with A+ 0.006 and A- 0.005 mV, tau 20 ms, shift d = 2 ms, 250 inhibitory of 4 mV, "
         "Poisson inputs at 10 Hz, strengths only kept at or above 0), simulated 20,000 s from strengths uniform on 1-5 "
         "mV, the mean or SD of the strengths or the firing rate changes by over 5% between the last two 5,000 s; or a "
-        "start on 5-9 mV fails that or ends over 5% from the first mean; or d = 0 settles likewise.")
+        "start on 5-9 mV fails that or ends over 5% from the first run's mean or 10% from its SD; or d = 0 settles "
+        "likewise.")
 
 
 class Refused(Exception):
