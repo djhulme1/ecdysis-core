@@ -5219,3 +5219,47 @@ reduction by SL_3 × S_3 to three cases is not computed, and no finite search
 reaches every field of characteristic two. The module's docstring named the
 results Theorem 1 and Proposition 3.2; the paper numbers them 1.3 and 3.3, and
 the docstring was corrected after the receipt.
+
+## poly/pauli2018.py: Pauli, Weidel, Kunkel and Morrison, the polychronization model's sensitivity (2018)
+
+`poly/pauli2018.py` tests claim `ext:3695cf4d57346a56`, Pauli, Weidel, Kunkel
+and Morrison (Frontiers in Neuroinformatics 12:46, 2018): the correctly
+reproduced polychronization model is highly sensitive to implementation
+choices such as the realization of background noise, the integration timestep
+and the thresholding parameter of the analysis algorithm. It runs the model
+they reproduced bit for bit, Izhikevich's released `poly_spnet.cpp` (the input
+`poly/izh2006.py` already pins), as two programs: O, changed only to count the
+groups at 5 and 10 layers in the same pass as its own count at 7 (the
+threshold `min_group_path` is used nowhere else), and P, which is O with each
+neuron's own 40 Hz Poisson train of 10 mV spikes in place of one random neuron
+driven each millisecond (their section 3.4.1). Four seeds, each run as O and
+as P, the same seed building the same network, and the program's own seed as
+O. Each change must move the count by at least half the paper's change on a
+log scale (the square root of its ratio).
+
+| Command | Claim |
+|---|---|
+| `python3 poly/pauli2018.py` | Pauli et al. 2018: the polychronization model is highly sensitive to its noise and its search's threshold |
+
+The standard library and the image's g++, in the buildpack-deps image; 92
+minutes on two cores (O's runs about 15 minutes each, P's about 23). The
+receipt (`e10dc7c0…`, 16 October, at `867517b`, a verification) confirmed it,
+5 of 5 conditions. The program's own seed gives the paper's three printed
+counts exactly: 4,305 groups at 7 layers, 27,116 at 5 and 608 at 10. Over the
+four draws the Poisson background takes the median from 2,531 groups (1,724,
+4,809, 3,338 and 1,206) to 366 (418, 726, 314 and 169), 0.145 of it, where the
+test allows at most 0.316 (the paper: a fall of about 90%); each seed's network
+gives 4 to 11 times fewer groups. In the O draws the median count at 5 layers
+is 8.11 times that at 7, and at 10 layers 0.130 times (each draw 6.1 to 11.2,
+and 0.066 to 0.172). Controls 6 of 6, among them the program's own seed's
+4,305 at 7 layers and the P draws' excitatory rates within the paper's 2 to
+8 Hz (4.06 to 4.18 Hz over the last 10 s; the O draws 2.68 to 4.25). Beside
+it: under the program's own background the count rises with the share of
+strong excitatory-to-excitatory synapses at the end without exception, as in
+`poly/izh2006.py`'s nine runs (1,206 groups at 27.68% to 4,809 at 28.88%), but
+the same networks under the Poisson background end with shares as high or
+higher in three of four (28.33% to 29.41%) and 169 to 726 groups, few of them
+long (3 to 19 reach 10 layers, against 80 to 827). The integration timestep,
+the sentence's third choice, is not tested: the paper's test of it needs the
+network and its search at 0.1 ms. Smoke trials at 60 s and 2 s, under the
+runner's container flags, revealed no bug before the commit.
