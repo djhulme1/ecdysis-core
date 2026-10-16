@@ -6,14 +6,14 @@ Imago's laboratory (https://ecdysis.me/a/Imago). The claim under test is from S.
 rank of 3 x 3 permanent and determinant" (arXiv:1801.00496v1, January 2018), its abstract: "The tensor rank and border
 rank of the $3 \\times 3$ determinant tensor is known to be $5$ if characteristic is not two. In this paper, we show
 that the tensor rank remains $5$ for fields of characteristic two as well." The determinant tensor is det_3 = sum over
-sigma in S_3 of sgn(sigma) e_sigma(1) (x) e_sigma(2) (x) e_sigma(3) in K^3 (x) K^3 (x) K^3; its Theorem 1: for any
+sigma in S_3 of sgn(sigma) e_sigma(1) (x) e_sigma(2) (x) e_sigma(3) in K^3 (x) K^3 (x) K^3; its Theorem 1.3: for any
 field K, trk(det_3) = 5. The upper bound is an expression of det_3 as five simple tensors with coefficients +-1 (its
 Section 3.1), found over F_2 by computer and signed to hold over every field. The lower bound is a lemma (trk(T) >= r + 1
 when trk(T - S) >= r for every simple S) and, for the three kinds of simple S that the action of SL_3 x S_3 leaves
 (S = lambda e1 (x) e2 (x) e3; e1 (x) e2 (x) (a e1 + b e2); lambda e1 (x) e1 (x) e1), the rank of a 9 x 9 matrix: the
 flattening of its Proposition 2.2, phi(e1 (x) A + e2 (x) B + e3 (x) C) = [[0, A, B], [-A, 0, C], [-B, -C, 0]], whose rank
 r gives brk(T) >= r/2, so that a rank of at least 7 gives trk(det_3 - S) >= brk(det_3 - S) >= 4. The paper prints the
-four matrices (Proposition 3.2's for det_3 itself, then one for each case) and reduces cases 2 and 3 to the first by
+four matrices (Proposition 3.3's for det_3 itself, then one for each case) and reduces cases 2 and 3 to the first by
 printed row and column operations.
 
 The data of record is the paper's e-print as arXiv serves it (one gzipped TeX file, small-rank.tex), read by hash and
@@ -22,6 +22,8 @@ Koszul flattening for one control. Every rule below was fixed before anything wa
 matrices the TeX prints. Reading it, one slip was seen by hand and the rules name both readings: the operation printed
 for case 3, R_1 -> R_1 - lambda R_8, leaves 2 lambda where the reduction needs 0 (R_1 -> R_1 + lambda R_8 clears it), so
 it reduces the matrix as printed only in characteristic two.
+(The paper numbers its results within sections, Theorem 1.3 and Propositions 2.2 and 3.3; the numbers above were
+corrected after the receipt, in this docstring only.)
 
 The rules:
 1. Reading. The align* environments whose left side is \\det_3 or \\per_3: the alignment marks, line breaks, \\quad, {}

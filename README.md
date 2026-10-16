@@ -5161,3 +5161,61 @@ row by row; the planted change moves the count by exactly ten; the check that
 each child and parent type appears once fails, on the duplicated name. The
 trial under Imago's seed and the sealed run gave identical outputs; nothing
 depends on the seed.
+
+## prank/km2018.py: Krishna and Makam, the tensor rank of the 3 × 3 determinant in every characteristic (2018)
+
+`prank/km2018.py` tests claim `ext:abcc0ac680c4891f`, Krishna and Makam, "On
+the tensor rank of 3 × 3 permanent and determinant" (arXiv:1801.00496v1,
+January 2018): "In this paper, we show that the tensor rank remains $5$ for
+fields of characteristic two as well." The determinant tensor det_3 = Σ_σ
+sgn(σ) e_σ(1) ⊗ e_σ(2) ⊗ e_σ(3) has tensor rank 5 when the characteristic is
+not two (Derksen and Makam): the flattening [[0, A, B], [−A, 0, C], [−B, −C,
+0]] of its slices has rank 9 there, so border rank at least 5, but only 8 in
+characteristic two, which gives 4. The paper's Theorem 1.3 restores 5 in every
+characteristic with an expression of det_3 as five simple tensors with
+coefficients ±1, found over F_2 by computer, and a lower bound through a lemma
+(trk(T) ≥ r + 1 when trk(T − S) ≥ r for every simple S) and three kinds of S,
+for each of which it prints the flattening of det_3 − S. The module reads the
+e-print (by hash) as text: its identities and its four printed matrices.
+
+| Command | Claim |
+|---|---|
+| `python3 prank/km2018.py` | Krishna and Makam 2018: the tensor rank of the 3 × 3 determinant tensor is 5 over every field, characteristic two included |
+
+Standard library, in the pinned `python` image, on the e-print (by hash);
+about 25 seconds. Tests: `python3 -m unittest tests.test_km2018`, on synthetic
+TeX, small matrices and random tensors (the search against brute force over
+F_2); the paper's expressions and matrices are never read there. The receipt
+(`1d04cf21…`, 16 October, at `e0d6ae2`, rules first, a verification): all 13
+conditions hold. The five-term expression is det_3 over the integers. Each
+case's printed matrix is the flattening of det_3 − S, and elimination on unit
+pivots, which keeps the rank in every characteristic and at every parameter
+value, gives at least 7 (8 for cases 2 and 3, a ninth wherever 2 is
+invertible; 7 for case 1, with a residual [[0, 1 − λ], [2 − λ, 0]] that keeps
+8). An exhaustive search finds no sum of four simple tensors equal to det_3
+over the fields with 2, 3, 4, 5, 7 and 8 elements, trying all 49, 169, 441,
+961, 3,249 and 5,329 lines of rank-one matrices.
+
+Beside it: the least rank of each case's flattening over every parameter value
+is 8 in characteristic two and 8 (case 1) or 9 (cases 2 and 3) in odd
+characteristic; the paper's per_3 expression is per_3 over the integers, and
+per_3 is a sum of four simple tensors but not of three over F_3, F_5 and F_7;
+Derksen's printed expression is det_3; Proposition 3.3's matrix is the
+flattening of det_3, of rank 9 over Q and 8 over F_2. Two slips in the print:
+Glynn's formula is printed without the sign v_1⋯v_(n−1) on each term, and as
+printed it is not per_n for any n from 2 to 5, while with the sign it is (the
+paper uses only its conclusion, a rank of at most 2^(n−1)); and case 3's
+printed operation R_1 ↦ R_1 − λR_8 leaves −2λ where the reduction needs 0, so
+it works only in characteristic two, the case the paper is about, while R_1 ↦
+R_1 + λR_8 works in every characteristic; case 2's printed operations reduce
+its matrix exactly. Controls 6 of 6: the search finds per_3's four simple
+tensors (Glynn's) over F_3, F_5 and F_7, the unit tensor's three and a planted
+sum of four over all six fields; simple tensors flatten to rank at most 2 (all
+of them over F_2 and F_3); prank/it.py's Koszul flattening gives the same ranks
+over Q; the unit-pivot bound never exceeds a rank found; and the expression
+with one sign changed is not det_3. The trial under Imago's seed and the
+sealed run gave identical outputs; nothing depends on the seed. The paper's
+reduction by SL_3 × S_3 to three cases is not computed, and no finite search
+reaches every field of characteristic two. The module's docstring named the
+results Theorem 1 and Proposition 3.2; the paper numbers them 1.3 and 3.3, and
+the docstring was corrected after the receipt.
