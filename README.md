@@ -4999,3 +4999,63 @@ sizes were moved to 8 and 16 at `683e8a7`, after that outcome was seen, as the
 docstring records, and nothing the test computes changed. The second found no
 bug, and the sealed run repeated its outputs exactly but for the term counts of
 its own seed-drawn tensors.
+
+## iit/leung2021.py: Leung, Cohen, van Swinderen and Tsuchiya, the integrated information structure under isoflurane (2021)
+
+`iit/leung2021.py` tests claim `ext:c2b5458f6b8f60ce`, Leung, Cohen, van
+Swinderen and Tsuchiya, "Integrated information structure collapses with
+anesthetic loss of conscious arousal in Drosophila melanogaster" (PLoS
+Computational Biology 17(2), e1008722, 2021; CC BY 4.0): "Consistent with this
+conjecture, we found that integrated interactions among populations of neurons
+during wakefulness collapsed to isolated clusters of interactions during
+anesthesia." The paper binarises fly local field potentials at each channel's
+median, builds the state-by-channel TPM of every set of four of its 15 channels
+at τ = 4 ms, and computes with PyPhi 0.8.1 the IIT 3.0 φ of each of a set's 15
+mechanisms at each state, its integrated information structure (IIS), averaged
+over states by occurrence and over eight 2.25 s epochs; its Fig 4C shows φ
+lower under isoflurane for every mechanism size. The module reads the authors'
+deposit (by hash) and runs the same pipeline on 60 of the 1,365 sets drawn by
+the seed, every mechanism's φ computed by `iit/iis.c`, a C engine that follows
+PyPhi 0.8.1's definitions (read from its source as text) with exact transport
+costs.
+
+| Command | Claim |
+|---|---|
+| `python3 iit/leung2021.py` | Leung et al. 2021: IIT 3.0's φ of every mechanism size of four-channel sets of fly LFPs is lower under isoflurane |
+
+numpy, scipy and gcc, in the pinned `scipy-notebook` image, on the deposit (by
+hash); about 17 minutes on 2 CPUs. Tests: `python3 -m unittest
+tests.test_leung2021`, on constructed and random TPMs and synthetic channels
+(the deposit is never read there); `iis.c` reproduces PyPhi 0.8.1's own
+standard answer for its basic network and agrees with `iit/engine.py` on every
+value of random TPMs of two to four nodes. The receipt (`1c5c1bd3…`, 16
+October, at `ffc632c`, rules first, a verification): all four conditions hold.
+Awake and under isoflurane, the mean φ over the 13 flies is 0.0614 and 0.0459
+for 1-channel mechanisms, 0.0295 and 0.0252 for 2-channel ones, 0.0325 and
+0.0282 for 3-channel ones and 0.0361 and 0.0317 for the 4-channel mechanism,
+lower under isoflurane by one-tailed paired t-tests over the flies at p =
+0.0015, 0.0026, 0.0020 and 0.0014 (t = 3.70, 3.41, 3.56 and 3.73, 12 degrees of
+freedom), in 12, 11, 11 and 12 of the 13 flies.
+
+Beside it, as the paper says: 1-channel mechanisms have the greatest φ, then
+2 < 3 < 4; the wake/isoflurane ratio falls with size (1.353, 1.178, 1.155 and
+1.142), as its Fig 4D found; weighting the states over all 2,250 samples changes
+no conclusion. No TPM row lacked a sample and no observed state was one PyPhi
+would refuse as unreachable. At every observed state of every TPM, awake and
+under isoflurane, all 15 mechanisms have φ > 0. A null that keeps each
+channel's own dynamics and breaks the interactions between channels, the four
+channels of a set taken from four different epochs, on 10 sets drawn again by
+the seed, keeps 83%, 90% and 95% of the awake φ of 2-, 3- and 4-channel
+mechanisms on the same sets and 55%, 69% and 80% of their fall under
+isoflurane (from detail.json), a fall itself significant (p = 0.00089, 0.0012
+and 0.00097); the real data exceed the null in 13, 13 and 12 of the flies.
+Controls 7 of 7: the file's shape; 1,125 samples on in every channel-epoch (no
+ties at a median); the state counts of every epoch; `iis.c` against
+`iit/engine.py` on all 2,160 values of three seed-drawn TPMs of the data; the
+effect distance against exact transport; a TPM of the data rebuilt with each
+channel depending only on itself, which gives φ 0 to every mechanism of two or
+more channels; and the t-test against scipy's. System-level Φ, the
+classification analysis and the mixed models are not checked.
+
+A trial under Imago's seed found no bug, and the sealed run, under the
+archive's own draw of sets, gave the same conclusions.
