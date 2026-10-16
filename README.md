@@ -5059,3 +5059,59 @@ classification analysis and the mixed models are not checked.
 
 A trial under Imago's seed found no bug, and the sealed run, under the
 archive's own draw of sets, gave the same conclusions.
+
+## packing/kv2014.py: Korže and Vesel, the packing chromatic number of the hexagonal lattice (2014)
+
+`packing/kv2014.py` tests claim `ext:a96e04e3bf4e367c`, Korže and Vesel, "On
+the packing chromatic number of square and hexagonal lattice" (Ars Mathematica
+Contemporanea 7, 13–22, 2014; CC BY): "We show that the packing chromatic
+number for the hexagonal lattice ℋ is 7." The upper bound is a packing
+7-colouring the paper cites from Fiala, Klavžar and Lidický (2009), whose paper
+is not open; the lower bound is the paper's own, by computer (Section 2). H1 is
+a 24-vertex piece of the lattice (its Fig. 1), H_i is i copies of it joined
+port to port (u′u, v′v, z′z, w′w; Fig. 2), and D6 is the digraph of H1's
+packing 6-colourings, with an arc where two of them together pack-colour H2. A
+packing colouring of the lattice restricts to every H_i, and so to walks of D6
+of every length; with D6 acyclic, the lattice has none. The paper reports D6's
+26,660 vertices, its largest out-degree 37 and that it has no cycle; it prints
+neither D6 nor its longest path (the web page its concluding remark names is
+not used). The module transcribes H1 from Fig. 1 into lattice coordinates,
+builds D6 with every distance taken in H2 and loops counted as cycles, sorts it
+topologically, and then searches H_(d+2) directly, without D6, for a packing
+6-colouring.
+
+| Command | Claim |
+|---|---|
+| `python3 packing/kv2014.py` | Korže and Vesel 2014: the hexagonal lattice has no packing 6-colouring, by the digraph D6 of a 24-vertex piece |
+
+Standard library and gcc (`packing/kvsearch.c`, a backtracking search with
+forward checking, built at run time), in the pinned `buildpack-deps` image, no
+inputs; about ten seconds. Tests: `python3 -m unittest tests.test_kv2014`, on
+paths, a six-cycle, random graphs, path tiles and a chain of hexagons (the
+search against enumeration, D_k's arcs against every pair checked directly, the
+topological sort on random DAGs, the lattice's coordination sequence 3r); H1
+and D6 are never computed there. The receipt (`f6a69271…`, 16 October, at
+`e471c5b`, rules first, a reproduction, as no data of record exists): all four
+conditions hold. H1 as drawn has 24 vertices and 29 lattice edges, and H2 its
+two copies' 58 and the four joins; copies two apart are at least 7 apart; D6
+has 26,660 vertices and a largest out-degree of 37, as printed, 488 arcs, no
+loop and no cycle. Its longest path is a single arc (d = 1): H2 has 488 packing
+6-colourings and H3, three copies and 72 vertices, has none, which the direct
+search confirms on its own in 1,372,945 assignments.
+
+Beside it: only 34 of D6's vertices have an arc out and 78 an arc in (the
+largest in-degree is 11), so almost none of H1's colourings can be continued at
+all, and the paper's alternative, "a naive brute force search for a large
+enough subgraph", needs nothing larger than H3. The 7-colouring built here
+(colour 1 on the even rows; on the odd rows, which form a triangular lattice at
+twice the distance, colours 2 and 3 on two classes of its proper 3-colouring
+and 4 to 7 on the four cosets of twice the third class) is a packing colouring
+on a patch holding twelve periods with a margin of 8 (24,192 pairs within
+distance 7 checked), with densities 1/2, 1/6, 1/6 and 1/24 each. Controls 5 of
+5: H1's colourings counted by the C search and by a Python backtracking agree;
+H2's and H3's counted directly equal D6's walks; D5 is acyclic, trivially, as
+H1 itself has no packing 5-colouring (24 vertices of the lattice already need
+Brešar, Klavžar and Rall's six colours); on the infinite path, tiles of four
+vertices, D2 is empty and D3 has cycles; and the check of the 7-colouring
+catches one vertex recoloured. The trial under Imago's seed and the sealed run
+gave identical outputs; nothing depends on the seed.
