@@ -63,13 +63,19 @@ and |k| <= 3L; the substitution engine with the phase of z planted as zeta^(r(v-
 +hv, and with too few copies (L = 3M - 3 at M = 3) is caught in each case; Lemma 4.1's printed example
 u(vw) = v^2 s + vD at a = b = 2 is reproduced, and with the second-leg kernel weight planted as +1 the weight-zero
 part is caught; the paper's Figure 1 (C(2,4), a = 2, h = 1: three surviving blocks, two crossed terms) is reproduced;
-and with the tripling constraints dropped the programme's minimum falls below a^(4/3) (the constraints carry the
-lemma).
+and with the tripling constraints dropped the programme's minimum falls below a^(4/3) at a = 8 and 16 (the
+constraints carry the lemma).
 
 What it cannot check: Lemma 2.2 and Appendix A (the existence of detecting characters), Corollary 3.2's passage from
 the finite separation to entropy as N grows, the constructions beyond the sizes tried, and the limits in a. The
 paper's Lean formalization (OAI.MatrixMultiplication.complex_omega_le_nine_quarters) needs Lean 4 with Mathlib,
 which this container cannot hold.
+
+Changed after a trial: the last control first named a = 4 and 8. The first trial in the reference runner, under a
+seed of Imago's own, found every condition of the test met and that control failed: without the tripling the least
+P(4,4) is 6.510, above 4^(4/3) = 6.350 (concavity and P(1,b) = b alone force that much at a = 4), while at a = 8 it is
+12.331, below 16. The control's two sizes were moved to 8 and 16 at the next commit, after that outcome was seen;
+nothing the test computes changed.
 
 Writes results/outputs.json (the values a receipt carries) and results/detail.json (every value computed).
 Run with: python3 mm/omega94.py
@@ -95,6 +101,7 @@ LEMMA42_A = range(1, 7)
 LEMMA42_H = range(1, 7)
 GRID_A, GRID_B = 24, 96
 LP_TOL = 1e-7
+NO_TRIPLING_A = (8, 16)
 TEST = ("Refuted if one of the paper's finite constructions, built as printed, fails on small cases: Proposition 3.1's "
         "substitutions and weights (L = 5M copies, M = 1 to 4, seed-drawn integer blocks) leave a negative weight, a "
         "survivor outside (3.2) or a weight-zero part other than the direct sum of the A_h ⊗ B_X(M); Lemma 4.1's bases and "
@@ -507,10 +514,10 @@ def run(seed, results="results"):
     fig = tripling(2, 1)
     ctl["Figure 1: C(2,4) at a = 2, h = 1 leaves three blocks of 2 terms and crosses 2 terms"] = (
         fig["ok"] and fig["sizes"] == [2, 2, 2] and fig["crossed"] == 2)
-    no_trip = [growth_lp(a, tripling_on=False)[0] for a in (4, 8)]
+    no_trip = [growth_lp(a, tripling_on=False)[0] for a in NO_TRIPLING_A]
     ctl_info["without_tripling"] = no_trip
-    ctl["without the tripling constraints the least P(a,a) falls below a^(4/3) at a = 4 and 8"] = all(
-        v < a ** (4 / 3) - 1e-6 for v, a in zip(no_trip, (4, 8)))
+    ctl["without the tripling constraints the least P(a,a) falls below a^(4/3) at a = 8 and 16"] = all(
+        v < a ** (4 / 3) - 1e-6 for v, a in zip(no_trip, NO_TRIPLING_A))
 
     # 1. Proposition 3.1
     prop = {}
