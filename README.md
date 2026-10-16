@@ -5115,3 +5115,49 @@ Brešar, Klavžar and Rall's six colours); on the infinite path, tiles of four
 vertices, D2 is empty and D3 has cycles; and the check of the 7-colouring
 catches one vertex recoloured. The trial under Imago's seed and the sealed run
 gave identical outputs; nothing depends on the seed.
+
+## reversal/berglund2023.py: Berglund, Tong, Kaufmann, Balesni, Stickland, Korbak and Evans, the Reversal Curse in the wild (2023)
+
+`reversal/berglund2023.py` tests claim `ext:79b405797d84a973`, Berglund et
+al., "The Reversal Curse: LLMs trained on "A is B" fail to learn "B is A""
+(arXiv:2309.12288v4; ICLR 2024): "GPT-4 correctly answers questions like the
+former 79% of the time, compared to 33% for the latter." The former are
+questions such as "Who is Tom Cruise's mother?", the latter their reverse, "Who
+is Mary Lee Pfeiffer's son?". The paper's Experiment 2 asked GPT-4 once for the
+mother and once for the father of the first 1,000 names of an IMDb list ("GPT-4
+is able to identify the celebrity's parent 79% of the time, giving us 1573
+child-parent pairs") and then ten times to name a child of each parent it gave
+("successful only 33% of the time"; the note under Figure 4 says 28%). The
+module reads the authors' released files (lukasberglund/reversal_curse at
+`6af5f41`, by hash; the repository has no licence file): the pairs file their
+script writes, the celebrity list and the five other models' results. It writes
+out counts only, no names.
+
+| Command | Claim |
+|---|---|
+| `python3 reversal/berglund2023.py` | Berglund et al. 2023: GPT-4 names a celebrity's parent 79% of the time and the celebrity as the parent's child 33% |
+
+Standard library, in the pinned `python` image, on the seven files (by hash);
+seconds. Tests: `python3 -m unittest tests.test_berglund2023`, on made-up files
+(the authors' files are never read there). The receipt (`f715474e…`, 16
+October, at `972350a`, rules first, a verification) fails, 1 of 2 conditions.
+The released file holds 1,513 pairs, not the printed 1,573: 75.65% of the 2,000
+parent questions, not 79%. GPT-4 named the child for 495 of them, 32.7%, the
+text's 33% (not the figure note's 28%).
+
+Beside it: 797 of the first 1,000 names have a parent named, 79.7%, which is
+79% only if cut rather than rounded (one name stands twice among them, at
+places 50 and 51, so 999 are distinct and its two pairs appear twice); the
+reversal share is 28.3% for mothers (216 of 764) and 37.2% for fathers (279 of
+749); 714 celebrities have both parents. On the same pairs, gpt-3.5-turbo names
+the parent with a mean success of 34.8% and the child 11.9%; the mean
+probability of the correct parent against the correct child is 0.0986 against
+0.0445 for davinci and 0.0804 against 0.0087, 0.0776 against 0.0026 and 0.0810
+against 0.0168 for Llama-1 7B, 30B and 65B, the parent the likelier in 51.8%,
+78.1%, 97.1% and 92.1% of pairs. Controls 5 of 6: the two CSV readers agree on
+all six files; can_reverse is true exactly where a prediction is filled; every
+prediction begins with its child; the other models' files list the same pairs
+row by row; the planted change moves the count by exactly ten; the check that
+each child and parent type appears once fails, on the duplicated name. The
+trial under Imago's seed and the sealed run gave identical outputs; nothing
+depends on the seed.
