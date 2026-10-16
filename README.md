@@ -4867,3 +4867,67 @@ above it, it gives 37,500 for d = 5, where the formula and the enumeration give
 30,000 (37,500 is the formula with φ(5) taken as 5), and 15,552 for d = 6,
 where the formula gives 155,520, a digit dropped. A trial under Imago's seed
 found no bug, and the sealed run repeated its outputs exactly.
+
+## pi/bai.py: Bai, the irrationality measure of π is at most 7.101862832357 (2026)
+
+`pi/bai.py` tests claim `ext:12d112870a970612`, Yufei Bai, "The irrationality
+measure of π is at most 7.101862832357" (arXiv:2609.11276v2, September 2026):
+"The resulting integer linear forms in $1$ and $π$ prove \[ μ(π)<7.101862832357.
+\]" The paper says that two AI systems assisted throughout its research and
+writing. It gives Zeilberger and Zudilin's integral (`pi/zz.py`,
+`ext:80b8e1febcd7cc56`, which the record now shows it extends) two independent
+numerator exponents and fixes the triple (1857, 3714, 5570): J_n, the integral
+of R_n(t) = 5 t^(3714n) (t⁴ + 6t² + 25)^(3714n) / (25 − t²)^(5570n+1) along the
+segment from −1 − 2i to −1 + 2i, is u_n + v_n π, and
+M_n = 2^(4−4645n) lcm(1, …, 7430n)/Φ_n, Φ_n the product of the primes a
+congruence picks out, makes M_n J_n = U_n + V_n π an integer form. The bound is
+1 + (r + C)/(−s − C), from the coefficients' growth r, the integral's decay s
+and the denominators' cost C. The module recomputes the three rates by a route
+other than the paper's rational enclosures (bisection for the real saddle, the
+stationary cubic derived from the phase and its roots, the deleted primes' set
+E found exactly and its density as a sum of digamma values) and builds the
+integer forms exactly for n = 1 to 6.
+
+| Command | Claim |
+|---|---|
+| `python3 pi/bai.py` | Bai 2026: μ(π) < 7.101862832357, from integer linear forms in 1 and π |
+
+mpmath, in the pinned `scipy-notebook` image, on the e-print (by hash), whose
+TeX must print every formula and constant used; about three minutes. Tests:
+`python3 -m unittest tests.test_bai`, on Zeilberger and Zudilin's triple and
+small triples (the paper's own is never evaluated there). The receipt
+(`f22c6ac8…`, 16 October, at `a8b23ab`, rules first at `b5cc443`, a
+verification): all seven conditions hold. The bound comes out
+7.101862832356350795733674986…, as printed to its nineteen decimals and below
+the abstract's 7.101862832357; r = 3.331943986178299338283…,
+s = −1.174543941310025108443…, C = 0.5399938191988801144529… and
+ω = 1202.5657733612918002543147…, each inside the paper's printed enclosure, as
+are σ, τ and the final interval. For n = 1 to 6, V_n is a nonzero integer of
+about 9,370 to 56,250 digits, and V_n π lies within 10^−1532, 10^−3070,
+10^−4579, 10^−6115, 10^−7637 and 10^−9155 of an integer, the paper's rate of
+about 10^−1535 per n (the test required 10^−1228n), with log|V_n| within 0.1%
+of cn σ.
+
+Beside it, everything checked holds: the stationary cubic, its discriminant and
+N(z) with its identity, as printed; the paper's arc passes through the saddle,
+stays in the upper half-plane within |γ| ≤ 5, and its phase peaks there at s;
+E has 2,784 components and measure 1724689/13797510, exactly the paper's five
+families (186, 557, 742, 371 and 928 intervals); |v_n| by the paper's second
+route (4.6) equals the residue for n = 1 and 2; Lemma 2.1's valuations hold
+for all 13,000 Laurent coefficients at n = 1, and Lemma 2.2's deletions in all
+1,195 cases over its 150 deleted primes; log Φ_n/n at n = 2000 is 1201.97
+against ω = 1202.57; the same code at Zeilberger and Zudilin's triple gives
+their 7.1032053341370017275057734…, and the improvement
+0.001342501780650931772… is as printed. Controls 6 of 6, among them good forms
+at Zeilberger and Zudilin's triple for n = 40 to 100, and Euler's e and a
+pole-order fault, each caught. One printed orientation value is rounded where
+the others are cut: y_c's imaginary part, 1.0125739031364358…, appears as
+1.012573903136436… (the appendix's enclosure is right), which the module's
+digit check, written for cut digits, reports as a mismatch. The paper's local
+optimality theorem (Section 6) is not checked.
+
+Three trials ran under Imago's seed: the first stopped before any output,
+converting a 9,400-digit integer to a decimal string beyond Python's 4,300-digit
+limit (fixed at `e4cc086`); the second mislabelled one control in detail.json
+(the label fixed at `a8b23ab`, after its outputs were seen); the third found no
+bug, and the sealed run repeated its outputs exactly.
