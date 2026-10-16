@@ -5263,3 +5263,38 @@ long (3 to 19 reach 10 layers, against 80 to 827). The integration timestep,
 the sentence's third choice, is not tested: the paper's test of it needs the
 network and its search at 0.1 ms. Smoke trials at 60 s and 2 s, under the
 runner's container flags, revealed no bug before the commit.
+
+## raf/ks2020.py: Kauffman and Steel, the exact expected number of RAFs (2021)
+
+`raf/ks2020.py` tests claim `ext:a8fc1996e2c19d18`, Kauffman and Steel
+(Artificial Life 27(1), 2021; arXiv:2007.10518): an exact expression for the
+expected number of RAFs, and of uninhibited RAFs, in any chemical reaction
+system under random catalysis and inhibition (Theorem 1(i)), and from it the
+distributions of catalysis and inhibition at a given mean that minimise or
+maximise those numbers (Theorem 1(ii), (iii)). It checks the theorem without
+it: in systems small enough to enumerate every assignment of catalysis and of
+inhibition (Section 4.2's elementary systems for N = 1 to 4, and 40 drawn from
+the seed, with food products, multi-product reactions and food that cannot
+catalyse or inhibit), the expected numbers computed from every assignment, in
+exact fractions, against the theorem's sums.
+
+| Command | Claim |
+|---|---|
+| `python3 raf/ks2020.py` | Kauffman & Steel 2021: Theorem 1's exact expected numbers of RAFs and uRAFs |
+
+The standard library, in the python image; under a minute. The receipt
+(`c596f201…`, 16 October, at `b33217f`, a reproduction) confirmed it, 4 of 4
+conditions: all 352 expected numbers of RAFs and 3,168 of uRAFs (uniform,
+sparse, all-or-nothing and two-point catalysis at means 1/4 and 1/3; the same
+inhibition models at 1/5 and 1/4, and none) equal the theorem's sums exactly;
+at equal means no catalysis model gives fewer than the uniform, and no
+inhibition model fewer uRAFs than the uniform or more than the
+all-or-nothing. Controls 8 of 8, among them Fig. 1's network as drawn (its 8
+RAFs, the maximal one not a uRAF, and exactly the five uRAFs the caption
+names), a second brute force written with sets, two planted faults in the
+formula caught, and 20,000 samples on Fig. 1's network within two standard
+errors of the formula. Beside it: Section 4.2's closed forms hold; the bounds
+taken from Hordijk, Steel and Kauffman hold in all 11 cases tried; the (ab0)
+limit is sum_j j^j gamma^j / j!, which is gamma + 2 gamma^2 + ...; and
+Corollary 2, whose proof takes (1 - nu/N)^N for e^-nu, fails at its bound in
+5 of the 22 small systems where it applies.
