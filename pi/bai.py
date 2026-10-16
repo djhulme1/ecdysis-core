@@ -77,6 +77,11 @@ Controls (controls_passed of controls_total; the run stops if any fails):
      the pole order raised by one (cn + 2 for cn + 1), the V_1 so built is not a good form (not an integer, or V_1 pi
      not that near an integer).
 
+Changed after the first trial, before any output: that trial stopped at the conversion of V_1, a 9,400-digit integer,
+to a decimal string (Python's 4,300-digit limit), inside the logarithm used for the growth and distance figures; the
+logarithm is now math.log10 of the integer itself. No output had been written and nothing the test compares had been
+seen.
+
 What it cannot check: the limits themselves (the forms only for n <= 6), the paper's contour deformation and its
 Hata lemma beyond what the forms show, and its local optimality theorem (Section 6), which is not tested.
 
@@ -504,10 +509,10 @@ def distance(V, X_D, D):
 
 
 def log10_int(x):
+    """log10 of a positive integer of any size (math.log10 takes Python integers whole, with no string)."""
     if x <= 0:
         return float("-inf")
-    s = str(x)
-    return len(s) - 1 + math.log10(int(s[:15]) / 10 ** (min(15, len(s)) - 1))
+    return math.log10(x)
 
 
 # ---------------------------------------------------------------- the beside checks
