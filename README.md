@@ -4931,3 +4931,71 @@ converting a 9,400-digit integer to a decimal string beyond Python's 4,300-digit
 limit (fixed at `e4cc086`); the second mislabelled one control in detail.json
 (the label fixed at `a8b23ab`, after its outputs were seen); the third found no
 bug, and the sealed run repeated its outputs exactly.
+
+## mm/omega94.py: OpenAI, an upper bound of 9/4 for the matrix multiplication exponent (2026)
+
+`mm/omega94.py` tests claim `ext:3202cd30bbb8b971`, OpenAI, "An Upper Bound of
+9/4 for the Matrix Multiplication Exponent" (OpenAI Math Release preprint, 2
+October 2026; github.com/openai/math, Apache 2.0), its abstract: "We prove that
+the exponent of matrix multiplication over the complex numbers is at most 9/4."
+The proof joins three explicit tensor degenerations to Strassen's asymptotic
+spectrum. Proposition 3.1 separates a tensor whose sectors share their first
+leg into a direct sum of the A_h ⊗ B_X(M), using L = 5M copies under
+root-of-unity substitutions and integer weights; Lemma 4.1 degenerates
+C(a,b) ⊗ B_X(2), C(a,b) the tensor of multiplying polynomials with a and b
+coefficients, to C(a,b+1) ⊕ C(a,b−1) by a determinant filtration; Lemma 4.2
+degenerates C(a, 3h+a−1) to three sectors, two translates of C(a,h) and one
+with its second and third legs exchanged; and Lemma 5.1 turns the
+inequalities these give into P(a,a) ≥ a^(4/3) for any P that is symmetric,
+concave in each argument, starts at P(1,b) = b and obeys the tripling. The
+module builds each degeneration exactly on small cases (the copies summed in
+Z[ζ], modulo the cyclotomic polynomial), checks every weight and the part of
+weight zero term by term, and solves Lemma 5.1's hypotheses as a linear
+programme on a 24 × 96 grid.
+
+| Command | Claim |
+|---|---|
+| `python3 mm/omega94.py` | OpenAI 2026: ω ≤ 9/4 over C, by its finite constructions on small cases and its growth lemma on a 24 × 96 grid |
+
+scipy, in the pinned `scipy-notebook` image, no inputs; under a minute. Tests:
+`python3 -m unittest tests.test_omega94`, on tensors and programmes other than
+the paper's. The receipt (`c51987b9…`, 16 October, at `683e8a7`, rules first at
+`9ae90b8`, a reproduction): all four conditions hold. Proposition 3.1's
+substitutions and weights, as printed, separate all 12 seed-drawn instances
+(M = 1 to 4, three each): no term has negative weight, every survivor satisfies
+(3.2), and the part of weight zero is exactly the direct sum (545 terms after
+the copies are summed, 356 of weight zero, all the direct sum's; the largest
+weight 1). Lemma 4.1's bases and weights degenerate C(a,b) ⊗ B_X(2) to
+C(a,b+1) ⊕ C(a,b−1) for all 25 pairs (a = 1 to 5, b = 2 to 6), its starred
+block of weight +1 (50 terms) dropped; Lemma 4.2's partition gives its three
+sectors for all 36 pairs (a, h = 1 to 6), the middle exactly as printed, its
+420 crossed terms of positive weight dropped. On the grid the least P(a,a) the
+hypotheses allow is at least a^(4/3) for every a from 2 to 24: 10/3 against
+2.520 at a = 2, the closest, and 114.14 against 69.23 at a = 24; it is above the
+proof's intermediate bound a ∏_(m<a) (1 + 1/(3m)) by at least 0.667.
+
+Beside it: the rank of C(a,b) is a + b − 1 for a, b = 1 to 6 (the paper's
+(4.2)), by an exact evaluation and interpolation and the output flattening; the
+proof's (1 + 1/(3m))³ ≥ 1 + 1/m to m = 2,000, and that product's cube at least a
+to a = 100,000; the exponent the finite inequality a^(4/3) ≤ (2a − 1)^(1/t)
+allows is 0.825, 0.788 and 0.775 at a = 10³, 10⁶ and 10⁹ (it tends to 3/4); and
+the fewest copies that separate a seed-drawn tensor are 4, 7 and 10 at M = 2, 3
+and 4, 3M − 2, where the paper takes 5M. Controls 5 of 5: Σ_r ζ^(rk) is L or 0
+in Z[ζ] for L = 2 to 20; the separation with z's phase planted as ζ^(r(v−h)),
+Z's weight as +hv, or 6 copies at M = 3 is caught; Lemma 4.1's printed example
+u(vw) = v²s + vD is reproduced, and a kernel weight planted as +1 is caught; the
+paper's Figure 1 (C(2,4): three blocks, two crossed terms) is reproduced; and
+without the tripling the least P(a,a) falls below a^(4/3) at a = 8 and 16 (12.33
+against 16, 18.75 against 40.32), so the tripling carries the lemma. No finite
+run reaches Lemma 2.2 and Appendix A (the detecting characters), Corollary 3.2's
+passage to entropy or the limits in a; the paper's Lean formalization
+(`OAI.MatrixMultiplication.complex_omega_le_nine_quarters`) needs Lean 4 with
+Mathlib, which this container cannot hold.
+
+Two trials ran under Imago's seed. The first met every condition but failed one
+control: without the tripling the least P(4,4) is 6.510, above 4^(4/3) = 6.350,
+because concavity and P(1,b) = b alone force that much at a = 4; the control's
+sizes were moved to 8 and 16 at `683e8a7`, after that outcome was seen, as the
+docstring records, and nothing the test computes changed. The second found no
+bug, and the sealed run repeated its outputs exactly but for the term counts of
+its own seed-drawn tensors.
