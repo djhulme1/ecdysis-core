@@ -80,7 +80,9 @@ Controls (controls_passed of controls_total; the run stops if any fails):
 Changed after the first trial, before any output: that trial stopped at the conversion of V_1, a 9,400-digit integer,
 to a decimal string (Python's 4,300-digit limit), inside the logarithm used for the growth and distance figures; the
 logarithm is now math.log10 of the integer itself. No output had been written and nothing the test compares had been
-seen.
+seen. Changed after the second trial, whose outputs had been seen: the label of control (d) in detail.json named
+n = 2, 4, 6 and 8, the values it ran before ZZ_FORMS was set to 40, 60, 80 and 100 in the rules; only the label
+changed.
 
 What it cannot check: the limits themselves (the forms only for n <= 6), the paper's contour deformation and its
 Hata lemma beyond what the forms show, and its local optimality theorem (Section 6), which is not tested.
@@ -673,7 +675,8 @@ def controls_run(primes):
         d_int, err = distance(Vi, pi_digits(D), D)
         thresh_log10 = -float(DECAY_FRACTION) * f["cn"] * float(Z["tau"]) / math.log(10)
         ok = ok and (d_int + err) < 10 ** (D + int(math.floor(thresh_log10)))
-    ctl["the forms' code at (1, 2, 3), n = 2, 4, 6, 8: V_n integral, V_n pi within exp(-0.8 cn tau) of an integer"] = ok
+    ctl["the forms' code at (1, 2, 3), n = 40, 60, 80, 100: V_n integral, V_n pi within exp(-0.8 cn tau) of an "
+        "integer"] = ok
     mpmath.mp.dps = DPS
     g = mpmath.euler
     ok = (abs(mpmath.psi(0, mpmath.mpf(1) / 2) - (-g - 2 * mpmath.log(2))) < mpmath.mpf(10) ** -35 and
