@@ -5462,3 +5462,61 @@ spline (f'' = 0 at both end knots, the usual meaning of "natural", which the
 rules had read as the linear continuation only) was added beside the test and
 not counted: it gives 11 of 12 on the 23 AIs, worse only on the equal-family
 Brier score (+0.16 × 10⁻³), and 10 of 12 on the 26.
+
+## mm/uz2026.py: Uznański, rectangular matrix multiplication from polynomial products (2026)
+
+`mm/uz2026.py` tests claim `ext:4fb9abfe8dadff69`, from Uznański's note
+"Rectangular matrix multiplication from polynomial products" (arXiv:2610.10494v2,
+11 October 2026; CC BY 4.0; the note says its proofs were obtained through
+OpenAI Codex): "In this note, we extend the matrix-multiplication analysis by
+OpenAI to rectangular products and prove ω(1,k,1) ≤ 2 for 0 ≤ k ≤ 1/2, and
+ω(1,k,1) ≤ 1 + k + 1/(4k) for k ≥ 1/2", so ω(1, 1/2, 1) = 2 and the dual exponent
+α is at least 1/2. It extends OpenAI's ω ≤ 9/4 (`ext:3202cd30bbb8b971`, checked by
+`mm/omega94.py`). The proof joins four explicit degenerations, multinomial
+counting, an angular constraint on a tensor character's three dot-product
+parameters (Σ arccos √p_i ≥ π/2), Strassen's spectral theorem and a final
+optimisation by Wolstenholme's inequality. The module builds every finite
+construction exactly, as the TeX prints it, on small cases: the finite separation
+of a shared leg with 2M copies in Z[ζ], the two- and three-sector splittings of
+convolutions, and the replication of a convolution by cyclic convolution in
+Q(ζ_m). It checks the final optimisation, from the angular constraint to Theorem
+1.1's bound, on a grid of shapes, and the curve and its table in exact fractions.
+
+| Command | Claim |
+|---|---|
+| `python3 mm/uz2026.py` | Uznański 2026: ω(1,k,1) ≤ 2 for k ≤ 1/2 and 1 + k + 1/(4k) above |
+
+The scipy-notebook image (numpy and scipy), the note's e-print as its one input;
+ten seconds. Tests: `python3 -m unittest tests.test_uz2026`, on other inputs. The
+receipt (`f5096480…`, 18 October, at `5f44f31`, rules first, a verification)
+confirms it, 6 of 6 conditions:
+- **Separation:** the 12 seed-drawn instances (M = 1 to 4; 867 terms, 356 of
+  weight zero) keep only g + u = h + v, with weight (g − h)² and the largest
+  weight (M − 1)², and leave exactly the direct sum of the T_h ⊗ B_X(M).
+- **Two-sector splitting:** it holds for all 25 pairs in its printed coordinates,
+  its 50 crossed terms of weight one dropped.
+- **Three-sector splitting:** it holds for all 36 pairs.
+- **Replication:** it holds for all 45 cases (m = 1 to 5, r, s = 1 to 3), to
+  degree one.
+- **Theorem 1.1:** on 1,326 shapes the largest objective the angular constraint
+  allows never exceeds its bound, and reaches it within 10⁻⁶ on every one. So the
+  Wolstenholme step is exact, and the strength of the result lies wholly in
+  Proposition 4.2.
+- **Corollary 1.2:** its curve is the theorem at (1, k, 1), and its table reads
+  as printed.
+
+Beside the test, nothing counted:
+- **Applications:** the six numbers come out of the curve and the balances as
+  printed: the lowest-common-ancestor exponent (3 + √3)/2, the Hamming exponent
+  (13 − √7)/4, Zwick's 2.5, the witnesses' 2.5, sparse products at m = n^1.25,
+  and the dynamic inverse's 1.309913 under the printed 1.30992.
+- **Quantum functionals:** they meet the angular constraint, with equality on the
+  edges of the simplex.
+- **Copies:** the separation's filter needs only 2M − 1 copies, one fewer than
+  the printed 2M; Lü's polynomial separation (arXiv:2610.18914) also uses 2M − 1.
+
+Controls 8 of 8, each planting a fault in one construction or weakening the
+constraint. One trial in the reference runner found no bug, and the sealed run
+repeated its outputs. Not checked: Proposition 4.2 itself (its proof passes
+through limits of the character's profiles), Strassen's spectral theorem and the
+counting of Sections 3 and 4.
