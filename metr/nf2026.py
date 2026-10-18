@@ -88,11 +88,26 @@ Controls (controls_passed of controls_total):
      within 5% of 0.8; from Model 1 (beta 0.8, f the I-spline on the made-up tasks' own knots with pi = PI_TRUE, nearly
      flat in the middle), Model 1's loss is below the baseline's and its fitted probabilities are within 0.03 of the
      true ones in root mean square over the cells, the baseline's not;
- (e) the data: every task's weight in the file is 1/sqrt(n_F) within 1e-3 (it is printed to three decimals), and its
-     human minutes agree across AIs (rule 2 refuses otherwise);
+ (e) the data: every task's weight in the file is 1/sqrt(the AI's own tasks in the family) within 1e-3 (it is printed
+     to three decimals), the count METR's code takes and control (a) uses, and its human minutes agree across AIs
+     (rule 2 refuses otherwise);
  (f) a negative control the comparison could fail on: with the human times permuted across tasks (the first
      assignment's folds), the baseline's cross-validated equal-task log score is worse than with the true times by at
      least 0.02.
+
+After the first trial (under a seed of Imago's own, before any was issued; its outcome was seen: Model 1 better on 9
+of the 12 metrics, worse on the equal-family log and Brier scores and the sqrt-family log score), two changes, neither
+to the test. (1) Control (e) as committed compared each weight with one over the square root of the family's size
+among the 228 tasks, and failed: Claude 3.5 Sonnet (New) ran 226 of the 228 tasks, and its four cells in the families
+it ran in part are weighted by its own count of their tasks, as METR's code computes weights within each AI (control
+(a), which reproduced METR's fits, already used that count; the sentence above on what was read before the rules said
+"its family's size" from a reading of some AIs only). The control now takes the AI's own count, and the cells that
+differ from the global count are reported beside it. The test's weights stay the paper's, whose n_F does not depend on
+the AI. (2) Beside the test, reading N, chosen after the outcome was seen and not counted: rule 3 reads "natural" as
+the linear continuation beyond [x_lo, x_hi] only, and its fit to all of reading A has a zero slope at x_lo (pi_1 = 0);
+a natural cubic spline in the standard sense also has f'' = 0 at x_lo and x_hi, which on this basis ties pi_2 to pi_1
+and pi_6 to pi_7 (the five generators of the cone of nonnegative combinations with f'' = 0 at both ends, each scaled to
+end at 1). Reading N runs Model 1 on that basis over the same 20 assignments, on readings A and B.
 
 What it cannot check: Model 2, the paper's figures beyond the values named, and whether METR's tasks and human times
 measure what they are meant to (the paper questions exactly that; its diagnostics are not repeated here).
@@ -321,7 +336,7 @@ class ISpline:
 
     def basis(self, x):
         x = np.asarray(x, dtype=float)
-        B = np.empty((len(x), self.K))
+        B = np.empty((len(x), len(self.splines)))
         inside = (x >= self.lo) & (x <= self.hi)
         below, above = x < self.lo, x > self.hi
         for m, (s, d_lo, d_hi) in enumerate(self.splines):
@@ -338,6 +353,31 @@ class ISpline:
         pi, _ = nnls(self.basis(grid), (grid - self.lo) / (self.hi - self.lo))
         pi = np.maximum(pi, 1e-9)
         return pi / pi.sum()
+
+
+class NaturalISpline(ISpline):
+    """Reading N (beside the test, chosen after the first trial): nonnegative combinations of the cubic I-splines with
+    f'' = 0 at x_lo and x_hi. At x_lo only I_1'' (negative) and I_2'' (positive) are nonzero, and at x_hi only I_6''
+    (negative) and I_7'' (positive), so the cone is spanned by five generators: I_1 and I_2 in the ratio that cancels
+    f''(x_lo), I_3, I_4, I_5, and I_6 and I_7 in the ratio that cancels f''(x_hi), each scaled to end at 1."""
+
+    def __init__(self, x_train_tasks, knots="Q"):
+        super().__init__(x_train_tasks, knots)
+        a = np.array([float(s.derivative(2)(self.lo)) for s, _, _ in self.splines])
+        b = np.array([float(s.derivative(2)(self.hi)) for s, _, _ in self.splines])
+        tiny = 1e-9 * max(1.0, float(np.max(np.abs(a))), float(np.max(np.abs(b))))
+        if [i for i in range(7) if abs(a[i]) > tiny] != [0, 1] or [i for i in range(7) if abs(b[i]) > tiny] != [5, 6] \
+                or not (a[0] < 0 < a[1] and b[5] < 0 < b[6]):
+            raise Refused("the I-splines' second derivatives at the ends are not as expected")
+        G = np.zeros((7, 5))
+        G[0, 0], G[1, 0] = a[1], -a[0]
+        G[2, 1] = G[3, 2] = G[4, 3] = 1.0
+        G[5, 4], G[6, 4] = b[6], -b[5]
+        self.G = G / G.sum(axis=0)
+        self.K = 5
+
+    def basis(self, x):
+        return ISpline.basis(self, x) @ self.G
 
 
 def softmax(g):
@@ -488,7 +528,7 @@ def fold_assignment(seed, r, nfam):
     return [set(int(v) for v in part) for part in np.array_split(rng.permutation(nfam), FOLDS)]
 
 
-def crossval(d, folds, knots="Q", kinds=("baseline", "model1")):
+def crossval(d, folds, knots="Q", kinds=("baseline", "model1"), spline=ISpline):
     J = len(d.ais)
     preds = {kind: np.full(len(d.j), np.nan) for kind in kinds}
     losses = []
@@ -499,7 +539,7 @@ def crossval(d, folds, knots="Q", kinds=("baseline", "model1")):
         if "baseline" in kinds:
             preds["baseline"][test] = predict(base, "baseline", te)
         if "model1" in kinds:
-            m1 = fit_model1(tr, J, ISpline(d.x_task[np.unique(tr.i)], knots), base)
+            m1 = fit_model1(tr, J, spline(d.x_task[np.unique(tr.i)], knots), base)
             preds["model1"][test] = predict(m1, "model1", te)
             losses.append((base["loss"], m1["loss"]))
         if "separate" in kinds:
@@ -699,6 +739,12 @@ def run(seed, inputs="inputs", results="results"):
                      for r in range(FOLD_ASSIGNMENTS)])
     meanS = mean_of([differences(crossval(dataA, fold_assignment(seed, r, nfam), kinds=("baseline", "separate"))[0],
                                  "baseline", "separate") for r in range(FOLD_ASSIGNMENTS)])
+    natural = {}
+    for label, data in (("A", dataA), ("B", dataB)):
+        rows = [differences(crossval(data, fold_assignment(seed, r, nfam), spline=NaturalISpline)[0])
+                for r in range(FOLD_ASSIGNMENTS)]
+        natural[label] = {"mean_differences": mean_of(rows),
+                          "per_metric_negative": {m: sum(1 for row in rows if row[m] < 0) for m in METRICS}}
     folds0, sc0, preds0 = first
     ci = cluster_ci(preds0["model1"], preds0["baseline"], dataA)
     J = len(dataA.ais)
@@ -737,9 +783,15 @@ def run(seed, inputs="inputs", results="results"):
     rms1, rmsb = rms(predict(f1, "model1", sim1), p_true), rms(predict(b1, "baseline", sim1), p_true)
     ctl["(d) the fits recover known curves (the baseline's slope within 5%; Model 1's probabilities within 0.03)"] = \
         bool(abs(fb["beta"] - beta_b) / beta_b < 0.05 and f1["loss"] < b1["loss"] and rms1 < 0.03 <= rmsb)
-    wt_ok = all(abs(c["weight"] - 1 / math.sqrt(dataA.nF_task[dataA.tasks.index(c["task"])])) < 1e-3
-                for v in cellsA.values() for c in v)
-    ctl["(e) every task's weight is 1/sqrt(n_F) within 1e-3, and its human minutes agree across AIs"] = bool(wt_ok)
+    wt_ok, off_global = True, Counter()
+    for name, v in cellsA.items():
+        own = Counter(family(c["task"]) for c in v)
+        for c in v:
+            wt_ok &= abs(c["weight"] - 1 / math.sqrt(own[family(c["task"])])) < 1e-3
+            if abs(c["weight"] - 1 / math.sqrt(dataA.nF_task[dataA.tasks.index(c["task"])])) >= 1e-3:
+                off_global[name] += 1
+    ctl["(e) every task's weight is 1/sqrt(the AI's tasks in the family) within 1e-3; human minutes agree across AIs"] = \
+        bool(wt_ok)
     h = hashlib.sha256(bytes.fromhex(seed) + b"|permute").digest()
     rng = np.random.Generator(np.random.PCG64(int.from_bytes(h[:16], "big")))
     scp, _, _ = crossval(dataA.with_x(dataA.x_task[rng.permutation(len(dataA.x_task))]), folds0, kinds=("baseline",))
@@ -761,6 +813,9 @@ def run(seed, inputs="inputs", results="results"):
         "reading_b_better": sum(1 for v in meanB.values() if v < 0),
         "knots_equal_better": sum(1 for v in meanE.values() if v < 0),
         "baseline_over_metr_better": sum(1 for v in meanS.values() if v < 0),
+        "natural_a_better": sum(1 for v in natural["A"]["mean_differences"].values() if v < 0),
+        "natural_b_better": sum(1 for v in natural["B"]["mean_differences"].values() if v < 0),
+        "weights_off_global_count": sum(off_global.values()),
         "f_rise_2_30": g4(rise), "f_slope_below_2": g4(slope_low), "f_slope_above_30": g4(slope_high),
         "unanimous_share": g4(unanimous), "unanimous_expected": g4(expected),
         "conditions_met": sum(cond.values()), "conditions_total": len(cond),
@@ -778,7 +833,8 @@ def run(seed, inputs="inputs", results="results"):
         "lofo": lofo_d,
         "reading_b": {"ais": len(dataB.ais), "cells": int(len(dataB.j)), "runs": int(dataB.n.sum()),
                       "earliest_cells": {a: len(early[a]) for a in EARLIEST}, "mean_differences": meanB},
-        "knots_equal": meanE, "baseline_minus_metr_original": meanS,
+        "knots_equal": meanE, "baseline_minus_metr_original": meanS, "natural": natural,
+        "weights_off_global_count": dict(off_global),
         "first_assignment": {"folds": [sorted(dataA.families[i] for i in f) for f in folds0], "scores": sc0,
                              "ci95": {m: list(v) for m, v in ci.items()}},
         "model1_all": {"beta": m1_all["beta"], "pi": m1_all["pi"].tolist(), "knots": spl.t.tolist(),

@@ -77,6 +77,37 @@ class Spline(unittest.TestCase):
         with self.assertRaises(M.Refused):
             M.ISpline(np.array([2.0, 2.0, 2.0]))
 
+    def test_natural(self):
+        s = M.NaturalISpline(self.xs, "Q")
+        self.assertEqual(s.K, 5)
+        B = s.basis(np.array([s.lo, s.hi]))
+        self.assertTrue(np.allclose(B[0], 0.0, atol=1e-14))
+        self.assertTrue(np.allclose(B[1], 1.0, atol=1e-12))
+        grid = np.linspace(s.lo - 2, s.hi + 2, 2001)
+        self.assertTrue(np.all(np.diff(s.basis(grid), axis=0) >= -1e-12))
+        e = 1e-3
+        for end in (s.lo, s.hi):
+            inner = end + 3 * e if end == s.lo else end - 3 * e
+            v = s.basis(np.array([inner - e, inner, inner + e]))
+            self.assertTrue(np.all(np.abs((v[0] - 2 * v[1] + v[2]) / e ** 2) < 0.02), (v[0] - 2 * v[1] + v[2]) / e ** 2)
+        full = M.ISpline(self.xs, "Q")
+        v = full.basis(np.array([s.lo + 3e-3 - 1e-3, s.lo + 3e-3, s.lo + 3e-3 + 1e-3]))
+        self.assertGreater(float(np.max(np.abs((v[0] - 2 * v[1] + v[2]) / 1e-6))), 0.1)   # the full basis bends there
+        pi = s.identity_pi()
+        f = s.lo + (s.hi - s.lo) * (s.basis(grid) @ pi)
+        self.assertLess(float(np.max(np.abs(f - grid))), 1e-6)
+
+    def test_natural_fit(self):
+        d, beta, p_true = M.simulate(SEED, "spline")
+        J = len(d.ais)
+        base = M.fit_baseline(d, J)
+        m = M.fit_model1(d, J, M.NaturalISpline(d.x_task, "Q"), base)
+        self.assertLessEqual(m["loss"], base["loss"] + 1e-9)
+        self.assertEqual(len(m["pi"]), 5)
+        folds = M.fold_assignment(SEED, 0, len(d.families))
+        sc, preds, _ = M.crossval(d, folds, spline=M.NaturalISpline)
+        self.assertTrue(np.all(np.isfinite(preds["model1"])))
+
 
 class Gradients(unittest.TestCase):
     def check(self, fun, theta, eps=1e-6):
