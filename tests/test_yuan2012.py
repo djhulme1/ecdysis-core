@@ -62,6 +62,10 @@ class KaplanMeier(unittest.TestCase):
             self.assertAlmostEqual(M.km_area_jumps(obs, end), M.km_area(obs, end), places=12)
         self.assertEqual(M.km_median(obs), 5)
 
+    def test_median_at_exactly_one_half(self):
+        # 30 deaths at days 1..30: S is exactly 1/2 after the 15th, which floating point may not reach
+        self.assertEqual(M.km_median([(t, True) for t in range(1, 31)]), 15)
+
     def test_tie_death_before_censoring(self):
         obs = [(5, True), (5, False), (7, True)]
         steps = M.km_steps(obs)

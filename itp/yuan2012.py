@@ -95,11 +95,18 @@ Controls (controls_passed of controls_total):
  (f) The deposit's VP as the paper read it: the panel's lowest and highest strain means round to the printed 24.9 and
      42.9 days.
 
+Changed after the first trial (seed sha256("imago trial yuan2012 18 October"), whose outputs were seen): the
+Kaplan-Meier curve is now computed in exact fractions. In floating point NOD.B10's females, whose curve is exactly 1/2
+after 662 days, came out at 0.5000000000000001 there, so their median was given as 669 days, the next death; scipy's
+ecdf gave 662 and control (b) failed on it. Scipy's side of control (b) now takes S at or below 1/2 + 1e-12 for its
+median. Only beside (f) uses a median; no condition does, and the areas move only in their last bits.
+
 Writes results/outputs.json (the values a receipt carries) and results/detail.json (every value computed).
 Run with: python3 itp/yuan2012.py (the pinned scipy-notebook image).
 """
 
 import csv
+from fractions import Fraction
 import hashlib
 import io
 import json
@@ -211,16 +218,17 @@ def read_igf1(data):
 # ---------------------------------------------------------------- rule 3: Kaplan-Meier
 
 def km_steps(obs):
-    """obs: [(time, dead)]. Returns [(t, deaths, censored, at_risk, S after t)] over the distinct times, ascending."""
+    """obs: [(time, dead)]. Returns [(t, deaths, censored, at_risk, S after t)] over the distinct times, ascending,
+    S an exact fraction."""
     by_t = {}
     for t, dead in obs:
         c = by_t.setdefault(t, [0, 0])
         c[0 if dead else 1] += 1
-    at_risk, s, steps = len(obs), 1.0, []
+    at_risk, s, steps = len(obs), Fraction(1), []
     for t in sorted(by_t):
         d, c = by_t[t]
         if d:
-            s *= 1.0 - d / at_risk
+            s *= Fraction(at_risk - d, at_risk)
         steps.append((t, d, c, at_risk, s))
         at_risk -= d + c
     return steps
@@ -233,13 +241,13 @@ def km_area(obs, end="observed"):
     if not deaths:
         raise ArithmeticError("a curve with no death")
     stop = steps[-1][0] if end == "observed" else deaths[-1][0]
-    area, prev_t, prev_s = 0.0, 0, 1.0
+    area, prev_t, prev_s = Fraction(0), 0, Fraction(1)
     for t, d, c, n, s in steps:
         if t > stop:
             break
         area += prev_s * (t - prev_t)
         prev_t, prev_s = t, s
-    return area
+    return float(area)
 
 
 def km_area_jumps(obs, end="observed"):
@@ -247,16 +255,16 @@ def km_area_jumps(obs, end="observed"):
     steps = km_steps(obs)
     deaths = [st for st in steps if st[1]]
     stop = steps[-1][0] if end == "observed" else deaths[-1][0]
-    total, prev_s = 0.0, 1.0
+    total, prev_s = Fraction(0), Fraction(1)
     for t, d, c, n, s in deaths:
         total += (prev_s - s) * t
         prev_s = s
-    return total + prev_s * stop
+    return float(total + prev_s * stop)
 
 
 def km_median(obs):
     for t, d, c, n, s in km_steps(obs):
-        if d and s <= 0.5:
+        if d and s <= Fraction(1, 2):
             return t
     return None
 
@@ -274,7 +282,7 @@ def scipy_km(obs):
     for t in times:
         area += prev_s * (t - prev_t)
         prev_t, prev_s = t, s_at[t]
-    med = next((t for t in sorted(set(dead)) if s_at[t] <= 0.5), None)
+    med = next((t for t in sorted(set(dead)) if s_at[t] <= 0.5 + 1e-12), None)
     return {t: s_at[t] for t in sorted(set(dead))}, med, area
 
 
@@ -509,7 +517,7 @@ def assess(mice, vp_rows, igf1):
         for end in ("observed", "death"):
             ok = ok and close(km_area(obs, end), km_area_jumps(obs, end))
         s_sc, med_sc, area_sc = scipy_km(obs)
-        s_me = {t: s for t, d, c, n, s in km_steps(obs) if d}
+        s_me = {t: float(s) for t, d, c, n, s in km_steps(obs) if d}
         ok = ok and set(s_sc) == set(s_me) and all(close(s_sc[t], s_me[t]) for t in s_me)
         ok = ok and med_sc == km_median(obs) and close(area_sc, km_area(obs, "observed"))
     ctl["Kaplan-Meier areas by two exact forms, and S, medians and areas against scipy.stats.ecdf, on every curve"] = ok
