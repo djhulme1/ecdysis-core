@@ -5409,3 +5409,56 @@ primitive rationals by its stated range, not 162; 162 with q = 3748 left out.
 Its verifier printed the same three calibrations. The first trial's line for
 scan (ii) folded that count into the check of its least and next triples; the
 label was split at `43c8a43`, after the trial, and nothing else changed.
+
+## metr/nf2026.py: Nguyen and Fithian, a shared monotone spline against the shared-slope logistic for METR's time horizons (2026)
+
+`metr/nf2026.py` tests claim `ext:3dc9ce8b4d4fc151`, from Nguyen and Fithian,
+"On the estimation and validity of AI time horizons---a statistical look at
+the METR plot" (arXiv:2610.12466v1, 8 October 2026): "Overall, we contribute
+time-horizon point estimates that perform better under a cross-validated suite
+of proper scoring rules". The paper's Model 1 replaces the log of human time in
+the shared-slope logistic model of METR's success curves by a monotone cubic
+I-spline f, shared by all the AIs, and says its point estimates beat that
+baseline on all 12 metrics of its suite: the marginal log, Brier and smoothed
+elementary (q = 0.5, 0.8) scores, each under equal-task, equal-family and
+sqrt-family weights, under 5-fold cross-validation on the 79 task families. The
+module fits both models by sqrt-family-weighted cross entropy to METR's
+published Time Horizon 1.1 task results (23 AIs, 228 tasks, 27,119 runs, by
+hash), with 4 interior knots at the training tasks' quintiles, and averages each
+metric's difference over 20 seed-drawn fold assignments; the paper does not say
+where its knots go or how it dealt its folds. Model 2, the paper's IRT model,
+is not tested.
+
+| Command | Claim |
+|---|---|
+| `python3 metr/nf2026.py` | Nguyen and Fithian 2026: the shared monotone spline beats the shared-slope logistic on 12 of 12 cross-validated scores |
+
+The scipy-notebook image (numpy, scipy and PyYAML), the paper's e-print, METR's
+task results and Time Horizon 1.0's runs as inputs; about five minutes on the
+runner's two processors. Tests: `python3 -m unittest tests.test_nf2026`, on
+made-up data. The receipt (`191403bd…`, 18 October, at `5f1c56b`, rules first
+at `b3acc28`, a verification) fails, 9 of 12 conditions. Model 1 is better on
+the q = 0.8 scores under all three weightings, on q = 0.5, on the equal-task log
+score (−2.97 × 10⁻³) and Brier score (−0.91 × 10⁻³) and on the sqrt-family
+Brier score (−0.06 × 10⁻³), and worse on the equal-family log score (+6.10 ×
+10⁻³) and Brier score (+0.98 × 10⁻³) and the sqrt-family log score (+1.20 ×
+10⁻³); one of the 20 assignments has all 12 negative, and the equal-family log
+score is negative in 2 of them. Family-cluster 95% intervals for the first
+assignment span zero on 10 of the 12, as the paper's own Figure 2 intervals for
+Model 1 all do. Beside the test: leave-one-family-out 9 of 12; the paper's 26
+AIs (the three earliest from 1.0's runs) 9 of 12; knots equally spaced 10 of
+12. Fitted to all the data, f rises from 2 to 30 minutes at 27% of the identity's
+rate, the abstract's "nearly flat in a region from 2--30 min"; 84.6% of run sets
+are unanimous where the baseline implies 59.5% (the paper: 83% and about 60%);
+and the baseline beats METR's own per-AI fit on 10 of 12 (the paper: 11 of 12;
+under the first trial's seed, 11 of 12, all but equal-task q = 0.5, as
+printed). Controls 6 of 6, among them METR's own per-AI fits reproduced from the
+cells within 6.9e-4 and a permuted-times negative control. The first trial, under
+a seed of Imago's own, gave 9 of 12 and found control (e) reading METR's weights
+by the family's size among all 228 tasks, where METR counts each AI's own tasks
+(4 cells of Claude 3.5 Sonnet (New) differ); the control was fixed at `5f1c56b`.
+At the same commit, after that outcome was seen, a natural reading of the
+spline (f'' = 0 at both end knots, the usual meaning of "natural", which the
+rules had read as the linear continuation only) was added beside the test and
+not counted: it gives 11 of 12 on the 23 AIs, worse only on the equal-family
+Brier score (+0.16 × 10⁻³), and 10 of 12 on the 26.
