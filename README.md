@@ -5367,3 +5367,45 @@ neither. Controls 4 of 5 in the first trial: its check of Eff against
 determinism minus degeneracy did the subtraction in Python's 28-digit default
 decimal context, and has run in the module's 50-digit context since `ec8cf9c`.
 Controls 5 of 5 since.
+
+## pi/szzb.py: Niedbala Giraudin, Bai's point as the minimum of the Salikhov-Zeilberger-Zudilin-Bai family (2026)
+
+`pi/szzb.py` tests claim `ext:182cbe7a21bdae6d`, from Niedbala Giraudin's
+note (arXiv:2609.37459v2, 5 October 2026): within Salikhov's configuration,
+poles at ±5 and zeros at 0, ±(1 ± 2i), the minimum of the note's closed-form
+law for the irrationality-measure bound is 7.101862832356, at Bai's point
+(1857, 1857, 2785). The module recomputes the law from the note's definitions:
+the window of primes as an exact union of intervals (the note's arc criterion,
+which is Bai's set E at her triple), its measure by digamma sums, the
+stationary cubic's levels, and Lambda and mu. It evaluates the law at every
+primitive triple of three sets: a0, a1 <= 40 and b <= 100; the slice a0 = a1
+<= 8000 with b/a1 in [1.4995, 1.5003]; and an off-slice box with a1 <= 3000.
+Floating point only picks which triples are recomputed in 40-digit mpmath, and
+the min-max value is computed wherever the least level's lower bound would not
+settle a comparison.
+
+| Command | Claim |
+|---|---|
+| `python3 pi/szzb.py` | Niedbala Giraudin 2026: Bai's point is the minimum of the law within Salikhov's configuration |
+
+The scipy-notebook image (numpy, scipy and mpmath), the note's e-print as its
+one input; about two and a half minutes on the runner's two processors, half
+of them the note's own verifier, run beside. The receipt (`29ae9186…`, 18
+October, at `43c8a43`, a verification) confirmed it, 2 of 2 conditions. Mu at
+Bai's point is 7.1018628323563507957, the least level is the conjugate pair's
+and the min-max value; of 54,280 triples in the three sets that yield a bound
+none is at or below it, and the nearest is (7426, 7426, 11137), at Q = 3713,
+0.756e-9 above. Off the slice the least is 4.4e-3 above, and among small
+denominators the next after (2, 2, 3) is (40, 39, 59), at 7.2018.
+
+Controls 8 of 8, among them the window and the bound at four triples by the
+lab's `pi/bai.py`, whose growth rate comes from Bai's saddle rather than the
+cubic: the two routes agree to 39 digits. Beside the test, the note's printed
+values hold: its calibrations (18 of 18, among them Salikhov's 7.606308 with his
+two-branch window and 7.4147395226 with all three branches), its Q table (12
+of 12), its scan (i), its dips (5 of 5), Section 9's tables (28 of 28 and 15 of
+15) and Section 7's row for this configuration. Its scan (ii) holds 163
+primitive rationals by its stated range, not 162; 162 with q = 3748 left out.
+Its verifier printed the same three calibrations. The first trial's line for
+scan (ii) folded that count into the check of its least and next triples; the
+label was split at `43c8a43`, after the trial, and nothing else changed.
