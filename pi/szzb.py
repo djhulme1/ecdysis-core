@@ -103,6 +103,10 @@ Controls (controls_passed of controls_total):
      comparison;
  (h) scipy's digamma against mpmath's at 25 points in (1, 2] within 2e-15.
 
+Changed after the first trial, whose outputs had been seen: the line reporting Section 8's scan (ii) folded its count
+into the check of its least and next triples, so that a count of 163 against the printed 162 read as the next triple
+not being as printed; the count and that check are now reported apart. Only that label changed.
+
 What it cannot check: the law's derivation (the window's sufficiency, the savings, Theorem 2's min-max argument),
 which is the note's; directions other than the three sets' lattice points; and the other fifteen configurations of
 the note's Section 7, which are not tested.
@@ -906,9 +910,9 @@ def run(seed, inputs="inputs", results="results"):
     ii_exact = sorted((ex(t)["mu_low"] if t != BAI else mu_bai, t) for _, t in ii_b[:3])
     ii_least = ii_exact[0][1] if ii_exact else None
     ii_next = ii_exact[1] if len(ii_exact) > 1 else None
-    ii_ok = bool(len(ii) == PRINTED["scan_ii"][0] and ii_least == BAI and ii_next is not None and
-                 ii_next[1] == PRINTED["scan_ii"][1] and cut_or_round((ii_next[0] - mu_bai) * mp(10) ** 9,
-                                                                       PRINTED["scan_ii"][2]))
+    ii_count_ok = len(ii) == PRINTED["scan_ii"][0]
+    ii_ok = bool(ii_least == BAI and ii_next is not None and ii_next[1] == PRINTED["scan_ii"][1] and
+                 cut_or_round((ii_next[0] - mu_bai) * mp(10) ** 9, PRINTED["scan_ii"][2]))
     dips = []
     for t, val in PRINTED["dips"]:
         e = ex(t)
@@ -989,7 +993,8 @@ def run(seed, inputs="inputs", results="results"):
         "calibrations": f"{sum(cal.values())} of {len(cal)} printed calibration values reproduced",
         "q_table": f"{sum(1 for r in qrows if r[3])} of {len(qrows)} as printed (mu minus Bai's, 1e-9)",
         "section8_scans": f"(i) 1857 strict minimum, neighbours as printed: {yn(i_ok)}; (ii) {len(ii)} triples "
-                          f"(printed 162), least Bai's, next as printed: {yn(ii_ok)}",
+                          f"(printed 162: {yn(ii_count_ok)}); least Bai's, next (3712,3712,5567) at +1.51e-9 as "
+                          f"printed: {yn(ii_ok)}",
         "dips": f"{sum(1 for d in dips if d[2])} of {len(dips)} as printed (nine decimals)",
         "section9_tables": (f"5x7 table {sum(1 for r in xt if r[4])} of {len(xt)} within 1.5e-4; slices "
                             f"{sum(1 for r in sl if r[4])} of {len(sl)} as printed"),
