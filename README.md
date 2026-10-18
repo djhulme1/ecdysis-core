@@ -5298,3 +5298,39 @@ taken from Hordijk, Steel and Kauffman hold in all 11 cases tried; the (ab0)
 limit is sum_j j^j gamma^j / j!, which is gamma + 2 gamma^2 + ...; and
 Corollary 2, whose proof takes (1 - nu/N)^N for e^-nu, fails at its bound in
 5 of the 22 small systems where it applies.
+
+## itp/yuan2012.py: Yuan et al., sexual maturation, IGF1 and lifespan across inbred strains (2012)
+
+`itp/yuan2012.py` tests claim `ext:8dcf7c6a224abf35`, Yuan, Meng, Nautiyal,
+Flurkey, Tsaih, Krier, Parker, Harrison and Paigen (PNAS 109(21), 2012):
+strains with lower IGF1 reach female sexual maturation (vaginal patency, VP)
+later, and among strains of normal lifespan (mean above 600 days) later VP goes
+with longer life. It reads the authors' three Mouse Phenome Database deposits
+by hash: Yuan2's raw lifespans (abnormal deaths censored; AKR/J is not
+deposited), Yuan4's ages of vaginal opening and Yuan1's IGF1 at 6 months. A
+strain's female mean lifespan is the area under its females' Kaplan-Meier
+curve, kept in exact fractions.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/yuan2012.py` | Yuan et al. 2012: later VP goes with longer life above 600 days, and lower IGF1 with later VP |
+
+The pinned scipy-notebook image; seconds. The receipt (`80da9d7f…`, 18
+October, at `3d34b6f`, a verification) confirmed it, 2 of 2 conditions: among
+the 24 strains above 600 days, female mean lifespan rises 7.3 days for each day
+of later VP (R^2 0.195, P = 0.031; the paper prints R^2 0.33 over 23), and over
+the paper's 31 strains mean female IGF1 at 6 months falls with mean VP
+(r = -0.431, P = 0.016; printed R^2 0.19, P = 0.013). Controls 5 of 6: the one
+that fails is the deposit against the paper's printed means. D2's female mean is
+580.2 days (printed 580), but CAST's is 665 by the paper's method (664 by its
+natural deaths alone), not the printed 578, so the 600-day cutoff keeps CAST,
+which the paper removed as short-lived. Without it (a post hoc computation from
+the sealed run's values, not part of the receipt) the regression has R^2 0.307,
+P = 0.006, close to the paper's. The VP range is the printed one (NON 24.91 days
+to PWD 42.93), and the five latest strains are PWD, WSB, CAST, D2 and MOLF, as
+the paper says. Beside the test, Yuan et al. 2009's inverse correlation of IGF1
+at 6 months with median lifespan holds on the completed deposit: r = -0.355
+(P = 0.006) over 58 strain-by-sex groups, and -0.507 over the 47 with medians of
+600 days or more (printed -0.33 with AKR/J, and -0.53). A first trial found a
+floating-point median (NOD.B10's females, whose curve is exactly 1/2 at 662
+days); the curve has been exact since `3d34b6f`.
