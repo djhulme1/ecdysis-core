@@ -80,6 +80,11 @@ Controls (controls_passed of controls_total):
      from alpha, gamma from beta) and Fig. 2's macro TPM factorises into alpha's row given beta and beta's given alpha,
      in exact fractions.
 
+Changed after the first trial (seed sha256("imago trial hoel2013 18 October"), whose outputs were seen): control
+(b) compared Eff with determinism minus degeneracy within 1e-30 using Python's default decimal context, whose 28
+digits leave errors of about 4e-29, so it failed on Fig. 2 and Fig. 4 though the 50-digit values agree; it now does
+that arithmetic in the module's 50-digit context, within 1e-40. No condition, value or other control changed.
+
 Writes results/outputs.json (the values a receipt carries) and results/detail.json (every value computed).
 Run with: python3 ce/hoel2013.py (the pinned python image, standard library).
 """
@@ -460,9 +465,9 @@ def assess():
         ex = exact_measures(rows)
         cols = sorted({c for r in rows for c in r})
         fl = float_ei([[float(r.get(c, 0)) for c in cols] for r in rows])
-        ok = ok and abs(ex["ei"] - ex["ei2"]) < decimal.Decimal("1e-30")
+        ok = ok and abs(CTX.subtract(ex["ei"], ex["ei2"])) < decimal.Decimal("1e-40")
         ok = ok and abs(fl[0] - float(ex["ei"])) < 1e-12 and abs(fl[1] - float(ex["ei"])) < 1e-12
-        ok = ok and abs(ex["eff"] - (ex["det"] - ex["deg"])) < decimal.Decimal("1e-30")
+        ok = ok and abs(CTX.subtract(ex["eff"], CTX.subtract(ex["det"], ex["deg"]))) < decimal.Decimal("1e-40")
     for (name, one), v in found.items():
         tpm = t2 if name == "fig2" else t4
         for m, a, b in v["checks"]:
