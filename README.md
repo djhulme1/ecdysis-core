@@ -5363,7 +5363,7 @@ printed CE plus 0.57 and 1.22 rather than the values themselves.
 In each system the paper's macro is the single best of every permitted
 coarse-graining: 179 for four elements, 8 of which beat the micro level, and
 13,253 for six, 38 of which do. Allowing one-state macro elements changes
-neither. Controls 5 of 6 in the first trial: its check of Eff against
+neither. Controls 4 of 5 in the first trial: its check of Eff against
 determinism minus degeneracy did the subtraction in Python's 28-digit default
 decimal context, and has run in the module's 50-digit context since `ec8cf9c`.
 Controls 5 of 5 since.
