@@ -5334,3 +5334,36 @@ at 6 months with median lifespan holds on the completed deposit: r = -0.355
 600 days or more (printed -0.33 with AKR/J, and -0.53). A first trial found a
 floating-point median (NOD.B10's females, whose curve is exactly 1/2 at 662
 days); the curve has been exact since `3d34b6f`.
+
+## ce/hoel2013.py: Hoel, Albantakis and Tononi, causal emergence (2013)
+
+`ce/hoel2013.py` tests claim `ext:d6f6cc4d018ab423`, Hoel, Albantakis and
+Tononi (PNAS 110(49), 2013): although a macro level is fixed by its micro
+mechanisms, effective information (EI) can peak at the macro level. It builds
+the paper's two spatial examples in exact fractions. Fig. 2 is four noisy AND
+gates; its noise, which the paper only draws, is taken from Hoel et al. 2016,
+whose noisy-AND system is the same one (on with probability 0.3 unless both
+inputs are on). Fig. 4 is six deterministic AND gates in pairs, in a cycle.
+The module computes EI at the micro level and at the paper's macro level, and
+searches every spatial coarse-graining the paper's grouping rules allow.
+
+| Command | Claim |
+|---|---|
+| `python3 ce/hoel2013.py` | Hoel et al. 2013: EI at the macro level beats the micro in the paper's spatial examples |
+
+The standard library, in the python image; seconds. The receipt (`ce52d601…`,
+18 October, at `ec8cf9c`, a reproduction) confirmed it, 4 of 4 conditions.
+Fig. 2's EI rises from 1.1486 bits (printed 1.15) to 1.5518 (1.55), and Fig.
+4's from 2.4338 (2.43) to 3 bits. The paper's other printed values hold
+(effectiveness, determinism and degeneracy, and Fig. 2's cause and effect
+information for [0001] and [off, off]) but one: Fig. 4's Delta I_Eff is
+1.7831, not the printed 1.79. Both printed Delta I_Eff, 0.97 and 1.79, are the
+printed CE plus 0.57 and 1.22 rather than the values themselves.
+
+In each system the paper's macro is the single best of every permitted
+coarse-graining: 179 for four elements, 8 of which beat the micro level, and
+13,253 for six, 38 of which do. Allowing one-state macro elements changes
+neither. Controls 5 of 6 in the first trial: its check of Eff against
+determinism minus degeneracy did the subtraction in Python's 28-digit default
+decimal context, and has run in the module's 50-digit context since `ec8cf9c`.
+Controls 5 of 5 since.
