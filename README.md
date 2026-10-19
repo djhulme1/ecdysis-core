@@ -6057,3 +6057,67 @@ after it (the docstring says which), values unchanged. Not checked: the SAT
 searches and the optimality claims (inequality (10) "cannot be improved", 646
 "cannot give" 647), the backdoor search behind Table 9, and inequality (7),
 whose template is not printed.
+
+## metr/becker2025.py: Becker, Rush, Barnes and Rein (METR), early-2025 AI made experienced developers 19% slower (2025)
+
+`metr/becker2025.py` tests claim `ext:54206edba29a28d5`, from Becker, Rush,
+Barnes and Rein (METR), "Measuring the Impact of Early-2025 AI on Experienced
+Open-Source Developer Productivity" (arXiv:2507.09089v2, July 2025; CC BY 4.0):
+"Surprisingly, we find that allowing AI actually increases completion time by
+19%--AI tooling slowed developers down." Sixteen developers completed 246 issues
+on their own repositories, each issue randomised to AI allowed or disallowed.
+
+The module reads the authors' release (METR/Measuring-Early-2025-AI-on-Exp-OSS-
+Devs at `7ff2d76`): `data_complete.csv`, every cell checked, its `regression.py`
+(run once from memory as a control) and its README's printed run. It reads
+every number the paper prints from the e-print's `macros.tex`, in memory. The
+estimator is the paper's equation (1): OLS of the log of total implementation
+time (initial plus post-review time, a blank post-review time imputed as its
+arm's mean) on AI allowed and the log of the developer's forecast without AI,
+the slowdown exp(b) - 1, with the non-robust standard error the released code
+names, the HC3 the appendix names, and developer-clustered.
+
+| Command | Claim |
+|---|---|
+| `python3 metr/becker2025.py` | Becker et al. 2025: allowing early-2025 AI tools increased experienced open-source developers' completion time by 19% |
+
+The scipy-notebook image (numpy, statsmodels); four inputs by hash: the data,
+the authors' code and README, and the paper's e-print. About a minute. Tests:
+`python3 -m unittest tests.test_becker2025`, on data written there. The receipt
+(`21ba40e6…`, 19 October, at `59471e7`, rules first at `3a7d74d`, a
+verification) confirms it, 3 of 3 conditions:
+- **The sample:** 246 issues of 16 developers, 136 with AI allowed and 110
+  without, as the paper counts them.
+- **The slowdown:** 18.84%, which rounds to the printed 19% (b = 0.1726).
+- **The interval:** 1.26% to 39.48% with the non-robust standard error, 1.30% to
+  39.41% with HC3 (printed 1 to 39), both above zero; clustered by developer,
+  1.63% to 38.96%.
+
+Beside the test, nothing counted:
+- **The authors' README and code:** both print 0.188, (0.013, 0.395), (0.013,
+  0.394) and (0.016, 0.39), as the module computes.
+- **Printed values:** 32 of 47 recomputed as printed. All that use every issue
+  hold: the five imputations (18%, 18%, 18%, 14%, 23%), initial time alone (20%),
+  the three alternative estimators (23%, 22%, 15%), the subset with exposure
+  recorded (26%), the ratio of means (34%, bootstrap 5 to 70), the developers'
+  forecasts (-24%, -22%, -25%) and the correlations (0.64 and 0.59, as minutes,
+  total time). The fixed-effects and exposure intervals match only with HC3.
+- **What does not hold:** the release has 230 recorded post-review times and
+  16 blank, where the paper counts 219 and 27, so the recorded-only estimates
+  (21.8%, 20.1% and 34.2% against 19%, 18% and 60%), two review-time medians, one
+  mean and the counts differ; and the forecast interval (-32 to -14 printed) is
+  -26.0 to -21.4 by a pooled bootstrap and -30.0 to -17.2 by a two-stage one.
+- **Inference:** a two-stage bootstrap gives -4.7% to 46.9%; re-randomising
+  every issue by coin flip gives a one-sided p of 0.019.
+
+Controls 4 of 4: the authors' code prints the module's four lines; the least
+squares equals statsmodels' and the exact normal equations; swapping the arms
+gives exactly -b and a planted ln 1.5 exactly b + ln 1.5; and the coin-flip
+re-randomised coefficients centre on zero.
+
+The first trial was refused at reading (`external_resource_needs_1_to_3` holds
+5 for issue 46); the second showed the first form of control (4), within-developer
+permutations, mis-specified, as the docstring says. Not checked: the trial
+itself (recruitment, self-reported times, the issues' validity), the exit
+surveys, the expert forecasts and the screen recordings, which are not
+released.
