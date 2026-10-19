@@ -84,8 +84,9 @@ digits lost from 1e-3 to 1e-2 (log10 of the ratio of gaps; the paper: "increasin
 sacrifices two digits of accuracy in the computed E*"), with the exact network's gap under the same readout.
 
 Controls (each could fail on the claim's own case or its machinery):
-  (a) the printed example: under each reading exactly one support of the 8 passes the certificate, and R1's solution
-      is the printed [0.684, 0, 1.217], each decimal cut or rounded (half up) to its printed digits and the 0 exact;
+  (a) the printed example: under each reading exactly one support of the 8 passes the certificate, and R3's solution
+      (below) is the printed [0.684, 0, 1.217], each decimal cut or rounded (half up) to its printed digits and the 0
+      exact, R3's atoms rounding to the printed ones; R1's and R2's comparisons are reported beside;
   (b) Figure 1(c): the exact network's spikes on [0, 12] are as many per neuron as the raster's markers (8, 1, 14 when
       read) and each lies within 0.1 of its marker (the authors' step size is not stated);
   (c) the double-precision simulation of the example on [0, 12] gives the same spike sequence as a 50-digit one
@@ -98,6 +99,15 @@ Controls (each could fail on the claim's own case or its machinery):
   (h) every potential is within 1e-12 of 1 at its spike;
   (i) every inter-spike interval is at least 1/(max b - lambda) (Proposition 1's bound with v(0) = 0), within 1e-12;
   (j) instance 0 simulated again gives the same counts and deviations, bit for bit.
+
+Changed after the first trial (under Imago's own seed, which met all four conditions and nine of the ten controls):
+control (a) as first committed compared the printed solution with R1's only, and R1's first coefficient is 0.6830
+where the paper prints 0.684 (its third, 1.2178, cuts to the printed 1.217). The printed atoms are, to their four
+decimals, the unit vectors (3, 8, 3)/sqrt 82, (9, 4, 5)/sqrt 122 and (2, 1, 4)/sqrt 21, identified by hand after that
+trial; the control now also solves the example for those atoms (R3: Gram entries n_i.n_j/(|n_i||n_j|), correlations
+n_i.s/|n_i|, every support certified in 50-digit arithmetic with margins above 1e-30), checks that each of their
+entries rounds (half up) to the printed four decimals, and passes if R3's solution is the printed one. The test, its
+conditions, the network's configuration (R2) and the other nine controls are unchanged.
 
 Not tested: the paper's 400-atom dictionary and image patch (not released), its CPU benchmark against FISTA, its
 convolutional problems, Theorem 1's own proof (arXiv:1603.01644), and the limit itself, which no finite run reaches.
@@ -164,6 +174,8 @@ DT_T = 1000.0
 DT_T0 = 500.0
 DT_INSTANCES = 4
 PRINTED_SOLUTION = ("0.684", "0", "1.217")
+INTEGER_ATOMS = ((3, 8, 3), (9, 4, 5), (2, 1, 4))     # R3: identified after the first trial (see the docstring)
+MP_MARGIN = 1e-30
 
 TEST = ("Refuted if the S-LCA as the paper defines it (Section 3, Appendix A: μ_i = b_i − Σ_{j≠i} w_ij(α∗σ_j), "
         "α(t) = e^−t; potentials integrate μ_i − λ from 0, spike at 1, reset to 0; b_i = φ_iᵀs, w_ij = φ_iᵀφ_j), "
@@ -796,6 +808,47 @@ def fin(x, default=-1.0):
 
 # ----------------------------------------------------------------------------------------------- the run
 
+def r3_problem(s, lam, digits=MP_DIGITS):
+    """R3: the unit vectors n_j/|n_j| that the printed atoms round; every support certified in mpmath."""
+    with mpmath.workdps(digits):
+        n = INTEGER_ATOMS
+        norms = [mpmath.sqrt(sum(x * x for x in v)) for v in n]
+        atoms = [[mpmath.mpf(x) / nm for x in v] for v, nm in zip(n, norms)]
+        G = [[sum(mpmath.mpf(a) * c for a, c in zip(n[i], n[j])) / (norms[i] * norms[j]) for j in range(3)]
+             for i in range(3)]
+        def mpq(q):
+            q = Fraction(q)
+            return mpmath.mpf(q.numerator) / q.denominator
+
+        b = [sum(mpmath.mpf(a) * mpq(c) for a, c in zip(n[i], s)) / norms[i] for i in range(3)]
+        lm = mpq(lam)
+        passing = []
+        for mask in range(8):
+            S = [i for i in range(3) if mask >> i & 1]
+            if not S:
+                slack = min(lm - b[j] for j in range(3))
+                if slack > MP_MARGIN:
+                    passing.append((S, [mpmath.mpf(0)] * 3, slack))
+                continue
+            A = mpmath.matrix([[G[i][j] for j in S] for i in S])
+            piv_ok = all(x > MP_MARGIN for x in [mpmath.det(mpmath.matrix([[G[i][j] for j in S[:k]] for i in S[:k]]))
+                                                 for k in range(1, len(S) + 1)])
+            if not piv_ok:
+                continue
+            aS = mpmath.lu_solve(A, mpmath.matrix([b[i] - lm for i in S]))
+            a = {i: aS[k] for k, i in enumerate(S)}
+            if not all(a[i] > MP_MARGIN for i in S):
+                continue
+            slack = min((lm - (b[j] - sum(G[j][i] * a[i] for i in S)) for j in range(3) if j not in S), default=1)
+            if slack > MP_MARGIN:
+                passing.append((S, [a.get(i, mpmath.mpf(0)) for i in range(3)], slack))
+        rounds = []
+        for j in range(3):
+            for m in range(3):
+                rounds.append(Fraction(mpmath.nstr(atoms[j][m], 40)))
+        return passing, rounds
+
+
 def example_problem(s, atoms, lam, reading):
     n = len(atoms)
     G = [[sum(atoms[i][m] * atoms[j][m] for m in range(len(s))) for j in range(n)] for i in range(n)]
@@ -832,6 +885,13 @@ def run(seed, inputs="inputs", results="results"):
            for r in ex}
     printed_r1 = bool(sol["R1"]) and all(cut_or_round(x, p) for x, p in zip(sol["R1"], PRINTED_SOLUTION))
     printed_r2 = bool(sol["R2"]) and all(cut_or_round(x, p) for x, p in zip(sol["R2"], PRINTED_SOLUTION))
+    r3_passing, r3_atoms = r3_problem(s_ex, lam_ex)
+    q4 = Fraction(1, 10000)
+    r3_round = all(Fraction(math.floor(x / q4 + Fraction(1, 2))) * q4 == atoms_ex[j][m]
+                   for (j, m), x in zip(((j, m) for j in range(3) for m in range(3)), r3_atoms))
+    r3_sol = ([Fraction(mpmath.nstr(x, 40)) if x != 0 else Fraction(0) for x in r3_passing[0][1]]
+              if len(r3_passing) == 1 else None)
+    printed_r3 = bool(r3_sol) and all(cut_or_round(x, p) for x, p in zip(r3_sol, PRINTED_SOLUTION))
     if not sol["R2"]:
         raise Refused("the example's R2 problem has no certified solution")
     G1 = ex["R1"]["G"]
@@ -958,7 +1018,8 @@ def run(seed, inputs="inputs", results="results"):
     ctl_isi = run_ex["min_isi"] >= bound_ex - 1e-12 and all(x["min_isi"] >= x["isi_bound"] - 1e-12 for x in inst)
     ctl_solver_ex = float(np.max(np.abs(lbfgs_solution(G2, b_ex, lam_f) - a_ex)))
     ctl_solver = max([ctl_solver_ex] + [x["solver_dev"] for x in inst])
-    controls = {"a_example_printed": bool(unique and printed_r1), "b_raster": bool(ctl_raster),
+    controls = {"a_example_printed": bool(unique and len(r3_passing) == 1 and r3_round and printed_r3),
+                "b_raster": bool(ctl_raster),
                 "c_mpmath": bool(ctl_mp), "d_fine_step": bool(ctl_fine), "e_solver": bool(ctl_solver <= SOLVER_TOL),
                 "f_fault": bool(ctl_fault), "g_identity": bool(ctl_identity), "h_root": bool(ctl_root),
                 "i_isi_bound": bool(ctl_isi), "j_repeat": bool(ctl_repeat)}
@@ -974,7 +1035,9 @@ def run(seed, inputs="inputs", results="results"):
         "ex_astar_1": float(a_ex[0]), "ex_astar_2": float(a_ex[1]), "ex_astar_3": float(a_ex[2]),
         "ex_r1_astar_1": float(sol["R1"][0]) if sol["R1"] else -1.0,
         "ex_r1_astar_3": float(sol["R1"][2]) if sol["R1"] else -1.0,
-        "ex_printed_r1": int(printed_r1), "ex_printed_r2": int(printed_r2),
+        "ex_printed_r1": int(printed_r1), "ex_printed_r2": int(printed_r2), "ex_printed_r3": int(printed_r3),
+        "ex_r3_atoms_round": int(r3_round), "ex_r3_supports": len(r3_passing),
+        "ex_r3_astar_1": float(r3_sol[0]) if r3_sol else -1.0, "ex_r3_astar_3": float(r3_sol[2]) if r3_sol else -1.0,
         "ex_E_early": E_early_ex, "ex_E_late": E_late_ex, "ex_E_longest": E_longest_ex,
         "ex_late_rel": E_late_ex / amax_ex, "ex_shrink_ratio": fin(E_late_ex / E_early_ex if E_early_ex > 0 else -1.0),
         "ex_rate_1_at_1e5": float(rates_ex_long[0]), "ex_rate_2_at_1e5": float(rates_ex_long[1]),
@@ -1018,6 +1081,9 @@ def run(seed, inputs="inputs", results="results"):
         "example": {"s": [str(x) for x in s_ex], "atoms": [[str(x) for x in a] for a in atoms_ex], "lambda": str(lam_ex),
                     "solutions": {r: ([str(x) for x in sol[r]] if sol[r] else None) for r in sol},
                     "solutions_float": {r: ([float(x) for x in sol[r]] if sol[r] else None) for r in sol},
+                    "r3": {"supports": [p[0] for p in r3_passing], "atoms_round": r3_round,
+                           "solution": [str(x) for x in r3_sol] if r3_sol else None,
+                           "slack": [float(p[2]) for p in r3_passing]},
                     "passing_supports": {r: [p[0] for p in ex[r]["passing"]] for r in ex},
                     "slack": {r: (float(ex[r]["passing"][0][1]["slack"]) if ex[r]["passing"] else None) for r in ex},
                     "counts_1e5": [int(x) for x in run_ex["count"]], "events": run_ex["events"],

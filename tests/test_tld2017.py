@@ -303,6 +303,24 @@ class Source(unittest.TestCase):
                 M.EPRINT = saved
 
 
+class ReadingR3(unittest.TestCase):
+    def test_other_integer_atoms(self):
+        saved = M.INTEGER_ATOMS
+        try:
+            M.INTEGER_ATOMS = ((1, 0, 0), (0, 1, 0), (1, 1, 0))
+            s = [Fraction(1), Fraction(2), Fraction(0)]
+            passing, rounds = M.r3_problem(s, Fraction(1, 10))
+            self.assertEqual(len(passing), 1)
+            atoms = np.array([[1, 0, 0], [0, 1, 0], [1 / math.sqrt(2), 1 / math.sqrt(2), 0]])
+            G = atoms @ atoms.T
+            b = atoms @ np.array([1.0, 2.0, 0.0])
+            lb = M.lbfgs_solution(G, b, 0.1)
+            self.assertLess(max(abs(float(x) - y) for x, y in zip(passing[0][1], lb)), 1e-7)
+            self.assertLess(abs(float(rounds[6]) - 1 / math.sqrt(2)), 1e-15)
+        finally:
+            M.INTEGER_ATOMS = saved
+
+
 class Comparisons(unittest.TestCase):
     def test_cut_or_round(self):
         self.assertTrue(M.cut_or_round(Fraction(6849, 10000), "0.684"))
