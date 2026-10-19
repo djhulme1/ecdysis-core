@@ -6179,3 +6179,65 @@ verdicts, and unit tensors give Koszul rank 2r. The first trial met every
 condition and control; the Johns & Teitler comparison was then widened to
 diagonal sign changes (`bb39081`, declared). Not checked: that 17 and 18 are
 optimal, or the numerical search and LLL reduction that found the 17.
+
+## snn/rubin.py: Rubin, Lee and Sompolinsky, rate-invariant weights under multiplicative STDP (2001)
+
+`snn/rubin.py` tests claim `ext:64f0cd74edf6a3ae`, Rubin, Lee and Sompolinsky,
+"Equilibrium Properties of Temporally Asymmetric Hebbian Plasticity"
+(Physical Review Letters 86(2), 364–367, 2001; arXiv:cond-mat/0007392): "In a
+biologically plausible multiplicative model, we find that the synapses in
+asynchronous networks reach a distribution that is invariant to the firing
+rates of either the pre- or post-synaptic cells." The network is the paper's
+(its text and Figure 2's legend): 1000 excitatory synapses on independent
+Poisson inputs driving an integrate-and-fire cell (τm 20 ms, τs 5 ms, Vs 5,
+gs 0.01, threshold 1, reset 0), every input-output pair changing a weight by
+±λ f±(w) e^(−Δt/τ) (λ 0.005, τ 10 ms, α 1.05), additive (f+ = 1, f− = α, the
+weight clipped to [0, 1]) or multiplicative (f+ = 1 − w, f− = αw). Its engine,
+`snn/rubin.c`, steps the cell by exponential Euler at 0.1 ms, counts every
+pair by traces, and holds one synapse at 0.5 to measure χ, as the paper did.
+
+| Command | Claim |
+|---|---|
+| `python3 snn/rubin.py` | Rubin, Lee & Sompolinsky 2001: under the multiplicative rule the weights settle to one distribution whatever the input and output rates |
+
+Python's standard library and gcc, in the pinned `buildpack-deps` image, no
+inputs; about four minutes. Tests: `python3 -m unittest tests.test_rubin`. The
+receipt (`d8e34703…`, 19 October, at `6e1d7f1`, rules first at `9505b45`, a
+reproduction) confirms it, 17 of 17 conditions. Run 3,000 s from uniform
+weights and measured over the last 1,000 s, the weights at inputs of 10, 20,
+30 and 40 Hz have means of 0.5079, 0.4923, 0.4922 and 0.4925 and SDs of
+0.0181, 0.0114, 0.0090 and 0.0079 while the output fires at 16.0, 80.9, 137.3
+and 192.7 Hz (Figure 3(b), read from its vector paths: 16.4, 80.6, 136.8 and
+192.3 Hz, mean weights 0.505 to 0.491); the largest Wasserstein distance
+between two rates is 0.0160 (10 against 40 Hz), against the test's 0.05. At
+10 Hz input, raising gs to 0.015 and 0.02 lifts the output to 51.6 and
+81.1 Hz and moves the distribution by at most 0.0144. Each run's halves lie
+within 0.0007, and the run from every weight at 1 ends 0.00015 from the
+uniform start's. The 10 Hz distribution (mean 0.508, SD 0.018) is Figure
+2(b)'s (0.505, 0.018); 1/(1 + α) = 0.488.
+
+Beside it: χ from the synapse held at 0.5 (pooled over the plastic ones) is
+0.150 (0.146), 0.010 (0.011), 0.008 (0.006) and 0.005 (0.004) at the four
+rates, and T− is 0 within 0.007 ms. The additive rule (50,000 s) gives the
+paper's other regime: weights at the bounds (at 10 Hz, 32% below 0.1 and 39%
+at or above 0.9; Figure 2(a): 39% and 41%), mean weights of 0.537, 0.274,
+0.186 and 0.140 that fall as the inputs rise (Figure 3(a): 0.509, 0.262,
+0.179 and 0.137), output rates of 22.0 to 26.5 Hz (the figure's 17.9 to
+22.2) and χ of 0.066 to 0.083 (the text's 2(α − 1) = 0.1). One synapse whose
+output is its input shifted by Δt lands on the paper's Eq. 9 within 0.008 at
+±5, ±10, ±20 and ±50 ms (0.819 and 0.171 at ±10 ms, Figure 1(b): 0.817 and
+0.169). At 10 Hz the mean weight comes within 0.01 of its equilibrium for good
+after 110 s from every weight at 1 under the multiplicative rule, and after
+330 s from uniform weights under the additive one; the multiplicative mark
+from uniform weights, 10 s, says nothing, since their mean starts at 0.5, and
+the start from every weight at 1 was added beside it after the first trial
+(`6e1d7f1`, declared). Controls 7 of 7: the C program bit for bit against a
+plain Python implementation under each rule; the pairing rule; the membrane's
+first spike under a constant conductance; the inputs' counts and mean
+conductance; T− at 0; and the distance on known histograms.
+
+Found on the way: Figure 3's right axis is labelled ⟨w⟩, 20χ, but read that
+way the additive network's χ is 0.019 to 0.022, a fifth of the 0.1 the text
+says it agrees with. Read as 4χ, the curves give 0.094 to 0.109 for the
+additive network and 0.154, 0.010, 0.007 and 0.004 for the multiplicative one,
+beside this simulation's 0.146, 0.011, 0.006 and 0.004.
