@@ -5664,3 +5664,60 @@ The first trial was refused at reading, on Table 6's missing 49. A rule declared
 in the docstring now reports gaps in the tables beside the test. Not checked:
 Table I's SAT and UNSAT results (no certificates are published), and whether
 better bounds had been listed elsewhere.
+
+## itp/liao2011.py: Liao, Rikke, Johnson, Gelfond, Diaz and Nelson, fat maintenance and the DR lifespan response (2011)
+
+`itp/liao2011.py` tests claim `ext:d8b3233ee52a175a`, Liao, Rikke, Johnson,
+Gelfond, Diaz and Nelson, "Fat maintenance is a predictor of the murine
+lifespan response to dietary restriction" (Aging Cell 10, 629–639, 2011):
+"Across strains, DR life extension correlated inversely with fat reduction,
+measured at midlife (males, r= -0.41, P<0.05, n=38 strains; females, r= -0.63,
+P<0.001, n=33 strains) and later ages." It is the sequel to Liao et al. 2010
+(`ext:505a8e3d3548087b`, on which it rests by an extends link): the same mice,
+whose fat and lean mass were measured by quantitative magnetic resonance at
+15–17 months. Its data of record is the same deposit, the Mouse Phenome
+Database's project Nelson1, which names both papers. The module takes the
+strains with fat measured under both diets (38 in males, 33 in females, the
+paper's counts) and correlates the paper's difference scores, mean AL fat
+minus mean DR fat against mean DR lifespan minus mean AL lifespan over all
+mice, with the abstract's thresholds.
+
+| Command | Claim |
+|---|---|
+| `python3 itp/liao2011.py` | Liao et al. 2011: the strains that lose least fat under DR gain most life |
+
+scipy, in the pinned `scipy-notebook` image, on the deposit (by hash); seconds.
+Tests: `python3 -m unittest tests.test_liao2011`, on panels of mice made in the
+tests. The receipt (`8e3912a0…`, 19 October, at `95ab431`, rules first, a
+verification): both conditions hold, with the paper's numbers. Males r −0.413
+(P 0.0100), females r −0.629 (P 0.00009), as printed (−0.41, P = 0.01; −0.63,
+P = 0.0001).
+
+Beside the test, nothing counted:
+- **Other measures:** percent fat (−0.51 and −0.67) and the relative reduction
+  (−0.50 and −0.54) correlate more strongly. Lean reduction does not correlate
+  (−0.15 and −0.02), and DR fat does not follow AL fat (0.24 and −0.01), as the
+  paper says.
+- **Lifespans of the measured mice only:** the correlation weakens to −0.26
+  (P 0.11) in males and −0.52 (P 0.002) in females. So the males' result rests
+  on the lifespans of mice that died before the measurement.
+- **Table 1:** 10 of its 12 correlations are reproduced to two decimals. The
+  AL females' fat and lean give 0.48 and −0.34, where 0.46 and −0.36 are
+  printed.
+- **Other printed numbers:** the fold ranges of strain fat are 4.7, 3.9, 6.2
+  and 6.3 (printed 4.8, 3.9, 6.2 and 6.3). The extreme fat changes are −80%
+  (ILSXISS 24) and +61% (ILSXISS 3) in males, as printed; in females they are
+  −84% and +93%, the latter in a strain with one mouse in each diet, ILSXISS 3
+  giving +58%. Of the strains DR lengthened (11 by Student's t-test, 9 by
+  Welch's), none lost fat significantly ("none" printed). The overall
+  reductions with strains equally weighted come out a point or more above the
+  printed ones: fat 39.7% and 34.9%, lean 21.0% and 24.2% (printed 38, 33, 17
+  and 21). The printed shares of strains losing lean mass significantly (74%
+  and 79%) are 28 of 38 and 26 of 33, all strains as the denominator, though
+  only 37 and 29 have two mice in each diet.
+
+Controls 4 of 4: the plain statistics against scipy's on every one computed;
+the two correlations in exact rational arithmetic; the file as read (790 rows,
+41 and 39 strains, 38 and 33 with fat under both diets, 668 mice measured); and
+planted signs (r = −1 meets both conditions, r = +1 neither). The abstract's
+"later ages" (fat at 20–22 months) are not in the deposit and are not tested.
