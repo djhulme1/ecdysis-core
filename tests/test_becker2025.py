@@ -178,6 +178,10 @@ class Draws(unittest.TestCase):
         perm = M.permutation_betas(rows, total, 50, M.Stream("0" * 64, "p").rng())
         self.assertEqual(perm.shape, (50,))
         self.assertTrue(np.all(np.isfinite(perm)))
+        coin = M.rerandomised_betas(rows, total, 400, M.Stream("0" * 64, "c").rng())
+        self.assertLess(abs(coin.mean()), 4 * coin.std(ddof=1) / math.sqrt(400))
+        flo, fhi = M.two_stage_forecast(rows, 200, M.Stream("0" * 64, "f").rng())
+        self.assertLess(flo, fhi)
 
     def test_bad_seed(self):
         with self.assertRaises(M.Refused):

@@ -45,7 +45,8 @@ summarised) found 16 blank post-review times, where the paper counts 27 issues w
    the seed); Pearson's correlation of each arm's forecast with its time (as minutes and as logarithms, with total and
    with initial time); the post-review times' means, medians and shares of zero by arm; the counts of issues with and
    without a post-review time; a two-stage bootstrap of the regression's slowdown (developers, then issues within
-   them; 2,000 draws); and a randomisation p value from 10,000 permutations of the arms within each developer.
+   them; 2,000 draws); and a randomisation p value from 10,000 re-randomisations of every issue by a fair coin, the
+   paper's design, with the p value from 10,000 permutations of the arms within each developer beside it.
 5. Not in the release, and so not checked: the issues randomised other than by coin flip, the screen recordings, the
    exit surveys (the developers' post-hoc 20%), the expert forecasts (39% and 38%) and the dates.
 6. Controls (controls_passed counts those that behave as stated): (1) the authors' regression.py, run from the input
@@ -53,12 +54,22 @@ summarised) found 16 blank post-review times, where the paper counts 27 issues w
    decimals; (2) this module's least squares equals statsmodels' (the image's) in b and in all three standard errors
    (relative difference below 1e-9), and b equals the exact rational solution of the normal equations on the same
    floating-point inputs (below 1e-12); (3) the arms swapped give exactly -b, and ln 1.5 added to every AI-allowed
-   log time gives exactly b + ln 1.5 (below 1e-12); (4) the mean of the permuted coefficients lies within four of
-   its standard errors of zero.
+   log time gives exactly b + ln 1.5 (below 1e-12); (4) the mean of the coefficients under the coin-flip
+   re-randomisations lies within four of its standard errors of zero (exactly symmetric about zero in law, since an
+   assignment and its complement are equally likely and give b and -b).
 
 Changed after the first trial, which was refused at reading before any estimate was computed: the reader required
 external_resource_needs_1_to_3 to lie in 1..3, as the README's data spec says, and line 47 of the file holds 5. The
 two columns beside the test are now read as integers, and values outside the README's ranges are reported (rule 1).
+
+Changed after the second trial, whose outputs were seen: control (4) first asked the permutations within developers
+to centre on zero, and they do not (mean 0.0226, 30 of their standard errors): with each developer's share of
+AI-allowed issues held fixed and no developer effects in the regression, a permuted arm stays correlated with the
+developers' own speed. That was the control's error, not the estimator's. The randomisation p value now re-randomises
+every issue by a fair coin, as the trial did, the control asks that distribution to centre on zero, and the
+within-developer permutations are reported beside it. And the developers' forecast interval, which a pooled bootstrap
+of the issues gives narrower than printed, is also computed by the two-stage bootstrap of rule 4 and both are
+reported; the list of values not as printed names each once, shortly. Nothing the test computes changed.
 
 What it cannot check: the trial itself (the recruitment, the randomisation, the self-reported times and the issues'
 validity are as METR recorded them), and whether the effect generalises beyond these developers and early-2025 tools.
@@ -111,7 +122,8 @@ TWO_STAGE_DRAWS = 2000
 PERMUTATIONS = 10000
 OUTPUTS = ("sample", "beta", "slowdown", "slowdown_pct", "se_nonrobust", "se_hc3", "se_cluster", "ci_nonrobust",
            "ci_hc3", "ci_cluster", "readme", "imputation", "outcomes", "estimators", "exposure_subset", "ratio",
-           "forecasts", "correlations", "review_times", "counts", "two_stage", "randomisation_p", "printed",
+           "forecasts", "correlations", "review_times", "counts", "two_stage", "randomisation_p", "permutation_p",
+           "printed",
            "printed_matched", "printed_total", "authors_code", "conditions_met", "conditions_total", "test_passed",
            "controls_passed", "controls_total")
 LIMIT = 200
@@ -396,6 +408,39 @@ def two_stage(rows, total, draws, rng):
     return float(np.quantile(out, 0.025)), float(np.quantile(out, 0.975)), len(out)
 
 
+def rerandomised_betas(rows, total, draws, rng):
+    """Every issue's arm drawn again by a fair coin (assignments with one arm only are drawn again)."""
+    y, X = design(rows, total)
+    n = len(rows)
+    out = np.empty(draws)
+    Xp = X.copy()
+    d = 0
+    while d < draws:
+        a = rng.integers(0, 2, n).astype(np.float64)
+        if a.min() == a.max():
+            continue
+        Xp[:, 1] = a
+        b, *_ = np.linalg.lstsq(Xp, y, rcond=None)
+        out[d] = b[1]
+        d += 1
+    return out
+
+
+def two_stage_forecast(rows, draws, rng):
+    devs = sorted({r["dev"] for r in rows})
+    by_dev = {d: [i for i, r in enumerate(rows) if r["dev"] == d] for d in devs}
+    f_ai = np.asarray([r["f_ai"] for r in rows])
+    f_noai = np.asarray([r["f_noai"] for r in rows])
+    out = np.empty(draws)
+    for k in range(draws):
+        idx = []
+        for d in rng.choice(devs, len(devs), replace=True):
+            members = by_dev[int(d)]
+            idx.extend(rng.choice(members, len(members), replace=True).tolist())
+        out[k] = f_ai[idx].mean() / f_noai[idx].mean() - 1
+    return float(np.quantile(out, 0.025)), float(np.quantile(out, 0.975))
+
+
 def permutation_betas(rows, total, draws, rng):
     y, X = design(rows, total)
     devs = np.asarray([r["dev"] for r in rows])
@@ -461,6 +506,36 @@ class Printed:
 
     def misses(self):
         return [r["name"] for r in self.rows if not r["match"]]
+
+
+ABBREVIATIONS = (("PctSpeedup", ""), ("NumIssues", "n "), ("FinishedCompleteIssues", "recorded "),
+                 ("InitialImplementationTime", "initial"), ("TotalImplementationTime", "total"),
+                 ("PostReviewTime", "post-review"), ("InitialImplementationStartedButNotFinished", "blank"),
+                 ("AllFinishedCompleteValid", " recorded"), ("ReviewTimeMinutes", " review "), ("Overall", "all"),
+                 ("InAIAllowed", " AI"), ("NoAIAllowed", " no AI"), ("AIAllowed", " AI"), ("NoAI", " no AI"))
+
+
+def abbreviate(names):
+    """Each unmatched printed value named once, shortly ("PctSpeedupX interval" folds into X)."""
+    out = []
+    for name in names:
+        base = name.replace(" interval", "")
+        for a, b in ABBREVIATIONS:
+            base = base.replace(a, b)
+        base = " ".join(base.split())
+        if base not in out:
+            out.append(base)
+    return out
+
+
+def fit_list(head, items):
+    """head and the items, comma-separated, as many as fit in LIMIT characters, then how many more."""
+    for k in range(len(items), -1, -1):
+        rest = len(items) - k
+        text = head + ", ".join(items[:k]) + (f" and {rest} more" if rest else "")
+        if len(text) <= LIMIT:
+            return text
+    return head[:LIMIT]
 
 
 def fmt_ci(ci):
@@ -556,11 +631,15 @@ def run(seed, inputs="inputs", results="results"):
         idx = rng.integers(0, len(rows), len(rows))
         fb[d] = f_ai[idx].mean() / f_noai[idx].mean() - 1
     forecast["ci"] = (float(np.quantile(fb, 0.025)), float(np.quantile(fb, 0.975)))
+    st = Stream(seed, "becker2025/forecast-two-stage")
+    forecast["ci_two_stage"] = two_stage_forecast(rows, TWO_STAGE_DRAWS, st.rng())
     pr.value("PctSpeedupForecast", forecast["all"])
     pr.value("PctSpeedupForecastNoAI", forecast["noai"])
     pr.value("PctSpeedupForecastAIAllowed", forecast["ai"])
     forecast_ci_ok = (pct(forecast["ci"][0]) == int(macro_number(macros, "PctSpeedupForecastLowerCI")) and
                       pct(forecast["ci"][1]) == int(macro_number(macros, "PctSpeedupForecastUpperCI")))
+    forecast_ts_ok = (pct(forecast["ci_two_stage"][0]) == int(macro_number(macros, "PctSpeedupForecastLowerCI")) and
+                      pct(forecast["ci_two_stage"][1]) == int(macro_number(macros, "PctSpeedupForecastUpperCI")))
     corr = {}
     for arm, fc, name in ((1, f_ai, "CorrForecastAndImplementationTimeAIAllowed"),
                           (0, f_noai, "CorrForecastAndImplementationTimeNoAI")):
@@ -596,10 +675,13 @@ def run(seed, inputs="inputs", results="results"):
         pr.value(name, counts[key], scale=1)
     st = Stream(seed, "becker2025/two-stage")
     ts = two_stage(rows, total, TWO_STAGE_DRAWS, st.rng())
+    st = Stream(seed, "becker2025/coin")
+    coin = rerandomised_betas(rows, total, PERMUTATIONS, st.rng())
+    p_one = float((1 + np.sum(coin >= main["beta"])) / (1 + PERMUTATIONS))
+    p_two = float((1 + np.sum(np.abs(coin) >= abs(main["beta"]))) / (1 + PERMUTATIONS))
     st = Stream(seed, "becker2025/permutation")
     perm = permutation_betas(rows, total, PERMUTATIONS, st.rng())
-    p_one = float((1 + np.sum(perm >= main["beta"])) / (1 + PERMUTATIONS))
-    p_two = float((1 + np.sum(np.abs(perm) >= abs(main["beta"]))) / (1 + PERMUTATIONS))
+    p_perm = float((1 + np.sum(perm >= main["beta"])) / (1 + PERMUTATIONS))
 
     # controls
     ctl, ctl_detail = {}, {}
@@ -635,11 +717,13 @@ def run(seed, inputs="inputs", results="results"):
     ctl["the arms swapped give exactly -b, and ln 1.5 added to the AI-allowed log times b + ln 1.5"] = (
         swap_diff < 1e-12 and shift_diff < 1e-12)
     ctl_detail["swap_shift"] = {"swap": swap_diff, "shift": shift_diff}
-    perm_sd = float(np.std(perm, ddof=1))
-    perm_mean = float(np.mean(perm))
-    ctl["the permuted coefficients centre on zero (within four standard errors of their mean)"] = (
-        abs(perm_mean) < 4 * perm_sd / math.sqrt(PERMUTATIONS))
-    ctl_detail["permutation"] = {"mean": perm_mean, "sd": perm_sd, "p_one_sided": p_one, "p_two_sided": p_two}
+    coin_sd = float(np.std(coin, ddof=1))
+    coin_mean = float(np.mean(coin))
+    ctl["the coin-flip re-randomised coefficients centre on zero (within four standard errors of their mean)"] = (
+        abs(coin_mean) < 4 * coin_sd / math.sqrt(PERMUTATIONS))
+    ctl_detail["rerandomisation"] = {"mean": coin_mean, "sd": coin_sd, "p_one_sided": p_one, "p_two_sided": p_two,
+                                     "within_developer": {"mean": float(np.mean(perm)), "sd": float(np.std(perm, ddof=1)),
+                                                          "p_one_sided": p_perm}}
 
     matched, total_printed = pr.matched()
     misses = pr.misses()
@@ -669,8 +753,9 @@ def run(seed, inputs="inputs", results="results"):
                             f"ranges: " + (", ".join(f"issue {i} {w} {v}" for i, w, v in out_of_range[:4]) or "none")),
         "ratio": (f"ratio of mean times {100 * ratio['s']:.1f}%, pooled bootstrap {fmt_ci(ratio['ci'])}"
                   f"{' as printed' if ratio_ci_ok else ' (printed 5 to 70)'}"),
-        "forecasts": (f"forecast ratio {100 * forecast['all']:.1f}% {fmt_ci(forecast['ci'])}"
-                      f"{'' if forecast_ci_ok else ' (interval not as printed)'}; arms: without AI "
+        "forecasts": (f"forecast ratio {100 * forecast['all']:.1f}%, pooled {fmt_ci(forecast['ci'])}"
+                      f"{'*' if forecast_ci_ok else ''}, two-stage {fmt_ci(forecast['ci_two_stage'])}"
+                      f"{'*' if forecast_ts_ok else ''} (* as printed); arms: without AI "
                       f"{100 * forecast['noai']:.1f}%, with {100 * forecast['ai']:.1f}%"),
         "correlations": "; ".join(f"{'AI allowed' if 'AIAllowed' in k else 'AI disallowed'} {v['printed']}: "
                                   + (", ".join(v["matching"]) or "no reading") for k, v in corr.items()),
@@ -680,8 +765,8 @@ def run(seed, inputs="inputs", results="results"):
                    f"{counts['blank post-review']}; the paper: 219 (122) and 27"),
         "two_stage": f"two-stage bootstrap {fmt_ci(ts[:2])} from {ts[2]} draws",
         "randomisation_p": round(p_one, 6),
-        "printed": ("not as printed: " + ", ".join(m.replace("PctSpeedup", "").replace("NumIssues", "N")[:40]
-                                                   for m in misses))[:LIMIT] if misses else "all as printed",
+        "permutation_p": round(p_perm, 6),
+        "printed": fit_list("unmatched: ", abbreviate(misses)) if misses else "all as printed",
         "printed_matched": matched,
         "printed_total": total_printed,
         "authors_code": ("prints " + ", ".join(f"{k} {authors[k]}" for k in ("speedup",) if authors.get(k) is not None)
@@ -700,7 +785,8 @@ def run(seed, inputs="inputs", results="results"):
               "outcomes": outcomes, "estimators": estimators, "exposure": exposure, "ratio": ratio,
               "ratio_ci_as_printed": ratio_ci_ok, "forecast": forecast, "forecast_ci_as_printed": forecast_ci_ok,
               "correlations": corr, "review": review, "overall_median_review": overall_median, "counts": counts,
-              "two_stage": ts, "permutation": {"p_one_sided": p_one, "p_two_sided": p_two},
+              "two_stage": ts, "rerandomisation": {"p_one_sided": p_one, "p_two_sided": p_two},
+              "forecast_two_stage_as_printed": forecast_ts_ok,
               "readme": {"printed": readme, "ours": ours_printed, "match": readme_match}, "printed": pr.rows,
               "blank_issue_ids": [r["issue"] for r in blanks], "out_of_range": out_of_range}
     os.makedirs(results, exist_ok=True)
