@@ -86,6 +86,15 @@ Controls (controls_passed of controls_total):
  (g) The decision on the figure's own values (read by eye): all 15 conditions hold.
  (h) A planted fault: the decision on a history with no memory (the falling sweep a copy of the rising) fails all
      six of the falling sweep's conditions at r_o = 1.75, 2 and 2.25, and so the test.
+
+Changed after the first trial (under Imago's own seed), and declared here: the test, its sixteen readings and its
+conditions are as committed at 3260d33, and so is every number the first trial reported. That trial found the test
+holding under seven of the sixteen readings, all with d_o and d_a as unit vectors, and the literal reading (the sums
+as printed) meeting 6 of 15: with the sums the rising group forms only a slow, partial torus and does not polarize
+below r_o = 4, and the falling sweep retraces it. The items beside the test had been run under the literal reading
+only, where they say little about the model the paper's figure shows; they are now run also under nu1 (the literal
+reading but for unit vectors, the nearest under which the test holds), with the same seeds, and the outputs add
+every reading's mean gap to the figure and nu1's four curves.
 """
 
 import concurrent.futures
@@ -110,6 +119,8 @@ CORE = (1.75, 2.0, 2.25)
 TORUS_M, TORUS_P, PAR_P, PAR_M, LOW_P, HIGH_P = 0.6, 0.4, 0.7, 0.3, 0.4, 0.7
 READINGS = [(s, u, z) for s in (0, 1) for u in (0, 1) for z in (1, 2)]  # (self in d_o, unit vectors, noise)
 LITERAL = (0, 0, 1)
+NEAR = (0, 1, 1)                     # the literal reading but for unit vectors (added after the first trial)
+BESIDE_READINGS = (LITERAL, NEAR)
 MEASURES = ("end", "win")
 GRID_DRO, GRID_DRA, GRID_REPS, GRID_STEPS = (0, 1, 2, 4, 8, 13), (1, 4, 8, 13), 10, 5000
 SORT_RO, SORT_REPS, SORT_STEPS = 6.0, 30, 5000
@@ -753,26 +764,29 @@ def assess(seed, work):
                 p = base_params(reading, seed64(seed, f"sweep/{k}"), ro_lo=RO_LO, ro_step=RO_STEP, n_up=N_UP,
                                 steps_per=STEPS_PER, window=WINDOW)
                 jobs[("sweep", reading, k)] = pool.submit(c_run, exe, work, p, "sweep", f"s-{code(reading)}-{k}")
-        for k in range(REPLICATES):
-            p = base_params(LITERAL, seed64(seed, f"sweep/{k}"), alpha=360.0, ro_lo=RO_LO, ro_step=RO_STEP,
-                            n_up=N_UP, steps_per=STEPS_PER, window=WINDOW)
-            jobs[("a360", LITERAL, k)] = pool.submit(c_run, exe, work, p, "sweep", f"a360-{k}")
-        for ro in CORE:
+        for br in BESIDE_READINGS:
+            c_ = code(br)
             for k in range(REPLICATES):
-                p = base_params(LITERAL, seed64(seed, f"fresh/{ro}/{k}"), ro=ro, steps=GRID_STEPS, window=WINDOW)
-                jobs[("fresh", ro, k)] = pool.submit(c_run, exe, work, p, "grid", f"f-{ro}-{k}")
-        for dro in GRID_DRO:
-            for dra in GRID_DRA:
-                for k in range(GRID_REPS):
-                    ro = RR + dro
-                    p = base_params(LITERAL, seed64(seed, f"grid/{dro}/{dra}/{k}"), ro=ro, ra=ro + dra,
-                                    steps=GRID_STEPS, window=WINDOW)
-                    jobs[("grid", (dro, dra), k)] = pool.submit(c_run, exe, work, p, "grid", f"g-{dro}-{dra}-{k}")
-        for name, (vary, sd, _) in SORTS.items():
-            for k in range(SORT_REPS):
-                p = base_params(LITERAL, seed64(seed, f"sort/{name}/{k}"), ro=SORT_RO, steps=SORT_STEPS, vary=vary,
-                                vary_sd=sd)
-                jobs[("sort", name, k)] = pool.submit(c_run, exe, work, p, "sort", f"o-{name}-{k}")
+                p = base_params(br, seed64(seed, f"sweep/{k}"), alpha=360.0, ro_lo=RO_LO, ro_step=RO_STEP,
+                                n_up=N_UP, steps_per=STEPS_PER, window=WINDOW)
+                jobs[("a360", br, k)] = pool.submit(c_run, exe, work, p, "sweep", f"a360-{c_}-{k}")
+            for ro in CORE:
+                for k in range(REPLICATES):
+                    p = base_params(br, seed64(seed, f"fresh/{ro}/{k}"), ro=ro, steps=GRID_STEPS, window=WINDOW)
+                    jobs[("fresh", br, ro, k)] = pool.submit(c_run, exe, work, p, "grid", f"f-{c_}-{ro}-{k}")
+            for dro in GRID_DRO:
+                for dra in GRID_DRA:
+                    for k in range(GRID_REPS):
+                        ro = RR + dro
+                        p = base_params(br, seed64(seed, f"grid/{dro}/{dra}/{k}"), ro=ro, ra=ro + dra,
+                                        steps=GRID_STEPS, window=WINDOW)
+                        jobs[("grid", br, (dro, dra), k)] = pool.submit(c_run, exe, work, p, "grid",
+                                                                         f"g-{c_}-{dro}-{dra}-{k}")
+            for name, (vary, sd, _) in SORTS.items():
+                for k in range(SORT_REPS):
+                    p = base_params(br, seed64(seed, f"sort/{name}/{k}"), ro=SORT_RO, steps=SORT_STEPS, vary=vary,
+                                    vary_sd=sd)
+                    jobs[("sort", br, name, k)] = pool.submit(c_run, exe, work, p, "sort", f"o-{c_}-{name}-{k}")
         ctl, cinfo = controls(exe, work, seed)
         res = {key: f.result() for key, f in jobs.items()}
 
@@ -792,63 +806,92 @@ def assess(seed, work):
     best = max(met for met, _ in per.values())
     lit_met, lit_cond = per[(LITERAL, "end")]
     lit = curves([res[("sweep", LITERAL, k)] for k in range(REPLICATES)], "end")
+    near = curves([res[("sweep", NEAR, k)] for k in range(REPLICATES)], "end")
 
-    def series(d, idx):
-        return [lit[d][k][idx] for k in sorted(lit[d])]
+    def series(cv, d, idx):
+        return [cv[d][k][idx] for k in sorted(cv[d])]
 
-    gaps = []
-    for d, key_p, key_m in (("up", "p_up", "m_up"), ("down", "p_down", "m_down")):
-        for k in sorted(lit[d]):
-            if lit[d][k][0] is not None:
-                gaps.append(abs(lit[d][k][0] - FIG4[key_p][k]))
-                gaps.append(abs(lit[d][k][1] - FIG4[key_m][k]))
-    figure_gap = math.fsum(gaps) / len(gaps) if gaps else -1.0
+    def gap(cv):
+        gaps = []
+        for d, key_p, key_m in (("up", "p_up", "m_up"), ("down", "p_down", "m_down")):
+            for k in sorted(cv[d]):
+                if cv[d][k][0] is not None:
+                    gaps.append(abs(cv[d][k][0] - FIG4[key_p][k]))
+                    gaps.append(abs(cv[d][k][1] - FIG4[key_m][k]))
+        return math.fsum(gaps) / len(gaps) if gaps else -1.0
+
+    figure_gap = gap(lit)
+    gaps_all = {code(r): gap(curves([res[("sweep", r, k)] for k in range(REPLICATES)], "end")) for r in READINGS}
     core = [k_of(ro) for ro in CORE]
 
-    # beside: alpha = 360
-    a360 = curves([res[("a360", LITERAL, k)] for k in range(REPLICATES)], "end")
-    a360_met, a360_cond = decide(a360)
-    a360_mmax = max((v[1] for v in a360["up"].values() if v[1] is not None), default=-1.0)
-    # beside: fresh starts
-    fresh = {}
-    for ro in CORE:
-        recs = [res[("fresh", ro, k)]["grid"] for k in range(REPLICATES)]
-        cnt = [x for x in recs if x["classes"] == 1]
-        fresh[ro] = (mean_se([x["p"] for x in cnt])[0], mean_se([x["m"] for x in cnt])[0], len(cnt))
-    # beside: the grid
-    grid = {}
-    for dro in GRID_DRO:
-        for dra in GRID_DRA:
-            recs = [res[("grid", (dro, dra), k)]["grid"] for k in range(GRID_REPS)]
+    beside = {}
+    for br in BESIDE_READINGS:
+        # alpha = 360
+        a360 = curves([res[("a360", br, k)] for k in range(REPLICATES)], "end")
+        a360_met, a360_cond = decide(a360)
+        a360_mmax = max((v[1] for v in a360["up"].values() if v[1] is not None), default=-1.0)
+        # fresh starts
+        fresh = {}
+        for ro in CORE:
+            recs = [res[("fresh", br, ro, k)]["grid"] for k in range(REPLICATES)]
             cnt = [x for x in recs if x["classes"] == 1]
-            pm_, mm_ = mean_se([x["p"] for x in cnt])[0], mean_se([x["m"] for x in cnt])[0]
-            if len(cnt) * 2 < GRID_REPS:
-                kind = "fragments"
-            elif pm_ >= 0.9:
-                kind = "highly parallel"
-            elif pm_ >= 0.5:
-                kind = "dynamic parallel"
-            elif mm_ >= 0.5:
-                kind = "torus"
-            else:
-                kind = "swarm"
-            grid[f"{dro},{dra}"] = {"p": pm_, "m": mm_, "counted": len(cnt), "kind": kind}
-    # beside: sorting
-    sorting = {}
-    for name, (vary, sd, fig) in SORTS.items():
-        fr, ce, n_ok = [], [], 0
-        for k in range(SORT_REPS):
-            r = res[("sort", name, k)]
-            if r["state"][2] != 1:
-                continue
-            n_ok += 1
-            a, b = sorting_rho(r["ind"], name)
-            fr.append(a)
-            ce.append(b)
-        sorting[name] = {"front": mean_se(fr), "centre": mean_se(ce), "counted": n_ok, "figure": fig}
+            fresh[ro] = (mean_se([x["p"] for x in cnt])[0], mean_se([x["m"] for x in cnt])[0], len(cnt))
+        # the grid
+        grid = {}
+        for dro in GRID_DRO:
+            for dra in GRID_DRA:
+                recs = [res[("grid", br, (dro, dra), k)]["grid"] for k in range(GRID_REPS)]
+                cnt = [x for x in recs if x["classes"] == 1]
+                pm_, mm_ = mean_se([x["p"] for x in cnt])[0], mean_se([x["m"] for x in cnt])[0]
+                if len(cnt) * 2 < GRID_REPS:
+                    kind = "fragments"
+                elif pm_ >= 0.9:
+                    kind = "highly parallel"
+                elif pm_ >= 0.5:
+                    kind = "dynamic parallel"
+                elif mm_ >= 0.5:
+                    kind = "torus"
+                else:
+                    kind = "swarm"
+                grid[f"{dro},{dra}"] = {"p": pm_, "m": mm_, "counted": len(cnt), "kind": kind}
+        # sorting
+        sorting = {}
+        for name, (vary, sd, fig) in SORTS.items():
+            fr, ce, n_ok = [], [], 0
+            for k in range(SORT_REPS):
+                r = res[("sort", br, name, k)]
+                if r["state"][2] != 1:
+                    continue
+                n_ok += 1
+                a, b = sorting_rho(r["ind"], name)
+                fr.append(a)
+                ce.append(b)
+            sorting[name] = {"front": mean_se(fr), "centre": mean_se(ce), "counted": n_ok, "figure": fig}
+        beside[br] = {"a360": a360, "a360_met": a360_met, "a360_cond": a360_cond, "a360_mmax": a360_mmax,
+                      "fresh": fresh, "grid": grid, "sorting": sorting}
 
-    def g(ro):
-        return grid[ro]["kind"]
+    def bout(br, suffix, label):
+        b = beside[br]
+        grid, fresh, sorting, a360 = b["grid"], b["fresh"], b["sorting"], b["a360"]
+
+        def g(key):
+            return grid[key]["kind"]
+
+        return {
+            "fresh_starts" + suffix: f"random starts, 5,000 steps, {label}: " + "; ".join(
+                f"r_o {ro} m {f2(fresh[ro][1])} p {f2(fresh[ro][0])} ({fresh[ro][2]})" for ro in CORE),
+            "alpha360" + suffix: (f"alpha 360, {label}: {b['a360_met']} of 15; rising m at 1.75/2/2.25 "
+                                  f"{fmt_list([a360['up'][k][1] for k in core])}; largest rising m "
+                                  f"{f2(b['a360_mmax'])}"),
+            "grid" + suffix: (f"Fig. 3 grid, {label} (dro,dra): 0,13 " + g("0,13") + "; 1,13 " + g("1,13")
+                              + "; 4,13 " + g("4,13") + "; 13,13 " + g("13,13") + "; 0,1 " + g("0,1")),
+            "sorting_speed" + suffix: (f"speed s.d. 0.2, {label}: rho front {f2(sorting['speed']['front'][0])}, "
+                                       f"centre {f2(sorting['speed']['centre'][0])} (figure 0.76, -0.22; "
+                                       f"{sorting['speed']['counted']} groups)"),
+            "sorting_rr" + suffix: (f"r_r s.d. 0.3, {label}: rho front {f2(sorting['rr']['front'][0])}, centre "
+                                    f"{f2(sorting['rr']['centre'][0])} (figure -0.44, -0.57; "
+                                    f"{sorting['rr']['counted']} groups)"),
+        }
 
     out = {
         "test_passed": int(best == 15),
@@ -866,25 +909,22 @@ def assess(seed, work):
                          f"m {fmt_list([lit['down'][k][1] for k in core])}"),
         "ends": (f"literal p: rising at 1 {f2(lit['up'][0][0])}, falling at 1 {f2(lit['down'][0][0])}, "
                  f"at 4 {f2(lit['up'][N_UP - 1][0])}"),
-        "rising_m": fmt_list(series("up", 1)),
-        "rising_p": fmt_list(series("up", 0)),
-        "falling_m": fmt_list(series("down", 1)),
-        "falling_p": fmt_list(series("down", 0)),
+        "rising_m": fmt_list(series(lit, "up", 1)),
+        "rising_p": fmt_list(series(lit, "up", 0)),
+        "falling_m": fmt_list(series(lit, "down", 1)),
+        "falling_p": fmt_list(series(lit, "down", 0)),
+        "rising_m_nu1": fmt_list(series(near, "up", 1)),
+        "rising_p_nu1": fmt_list(series(near, "up", 0)),
+        "falling_m_nu1": fmt_list(series(near, "down", 1)),
+        "falling_p_nu1": fmt_list(series(near, "down", 0)),
         "figure_gap": round(figure_gap, 3),
+        "figure_gaps": "mean gap to the figure, end: " + ", ".join(f"{k} {v:.2f}" for k, v in gaps_all.items()),
         "fragmented": "fragmented replicate-values of 375: " + ", ".join(f"{k} {v}" for k, v in sorted(frag.items())),
-        "fresh_starts": "random starts, 5,000 steps, literal: " + "; ".join(
-            f"r_o {ro} m {f2(fresh[ro][1])} p {f2(fresh[ro][0])} ({fresh[ro][2]})" for ro in CORE),
-        "alpha360": (f"alpha 360, literal: {a360_met} of 15; rising m at 1.75/2/2.25 "
-                     f"{fmt_list([a360['up'][k][1] for k in core])}; largest rising m {f2(a360_mmax)}"),
-        "grid": ("Fig. 3 grid (dro,dra): 0,13 " + g("0,13") + "; 1,13 " + g("1,13") + "; 4,13 " + g("4,13")
-                 + "; 13,13 " + g("13,13") + "; 0,1 " + g("0,1")),
-        "sorting_speed": (f"speed s.d. 0.2: rho front {f2(sorting['speed']['front'][0])}, centre "
-                          f"{f2(sorting['speed']['centre'][0])} (figure 0.76, -0.22; {sorting['speed']['counted']} groups)"),
-        "sorting_rr": (f"r_r s.d. 0.3: rho front {f2(sorting['rr']['front'][0])}, centre "
-                       f"{f2(sorting['rr']['centre'][0])} (figure -0.44, -0.57; {sorting['rr']['counted']} groups)"),
         "controls_passed": sum(ctl.values()),
         "controls_total": len(ctl),
     }
+    out.update(bout(LITERAL, "", "literal"))
+    out.update(bout(NEAR, "_nu1", "nu1"))
     for k, v in out.items():
         if isinstance(v, str) and len(v) > 200:
             raise AssertionError(f"{k}: longer than 200 characters: {v}")
@@ -892,9 +932,12 @@ def assess(seed, work):
             raise AssertionError(f"{k}: not finite")
     detail = {"test": TEST, "literal_conditions": lit_cond,
               "conditions": {f"{code(r)}-{m}": c for (r, m), (_, c) in per.items()},
-              "curves": curves_all, "figure": FIG4, "alpha360": {"conditions": a360_cond, "curves": {
-                  d: {f"{ro_value(k):.2f}": v[:3] for k, v in a360[d].items()} for d in a360}},
-              "fresh": {str(ro): v for ro, v in fresh.items()}, "grid": grid, "sorting": sorting,
+              "curves": curves_all, "figure": FIG4, "figure_gaps": gaps_all,
+              "beside": {code(br): {
+                  "alpha360": {"conditions": b["a360_cond"], "curves": {
+                      d: {f"{ro_value(k):.2f}": v[:3] for k, v in b["a360"][d].items()} for d in b["a360"]}},
+                  "fresh": {str(ro): v for ro, v in b["fresh"].items()}, "grid": b["grid"], "sorting": b["sorting"]}
+                  for br, b in beside.items()},
               "controls": ctl, "control_info": cinfo}
     return out, detail
 
