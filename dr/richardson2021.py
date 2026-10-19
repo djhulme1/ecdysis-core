@@ -85,6 +85,19 @@ Controls (controls_passed counts those that behave as stated; the run stops if a
      gain under 25%) make (c) fail; the lifelong Control females' ages multiplied by 1.4 standing for Low BCAA's make
      (d) fail.
 
+Changed after the first trial (under a trial seed; the test, its conditions and their computations unchanged, every
+change beside the test, made after its outputs were seen):
+   - the frailty tables write each item as text, "mean ± SEM" to two decimals, which the first reader took for no
+     number at all, so every frailty mean was empty: the reader now takes the mean before "±" (exactly, as written)
+     and refuses a cell it cannot read or a table with no score;
+   - the text's "26% dying prior to 717 days (the lifespan of the last mouse in the Low BCAA group prior to the curves
+     crossing)" counts that mouse: the deaths by 717 days are now reported, by Kaplan-Meier and as shares, beside those
+     before it;
+   - Table 3 prints its medians in whole days (Prism's 68.5 and 52.5 as 69 and 53) and its changes from the rounded
+     medians: a median now matches when it rounds half up to the printed day and a change when the change of the
+     rounded medians rounds to it (the unrounded matches are counted too), and a printed log-rank p that is the
+     Gehan-Breslow-Wilcoxon p is counted as such.
+
 What it cannot check: whether the tables are the data the paper analysed (Table 3's values are compared beside), and
 the mice's causes of death.
 
@@ -107,7 +120,8 @@ import xml.etree.ElementTree as ET  # noqa: E402
 import zipfile  # noqa: E402
 from fractions import Fraction  # noqa: E402
 
-WORKBOOK = ("SupplementaryTables_MOESM2.xlsx", "9ade808b2337832331529cfa0da3348672c93844c841a4caf15acc443a0b04c9", 215229)
+WORKBOOK = ("SupplementaryTables_MOESM2.xlsx", "9ade808b2337832331529cfa0da3348672c93844c841a4caf15acc443a0b04c9",
+            215229)
 
 CAPTION_N = {
     "Table S2": {"f": {"Control": 9, "Low BCAA": 18, "Low AA": 13}, "m": {"Control": 20, "Low BCAA": 14, "Low AA": 10}},
@@ -448,6 +462,16 @@ def rounds_to(x, printed):
     return abs(round(float(x), places) - printed) < 10 ** (-places) / 2 + 1e-15
 
 
+def frailty_score(v):
+    """A frailty cell as the deposit writes it, "mean ± SEM" (or a bare number): its mean, exact; None if empty."""
+    if v is None:
+        return None
+    m = re.fullmatch(r"\s*(-?[0-9]+(?:\.[0-9]+)?)\s*(?:±\s*[0-9]+(?:\.[0-9]+)?)?\s*", v)
+    if not m:
+        raise Refused(f"frailty cell {v!r} is not a mean with its SEM")
+    return Fraction(m.group(1))
+
+
 def frailty_means(sheet, name):
     rows = [r for r in sheet if any(cell(r, j) is not None for j in range(len(r)))]
     ages = rows[0]
@@ -466,12 +490,12 @@ def frailty_means(sheet, name):
             cols.append((j, age, cell(diets, j)))
     sums = {(a, d): [] for _, a, d in cols}
     for r in rows[2:]:
-        vals = [(a, d, number(cell(r, j))) for j, a, d in cols]
-        if all(v is None for _, _, v in vals):
-            continue
+        vals = [(a, d, frailty_score(cell(r, j))) for j, a, d in cols]
         for a, d, v in vals:
             if v is not None:
-                sums[(a, d)].append(Fraction(v).limit_denominator(10 ** 9))
+                sums[(a, d)].append(v)
+    if not any(sums.values()):
+        raise Refused(f"{name}: no frailty scores read")
     means = {k: (sum(v) / len(v) if v else None) for k, v in sums.items()}
     order = []
     for _, a, _ in cols:
@@ -639,21 +663,32 @@ def run(seed, inputs="inputs", results="results"):
     cond = conditions(res)
 
     # beside: Table 3 as printed
-    matched, total, misses = 0, 0, []
+    def half_up(x):
+        return None if x is None else math.floor(Fraction(x) + Fraction(1, 2))
+
+    matched, total, misses, exact = 0, 0, [], 0
+    lr_as_gbw = []
     for key in PANELS:
         for diet, (med, ch, lp, wp, mx, mch) in PRINTED[key].items():
             group = panels[key][diet]
             mine_med = prism_quantile(group, Fraction(1, 2))
-            checks = [("median", mine_med is not None and mine_med == med)]
+            checks = [("median", half_up(mine_med) == med, mine_med is not None and mine_med == med)]
             if diet != "Control":
                 r = res[f"{key}/{diet}"]
-                checks.append(("change", r["change"] is not None and rounds_to(r["change"], ch)))
-                checks.append(("log-rank p", rounds_to(r["logrank_p"], lp)))
+                rounded = change(half_up(r["median"][0]), half_up(r["median"][1]))
+                checks.append(("change", rounded is not None and rounds_to(rounded, ch),
+                               r["change"] is not None and rounds_to(r["change"], ch)))
+                ok_lr = rounds_to(r["logrank_p"], lp)
+                checks.append(("log-rank p", ok_lr, ok_lr))
+                if not ok_lr and rounds_to(r["gbw_p"], lp):
+                    lr_as_gbw.append(f"{key} {diet}")
                 if wp is not None:
-                    checks.append(("Wilcoxon p", rounds_to(r["gbw_p"], wp)))
-            for name, ok in checks:
+                    ok_w = rounds_to(r["gbw_p"], wp)
+                    checks.append(("Wilcoxon p", ok_w, ok_w))
+            for name, ok, ok_exact in checks:
                 total += 1
                 matched += ok
+                exact += ok_exact
                 if not ok:
                     misses.append(f"{key} {diet} {name}")
     maxima = {}
@@ -687,13 +722,16 @@ def run(seed, inputs="inputs", results="results"):
     early_cut, early_bcaa, early_ctl = TEXT["early"]
     mf = panels["mid_f"]
     share = {d: Fraction(sum(1 for t, died in mf[d] if died and t < early_cut), len(mf[d])) for d in mf}
-    km_early = {}
+    share_at = {d: Fraction(sum(1 for t, died in mf[d] if died and t <= early_cut), len(mf[d])) for d in mf}
+    km_early, km_at = {}, {}
     for d in mf:
-        s = Fraction(1)
+        s = s_at = Fraction(1)
         for t, sv in km(mf[d]):
             if t < early_cut:
                 s = sv
-        km_early[d] = 1 - s
+            if t <= early_cut:
+                s_at = sv
+        km_early[d], km_at[d] = 1 - s, 1 - s_at
     longest = max(t for t, died in panels["wt_m"]["Low BCAA"] if died)
     text_changes = {f"{k}/{d}": res[f"{k}/{d}"]["change"] for (k, d) in TEXT["changes"]}
 
@@ -725,14 +763,17 @@ def run(seed, inputs="inputs", results="results"):
         "wt_m_gain": float(c["change"]) if c["change"] is not None else -1.0,
         "wt_f_logrank_p": d["logrank_p"],
         "wt_f_gain": float(d["change"]) if d["change"] is not None else -1.0,
-        "table_s3": (f"{matched} of {total} printed medians, changes and p as computed; not: "
-                     + (", ".join(misses[:3]) + (f" and {len(misses) - 3} more" if len(misses) > 3 else "")
+        "table_s3": (f"{matched} of {total} printed medians (whole days), changes and p as computed ({exact} "
+                     f"unrounded); log-rank p printed that are the Wilcoxon's: {len(lr_as_gbw)}; not: "
+                     + (", ".join(misses[:2]) + (f" and {len(misses) - 2} more" if len(misses) > 2 else "")
                         if misses else "none")),
         "maxima": "Max (75%) as printed: " + ", ".join(f"{k} {h} of {n}" for k, (h, n) in maxima.items()),
         "wang_allison": (f"best reading {'/'.join(best)}: {wa[best]['hits']} of {wa[best]['n']} printed p; wt_m Low "
                          f"BCAA p {fmt(wa[best]['values']['wt_m/Low BCAA'][0])} (printed 0.0251)"),
-        "text_values": (f"midlife females dead before 717 d: Low BCAA {fmt(100 * share['Low BCAA'], 1)}%, Control "
-                        f"{fmt(100 * share['Control'], 1)}% (printed 26, 8); longest lifelong Low BCAA male "
+        "text_values": (f"midlife females dead by 717 d, Kaplan-Meier (shares): Low BCAA "
+                        f"{fmt(100 * km_at['Low BCAA'], 1)}% ({fmt(100 * share_at['Low BCAA'], 1)}), Control "
+                        f"{fmt(100 * km_at['Control'], 1)}% "
+                        f"({fmt(100 * share_at['Control'], 1)}); printed 26, 8; longest lifelong Low BCAA male "
                         f"{longest} d (printed 1456)"),
         "frailty": "Low BCAA mean item score below Control's at " + "; ".join(
             f"{k} {len(v['lower'])} of {len(v['ages'])} ages" for k, v in fr.items()),
@@ -759,11 +800,13 @@ def run(seed, inputs="inputs", results="results"):
     detail = {"input": {"name": WORKBOOK[0], "sha256": WORKBOOK[1], "bytes": WORKBOOK[2]},
               "counts": {t: {h: {dd: len(v) for dd, v in tables[t][h].items()} for h in tables[t]} for t in tables},
               "conditions": cond, "controls": ctl, "results": js(res), "table_s3_misses": misses,
+              "table_s3_logrank_as_wilcoxon": lr_as_gbw,
               "maxima": {k: list(v) for k, v in maxima.items()},
               "max75_values": {f"{key}/{diet}/{reading}": js(max75(panels[key][diet], reading))
                                for key in PANELS for diet in panels[key] for reading in ("km", "deaths", "all")},
               "wang_allison": {"/".join(k): js(v) for k, v in wa.items()}, "best_reading": list(best),
-              "early_deaths": {"share": js(share), "km": js(km_early)}, "longest": longest,
+              "early_deaths": {"before 717: share": js(share), "before 717: km": js(km_early),
+                               "by 717: share": js(share_at), "by 717: km": js(km_at)}, "longest": longest,
               "text_changes": js(text_changes), "frailty": fr, "test": TEST}
     os.makedirs(results, exist_ok=True)
     with open(os.path.join(results, "outputs.json"), "w", encoding="ascii") as fh:

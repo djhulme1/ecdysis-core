@@ -205,8 +205,8 @@ class Beside(unittest.TestCase):
         rows = [["Age", "16 months", None, "18 months", None],
                 ["Category", "Control", "Low BCAA", "Control", "Low BCAA"],
                 ["Integument"],
-                ["Alopecia", 0.5, 0.25, 0.5, 0.5],
-                ["Kyphosis", 0.0, 0.25, 1.0, 0.0],
+                ["Alopecia", "0.50 ± 0.10", "0.25 ± 0.05", "0.5 ± 0", 0.5],
+                ["Kyphosis", "0 ± 0", 0.25, "1.00 ± 0.00", "0 ± 0"],
                 ["Supplemental Table 9: Female frailty scores (lifelong intervention)"],
                 ["Frailty scores presented by index measured over time."]]
         path = os.path.join(d, "f.xlsx")
@@ -216,6 +216,10 @@ class Beside(unittest.TestCase):
         self.assertEqual(order, ["16 months", "18 months"])
         self.assertEqual(means[("16 months", "Control")], Fraction(1, 4))
         self.assertEqual(means[("18 months", "Low BCAA")], Fraction(1, 4))
+        self.assertEqual(M.frailty_score("0.27 ± 0.09"), Fraction(27, 100))
+        self.assertIsNone(M.frailty_score(None))
+        with self.assertRaises(M.Refused):
+            M.frailty_score("n/a")
 
 
 class Conditions(unittest.TestCase):
