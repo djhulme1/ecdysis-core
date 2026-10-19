@@ -5721,3 +5721,56 @@ the two correlations in exact rational arithmetic; the file as read (790 rows,
 41 and 39 strains, 38 and 33 with fat under both diets, 668 mice measured); and
 planted signs (r = −1 meets both conditions, r = +1 neither). The abstract's
 "later ages" (fat at 20–22 months) are not in the deposit and are not tested.
+
+## bdc/bv2022.py: Bogart and Valero, the determinantal complexity of two generalised permanents (2022)
+
+| Command | Claim |
+|---|---|
+| `python3 bdc/bv2022.py` | Bogart & Valero 2022: upper and lower bounds on the determinantal complexities of hyperoctahedral permanents and multipermanents, comparable to the permanent's |
+
+numpy, in the pinned `scipy-notebook` image, no inputs; about a minute. It
+reuses `bdc/grenet.py`'s cycle-cover expansion, modular elimination and seed
+stream. Tests: `python3 -m unittest tests.test_bv2022`, on other posets
+(divisor lattices), on compositions and partitions of 9 and 10 and on small
+polynomials. The receipt (`30a72c38…`, 19 October, at `e9cac89`, rules first,
+a reproduction): all 24 conditions hold. Proposition 2.1's matrix on the
+n-cube's face lattice, with a top added above its 2^n vertices, is 3^n-square
+with determinant hoperm_n: identically for n = 1 to 4 (2, 8, 48 and 384
+terms), at four points modulo 2^31 − 1 for n = 5 and 6 (243 and 729 rows). On
+the lattice of multisets it gives mperm_m for all 255 compositions of γ ≤ 8
+(189 identically, 66 at four points), sizes 1 to 255. The paper's B and B^(ℓ)
+are zeros, and the Hessians there have rank n² (n = 3 to 6) and γn (all 42
+partitions of γ = 3 to 8 into at least three parts), so dc(hoperm_n) ≥ n²/2
+and dc(mperm_m) ≥ γn/2.
+
+Beside the test, nothing counted:
+- **Theorem 1.4(2) cannot hold as printed.** It states dc(mperm_m) ≥
+  (m_1 + ⋯ + m_n)²/2, but the paper's own Theorem 1.3(2) matrix, verified
+  here, has 23 rows for (5,1,1), where that bound is 24.5, and 27 for
+  (6,1,1), where it is 32 (in all three orders of each). The proof's Hessian
+  has γn rows, so it gives γn/2 (10.5 and 12 there), below γ²/2 for 36 of
+  the 42 partitions (all but the permanents).
+- **The hyperoctahedral permanent is a permanent.** hoperm_n(X) =
+  per_n(X⁺ + X⁻) identically for n = 1 to 6: the sum over signs factorises
+  row by row. Grenet's (2^n − 1)-square matrix with each x_ij replaced by
+  x_{i,j} + x_{i,−j} has determinant hoperm_n at all four points for n = 2 to
+  6. So dc(hoperm_n) = dc(per_n), at most 2^n − 1, below Theorem 1.3(1)'s
+  3^n, and Theorem 1.4(1)'s n²/2 is Mignon and Ressayre's bound for the
+  permanent.
+- **The printed Hessians:** Proposition 3.8's [[C, C], [C, C]] is exact for
+  n = 3 to 6. Proposition 3.13's Q^(ℓ) and R^(ℓ) are exact for the 8
+  partitions with equal parts; for the other 34, R^(1) is the printed matrix
+  divided by γ − 2 (its factor is (γ − 3)!/Π m_j!, not k_1), which leaves the
+  rank unchanged.
+- **Mignon and Ressayre's lemma** (the paper's Lemma 3.1): at seed-drawn
+  integer matrices of rank n − 1 and n − 2, n = 2 to 6, the Hessian of det_n
+  has rank at most 2n in all ten (2n at rank n − 1, 4 at rank n − 2).
+
+Controls 9 of 9: the expansion against the Leibniz sum and against
+`bdc/grenet.py`'s; the modular determinant against an exact one; the
+polynomials against brute force over all maps; the Hessian against second
+differences; the exact rank against two modular ranks and numpy's; and four
+planted faults, each caught (an arc's sign flipped, the row negation omitted,
+B's corner shifted, B^(1)'s changed entries shifted). The journal version
+(Theoretical Computer Science 1071, 2026) could not be read here, so whether
+it corrects Theorem 1.4(2) is not known.
