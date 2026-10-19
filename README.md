@@ -6241,3 +6241,92 @@ way the additive network's χ is 0.019 to 0.022, a fifth of the 0.1 the text
 says it agrees with. Read as 4χ, the curves give 0.094 to 0.109 for the
 additive network and 0.154, 0.010, 0.007 and 0.004 for the multiplicative one,
 beside this simulation's 0.146, 0.011, 0.006 and 0.004.
+
+## dr/richardson2021.py: Richardson et al., lifelong BCAA restriction and survival in mice (2021)
+
+`dr/richardson2021.py` tests claim `ext:1be155e1b24e78fd`, Richardson, Konon,
+Schuster, … & Lamming, "Lifelong restriction of dietary branched-chain amino
+acids has sex-specific benefits for frailty and life span in mice" (Nature
+Aging 1, 73–86, 2021): "Here, we demonstrate that restricting dietary BCAAs
+increases the survival of two different progeroid mouse models, delays frailty
+and promotes the metabolic health of wild-type C57BL/6J mice when started in
+midlife, and leads to a 30% increase in lifespan and a reduction in frailty in
+male, but not female, wild-type mice when fed lifelong." Its data of record is
+the paper's Supplementary Tables workbook (Nature Aging's
+`43587_2020_6_MOESM2_ESM.xlsx`), whose Tables 2, 5, 8 and 10 list every
+mouse's lifespan in days, 1 for a death and 0 for a censored mouse, in
+GraphPad Prism's layout. The module reads them by hash with the standard
+library and computes what Prism 8 does: exact Kaplan–Meier medians (with
+Prism's rule for a curve that sits at one half), the log-rank
+(Mantel–Haenszel) test and the Gehan–Breslow–Wilcoxon test, each diet against
+its table's Control. The test takes the claim's survival statements; its
+frailty and metabolic statements are not tested, since the deposit gives
+frailty only as group means and no metabolic data.
+
+| Command | Claim |
+|---|---|
+| `python3 dr/richardson2021.py` | Richardson et al. 2021: cutting dietary BCAAs by two thirds lengthens progeroid survival, and lifelong male but not female lifespan |
+
+scipy and statsmodels (for the controls and the Wang–Allison readings only),
+in the pinned `scipy-notebook` image, on the deposit (by hash); seconds.
+Tests: `python3 -m unittest tests.test_richardson2021`, on a workbook made in
+the tests. The receipt (`8464706b…`, 19 October, at `6ade554`, rules first at
+`c1ad253`, a verification): all four conditions hold.
+- Lmna−/− females on Low BCAA (18 mice against 9): Gehan–Breslow–Wilcoxon p
+  0.0098 and a median of 68.5 days against 37 (printed 0.0098, 69 and 37); the
+  log-rank p is 0.0794, as printed.
+- LmnaG609G/G609G (12 against 15): log-rank p 0.0274, median 178 against 167
+  days, as printed.
+- Wild-type males fed from weaning (30 against 54): median 994 against 754
+  days, 31.83% longer, log-rank p 0.0373 (printed 31.83% and 0.037).
+- Wild-type females fed from weaning (29 against 60): median 700 against 697
+  days, 0.43% longer, log-rank p 0.684, as printed.
+
+Beside the test, nothing counted:
+- **Supplementary Table 3:** 41 of its 47 medians, changes and p come out as
+  printed once its medians are read as Prism's rounded to whole days (68.5
+  and 52.5 days print as 69 and 53, and its changes come from the rounded
+  medians: 86.49% where the unrounded give 85.14%). Its two midlife p, headed
+  log-rank (0.959 and 0.608), are the Gehan–Breslow–Wilcoxon test's (0.9593
+  and 0.6077); the log-rank test gives 0.642 and 0.880. The Lmna−/− males'
+  four p are not reproduced, though their medians are: log-rank 0.463 and
+  0.244, Wilcoxon 0.675 and 0.094 (printed 0.5527, 0.2045, 0.5689 and 0.0714).
+- **Maxima and the Wang–Allison test:** no reading reproduces the printed
+  "Max (75%) Survival" of every group (each group's age at 75% mortality by
+  its Kaplan–Meier staircase gives 4 of 15, by its deaths' nearest rank 6, by
+  all its mice 5), nor the printed Wang–Allison p (none of 12 under each of
+  the module's 24 readings; a diagnostic outside the receipt tried 1,728 and
+  matched at most 1). Under the reading nearest the Methods (the pair's age of
+  75% mortality, censored mice dropped, Boschloo's test), the lifelong males'
+  Low BCAA p is 0.188 where the text prints 0.0251 for its 12.3% increase in
+  maximum lifespan.
+- **Low AA:** Lmna−/− females +59.5% (log-rank 0.366, Wilcoxon 0.0355), males
+  +37.5%, LmnaG609G/G609G +15.0% (log-rank 0.0144), lifelong females −22.1%
+  (0.218) and males +34.9% (0.0332), as printed but the Lmna−/− males' p.
+- **The midlife cohort:** medians 5.1% and 3.0% longer (log-rank 0.642 and
+  0.880), no extension, as the paper says. Of its Low BCAA females 23.3% had
+  died by 717 days by Kaplan–Meier (20.6% of the group), against 8.0% of
+  Control's (5.9%); the text prints 26% and 8%.
+- **The longest-lived lifelong Low BCAA male** died at 1,456 days, as the text
+  says.
+- **Frailty,** from the deposit's item means (two decimals): the lifelong Low
+  BCAA males' mean item score is below Control's at every age from 25 months
+  (0.083 against 0.128 at 25 months, 0.107 against 0.218 at 36), as the text
+  says; the midlife females' and males' at 4 of 5 and 6 of 7 ages; the
+  lifelong females' at 6 of 8, where the text found no significant difference.
+
+Controls 6 of 6: the workbook as pinned, with its captions' counts; Table 3 as
+read; the log-rank and Gehan–Breslow–Wilcoxon p against statsmodels' survdiff
+and the log-rank against scipy's logrank (to 1e-9), and the exact curves
+against scipy's ecdf, on seed-drawn samples and on the test's four
+comparisons; Prism's FAQ medians; swapped groups, reversed rows and each
+Control against itself; and planted faults each condition catches. The first
+trial found the frailty reader reading nothing (the cells are "mean ± SEM"
+text), the text's 717-day count to include that day, and Table 3's medians
+printed in whole days; those items beside the test were fixed at `6ade554`
+(declared), and the test did not change.
+
+Found on the way: Supplementary Table 3 heads its midlife p values "p (log
+rank)", but 0.959 and 0.608 are the Gehan–Breslow–Wilcoxon test's; the
+log-rank test gives 0.642 and 0.880. Neither changes the paper's finding that
+BCAA restriction begun in midlife did not extend lifespan.
