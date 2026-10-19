@@ -207,6 +207,13 @@ class Tests(unittest.TestCase):
         with self.assertRaises(M.Refused):
             M.rowley_cells(broken)
 
+    def test_split_pairs(self):
+        self.assertEqual(M.split_pairs(S3, 13), [])
+        self.assertEqual(M.split_pairs([[1], [2, 3]], 3), [(1, 3)])
+        self.assertEqual(M.symmetry_text([]), "symmetric")
+        self.assertEqual(M.symmetry_text([(179, 358)]), "symmetric but for 179 and 358")
+        self.assertEqual(M.symmetry_text([(1, 9), (2, 8), (3, 7)]), "3 pairs split")
+
     def test_last_number_rule(self):
         # Theorem 3.17 from a two-colour WS-template and the base 1..4; the last number goes where it is told
         sets = [[1, 2], [3, 4]]

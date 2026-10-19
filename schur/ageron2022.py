@@ -70,7 +70,7 @@ Table 6 as printed leaves out 49, and it is an S-template with 49 in colour 1 or
    partition, 10 weakly sum-free sets covering 1..71,256. test_passed is 1 if all five hold.
 
 Beside the test, none of it counted: whether the three cited partitions are sum-free (160 into 5, 536 into 6, 1696
-into 7) and symmetric; Definition 2.1 for Tables 5, 6 and 7 and Definition 3.13 for Table 8; Definition 2.8's symmetry
+into 7) and which pairs x, n + 1 - x each splits (Definition 2.8's symmetry); Definition 2.1 for Tables 5, 6 and 7 and Definition 3.13 for Table 8; Definition 2.8's symmetry
 of each S-template (its extension from a one-colour base); Theorem 3.17 alone (1..22,535 and 1..71,255, without the
 last number) and the colours in which the last number keeps each partition weakly sum-free; whether Table 9 is also
 sum-free (a = b counted); four more entries of the paper's Table 3, S(8) >= 5,286 (Table 5 from 160), S(11) >=
@@ -94,6 +94,11 @@ number) has a weak sum fails Definition 3.13, and at least one has a sum; (5) of
 Table 7 to another colour, every move whose construction from the 160 partition has a sum fails Definition 2.1, and at
 least one has a sum; (6) the two tests of each pair return the same result for every colour of every colouring both
 are run on.
+
+Changed after the first trial, whose outputs were seen and which revealed no bug in anything the test computes: three
+outputs beside the test reworded, the values unchanged. premises names the pairs a partition splits rather than calling
+Fredricksen and Sweet's 536 partition not symmetric (their listing rule lets 179 and 358 split, and Definition 2.8 then
+counts it not symmetric); margins names its bounds; seeded counts each inequality's bases out of 100.
 
 What it cannot check: the SAT searches and the claims of optimality (inequality (10) "cannot be improved", WS(6) >= 646
 "cannot give" 647), the backdoor search behind Table 9, that the bounds were new in 2021, and inequality (7) (its
@@ -148,6 +153,7 @@ WS6 = (9, 646, 6)
 CLAIMED = {"s9": 17803, "s10": 60948, "ws6": 646, "ws9": 22536, "ws10": 71256}
 TABLE3 = {"s8": 5286, "s11": 203828, "s12": 644628, "s13": 2011290}
 PREVIOUS = {"s9": 17694, "s10": 60320, "ws6": 642, "ws9": 22056, "ws10": 70778}
+NAMES = {"s9": "S(9)", "s10": "S(10)", "ws6": "WS(6)", "ws9": "WS(9)", "ws10": "WS(10)"}
 BASES = 100
 MOVES = 20
 OUTPUTS = ("tables", "bases_read", "s9", "s9_passing", "s10", "s10_sums", "ws6", "ws6_sums", "ws9", "ws9_sums",
@@ -394,9 +400,18 @@ def symmetric_template(sets, q):
     return all(h[x] == h[n + 1 - x] for x in range(1, n + 1))
 
 
-def symmetric_partition(sets, n):
+def split_pairs(sets, n):
+    """Definition 2.8 for a partition of 1..n: the pairs x < n + 1 - x that lie in different sets."""
     where = {x: i for i, s in enumerate(sets) for x in s}
-    return all(where.get(n + 1 - x) == where[x] for x in where if 2 * x != n + 1)
+    return [(x, n + 1 - x) for x in sorted(where) if x < n + 1 - x and where.get(n + 1 - x) != where[x]]
+
+
+def symmetry_text(pairs):
+    if not pairs:
+        return "symmetric"
+    if len(pairs) <= 2:
+        return "symmetric but for " + "; ".join(f"{x} and {y}" for x, y in pairs)
+    return f"{len(pairs)} pairs split"
 
 
 # ---------------------------------------------------------------- constructions
@@ -648,8 +663,7 @@ def run(seed, inputs="inputs", results="results"):
 
     # beside the test
     prem = {name: tally.verdict(g, k) for name, g, k in (("160", g160, 5), ("536", g536, 6), ("1696", g1696, 7))}
-    sym_bases = {"160": symmetric_partition(b160, 160), "536": symmetric_partition(b536, 536),
-                 "1696": symmetric_partition(b1696, 1696)}
+    sym_bases = {"160": split_pairs(b160, 160), "536": split_pairs(b536, 536), "1696": split_pairs(b1696, 1696)}
     d21 = {}
     for c, t in s_tables.items():
         if not SH.defective(t):
@@ -815,8 +829,8 @@ def run(seed, inputs="inputs", results="results"):
         "ws9_sums": len(vw9["sums"]) if vw9 is not None else -1,
         "ws10": verdict_text(vw10, "Table 8 from 1696") if vw10 is not None else "Table 8 not used",
         "ws10_sums": len(vw10["sums"]) if vw10 is not None else -1,
-        "premises": "; ".join(f"{name} {'sum-free' if v['free'] else 'not sum-free'}"
-                              f"{', symmetric' if sym_bases[name] else ', not symmetric'}" for name, v in prem.items()),
+        "premises": "; ".join(f"{name} {'sum-free' if v['free'] else 'not sum-free'}, {symmetry_text(sym_bases[name])}"
+                              for name, v in prem.items()),
         "definitions": "; ".join(f"Table {c}: {d21[c]}" for c in s_tables) + "; Table 8: " + (
             f"a {b}-WS-template" if br8 is None else str(br8)),
         "symmetry": "; ".join(f"Table {c} {sym[c]}" for c in s_tables),
@@ -825,8 +839,9 @@ def run(seed, inputs="inputs", results="results"):
                        or "Table 8 not used",
         "ws6_strong": f"Table 9 as sum-free: {short(strong9)}; x and 2x in one set for {doubles} x",
         "table3": "; ".join(f"{k}: {short(v)}" for k, v in t3.items()),
-        "seeded": (f"{BASES} bases, k 2..6, p {min(ps)}..{max(ps)}: " + ", ".join(f"{k} {n}" for k, n in seeded.items())),
-        "margins": ", ".join(f"{k} +{CLAIMED[k] - PREVIOUS[k]}" for k in CLAIMED),
+        "seeded": (f"{BASES} bases, k 2..6, p {min(ps)}..{max(ps)}: "
+                   + ", ".join(f"{k} in {n} of {BASES}" for k, n in seeded.items())),
+        "margins": ", ".join(f"{NAMES[k]} +{CLAIMED[k] - PREVIOUS[k]}" for k in CLAIMED) + " over Tables 1 and 2",
         "moves": (f"Table 8: {m8_caught} of {len(m8)} moves give a weak sum, {m8_unsound} of them pass Definition 3.13; "
                   f"Table 7: {m7_caught} of {MOVES} give a sum, {m7_unsound} pass Definition 2.1"),
         "conditions_met": sum(cond.values()), "conditions_total": len(cond), "test_passed": int(all(cond.values())),
