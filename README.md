@@ -5856,10 +5856,11 @@ Beside the test, nothing counted:
   test meets 5 or 6 of 15 conditions. The rising group forms only a slow,
   partial torus (m_group 0.34 to 0.48 at r_o = 1.75 to 2.25, 0.76 by 3.75) and
   does not polarize by 4 (p_group 0.30). The falling sweep retraces it, so
-  there is no memory. Mean gap to the figure (read by eye): 0.42 for the sums,
-  0.14 to 0.18 for unit vectors.
-- **Later than the figure:** under unit vectors the rising torus lasts to
-  r_o = 3.5, where the figure's polarizes from 2.75 to 3.25.
+  there is no memory. Mean gap to the figure (read by eye): 0.42 to 0.44 for
+  the sums, 0.14 to 0.18 for unit vectors.
+- **Later than the figure:** under all four unit-vector readings the rising
+  torus lasts to r_o = 3.5 (m_group at least 0.77), where the figure's
+  polarizes from 2.75 to 3.25.
 - **Fragmentation:** nu1 loses 2 of 15 groups early in the rising sweep and 5
   more at the end of the falling (57 of 375 replicate-values).
 - **Random starts** (nu1, 5,000 steps) at r_o = 1.75 to 2.25 give the torus
@@ -5869,8 +5870,8 @@ Beside the test, nothing counted:
   very small range").
 - **Figure 3's grid** (nu1, 10 random starts each): a swarm at
   Delta r_o = 0, a torus at Delta r_o = 1 with Delta r_a = 13, a dynamic
-  parallel group at 2, highly parallel from 4, and fragmentation where
-  Delta r_a is small.
+  parallel group at 2, highly parallel from 4, and fragmentation where both
+  widths are small.
 - **Figure 5's sorting** (nu1): r_r with s.d. 0.3 gives centre rho −0.58
   (figure −0.57) but front −0.04 (figure −0.44). Speed with s.d. 0.2 gives front
   0.79 and centre −0.19 (figure 0.76 and −0.22), but only 3 of 30 groups held
