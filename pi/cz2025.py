@@ -82,6 +82,11 @@ each constant; the rules below were then written for all 21 fractions with a pri
    three planted faults, each caught: (1.4) with b_0 = 241, its limit missed; (1.4) with K = -1, its limit missed;
    and rule 3 without d*_D(n), an integer missed.
 
+Changed after the first trial, whose outcome had been seen (all 81 conditions and all 8 controls held): beside items
+(d) and (e) took |q'(n)L - p'(n)| at the working 280 digits, where its cancellation needs thousands (for (1.11) at
+n = 300 about 4,400), and printed nonsense; they now take L - p(n)/q(n) as the exact difference from the convergent
+60 steps on (a tail below E^-60 relative), with logarithms of the integers. No condition, control or input changed.
+
 What it cannot check: the limits as identities (the paper proves them through CM values of hypergeometric functions;
 here they hold to 200 digits); Theorem 7.3 beyond n = 300; and Proposition 7.7's asymptotics, which rest on the prime
 number theorem.
@@ -443,6 +448,12 @@ def rate(A, K, D):
         return None
     R = (A + mpmath.sqrt(disc)) / 2
     return R * R / (K * D * D)
+
+
+def log_gap(p, q, n, m):
+    """log|p(m)/q(m) - p(n)/q(n)|, exactly from the integers: the error of the nth convergent when m is far enough on."""
+    d = Fraction(p[m], q[m]) - Fraction(p[n], q[n])
+    return math.log(abs(d.numerator)) - math.log(d.denominator)
 
 
 def depth_for(E, digits):
@@ -959,7 +970,7 @@ def run(seed, inputs="inputs", results="results"):
                 detail["limits"][r["tag"]] = {"E": None}
                 continue
             N = depth_for(E, DIGITS_RATE)
-            p, q = family_convergents(r, max(N, N_DEN + 2))
+            p, q = family_convergents(r, max(N, N_DEN + 62))
             conv[r["tag"]] = (p, q)
             L = limit_value(r, cache)
             err = abs(mpmath.mpf(p[N]) / q[N] - L)
@@ -1047,9 +1058,9 @@ def run(seed, inputs="inputs", results="results"):
         f = lambda n: abs(r14["K"]) ** (n // 2) * math.prod(6 * (j - 1) + 1 for j in range(1, n + 1))
         drift = []
         for n in (100, 200):
-            qp = mpmath.mpf(q[n]) / f(n)
-            pp = mpmath.mpf(p[n]) / f(n)
-            drift.append(mpmath.log(abs(qp * L14 - pp)) + n * mpmath.log((253 + 80 * mpmath.sqrt(10)) / 3))
+            log_qp = math.log(abs(q[n])) - math.log(f(n))
+            drift.append(mpmath.mpf(log_qp + log_gap(p, q, n, n + 60))
+                         + n * mpmath.log((253 + 80 * mpmath.sqrt(10)) / 3))
         thm61 = (f"E = (16+5 sqrt10)^4/36: {'yes' if abs(E14 - Ealt) < mpmath.mpf(10) ** -250 else 'no'}; "
                  f"error x E^n / (3^(3/2) CS(-3)) at n = 30: {mpmath.nstr(const, 8)}; "
                  f"log|q'L - p'| + n log((253+80 sqrt10)/3) at n = 100, 200: "
@@ -1062,13 +1073,11 @@ def run(seed, inputs="inputs", results="results"):
             p, q = conv[r["tag"]]
             n = N_DEN
             fn = abs(r["K"]) ** (n // 2) * math.prod(r["D"] * (j - 1) + 1 for j in range(1, n + 1))
-            F = mpmath.log(abs(rate(r["A"], r["K"], r["D"]))) / 2
-            L = limit_value(r, cache)
-            qp = mpmath.mpf(q[n]) / fn
-            pp = mpmath.mpf(p[n]) / fn
-            grow = mpmath.log(abs(qp)) / (n * F)
-            small = -mpmath.log(abs(qp * L - pp)) / (n * F)
-            l12.append((r["tag"], float(grow), float(small)))
+            F = float(mpmath.log(abs(rate(r["A"], r["K"], r["D"]))) / 2)
+            log_qp = math.log(abs(q[n])) - math.log(fn)
+            grow = log_qp / (n * F)
+            small = -(log_qp + log_gap(p, q, n, n + 60)) / (n * F)
+            l12.append((r["tag"], grow, small))
     lemma12 = (f"at n = 300, log|q'|/(nF) from {min(x[1] for x in l12):.3f} to {max(x[1] for x in l12):.3f}, "
                f"-log|q'L-p'|/(nF) from {min(x[2] for x in l12):.3f} to {max(x[2] for x in l12):.3f}")
 
