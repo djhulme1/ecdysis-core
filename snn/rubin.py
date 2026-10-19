@@ -63,7 +63,9 @@ before any run of the model at the test's rates or durations.
      0.019, 0.019) and the text's 0.1 = 2 (alpha - 1) of Eq. 13, the shares below 0.1 and at or above 0.9 at 10 Hz
      (Figure 2(a): 39% and 41%), its halves, and the distances between its rates;
    - the equilibration at 10 Hz under each rule: the first 10 s mark after which the mean weight stays within 0.01
-     of the window's mean (the paper: the additive model much slower);
+     of the window's mean (the paper: the additive model much slower). Changed after the first trial, whose
+     outcomes were seen: the uniform start's mean is 0.5, already within 0.01 of the multiplicative equilibrium's,
+     so its mark says nothing; the run from every weight at 1, whose mean must travel to it, is reported beside it;
    - a single synapse (Figure 1, and Figure 2's upper histograms): a Poisson train at 10 Hz as the input and the
      same train shifted by dt as the output, dt = -50, -20, -10, -5, 5, 10, 20 and 50 ms, simulated in continuous
      time for 3,000 s and the weight's mean taken every second over the last 2,000 s, under each rule, against
@@ -519,6 +521,10 @@ def fmt(x, nd=3):
     return f"{x:.{nd}f}"
 
 
+def secs(t):
+    return "-" if t is None else f"{t:.0f} s"
+
+
 def run(seed, results="results", log=sys.stderr):
     if not re.fullmatch(r"[0-9a-f]{64}", seed):
         raise Refused("the seed must be 64 hex characters")
@@ -574,6 +580,7 @@ def run(seed, results="results", log=sys.stderr):
     add_dist = {f"{a}-{b}": wasserstein(add[a]["hist"][0], add[b]["hist"][0])
                 for i, a in enumerate(RATES) for b in RATES[i + 1:]}
     eq_mult = equilibration(mult[10]["windows"], mult[10]["w_mean"])
+    eq_one = equilibration(one["windows"], one["w_mean"])
     eq_add = equilibration(add[10]["windows"], add[10]["w_mean"])
 
     single = {}
@@ -618,9 +625,9 @@ def run(seed, results="results", log=sys.stderr):
         "single": ("one synapse, +10/-10 ms: multiplicative " + f"{single[(1, 10.0)]:.3f}/{single[(1, -10.0)]:.3f}"
                    + f" (Eq. 9 {w0_formula(10.0):.3f}/{w0_formula(-10.0):.3f}); additive "
                    + f"{single[(0, 10.0)]:.3f}/{single[(0, -10.0)]:.3f}"),
-        "equilibration": (f"10 Hz, mean w within {EQ_WITHIN} from then on: multiplicative "
-                          f"{'-' if eq_mult is None else f'{eq_mult:.0f} s'}, additive "
-                          f"{'-' if eq_add is None else f'{eq_add:.0f} s'}"),
+        "equilibration": (f"10 Hz, mean w within {EQ_WITHIN} for good: multiplicative {secs(eq_mult)} from uniform "
+                          f"(its mean starts at 0.5), {secs(eq_one)} from all at 1; additive {secs(eq_add)} from "
+                          f"uniform"),
         "conditions_met": sum(cond.values()),
         "conditions_total": len(cond),
         "test_passed": int(all(cond.values())),
@@ -649,7 +656,8 @@ def run(seed, results="results", log=sys.stderr):
               "additive": {str(r): dict(keep(add[r]), shares=add[r]["shares"], halves=add[r]["halves"])
                            for r in RATES},
               "additive_distances": add_dist,
-              "equilibration_s": {"multiplicative_10": eq_mult, "additive_10": eq_add},
+              "equilibration_s": {"multiplicative_10": eq_mult, "multiplicative_10_from_one": eq_one,
+                                  "additive_10": eq_add},
               "single_synapse": {f"{'multiplicative' if k[0] else 'additive'} {k[1]:g} ms": v
                                  for k, v in single.items()},
               "w0_formula": {f"{dt:g} ms": w0_formula(dt) for dt in SINGLE_DTS},
