@@ -143,6 +143,16 @@ class Lemma19(unittest.TestCase):
         self.assertEqual(p, 29)
         self.assertEqual(M.least_prime_above(89), 97)
 
+    def test_form_value_settles(self):
+        x = M.lemma19(*TOY, 2)
+        with mpmath.workdps(x["digits"]):
+            fs = M.series_value(x["parts"], 3, dps=x["digits"])
+            self.assertLess(abs(fs - x["F"]) / abs(fs), mpmath.mpf("1e-25"))
+        F, dps = M.form_value(x["A"], 0)
+        self.assertGreaterEqual(dps, 160)
+        with self.assertRaises(M.Refused):
+            M.form_value({0: Fraction(0), 5: Fraction(0)}, 0)
+
     def test_value_against_series(self):
         with mpmath.workdps(40):
             fs = M.series_value(self.res["parts"], 3, dps=40)

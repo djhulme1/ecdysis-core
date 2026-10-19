@@ -11,10 +11,15 @@ irrational."
 
 Its registered test is TEST below. The input is the v2 e-print from arXiv (one gzipped TeX file, rvbr.tex), checked
 against its SHA-256 and read as data (decompressed with the standard library and read as text; nothing in it is run).
-Every rule below was fixed before any quantity was computed for the paper's parameters; the TeX was read in full
-before the rules, and nothing of the paper's cases was computed before the commit. One reading, of (8.7), was settled
-on the tests' small case before the commit (item 3). Nothing here is random but the
-points of control (3), drawn from the seed.
+Every rule below was fixed before any quantity was computed for the paper's parameters; the TeX was read in full before
+the rules, and nothing of the paper's cases was computed before the commit. One reading, of (8.7), was settled on the
+tests' small case before the commit (item 3). After the first trial, under a seed of Imago's own and with nothing
+sealed, one fault was mended: control (8) had computed the form's value from its coefficients at too few digits (their
+rounding noise near 1e-80 against a form near 1e-108 at n = 1), and the value is now computed at rising precision until
+two agree; nothing in conditions (i) to (iv) changed. The same trial found Proposition 4 giving 5.96760227530 at Theorem
+2's directions (6.8) and 5.44124250745, the printed bound, at the Observation's directions, which the paper calls
+G-equivalent to (6.8); so the test as registered would fail a claim the run bears out, and the check is held for the
+owner (ZETA2_TEST, item 5). Nothing here is random but the points of control (3), drawn from the seed.
 
 1. The source. With its comments removed and its whitespace collapsed, rvbr.tex must hold every formula and printed
    value in PRINTED_TEX (the parameters of Theorems 1 to 3, Hata's (5.14), the Observation's directions, the remark's
@@ -65,7 +70,9 @@ points of control (3), drawn from the seed.
    phi(x) the maximum over M of the printed five-floor sum of c minus that of c', on fractions of denominator at most
    28; m_1, m_2, m_3 as printed; tau_0 < tau_1 the zeros of the quadratic; f_0 of Section 6; C_0 = -Re f_0(tau_0), C_1 =
    Re f_0(tau_1); C_2 = m_1 + m_2 - (the two integrals, the second over [0, 1/m_3)); the bound. Condition (iv): it lies
-   in [5.44124250, 5.44124251). test_passed is 1 if all four conditions hold.
+   in [5.44124250, 5.44124251). ZETA2_TEST names the directions condition (iv) reads: (6.8), as registered, or, under
+   the owner's correction of the test, the Observation's (10, 11, 12; 0, 24, 25), the other set then beside. test_passed
+   is 1 if all four conditions hold.
 6. Beside the test, none of it counted: every printed constant of the three proofs (Theorem 3's tau_0, C_0 and C_2;
    Theorem 1's tau_0, tau_1, C_0, C_1, the integral 24.18768530, the 4, C_2, m_1 = m_3 = 16 and m_2 = 18, and phi's
    range {0, 1, 2}), each compared at its printed digits, cut or rounded; Theorem 3's sets Omega_nu = {x: phi(x) >= nu}
@@ -77,7 +84,7 @@ points of control (3), drawn from the seed.
    120 settles; Theorem 3 with phi taken as 0 (no arithmetic saving); Lemma 19 at n = 1 with (8.7) as printed (no factor
    h_0 + 2t), which coefficients are then nonzero; Lemma 19's tighter "fairly rough" inclusions D_(m_0)^(q-j-1) A_j; how
    many primes in Phi's range are tight (Phi p no longer divides); and log|F|/n for the forms of item 3 with F = sum A_i
-   zeta(i) - A_0 (every nonzero A_i) in mpmath at enough digits, against -C_0.
+   zeta(i) - A_0 (every nonzero A_i) in mpmath at rising precision until two values agree, against -C_0.
 7. Controls (controls_passed counts those that behave as stated): (1) tau_0 at PRECISION and at 2 PRECISION agree to
    PRECISION - 10 digits, the polynomial vanishes there to the precision, and polyroots returns as many zeros as the
    degree; (2) psi(b) - psi(a) equals mpmath's quadrature of psi' on three intervals of Theorem 3's partition (1e-30);
@@ -87,9 +94,10 @@ points of control (3), drawn from the seed.
    denominator of the form), is reported non-integral at n = 1; (6) the zeta(2) group has order 120 and Section 5's M
    has 480 distinct collections; (7) the quadratics' zeros lie where the paper says (beta_2* < tau_0 < alpha_1* and
    tau_1 > alpha_4* for zeta(3); tau_0 < beta_1 and tau_1 > alpha_3* for zeta(2)) and each quadratic vanishes at them;
-   (8) for n = 1 the form's value from its coefficients, sum A_i zeta(i) - A_0, equals the series (1/2) sum over t >= 0
-   of R''(t) (R'' = R (L'^2 + L''), L = log R, by mpmath's nsum; the terms from 1 - h_1 to -1 vanish, R having a zero of
-   order r there) to 1e-20 relative.
+   (8) for n = 1 the form's value from its coefficients, sum A_i zeta(i) - A_0, at rising precision until two values
+   agree to 1e-30 relative, equals the series at that precision, (1/2) sum over t >= 0 of R''(t) (R'' = R (L'^2 + L''),
+   L = log R, by mpmath's nsum; the terms from 1 - h_1 to -1 vanish, R having a zero of order r there) to 1e-20
+   relative.
 
 Writes results/outputs.json (the values a receipt carries) and results/detail.json (every value computed).
 Run with: python3 pi/zudilin2004.py (the pinned scipy-notebook image, for mpmath).
@@ -129,6 +137,10 @@ T1 = ((18, 17, 16, 19), (0, 7, 31, 32))
 HATA = ((8, 7, 8, 9), (0, 1, 15, 16))
 T2 = ((13, 12, 14), (0, 24, 28))
 OBS = ((10, 11, 12), (0, 24, 25))
+# Condition (iv)'s directions: (6.8), as registered. The first trial found Proposition 4 giving 5.96760227530 at (6.8)
+# and 5.44124250745 at the Observation's (10, 11, 12; 0, 24, 25), which the paper calls G-equivalent to (6.8), so the
+# check is held for the owner: under his correction of the test, ZETA2_TEST becomes OBS and TEST the corrected text.
+ZETA2_TEST = T2
 BOUNDS = {"t1": (Fraction(551389062, 10 ** 8), Fraction(551389063, 10 ** 8)),
           "t2": (Fraction(544124250, 10 ** 8), Fraction(544124251, 10 ** 8))}
 
@@ -720,15 +732,31 @@ def lemma19(r, eta0, eta, n, want_value=True, well_poised=True):
     out["nonzero"] = sorted(i for i in A if i and A[i] != 0)
     if want_value:
         big = max(abs(A[i]) for i in A if A[i] != 0)
-        digits = int(math.log10(big.numerator + 1) - math.log10(big.denominator)) + 80
+        start = max(int(math.log10(big.numerator + 1) - math.log10(big.denominator)), 0)
+        F, digits = form_value(A, start)
         out["digits"] = max(digits, PRECISION)
+        out["F"] = F
         with mpmath.workdps(out["digits"]):
-            F = -mpmath.mpf(A[0].numerator) / A[0].denominator
-            for i in out["nonzero"]:            # every nonzero coefficient, kept or not
-                F += mpmath.mpf(A[i].numerator) / A[i].denominator * mpmath.zeta(i)
-            out["F"] = F
-            out["log_abs_F_over_n"] = mpmath.log(abs(F)) / n if F != 0 else None
+            out["log_abs_F_over_n"] = mpmath.log(abs(F)) / n
     return out
+
+
+def form_value(A, start):
+    """sum A_i zeta(i) - A_0 over every nonzero A_i, kept or not, at rising precision (start + 80, + 160, + 320, ...
+    digits) until two successive values agree to 1e-30 relative; (the value, the digits it settled at)."""
+    prev, margin = None, 80
+    while margin <= 40960:
+        dps = start + margin
+        with mpmath.workdps(dps):
+            F = -mpmath.mpf(A[0].numerator) / A[0].denominator
+            for i in sorted(A):
+                if i and A[i] != 0:
+                    F += mpmath.mpf(A[i].numerator) / A[i].denominator * mpmath.zeta(i)
+            if prev is not None and F != 0 and abs(F - prev) <= abs(F) * mpmath.mpf(10) ** -30:
+                return F, dps
+            prev = F
+        margin *= 2
+    raise Refused("the form's value did not settle")
 
 
 def least_prime_above(m):
@@ -992,6 +1020,7 @@ def run(seed, inputs="inputs", results="results"):
     hata = zeta3_case(HATA[0], HATA[1], sorted({(perm, HATA[1]) for perm in itertools.permutations(HATA[0])}))
     t2 = zeta2_case(*T2)
     obs = zeta2_case(*OBS)
+    z2 = t2 if ZETA2_TEST == T2 else obs
     q21 = (t3_analytic(*Q21), t3_arithmetic(*Q21))
     q11 = (t3_analytic(*Q11), t3_arithmetic(*Q11))
 
@@ -999,7 +1028,8 @@ def run(seed, inputs="inputs", results="results"):
         "(i) Theorem 3: Lemma 20's hypotheses hold and C0 > C2": bool(an["hypotheses"] and margin > 0),
         "(ii) Lemma 19 for n = 1, 2, 3": bool(l19_ok),
         "(iii) Theorem 1's bound in [5.51389062, 5.51389063)": in_bounds(t1["mu"], *BOUNDS["t1"]),
-        "(iv) Theorem 2's bound in [5.44124250, 5.44124251)": in_bounds(t2["mu"], *BOUNDS["t2"]),
+        ("(iv) Theorem 2's bound in [5.44124250, 5.44124251)" if ZETA2_TEST == T2 else
+         "(iv) the Observation's zeta(2) bound in [5.44124250, 5.44124251)"): in_bounds(z2["mu"], *BOUNDS["t2"]),
     }
 
     # beside: printed values
