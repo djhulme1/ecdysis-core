@@ -6121,3 +6121,61 @@ permutations, mis-specified, as the docstring says. Not checked: the trial
 itself (recruitment, self-reported times, the issues' validity), the exit
 surveys, the expert forecasts and the screen recordings, which are not
 released.
+
+## waring/cglv2019.py: Conner, Gesmundo, Landsberg and Ventura, Waring rank 18 and border Waring rank 17 for det_3 (2019)
+
+`waring/cglv2019.py` tests claim `ext:46b900f96581bdc5`, from Conner, Gesmundo,
+Landsberg and Ventura, "Rank and border rank of Kronecker powers of tensors and
+Strassen's laser method" (arXiv:1909.04785v2, December 2021; computational
+complexity 31, 2022): "We determine new upper bounds for the (Waring) rank and
+the (Waring) border rank of $\det_3$, exhibiting a strict submultiplicative
+behaviour for $T_{skewcw,2}$ which is promising for the laser method."
+
+The module reads the e-print's TeX in memory: the 18 linear forms, over
+Q(theta) with theta = exp(2 pi i/6), whose cubes give det_3, the 17 forms L_i(t)
+in the unknowns z_1..z_44, and the degree-27 polynomial whose root y* the z_j
+come from. It reads the authors' supplementary Appendices B and C
+(people.tamu.edu/~jml/CGLVkronsupp.html) as Macaulay2 text parsed as data, never
+executed: the y_j as polynomials in y*, the 54 equations and, for each, the
+values of its monomials, the certificate the paper's proof describes. Exact
+arithmetic in Q(theta), in F = Q[y]/(f) and in the cubic extensions
+F[u]/(u^3 - p) of the 40 equations of type 2.
+
+| Command | Claim |
+|---|---|
+| `python3 waring/cglv2019.py` | Conner et al. 2019: det_3 has Waring rank at most 18 and border Waring rank at most 17, below 25, the square of T_skewcw,2's border rank |
+
+The scipy-notebook image (numpy, sympy, mpmath); three inputs by hash: the
+e-print and Appendices B and C. About a minute. Tests: `python3 -m unittest
+tests.test_cglv2019`, on inputs written there (a certificate of the same shape
+over Q[y]/(y^27 - 2) among them). The receipt (`48485e96…`, 19 October, at
+`bb39081`, rules first at `7dcd23a`, a verification) confirms it, 4 of 4
+conditions:
+- **The 18:** the cubes of the 18 printed forms sum exactly to 6 det(X), the
+  cubic form of eps (x) eps, which is what the paper calls det_3 (its Appendix B
+  checks the same 6).
+- **The 17:** the t^0, t^1 and t^2 coefficients of sum L_i(t)^3 - 6 t^2 det(X)
+  are 54 equations, each a rational multiple of exactly one of Appendix C's
+  (14 of type 1, 40 of type 2), and the certificate holds in every identity,
+  196 cube identities among them; evaluation at a real root of f is a ring
+  homomorphism and real cube roots are unique, so the equations hold at the
+  paper's z_j, at any of f's three real roots.
+- **T_skewcw,2:** its p = 1 Koszul flattening under the paper's restriction has
+  rank 9, so its border rank is at least 5 and 17 < 25.
+- **The Kronecker square:** the paper's identification makes T_skewcw,2 the
+  Levi-Civita tensor, whose Kronecker square is symmetric with cubic form
+  6 det(X).
+
+Beside the test: Appendix B's forms are the TeX's; the TeX's polynomial is
+Appendix C's modulus; at each real root the 54 equations vanish to within
+1e-107 at 120 digits; the printed counts (54, 44, 14, 40) are the files'; Q[p] =
+Q[y*] for every type 2 equation, as the paper says; the Proposition's flattening
+rank is 2q + 5 for every even q from 2 to 20; and Johns & Teitler's remark that
+the 18 forms are the case d = 3 of their identity holds once rows 2 and 3 are
+negated and column 2 divided by 3, each form one of their terms times a sixth
+root of unity (none matches without the sign change). Controls 4 of 4: planted
+faults in a form and in y_1 are caught, the numerics agree with the exact
+verdicts, and unit tensors give Koszul rank 2r. The first trial met every
+condition and control; the Johns & Teitler comparison was then widened to
+diagonal sign changes (`bb39081`, declared). Not checked: that 17 and 18 are
+optimal, or the numerical search and LLL reduction that found the 17.
