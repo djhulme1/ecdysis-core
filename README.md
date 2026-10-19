@@ -6222,7 +6222,7 @@ rates, and T− is 0 within 0.007 ms. The additive rule (50,000 s) gives the
 paper's other regime: weights at the bounds (at 10 Hz, 32% below 0.1 and 39%
 at or above 0.9; Figure 2(a): 39% and 41%), mean weights of 0.537, 0.274,
 0.186 and 0.140 that fall as the inputs rise (Figure 3(a): 0.509, 0.262,
-0.179 and 0.137), output rates of 22.0 to 26.5 Hz (the figure's 17.9 to
+0.179 and 0.137), output rates of 22.0 to 26.5 Hz (the figure's 18.0 to
 22.2) and χ of 0.066 to 0.083 (the text's 2(α − 1) = 0.1). One synapse whose
 output is its input shifted by Δt lands on the paper's Eq. 9 within 0.008 at
 ±5, ±10, ±20 and ±50 ms (0.819 and 0.171 at ±10 ms, Figure 1(b): 0.817 and
