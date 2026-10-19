@@ -5592,3 +5592,75 @@ Controls 9 of 10:
 Two trials under Imago's own seed met all four conditions. Not checked: the
 paper's learned dictionary and image patch (not released), its CPU benchmark
 against FISTA, and the limit itself.
+
+## schur/shifted2026.py: Bengone et al., shifted S-templates and S(k + 2) ≥ 10 S(k) + 2 (2026)
+
+`schur/shifted2026.py` tests claim `ext:82570016b4c60524`, from Bengone, Brouk,
+Grinsztajn, Helbert, Lugherini, Rimmel and Tomasik (CentraleSupélec), "Shifted
+S-templates and improved lower bounds for Schur numbers" (arXiv:2607.15034v1,
+July 2026). Its abstract says the construction was "discovered during a
+conversation with ChatGPT 5.5 Pro, then refined, verified, and extended". A
+template of width 10, whose special cells may take the colour of the row before,
+gives S(k + 2) ≥ 10 S(k) + 2. With S(6) ≥ 536 and S(11) ≥ 203,828 that gives
+S(8) ≥ 5,362 and S(13) ≥ 2,038,282, past the 5,286 and 2,011,290 listed before.
+The claim rests on Fredricksen and Sweet's S(6) ≥ 536 (`ext:5c2324a4ae367bf1`,
+by an extends link).
+
+The module reads the template and its tail from the e-print's TeX, and
+Fredricksen and Sweet's partition of 1..536 into 6 by schur/fs.py's rules. It
+reads Ageron et al.'s S-templates of widths 33, 111 and 380 (their Tables 5 to 7,
+arXiv:2112.03175v2) from their PDF, through its cross-reference table and page
+tree; the tables' commas are set from the math italic font. It builds the paper's
+partition of 1..5,362 into 8, Ageron et al.'s of 1..203,828 into 11 by their
+Theorem 2.3, and from that the paper's of 1..2,038,282 into 13. Each is tested
+for sums by two exact bit-set tests written apart, a numba scan and Python
+integers, which must agree colour by colour.
+
+| Command | Claim |
+|---|---|
+| `python3 schur/shifted2026.py` | Bengone et al. 2026: S(k + 2) ≥ 10 S(k) + 2, so S(8) ≥ 5,362 and S(13) ≥ 2,038,282 |
+
+The scipy-notebook image (numpy, numba); three inputs by hash: the claim's
+e-print, Fredricksen and Sweet's PDF and Ageron et al.'s. About two minutes.
+Tests: `python3 -m unittest tests.test_shifted2026`, on other inputs. The receipt
+(`e22cebc8…`, 19 October, at `90cd05b`, rules first at `14fb9e7`, a
+verification) confirms it, 3 of 3 conditions:
+- **S(8) ≥ 5,362:** the template turns the 536 partition into 8 sum-free sets
+  covering 1..5,362. The base colours keep 644, 430, 550, 385, 320 and 350
+  integers; the two new colours take 1,074 and 1,609.
+- **S(13) ≥ 2,038,282:** Table 7 turns the 536 partition into 11 sum-free sets
+  covering 1..203,828, and the template turns those into 13 covering
+  1..2,038,282.
+- **The recurrence:** on 200 greedy sum-free bases drawn from the seed (2 to 6
+  colours, 3 to 87 integers), the template gives k + 2 sum-free sets covering
+  1..10p + 2 every time.
+
+Beside the test, nothing counted:
+- **Definition 3**, the paper's finite check, run with the tail over bases of 3
+  to 8 rows: the template is admissible.
+- **Lemma 1's transitions** (row types and carry, the tail's included) number 14,
+  19 and 20 at bases of 3, 4 and 5 rows, then stay at 20. Part (c) says they stop
+  depending on p from p = 3n, which is 3 here; they stop at 5 (Found on the way
+  in the programme's doc). The template passes at every size, so nothing in the
+  paper changes.
+- **Ageron et al.'s tables:** Tables 5 and 7 are S-templates by their Definition
+  2.1. Table 6 as printed leaves out 49; with 49 added to colour 1, or to colour 4,
+  it is one. With two completions the rule builds neither. Table 5 from the 536
+  partition gives 17,694 into 9 sum-free sets, and the template from Fredricksen
+  and Sweet's 1680 partition gives 16,802 into 9.
+- **Margins:** 76 over 5,286 and 26,992 over 2,011,290.
+
+Controls 5 of 5:
+- Sums planted from the seed in the 2,038,282 and 536 partitions are found by
+  both tests, and they are genuine.
+- The two tests agree on every colour of all 577 colourings.
+- Of the template's 100 single-cell changes, 98 give a sum from the 536 partition,
+  and each fails Definition 3. Of the other two, one passes it: row L's tenth cell
+  as A.
+- 19 of 20 seeded moves in Table 7 give a sum, none passing Definition 2.1.
+- Exactly 2 of the 16 two-colourings of 1..4 pass, and none of the 32 of 1..5.
+
+The first trial was refused at reading, on Table 6's missing 49. A rule declared
+in the docstring now reports gaps in the tables beside the test. Not checked:
+Table I's SAT and UNSAT results (no certificates are published), and whether
+better bounds had been listed elsewhere.
