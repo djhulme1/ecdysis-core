@@ -5883,3 +5883,41 @@ free flight; the noise's angles against their exact moments under both noise
 readings; the measures on a ring and a file; the classes; the decision on the
 figure's own values (15 of 15); and a planted history with no memory, which
 fails.
+
+## mm/lu2026.py: Lü, polynomial separation of a shared tensor leg in arbitrary characteristic (2026)
+
+| Command | Claim |
+|---|---|
+| `python3 mm/lu2026.py` | Lü: M + n − 1 copies of a matched sum degenerate to the direct sum of its blocks, each tensored with an n-dimensional dot product |
+
+Standard library, in the pinned `python` image, on the e-print
+(arXiv:2610.18914v1, by hash, its TeX read in memory); under a minute. Tests:
+`python3 -m unittest tests.test_lu2026`, on F_11, F_13, F_25 and pairs with M
+or n of 6 over Q. The receipt (`5cac9bc1…`, 19 October, at `f40bda8`, a
+verification): all 1,800 conditions hold. Proposition 2.1 was built exactly
+over Q and the finite fields of order 2, 3, 4, 5, 7, 8, 9, 16 and 27, for every
+M, n ≤ 5 with M + n − 1 ≤ |F|, with two seeded instances each (360 in all).
+The pullback of M + n − 1 copies along the paper's maps (evaluation and
+Lagrange interpolation, the inverse of the substitution's matrix over
+F[ε, ε⁻¹], the dual of ι_h) is polynomial in ε and equals eq. 2.3's Φ(ε). Its
+value at ε = 0, in the Lagrange basis at the a's, is exactly the direct sum of
+the A_h ⊗ B_X(n). The 40 instances on the smallest fields the proposition
+admits (|F| = M + n − 1, every element used) hold like the rest.
+
+Beside the test, nothing counted:
+- **The paper's remarks:** g_h⁻¹ is j(u) ↦ j((t − a_h)/ε), as printed, and
+  the ε-degree is exactly min(M − 1, n − 1) in all 360 instances.
+- **The copies:** C_μ's flattening rank is M + n − 1 in every field, so no
+  fewer copies of A restrict to A ⊗ C_μ. For n = M the count is 2M − 1,
+  against OpenAI's printed 5M and the 3M − 2 its own construction needs
+  (`mm/omega94.py`): 9, 13 and 25 at M = 5.
+- **Characteristic:** Lemma 4.1's sequence
+  0 → (uw − vs)V_(e−1) → V_e ⊗ span(s, w) → V_(e+1) → 0 is exact for e ≤ 12
+  over F_2, F_3 and F_5. `mm/omega94.py`'s degeneration of C(a,b) ⊗ B_X(2),
+  rebuilt over F_p, holds for all 25 pairs (a ≤ 5, b = 2 to 6) in each, as
+  Section 4 says. Lemma 4.2's tripling uses no field arithmetic.
+
+Controls 8 of 8: the field tables (associativity, distributivity, inverses, a
+generator of order q − 1); interpolation; four planted faults, each caught
+(one evaluation point too few, β without the substitution, a crossed term,
+a repeated a); a case worked by hand; and the e-print's 14 formulas.
