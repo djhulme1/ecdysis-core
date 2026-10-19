@@ -5520,3 +5520,75 @@ constraint. One trial in the reference runner found no bug, and the sealed run
 repeated its outputs. Not checked: Proposition 4.2 itself (its proof passes
 through limits of the character's profiles), Strassen's spectral theorem and the
 counting of Sections 3 and 4.
+
+## snn/tld2017.py: Tang, Lin & Davies, sparse coding by spiking neural networks (2017)
+
+`snn/tld2017.py` tests claim `ext:e014432d4832f546`, from Tang, Lin & Davies
+(Intel), "Sparse Coding by Spiking Neural Networks: Convergence Theory and
+Computational Results" (arXiv:1705.05475v1, 2017): "With a moderate but
+well-defined assumption, we prove that the SNN indeed solves sparse coding." The
+network is the spiking LCA (S-LCA): inhibitory spikes with exponential currents,
+potentials that integrate the current less a bias λ, spike at 1 and reset to 0,
+configured from a non-negative LASSO (CLASSO) problem. The paper proves that its
+spike rates converge to the CLASSO solution, assuming that a neuron which spikes
+for ever does so at bounded intervals. It is the theory behind Loihi's LASSO
+results (`ext:16709f63148f9fdd`, which rests on it by an extends link).
+
+The module simulates the network exactly, event by event: closed forms between
+spikes, and the next spike as the first root of a convex function, found by
+Newton's method from the right. It certifies each CLASSO solution in rationals
+and measures the largest deviation of the rates N_i(t)/t from it over a window,
+exactly, at each neuron's spikes and the window's ends.
+
+| Command | Claim |
+|---|---|
+| `OPENBLAS_NUM_THREADS=1 OPENBLAS_CORETYPE=Prescott python3 snn/tld2017.py` | Tang, Lin & Davies 2017: the S-LCA's spike rates converge to the CLASSO solution |
+
+The scipy-notebook image (numpy, scipy, mpmath); the paper's e-print is its one
+input, read by hash. Its TeX gives the 3-neuron example as exact decimals, and its
+Figure 1's vector drawings give the authors' raster and A-LCA curves. About two
+minutes. Tests: `python3 -m unittest tests.test_tld2017`, on other inputs. The
+receipt (`098ae7e3…`, 19 October, at `3545d2a`, rules first at `00b2731`, a
+verification) confirms it, 4 of 4 conditions:
+- **The example (Section 4.1):** the rates approach the configured problem's
+  solution (0.68313, 0.00001, 1.21773 at t = 100,000, against 0.683126, 0 and
+  1.217737). The largest deviation is 3.05 × 10⁻³ over [500, 1,000], 3.05 × 10⁻⁴
+  over [5,000, 10,000] and 3.06 × 10⁻⁵ over [50,000, 100,000], falling as 1/t.
+  Neuron 2 spikes once, at t = 1.249, and never again.
+- **20 instances shaped like Section 4.2's:** 400 Gaussian 8 × 8 atoms are split
+  into 128 non-negative channels, with λ from the homotopy, giving 8 non-zeros
+  every time and no redraw. The late deviation is at most 0.060% of the
+  solution's largest coefficient (median 0.026%), and at most 0.124 times the
+  early one.
+
+Beside the test, nothing counted:
+- **The assumption:** the runs bear it out. In all 20 instances the neurons
+  spiking in the last window are exactly the solution's support, and their
+  longest interval there is at most 1.55/a*_i. The few neurons outside the
+  support that spike at all stop by t = 4.
+- **Theorem 2's relation:** T(ū_i) − a_i is at most 1/t.
+- **The A-LCA:** from u(0) = 0 it is within 7 × 10⁻⁹ of the solution at t = 50.
+- **Figure 1(d):** its dashed A-LCA curves are the A-LCA started from u(0) = b,
+  within 0.004 (from u(0) = 0 they are 1.23 apart).
+- **Section 4's discrete-time solver** on the example (readout over [500, 1,000]):
+  relative objective gaps of 2.3 × 10⁻⁴ at step 10⁻² and 2.2 × 10⁻⁶ at 10⁻³, the
+  latter at the exact network's floor of 1.9 × 10⁻⁶. So two digits are lost, as
+  the paper says. On the instances the steps differ by 0.3 to 1.3 digits, both
+  near that floor.
+
+Controls 9 of 10:
+- **Passed:** Figure 1(c)'s 23 spikes are matched within 0.011; a 50-digit
+  simulation agrees within 2 × 10⁻¹⁵ and a fixed-step one at 10⁻⁵ within
+  1.1 × 10⁻⁴; L-BFGS-B agrees within 2 × 10⁻⁷; halving the inhibition fails the
+  test; the integral identity, the root residuals, Proposition 1's interval bound
+  and a repeat all hold.
+- **Failed, control (a):** the printed solution [0.684, 0, 1.217] is not the
+  exact solution of the printed example. That solution is 0.6830, 0 and 1.2178
+  for the atoms as printed, 0.6831 and 1.2177 for the network's own problem, and
+  0.6830 and 1.2178 for the unit vectors (3, 8, 3)/√82, (9, 4, 5)/√122 and
+  (2, 1, 4)/√21 that the printed decimals round. That last reading was added after
+  the first trial and declared; it did not change the verdict.
+
+Two trials under Imago's own seed met all four conditions. Not checked: the
+paper's learned dictionary and image patch (not released), its CPU benchmark
+against FISTA, and the limit itself.
