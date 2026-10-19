@@ -6330,3 +6330,90 @@ Found on the way: Supplementary Table 3 heads its midlife p values "p (log
 rank)", but 0.959 and 0.608 are the Gehan–Breslow–Wilcoxon test's; the
 log-rank test gives 0.642 and 0.880. Neither changes the paper's finding that
 BCAA restriction begun in midlife did not extend lifespan.
+
+## introspect/shm2025.py: Song, Hu & Mahowald, no privileged self-access in 21 open language models (2025)
+
+`introspect/shm2025.py` tests claim `ext:df2413a464dc4fd4`, Song, Hu &
+Mahowald, "Language Models Fail to Introspect About Their Knowledge of
+Language" (arXiv:2503.07513, COLM 2025): "While both metalinguistic prompting
+and probability comparisons lead to high task accuracy, we do not find
+evidence that LLMs have privileged "self-access"." Its data of record is the
+authors' release of every model's per-item outputs (`alldata/expr1.csv` and
+`expr2.csv` at `e8d4c5f`): for 21 open models and each item, the Direct
+preference (a difference of log probabilities) and the Meta preference under
+each prompt (the difference of the log probabilities of answering 1 and 2,
+averaged over the two orders). The module follows the authors' `analysis.R`
+line by line, since its tidyverse is in no pinned image: Pearson r between
+each model's Direct and each model's Meta preferences per prompt, averaged
+over prompts; the models' similarity categories; Exp. 1's 5%–95% filter; and
+the least squares of the 441 ordered pairs' Meta–Direct r on their
+Direct–Direct r and category, self the baseline, where a negative coefficient
+would be the self effect introspection predicts.
+
+| Command | Claim |
+|---|---|
+| `OPENBLAS_NUM_THREADS=1 OPENBLAS_CORETYPE=Prescott python3 introspect/shm2025.py` | Song, Hu & Mahowald 2025: prompting and probabilities are both accurate, and no model's prompted answers follow its own probabilities beyond its similarity to others |
+
+numpy, scipy and statsmodels in the pinned `scipy-notebook` image, on the
+release (by hash) and the authors' five texreg tables; about a minute. Tests:
+`python3 -m unittest discover -s tests -p test_shm2025.py`, on a release made
+in the tests. The receipt (`caa7660d…`, 19 October, at `adc2f5a`, rules first,
+a verification): all six conditions hold.
+- Exp. 1's accuracy: all 189 shares (21 models by Direct and under each of the
+  8 prompts) above one half, the lowest 0.624 (Qwen 1.5B Instruct, prompt 6).
+- The filter keeps 294 pairs, as printed. On them the Direct–Direct
+  coefficient is 0.1026 (p 9e-11) and the four categories' 0.0043, 0.0203,
+  0.0519 and 0.0504 (seed variant, base/instruct, same family, other): none
+  negative.
+- Exp. 2 (1,000 items each, six prompts): in wikipedia, news, nonsense and
+  randomseq no category coefficient is negative (the smallest t 0.07).
+
+Beside the test, nothing counted:
+- **The printed tables:** all 322 values of the appendix's five tables come
+  out as printed (every coefficient, standard error and star of Tables 5 to 8
+  and the logistic fit's AIC, BIC, log likelihood and deviance).
+- **The text's values:** 20 of 22. Its seed-variant p = .27 for Direct–Direct
+  on the categories is the regression over all 1,048 pairs (0.266); over the
+  294 filtered pairs, where its section stands, it is 0.148 (a diagnostic
+  outside the receipt). The unfiltered Meta-size p "= .001" is 0.00012
+  (Table 6 prints ***).
+- **The filter's other reading** (Direct and Meta answers disagreeing on at
+  least 5% of an item's 168 model-prompt rows) keeps 680 pairs, so the 294
+  are the code's reading.
+- **Big models** (70B or more, 49 pairs) **and the OLMo seeds:** no negative
+  coefficient at p < 0.05; OLMo's self effect −0.0106 (p 0.30) in Exp. 1.
+- **Item bootstrap** (2,000 draws from the seed): no similarity coefficient's
+  95% interval lies below zero. In Exp. 1 the intervals are 2.2 to 2.5 times
+  the least squares ones, and other's (−0.026 to 0.125) and same family's
+  (−0.008 to 0.110) contain zero: the paper's significantly positive other
+  and same-family effects in Exp. 1 rest on treating the 441 pairs as
+  independent. In Exp. 2 they stay above zero.
+- **Power:** a planted privileged component (each model's Meta preference plus
+  the part of its own Direct preference that no other model shares) makes the
+  test fail in all five regressions from c = 0.5 (the self Meta–Direct r up
+  0.078 on average), and in Exp. 1 alone from c = 0.1 (up 0.043).
+- **A literal self-reader** (each model's Meta preference plus its own
+  standardised Direct preference) passes the test in all five regressions,
+  with a self Meta–Direct r of 0.60 at c = 0.5 and 0.79 at c = 1.
+- **Cohen's kappa** between the two methods' answers: 0.249 on average in
+  Exp. 1 (0.076 to 0.380), the paper's "around 0.25"; 0.309 in Exp. 2.
+- **Exp. 2's first choices:** wikipedia 0.997 by Direct and 0.938 by Meta,
+  news 0.995 and 0.918, nonsense 0.804 and 0.549, randomseq 0.442 and 0.490,
+  as the appendix describes them.
+
+Controls 6 of 6: statsmodels' least squares and the exact rational normal
+equations (to 1e-13); scipy's Pearson r on every pair and prompt (to 1e-15);
+Direct–Direct symmetric with a unit diagonal; the categories from the metadata
+equal to those from the names (21, 24, 10, 82 and 304 pairs); the planted
+privileged component at c = 1 seen in all five regressions (t −23 to −5.6);
+and the logistic fit equal to statsmodels' GLM. One trial under a seed of
+Imago's own gave the same values (the bootstrap aside) and showed no bug. The
+reading pass before the rules counted, as first written, the rows of
+`expr1.csv` whose answer columns read True (an overall share), as the
+docstring declares.
+
+Found on the way: the test cannot see a model that reads out its own
+probabilities. A literal self-reader's prompted answers correlate with each
+model's probabilities in proportion to that model's similarity to its own, so
+its self pairs fall on the regression's line however strong the read-out; the
+test sees only knowledge of itself that no similar model shares.
