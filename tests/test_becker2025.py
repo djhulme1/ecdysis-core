@@ -44,6 +44,12 @@ class Reader(unittest.TestCase):
         self.assertEqual(sum(r["post"] is None for r in rows), 6)
         self.assertTrue(all(r["ai"] in (0, 1) for r in rows))
 
+    def test_beside_columns_out_of_range_are_read(self):
+        lines = synthetic().decode().split("\n")
+        cells = lines[2].split(","); cells[5] = "5.0"; lines[2] = ",".join(cells)
+        rows = M.read_data("\n".join(lines).encode())
+        self.assertEqual(rows[1]["resources"], 5)
+
     def test_refusals(self):
         good = synthetic().decode().split("\n")
         cases = []
@@ -51,7 +57,7 @@ class Reader(unittest.TestCase):
         bad = list(good); bad[2] = bad[2].replace(",2,", ",1,", 1); cases.append(bad)   # issue id twice
         bad = list(good); cells = bad[3].split(","); cells[6] = "2.0"; bad[3] = ",".join(cells); cases.append(bad)
         bad = list(good); cells = bad[4].split(","); cells[7] = "-3"; bad[4] = ",".join(cells); cases.append(bad)
-        bad = list(good); cells = bad[5].split(","); cells[4] = "6.0"; bad[5] = ",".join(cells); cases.append(bad)
+        bad = list(good); cells = bad[5].split(","); cells[4] = "2.5"; bad[5] = ",".join(cells); cases.append(bad)
         bad = list(good); cells = bad[6].split(","); cells[2] = "soon"; bad[6] = ",".join(cells); cases.append(bad)
         bad = list(good); cells = bad[7].split(","); cells[7] = ""; bad[7] = ",".join(cells); cases.append(bad)
         for lines in cases:

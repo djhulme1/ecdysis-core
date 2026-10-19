@@ -15,8 +15,9 @@ summarised) found 16 blank post-review times, where the paper counts 27 issues w
    release (METR/Measuring-Early-2025-AI-on-Exp-OSS-Devs at 7ff2d76): data_complete.csv, read by the csv module. Its
    header must be the nine columns of COLUMNS; issue_id must run 1..N once each; dev_id an integer; the two forecasts
    and initial_implementation_time positive numbers (minutes); ai_treatment 0 or 1; post_review_implementation_time a
-   number of minutes at least 0, or blank; prior_task_exposure_1_to_5 an integer 1..5 or blank, and
-   external_resource_needs_1_to_3 one 1..3 or blank. Anything else refuses the run as a reading error. From the same
+   number of minutes at least 0, or blank; prior_task_exposure_1_to_5 and external_resource_needs_1_to_3, used only
+   beside the test, integers or blank, a value outside the README's ranges (1-5 and 1-3) reported. Anything else
+   refuses the run as a reading error. From the same
    release, regression.py (the authors' code, run once as a control, rule 6) and README.md (whose printed outputs are
    compared beside the test). And the paper's e-print (arXiv:2507.09089v2), a gzipped tar opened in memory and never
    unpacked: its macros.tex holds every number the paper prints as \\newcommand{\\Name}{value}, and those values are
@@ -54,6 +55,10 @@ summarised) found 16 blank post-review times, where the paper counts 27 issues w
    floating-point inputs (below 1e-12); (3) the arms swapped give exactly -b, and ln 1.5 added to every AI-allowed
    log time gives exactly b + ln 1.5 (below 1e-12); (4) the mean of the permuted coefficients lies within four of
    its standard errors of zero.
+
+Changed after the first trial, which was refused at reading before any estimate was computed: the reader required
+external_resource_needs_1_to_3 to lie in 1..3, as the README's data spec says, and line 47 of the file holds 5. The
+two columns beside the test are now read as integers, and values outside the README's ranges are reported (rule 1).
 
 What it cannot check: the trial itself (the recruitment, the randomisation, the self-reported times and the issues'
 validity are as METR recorded them), and whether the effect generalises beyond these developers and early-2025 tools.
@@ -169,8 +174,8 @@ def read_data(data):
             "issue": whole(c["issue_id"], f"line {k} issue_id", 1),
             "f_noai": number(c["predicted_time_no_ai"], f"line {k} predicted_time_no_ai", positive=True),
             "f_ai": number(c["predicted_time_ai_allowed"], f"line {k} predicted_time_ai_allowed", positive=True),
-            "exposure": whole(c["prior_task_exposure_1_to_5"], f"line {k} prior_task_exposure", 1, 5, blank=True),
-            "resources": whole(c["external_resource_needs_1_to_3"], f"line {k} external_resource_needs", 1, 3,
+            "exposure": whole(c["prior_task_exposure_1_to_5"], f"line {k} prior_task_exposure", blank=True),
+            "resources": whole(c["external_resource_needs_1_to_3"], f"line {k} external_resource_needs",
                                blank=True),
             "ai": whole(c["ai_treatment"], f"line {k} ai_treatment", 0, 1),
             "initial": number(c["initial_implementation_time"], f"line {k} initial time", positive=True),
@@ -527,6 +532,10 @@ def run(seed, inputs="inputs", results="results"):
     pr.interval("PctSpeedupRegressionWithLogForecastAIAllowed", estimators["f_ai"])
     pr.interval("PctSpeedupRegressionWithLogForecastNoAIAndFixedEffects", estimators["fixed"])
     exp_rows = [i for i, r in enumerate(rows) if r["exposure"] is not None and r["resources"] is not None]
+    out_of_range = ([(r["issue"], "prior task exposure", r["exposure"]) for r in rows
+                     if r["exposure"] is not None and not 1 <= r["exposure"] <= 5] +
+                    [(r["issue"], "external resource needs", r["resources"]) for r in rows
+                     if r["resources"] is not None and not 1 <= r["resources"] <= 3])
     exposure = effect([rows[i] for i in exp_rows], total[exp_rows])
     pr.interval("PctSpeedupBaselinePriorTaskExposureAndExternalResourceNeedsDefined", exposure)
     st = Stream(seed, "becker2025/ratio")
@@ -656,7 +665,8 @@ def run(seed, inputs="inputs", results="results"):
                      f"post-review {short(outcomes['complete_post'])}"),
         "estimators": (f"no covariate {short(estimators['none'])}; AI-allowed forecast {short(estimators['f_ai'])}; "
                        f"fixed effects {short(estimators['fixed'])}"),
-        "exposure_subset": f"{len(exp_rows)} issues with both recorded: {short(exposure)}",
+        "exposure_subset": (f"{len(exp_rows)} issues with both recorded: {short(exposure)}; outside the README's "
+                            f"ranges: " + (", ".join(f"issue {i} {w} {v}" for i, w, v in out_of_range[:4]) or "none")),
         "ratio": (f"ratio of mean times {100 * ratio['s']:.1f}%, pooled bootstrap {fmt_ci(ratio['ci'])}"
                   f"{' as printed' if ratio_ci_ok else ' (printed 5 to 70)'}"),
         "forecasts": (f"forecast ratio {100 * forecast['all']:.1f}% {fmt_ci(forecast['ci'])}"
@@ -692,7 +702,7 @@ def run(seed, inputs="inputs", results="results"):
               "correlations": corr, "review": review, "overall_median_review": overall_median, "counts": counts,
               "two_stage": ts, "permutation": {"p_one_sided": p_one, "p_two_sided": p_two},
               "readme": {"printed": readme, "ours": ours_printed, "match": readme_match}, "printed": pr.rows,
-              "blank_issue_ids": [r["issue"] for r in blanks]}
+              "blank_issue_ids": [r["issue"] for r in blanks], "out_of_range": out_of_range}
     os.makedirs(results, exist_ok=True)
     with open(os.path.join(results, "outputs.json"), "w", encoding="ascii") as fh:
         json.dump(out, fh, indent=2, sort_keys=True)
