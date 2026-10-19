@@ -5774,3 +5774,57 @@ planted faults, each caught (an arc's sign flipped, the row negation omitted,
 B's corner shifted, B^(1)'s changed entries shifted). The journal version
 (Theoretical Computer Science 1071, 2026) could not be read here, so whether
 it corrects Theorem 1.4(2) is not known.
+
+## pi/cz2025.py: Cohen and Zudilin, continued fractions and irrationality measures for Chowla–Selberg gamma quotients (2025)
+
+| Command | Claim |
+|---|---|
+| `python3 pi/cz2025.py` | Cohen & Zudilin: 39 rapidly convergent continued fractions for Chowla–Selberg gamma quotients, and irrationality measures for 20 of them |
+
+mpmath, in the pinned `scipy-notebook` image, on the e-print (arXiv:2510.00215v5,
+by hash); about a minute. Tests: `python3 -m unittest tests.test_cz2025`, on
+tables written in the tests and fractions of the family outside the paper's
+tables. The receipt (`591e4a98…`, 19 October, at `2c9ccf6`, rules first at
+`11c2c6d`, a verification): all 81 conditions hold. Each of Table 2's 39
+fractions [[0,a_1,A(n−1)],[b_0,−K(Dn−1)(D(n−1)+1)]], run exactly to the
+depth its own rate E says should give 230 digits, agrees with its printed
+limit (CS(D) by Definition 1.1 times the printed algebraic factor) to 228 to
+235 digits; the slowest, (4.2), has |E| = 2 and needs 765 terms. For the 21
+fractions with a printed bound, Theorem 7.3's denominator bound holds exactly
+for every n up to 300, and each printed bound is Lemma 1.2's value with
+F = log|E|/2 and m*_D, rounded up.
+
+Beside the test, nothing counted:
+- **21 bounds, 20 constants:** Table 2 prints a bound for 21 fractions, where
+  the abstract, Theorem 6.2 and Remark 6.3(3) count 20. CS(−7) has two,
+  (1.5)'s 5.282 and (4.5)'s 7.204, and the theorem keeps the better.
+- **The arithmetic:** (1.5), whose A/K is −513/4, needs an extra power of 2
+  of at most 2^8 for n ≤ 300 (log₂ 300 = 8.2), as Theorem 7.3(ii)'s O(log n)
+  allows. With P_n's conditions p > √(2Dn) and p > D dropped, as Remark
+  7.5(1) says numerics suggest, all 21 stay integral. At n = 300 the actual
+  denominators are 0.92 to 0.96 of d*_D(n), as logarithms.
+- **The tables:** all 44 rows of Table 1 satisfy A²/(4KD²) = (2R_N(τ) − 1)²,
+  its five dashes are the rows with A² − 4KD² < 0, its "Y" marks exactly the
+  fractions with F > m*_D, and Table 2's rows are its rows scaled as
+  (mA, m²K). Its log|E|/2 column is rounded except for two cut values,
+  (1.1)'s 3.248 for 3.2488 and (3.10)'s 2.094 for 2.0947.
+- **Other statements:** Theorem 6.1's rate (16 + 5√10)⁴/36 and error constant
+  3^(3/2) CS(−3) (0.995 of it at n = 30); Lemma 1.2's growth and decay at
+  n = 300 within 0.6% of F for all 21; Theorem 7.1's explicit convergents
+  (78 of 78 sequences); Proposition 7.7's m_D = 2, 9/4, 8/3, 18/5 and its two
+  forms of m*_D; and the Chowla–Selberg relation of the introduction for the
+  nine class-number-one discriminants, all exact or to 50 digits.
+- **The other fractions:** the five in the text (2^(1/3), 3^(1/3), 5^(1/4),
+  π/√3 and Theorem 6.1's CS(−3)) to 150 digits, and the appendices' 34
+  exponentially convergent ones (some of them, the paper says, found only by
+  experiment) to at least 106 digits, each at its printed rate; CS(−3)³'s slow
+  fraction has the printed error constant 9·2^(−1/3) CS(−3)^(5/3) (1.0098 of
+  it at n = 4000).
+
+Controls 8 of 8: classical fractions (Lambert's tanh 1 and Euler's e − 2);
+CS(−3) and CS(−4) against the reflection formula; class numbers; the Kronecker
+symbol against Euler's criterion; the forward recursion against bottom-up
+evaluation on a seed-drawn row; and three planted faults, each caught. A first
+trial held all 81 conditions and showed two checks beside the test computing a
+cancelling difference at too low a precision; they were fixed (`2c9ccf6`), as
+the docstring records, and the second trial changed only those two.
