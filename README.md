@@ -5976,3 +5976,84 @@ computations against the connectivity shortcut; the depicted states
 reachable; Figure 18 with A made constant has no complex; feedback planted in
 the feed-forward draws makes a complex (in six of eight); and an error planted
 in the unfolding is caught (512 of 1,024 cases differ).
+
+## schur/ageron2022.py: Ageron et al., S- and WS-templates and new lower bounds for Schur and weak Schur numbers (2021)
+
+`schur/ageron2022.py` tests claim `ext:ceaaca11fb789459`, from Ageron,
+Casteras, Pellerin, Portella, Rimmel and Tomasik (CentraleSupélec), "New lower
+bounds for Schur and weak Schur numbers" (arXiv:2112.03175v2): "The new lower
+bounds include S(9) ≥ 17,803, S(10) ≥ 60,948, WS(6) ≥ 646, WS(9) ≥ 22,536 and
+WS(10) ≥ 71,256." Bengone et al.'s shifted S-templates (`ext:82570016b4c60524`)
+rest on it by an extends link, and its WS(6) search on Heule's Schur number five
+(`ext:587fe2afaa36d2c7`) by a method link.
+
+The module reads the paper's Tables 5 to 7 (S-templates of widths 33, 111 and
+380) with schur/shifted2026.py's PDF reader, and Table 8 (a 23-WS-template of
+width 42 with its "(N + 1)" marker) and Table 9 (a partition of 1..646 into 6)
+with readers written here. The bases are the partitions the bounds cite:
+Exoo's of 1..160 into 5 (schur/exoo.py's rules), Fredricksen and Sweet's of
+1..536 into 6 (schur/fs.py's) and Rowley's of 1..1696 into 7, read with xlrd
+from the ancillary workbook in his e-print (arXiv:2107.03560v1), in memory.
+Theorem 2.3 builds the S-template partitions, and Theorem 3.17 with
+Proposition 3.20's last number the weak ones. Sum-free (a = b allowed) and
+weakly sum-free (a < b) are each tested by two exact bit-set tests written
+apart, a numba scan and Python integers, which must agree colour by colour.
+
+| Command | Claim |
+|---|---|
+| `python3 schur/ageron2022.py` | Ageron et al. 2021: S(9) ≥ 17,803, S(10) ≥ 60,948, WS(6) ≥ 646, WS(9) ≥ 22,536 and WS(10) ≥ 71,256 |
+
+The scipy-notebook image (numpy, numba, xlrd); four inputs by hash: the claim's
+PDF, Exoo's and Fredricksen and Sweet's PDFs and Rowley's e-print. About four
+minutes. Tests: `python3 -m unittest tests.test_ageron2022`, on other inputs,
+among them Theorem 3.17 on every small WS-template a direct search finds. The
+receipt (`54a8171a…`, 19 October, at `92d3f6b`, rules first at `edc198b`, a
+verification) confirms it, 5 of 5 conditions:
+- **S(9) ≥ 17,803:** Table 6 leaves out 49; with 49 in colour 1 or in colour 4,
+  the two colours where it is an S-template by Definition 2.1, it turns Exoo's
+  partition into 9 sum-free sets covering 1..17,803, either way.
+- **S(10) ≥ 60,948:** Table 7 turns Exoo's partition into 10 sum-free sets
+  covering 1..60,948.
+- **WS(6) ≥ 646:** Table 9 is a partition of 1..646 into 6 weakly sum-free sets
+  (137, 85, 99, 90, 126 and 109 integers).
+- **WS(9) ≥ 22,536 and WS(10) ≥ 71,256:** Table 8, by Theorem 3.17 with its last
+  number in set 1, turns Fredricksen and Sweet's partition into 9 weakly
+  sum-free sets covering 1..22,536 and Rowley's into 10 covering 1..71,256.
+
+Beside the test, nothing counted:
+- **Premises:** the three cited partitions are sum-free; Exoo's and Rowley's are
+  symmetric, Fredricksen and Sweet's symmetric but for 179 and 358, the pair
+  their listing rule lets split.
+- **Definitions:** Tables 5 and 7 are S-templates by Definition 2.1 and Table 8
+  a 23-WS-template by Definition 3.13. By Definition 2.8, Tables 5 and 7 are
+  symmetric, and Table 6 only with 49 in colour 1.
+- **The last number:** Theorem 3.17 alone gives 1..22,535 and 1..71,255; the
+  last number keeps them weakly sum-free in colour 1 only, the one Table 8
+  marks.
+- **Table 9 as sum-free:** it is not; x and 2x share a set for 7 x.
+- **Table 3:** S(8) ≥ 5,286 (Table 5 from 160), S(11) ≥ 203,828 (Table 7 from
+  536), S(12) ≥ 644,628 (Table 7 from 1696) and S(13) ≥ 2,011,290 (Table 5 from
+  the 60,948 partition) all hold as built.
+- **The inequalities** (5) 111p + 43, (6) 380p + 148 and (10) 42p + 24 hold on
+  each of 100 greedy sum-free bases drawn from the seed (2 to 6 colours, 3 to
+  86 integers).
+- **Margins** over the state of the art in Tables 1 and 2: 109, 628, 4, 480
+  and 478.
+
+Controls 6 of 6:
+- Sums planted from the seed are found by both tests of each pair (weak ones in
+  the 71,256 and 646 partitions, a + b = c ones in the 60,948 and 160).
+- Of the two-colourings of 1..8 exactly 2 are weakly sum-free and none of 1..9;
+  of 1..4 exactly 2 are sum-free and none of 1..5; 1 and 2 together pass the
+  weak tests and fail the sum-free ones.
+- 19 of 20 seeded moves in Table 8 give a weak sum from the 536 partition, each
+  failing Definition 3.13; the other (32 from colour 4 to colour 1) leaves a
+  23-WS-template. 18 of 20 in Table 7 give a sum from Exoo's partition, each
+  failing Definition 2.1.
+- The two tests of each pair agree on every colour of all 1,293 colourings.
+
+The first trial revealed no bug; three outputs beside the test were reworded
+after it (the docstring says which), values unchanged. Not checked: the SAT
+searches and the optimality claims (inequality (10) "cannot be improved", 646
+"cannot give" 647), the backdoor search behind Table 9, and inequality (7),
+whose template is not printed.
