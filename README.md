@@ -5828,3 +5828,57 @@ evaluation on a seed-drawn row; and three planted faults, each caught. A first
 trial held all 81 conditions and showed two checks beside the test computing a
 cancelling difference at too low a precision; they were fixed (`2c9ccf6`), as
 the docstring records, and the second trial changed only those two.
+
+## spp/couzin2002.py: Couzin, Krause, James, Ruxton and Franks, collective memory in the zones model (2002)
+
+| Command | Claim |
+|---|---|
+| `python3 spp/couzin2002.py` | Couzin et al.: collective memory during the transition of a group from one type of collective behaviour to another |
+
+gcc and the standard library, in the pinned `buildpack-deps` image, no inputs;
+about ten minutes on two processors. The engine, `spp/couzin.c`, works in
+plain arithmetic (its own series for sine, cosine and logarithm, no fused
+operations), so another machine repeats it bit for bit; a plain Python
+implementation of the same rules agrees with it bit for bit. Tests:
+`python3 -m unittest tests.test_couzin2002`, on constructed configurations,
+small groups and synthetic curves. The receipt (`1ee87ddd…`, 19 October, at
+`8d51716`, rules first at `3260d33`, a reproduction): the 15 conditions hold
+under 8 of the 16 readings, and those 8 are every reading with d_o and d_a made
+unit vectors before they are averaged. Figure 4's protocol: 100 individuals,
+r_a = 14, r_o raised from 1 to 4 and lowered again in steps of 0.25, 2,000
+steps at each, 15 replicates. Under the nearest of them to the text (nu1), the
+rising group is a torus from r_o = 1.25 to 3.5 (m_group 0.79 to 0.88) and
+polarizes only at 4 (p_group 0.91). The falling group stays polarized down to
+1.25 (p_group 0.88 to 0.92, m_group at most 0.09) and is a swarm again at 1.
+
+Beside the test, nothing counted:
+- **The printed sums:** with d_o and d_a summed as eqs. 2 and 3 print them, the
+  test meets 5 or 6 of 15 conditions. The rising group forms only a slow,
+  partial torus (m_group 0.34 to 0.48 at r_o = 1.75 to 2.25, 0.76 by 3.75) and
+  does not polarize by 4 (p_group 0.30). The falling sweep retraces it, so
+  there is no memory. Mean gap to the figure (read by eye): 0.42 for the sums,
+  0.14 to 0.18 for unit vectors.
+- **Later than the figure:** under unit vectors the rising torus lasts to
+  r_o = 3.5, where the figure's polarizes from 2.75 to 3.25.
+- **Fragmentation:** nu1 loses 2 of 15 groups early in the rising sweep and 5
+  more at the end of the falling (57 of 375 replicate-values).
+- **Random starts** (nu1, 5,000 steps) at r_o = 1.75 to 2.25 give the torus
+  (m_group 0.82 to 0.90). The falling sweep's polarized group is the memory.
+- **alpha = 360** (nu1): the torus appears only at r_o = 1.25 and 1.5 (m_group
+  0.68), and from 1.75 the group polarizes, as the text says ("diminished to a
+  very small range").
+- **Figure 3's grid** (nu1, 10 random starts each): a swarm at
+  Delta r_o = 0, a torus at Delta r_o = 1 with Delta r_a = 13, a dynamic
+  parallel group at 2, highly parallel from 4, and fragmentation where
+  Delta r_a is small.
+- **Figure 5's sorting** (nu1): r_r with s.d. 0.3 gives centre rho −0.58
+  (figure −0.57) but front −0.04 (figure −0.44). Speed with s.d. 0.2 gives front
+  0.79 and centre −0.19 (figure 0.76 and −0.22), but only 3 of 30 groups held
+  together.
+
+Controls 8 of 8: the C program against Python, bit for bit (all eight model
+readings, both variations, alpha = 360); the series against the library;
+free flight; the noise's angles against their exact moments under both noise
+readings; the measures on a ring and a file; the classes; the decision on the
+figure's own values (15 of 15); and a planted history with no memory, which
+fails.
