@@ -69,7 +69,9 @@ computed nothing the test compares.
    from 2 to 20; and Johns & Teitler's remark that their expression is exactly the case d = 3 of theirs: their
    terms (-1)^sigma (sum_i omega^(ij) x_(i,sigma(i)))^3, column 2 divided by 3 (6 det(X) = 18 det(X) / 3), matched
    one to one with the 18 forms up to sixth roots of unity zeta with zeta^3 equal to the term's sign, for omega a
-   primitive cube root of unity, either one, and X or its transpose.
+   primitive cube root of unity, either one, and X or its transpose; since the first trial also after the diagonal
+   sign changes X -> D_r X D_c, D_r and D_c with entries +-1 (zeta^3 then equal to det(D_r) det(D_c) times the
+   sign), the best reported with the count without signs.
 7. Controls (controls_passed counts those that behave as stated): (1) with L_1's entry -1/3 replaced by -1/2 the sum
    of cubes is no longer a multiple of det(X); (2) with yy_1 replaced by 2 yy_1 at least one identity of the
    certificate fails; (3) numerically, at a point drawn from the seed (entries a + b i, a and b integers from -9 to 9,
@@ -78,6 +80,12 @@ computed nothing the test compares.
    certificate holds; (4) the Koszul machinery on unit tensors: sum_(i<=r) a_i b_i c_i in C^r (x) C^r (x) C^r gives
    rank 2r with A' = A (r = 3), and 10 with a seed-drawn integer restriction to C^3 (r = 5; its columns drawn from
    -9..9 and drawn again when zero).
+
+Changed after the first trial, whose outputs were seen: rule 6's comparison with Johns & Teitler's case d = 3, beside
+the test, first allowed only column 2 divided by 3, either cube root and the transpose, and matched none of the 18
+forms; a diagnostic outside the receipt then found that negating rows 2 and 3 as well (a symmetry of det) matches all
+18, so the comparison now also tries every diagonal sign change of rows and columns. Nothing the test computes
+changed: its four conditions and the four controls held in the first trial.
 
 What it cannot check: that 17 and 18 are optimal (Conner, Harper & Landsberg's border apolarity, cited for the lower
 bound 17, is not run here), or the numerical search that found the decomposition.
@@ -1171,6 +1179,10 @@ def jt_terms(omega, scale_col=1, transpose=False):
 
 
 def jt_match(forms):
+    """Rule 6's comparison: for each primitive cube root omega, X or its transpose, and each diagonal sign change
+    X -> D_r X D_c (D_r, D_c with entries +-1, eps = det(D_r) det(D_c)), how many of the 18 forms equal a distinct
+    term (column 2 divided by 3) up to a sixth root of unity zeta with zeta^3 = eps times the term's sign."""
+    from itertools import product
     w = THETA * THETA
     roots = [ONE]
     for _ in range(5):
@@ -1178,26 +1190,24 @@ def jt_match(forms):
     results = []
     for oname, omega in (("omega", w), ("omega-bar", w * w)):
         for transpose in (False, True):
-            terms = jt_terms(omega, 1, transpose)
-            used = [False] * len(terms)
-            hits = 0
-            for f in forms:
-                for idx, (sgn, mat) in enumerate(terms):
-                    if used[idx]:
-                        continue
-                    ok = False
-                    for z in roots:
-                        z3 = z * z * z
-                        if not (z3 == QT(sgn)):
-                            continue
-                        if all(f[r][c] == z * mat[r][c] for r in range(3) for c in range(3)):
-                            ok = True
-                            break
-                    if ok:
-                        used[idx] = True
-                        hits += 1
-                        break
-            results.append({"omega": oname, "transpose": transpose, "matched": hits})
+            for sr in product((1, -1), repeat=3):
+                for sc in product((1, -1), repeat=3):
+                    eps = sr[0] * sr[1] * sr[2] * sc[0] * sc[1] * sc[2]
+                    terms = [(sgn * eps, [[mat[r][c] * QT(sr[r] * sc[c]) for c in range(3)] for r in range(3)])
+                             for sgn, mat in jt_terms(omega, 1, transpose)]
+                    used = [False] * len(terms)
+                    hits = 0
+                    for f in forms:
+                        for idx, (sgn, mat) in enumerate(terms):
+                            if used[idx]:
+                                continue
+                            if any((z * z * z) == QT(sgn) and all(f[r][c] == z * mat[r][c] for r in range(3)
+                                                                  for c in range(3)) for z in roots):
+                                used[idx] = True
+                                hits += 1
+                                break
+                    results.append({"omega": oname, "transpose": transpose, "rows": list(sr), "columns": list(sc),
+                                    "matched": hits})
     return results
 
 
@@ -1301,6 +1311,8 @@ def run(seed, inputs="inputs", results="results"):
     gen = [field_generated(monomial_cube(tr[0][0], yy), PRIMES) for tr in cert["mon2"]]
     gen_full = sum(1 for g in gen if 27 in g)
     jt = jt_match(forms18)
+    plain = [r for r in jt if r["rows"] == [1, 1, 1] and r["columns"] == [1, 1, 1]]
+    jt_plain = max(r["matched"] for r in plain)
     jt_best = max(jt, key=lambda r: r["matched"])
     try:
         import sympy
@@ -1376,8 +1388,9 @@ def run(seed, inputs="inputs", results="results"):
         "field_generation": f"Q[p] = Q[y*] for {gen_full} of {len(gen)} type 2 equations",
         "skew_ranks": "rank 2q + 5 for every even q from 2 to 20" if skew_all else
                       "not 2q + 5 at q = " + ", ".join(str(k) for k, v in skew_ranks.items() if v != 2 * k + 5),
-        "johns_teitler": (f"{jt_best['matched']} of 18 forms are their d = 3 terms (column 2 over 3, "
-                          f"{jt_best['omega']}{', transposed' if jt_best['transpose'] else ''})"),
+        "johns_teitler": (f"{jt_best['matched']} of 18 forms are their d = 3 terms, column 2 over 3, after "
+                          f"rows times {jt_best['rows']} and columns times {jt_best['columns']} ({jt_best['omega']}"
+                          f"{', transposed' if jt_best['transpose'] else ''}); {jt_plain} without signs"),
         "conditions_met": met,
         "conditions_total": 4,
         "test_passed": int(met == 4),

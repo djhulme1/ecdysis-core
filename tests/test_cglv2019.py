@@ -227,6 +227,19 @@ class Tensors(unittest.TestCase):
         self.assertEqual(len(terms), 18)
         self.assertTrue(all(sum(1 for r in m for c in r if not c.iszero()) == 3 for _, m in terms))
 
+    def test_jt_match_finds_a_sign_change(self):
+        omega = M.THETA * M.THETA
+        forms = []
+        for sgn, mat in M.jt_terms(omega, 1, False):
+            z = -M.ONE if sgn == 1 else M.ONE  # column 3 negated: eps = -1, so zeta^3 = -sign keeps +6 det
+            forms.append([[z * mat[r][c] * M.QT(-1 if c == 2 else 1) for c in range(3)] for r in range(3)])
+        res = M.jt_match(forms)
+        best = max(res, key=lambda r: r["matched"])
+        self.assertEqual(best["matched"], 18)
+        plain = [r for r in res if r["omega"] == "omega" and not r["transpose"] and r["rows"] == [1, 1, 1]
+                 and r["columns"] == [1, 1, 1]]
+        self.assertLess(plain[0]["matched"], 18)
+
 
 class Draws(unittest.TestCase):
     def test_stream(self):
