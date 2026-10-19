@@ -160,14 +160,24 @@ class Reading(unittest.TestCase):
         with self.assertRaises(M.Refused):                       # colour numbers out of order
             M.read_s_templates(M.pdf_lines(make_pdf([table_page(AH_SETS, labels=[1, 3, 2]), HEADING])),
                                tables={5: (9, 3)})
-        with self.assertRaises(M.Refused):                       # 9 missing: not a partition of 1..9
+        with self.assertRaises(M.Refused):                       # 9 missing from a table the test uses
             M.read_s_templates(M.pdf_lines(make_pdf([table_page([[1, 4, 7], [2, 3], [5, 6, 8]]), HEADING])),
-                               tables={5: (9, 3)})
+                               tables={5: (9, 3)}, strict=(5,))
         with self.assertRaises(M.Refused):                       # the caption names another width
             M.read_s_templates(M.pdf_lines(make_pdf([table_page(AH_SETS), HEADING])), tables={5: (10, 3)})
         data = make_pdf([table_page(AH_SETS)])
         with self.assertRaises(M.Refused):                       # startxref pointing elsewhere
             M.pdf_lines(data.replace(b"startxref\n", b"startxref\n1"))
+
+    def test_table_leaving_one_out(self):
+        got = M.read_s_templates(M.pdf_lines(make_pdf([table_page([[1, 4, 7], [2, 3], [5, 6, 8]]), HEADING])),
+                                 tables={5: (9, 3)}, strict=())[5]
+        self.assertEqual((got["missing"], got["repeated"]), ([9], []))
+        self.assertEqual(M.completions(got), [3])             # 9 + 9 - 9 = 9 in colour 1; 9 + 2 - 9 = 2 in colour 2
+        self.assertEqual(M.usable(got), AH_SETS)
+        twice = dict(got, missing=[], repeated=[4])
+        self.assertIsNone(M.completions(twice))
+        self.assertIsNone(M.usable(twice))
 
     def test_input_hash(self):
         with tempfile.TemporaryDirectory() as d:

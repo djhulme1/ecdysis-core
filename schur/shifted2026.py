@@ -33,9 +33,13 @@ Every rule below was fixed before any construction was checked.
    the next "Table" caption or the heading "B WS-templates": the integers and the commas (the tables are set in
    mathematics, the comma from the math italic font in the position of ";"). From these tokens m blocks are read in
    turn: a colour's number (1 to m, in order), its first element, and one more element after each comma; what follows
-   the m-th block (a page number) is set aside. The m sets must partition 1..q, or the run is refused as a reading
-   error. The m-th colour is the special one (Definition 2.1: the condition holds "for all subsets but A_n"), and
-   m_{n+1}, its least element, comes from the table.
+   the m-th block (a page number) is set aside. The m sets of Table 7, which the test uses, must partition 1..q, or
+   the run is refused as a reading error. Tables 5 and 6, beside the test, are taken as printed (a rule added after
+   the first trial, which this refused: Table 6 as printed leaves out 49): an integer a table leaves out is tried in
+   each of its colours, and the colours in which the table becomes an S-template by Definition 2.1 are reported; with
+   exactly one, the table so completed is used beside the test, otherwise the table is not used. The m-th colour is
+   the special one (Definition 2.1: the condition holds "for all subsets but A_n"), and m_{n+1}, its least element,
+   comes from the table.
 4. The shifted construction (Sections II and III). A base g colours 1..p with k colours, p >= 3. Row alpha of the main
    block holds x = (alpha - 1) q + u, u = 1..q; its type is F when alpha = 1, L when alpha = p, M otherwise (Delta =
    {-1, 0, 1}, so n = 1). The template's cell (type, u) gives h(x): A gives k + 1, B gives k + 2, P_d gives
@@ -60,7 +64,8 @@ Every rule below was fixed before any construction was checked.
 
 Beside the test, none of it counted: whether the two cited partitions are themselves sum-free (536 into 6; 203,828
 into 11); the 1680 partition into 7 through the template (16,802 into 9); Tables 5 and 6 through Theorem 2.3 from the
-536 partition (33 x 536 + 6 = 17,694 into 9 and 111 x 536 + 43 = 59,539 into 10, two entries of their Table 3);
+536 partition (33 x 536 + 6 = 17,694 into 9 and 111 x 536 + 43 = 59,539 into 10, two entries of their Table 3;
+Table 6 as rule 3 completes it);
 whether Tables 5, 6 and 7 are S-templates by Definition 2.1 (each colour sum-free and, but the special one, free of
 x + y - q for x + y > q); Definition 3's finite check of Table II's template (rule 8); the transitions Lemma 1 calls
 realizable, counted at each model size (Lemma 1(c) says they no longer depend on p from p = 3n); and the margins over
@@ -389,7 +394,7 @@ def pdf_lines(data):
 CAPTION = re.compile(r"Table (\d+): S-template with width (\d+) and (\d+) colors")
 
 
-def read_s_templates(lines, tables=TABLES):
+def read_s_templates(lines, tables=TABLES, strict=(7,)):
     """Rule 3: {c: {"q", "m", "sets", "after"}} for Tables 5, 6 and 7."""
     out = {}
     for c, (q, m) in tables.items():
@@ -421,10 +426,41 @@ def read_s_templates(lines, tables=TABLES):
                 i += 2
             sets.append(s)
         listed = [x for s in sets for x in s]
-        if sorted(listed) != list(range(1, q + 1)):
+        missing = sorted(set(range(1, q + 1)) - set(listed))
+        repeated = sorted({x for x in listed if listed.count(x) > 1})
+        stray = sorted({x for x in listed if not 1 <= x <= q})
+        if (missing or repeated or stray) and c in strict:
             raise Refused(f"Table {c}: the {m} sets are not a partition of 1..{q}: a reading error")
-        out[c] = {"q": q, "m": m, "sets": [sorted(s) for s in sets], "after": tokens[i:]}
+        out[c] = {"q": q, "m": m, "sets": [sorted(s) for s in sets], "after": tokens[i:], "missing": missing,
+                  "repeated": repeated, "stray": stray}
     return out
+
+
+def defective(t):
+    return bool(t["missing"] or t["repeated"] or t["stray"])
+
+
+def completions(t):
+    """Rule 3: for a table that leaves out exactly one integer and repeats none, the colours (1..m) in which adding it
+    makes the table an S-template; None for any other defect."""
+    if len(t["missing"]) != 1 or t["repeated"] or t["stray"]:
+        return None
+    x, fits = t["missing"][0], []
+    for c in range(len(t["sets"])):
+        sets = [sorted(s + [x]) if i == c else list(s) for i, s in enumerate(t["sets"])]
+        if definition_21(sets, t["q"]) is None:
+            fits.append(c + 1)
+    return fits
+
+
+def usable(t):
+    """The table's sets as printed, or as rule 3 completes them, or None."""
+    if not defective(t):
+        return t["sets"]
+    fits = completions(t)
+    if fits is None or len(fits) != 1:
+        return None
+    return [sorted(s + t["missing"]) if i + 1 == fits[0] else list(s) for i, s in enumerate(t["sets"])]
 
 
 # ---------------------------------------------------------------- constructions
@@ -764,9 +800,21 @@ def run(seed, inputs="inputs", results="results"):
     # beside the test
     v1680 = tally.verdict(g1680, 7)
     v16802 = tally.verdict(shifted(g1680, 7, rows, tail, q), 9)
-    v17694 = tally.verdict(s_template(g536, 6, tables[5]["sets"], tables[5]["q"]), 9)
-    v59539 = tally.verdict(s_template(g536, 6, tables[6]["sets"], tables[6]["q"]), 10)
-    d21 = {c: definition_21(t["sets"], t["q"]) for c, t in tables.items()}
+    used = {c: usable(tables[c]) for c in (5, 6)}
+    beside = {c: (tally.verdict(s_template(g536, 6, used[c], tables[c]["q"]), kk) if used[c] is not None else None)
+              for c, kk in ((5, 9), (6, 10))}
+    d21 = {}
+    for c, t in tables.items():
+        if not defective(t):
+            d21[c] = "an S-template" if definition_21(t["sets"], t["q"]) is None else definition_21(t["sets"], t["q"])
+        else:
+            fits = completions(t)
+            gap = (f"leaves out {listing(t['missing'])}" if t["missing"] else "") + (
+                f" repeats {listing(t['repeated'])}" if t["repeated"] else "")
+            d21[c] = gap + ("; no single completion" if fits is None else
+                            f"; an S-template with it in colour {listing(fits)} only" if len(fits) == 1 else
+                            f"; an S-template with it in colours {listing(fits)}" if fits else
+                            "; no colour makes it an S-template")
     breach, transitions = admissible(rows, tail, q)
 
     # controls
@@ -853,9 +901,11 @@ def run(seed, inputs="inputs", results="results"):
         "premises": (f"536 into 6 {'sum-free' if v536['sum_free'] else 'not sum-free'}; 203,828 into 11 "
                      f"{'sum-free' if v11['sum_free'] else 'not sum-free'}"),
         "s9_from_1680": verdict_text(v16802, "from 1680"),
-        "ageron_9_10": (f"Table 5 from 536: {v17694['n']} into 9, {'sum-free' if v17694['sum_free'] else 'not'}; "
-                        f"Table 6: {v59539['n']} into 10, {'sum-free' if v59539['sum_free'] else 'not'}"),
-        "ageron_definition": "; ".join(f"Table {c}: {'an S-template' if d21[c] is None else d21[c]}" for c in tables),
+        "ageron_9_10": "; ".join(
+            f"Table {c}{' completed' if defective(tables[c]) else ''} from 536: " + (
+                f"{beside[c]['n']} into {beside[c]['k']}, {'sum-free' if beside[c]['sum_free'] else 'not sum-free'}"
+                if beside[c] is not None else "not built") for c in (5, 6)),
+        "ageron_definition": "; ".join(f"Table {c}: {d21[c]}" for c in tables),
         "admissible": "Definition 3 with the tail, p = 3..8: " + ("admissible" if breach is None else breach),
         "transitions": "realizable transitions by model size: " + ", ".join(f"p={p} {n}" for p, n in transitions.items()),
         "margins": (f"S(8): {v8['n']} - {PREVIOUS[8]} = {v8['n'] - PREVIOUS[8]}; S(13): {v13['n']} - {PREVIOUS[13]} "
@@ -874,10 +924,11 @@ def run(seed, inputs="inputs", results="results"):
               "controls": ctl, "control_detail": ctl_detail,
               "template": {"q": q, "rows": {t: [NAMES[x] for x in r] for t, r in rows.items()},
                            "tail": [NAMES[x] for x in tail]},
-              "tables": {str(c): {**t, "definition_21": d21[c]} for c, t in tables.items()},
+              "tables": {str(c): {**t, "definition_21": d21[c], "completions": completions(t) if defective(t) else None}
+                         for c, t in tables.items()},
               "verdicts": {name: {**v, "sums": {str(c): s for c, s in v["sums"].items()}} for name, v in
                            (("536", v536), ("5362", v8), ("203828", v11), ("2038282", v13), ("1680", v1680),
-                            ("16802", v16802), ("17694", v17694), ("59539", v59539))},
+                            ("16802", v16802), ("table5", beside[5]), ("table6", beside[6])) if v is not None},
               "bases": base_rows, "admissible": breach, "transitions": transitions}
     os.makedirs(results, exist_ok=True)
     with open(os.path.join(results, "outputs.json"), "w", encoding="ascii") as fh:
