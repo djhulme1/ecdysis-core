@@ -5921,3 +5921,58 @@ Controls 8 of 8: the field tables (associativity, distributivity, inverses, a
 generator of order q − 1); interpolation; four planted faults, each caught
 (one evaluation point too few, β without the substitution, a crossed term,
 a repeated a); a case worked by hand; and the e-print's 14 formulas.
+
+## iit/oat2014.py: Oizumi, Albantakis and Tononi, IIT 3.0's results on its own example systems (2014)
+
+| Command | Claim |
+|---|---|
+| `python3 iit/oat2014.py` | IIT 3.0: a system may condense into a major complex and minor complexes; connectivity shapes complexes; inactive elements can form one; simple systems can be minimally conscious; feed-forward systems, however complicated, are not, and some are functionally equivalent to conscious complexes |
+
+Standard library and gcc, in the pinned `buildpack-deps` image, no inputs;
+about ten minutes. Tests: `python3 -m unittest tests.test_oat2014`, on COPY
+rings of three, chains, a toggle and seeded layered networks, none of them the
+paper's. The computation is the lab's own IIT 3.0 (`iit/engine.py` and
+`iit/flow.c`, written for `iit/check.py`) as PyPhi 1.2.0 computes it, PyPhi's
+pyemd arithmetic for the verdict; the systems are read from the paper's
+figures, and PyPhi's own encoding of Figure 16 agrees with the reading.
+
+The receipt (`b6120b62…`, 19 October, at `91c9814`, a reproduction): fails, 8
+of 9 conditions. Figure 16 condenses into ABC (Φ 1.916665; the paper prints
+1.92) and FG (0.069445; printed 0.028), but not DE, which the paper makes a
+minor complex with ΦMax 0.028: with A on as a background condition, E = OR(A,
+D, E) is on whatever happens, so E specifies no cause, D is DE's only concept,
+and the cut from D to E leaves it whole, so Φ = 0. ABCDE has Φ 0.020727
+(printed 0.021), and ABC excludes it, as the caption says. The other eight
+conditions hold:
+- **Figure 17:** the modular network splits into AB, CD and EF (Φ 1 each; the
+  whole 0.531249, printed 0.53); the five ORs form one complex, Φ 0.003057,
+  with its 5 first-order concepts only (φ 0.016129, printed 0.0161); the
+  majority gates form one, Φ 10.729491 (printed 10.75), with 30 concepts, as
+  printed.
+- **Figures 18 and 19:** the COPY cycle, all off, is a complex of Φ 1 with four
+  concepts of 0.5 (A's cause on D, its effect on B, as printed); the
+  photodiode is one of Φ 1 with two, and the same in all four of its states.
+- **Feed-forward systems:** no complex in Figure 20A, in eight seed-drawn
+  layered systems with random gates (76 elements), or in the photodiode
+  unfolded over four steps, whose outputs equal the photodiode's in all 1,024
+  cases (4 initial states, 256 input sequences).
+
+Beside the test, nothing counted:
+- **Figure 21A as read:** its six elements form a complex of Φ 0.775506 with
+  17 concepts (printed: 17, and 0.76 in the caption, 0.79 in the figure); its
+  unfolding over four steps has no complex and matches it in all 419,904 cases;
+  but none of its 64 initial states reproduces the input-output run the figure
+  prints.
+- **Exact arithmetic** gives the same condensations for all seven systems.
+- **Full computations:** 2,646 candidate sets of up to three elements computed
+  through every cut with no shortcut; the 2,468 that are not strongly
+  connected all have Φ = 0.
+- **A diagnostic outside the receipt:** DE with A held off gives 0.069445,
+  FG's own value, and with A as noise 0.005102; the paper's equal 0.028 for DE
+  and FG looks like DE computed as if E did not see A on.
+
+Controls 7 of 7: the transport solver; pyemd's rounding; the full
+computations against the connectivity shortcut; the depicted states
+reachable; Figure 18 with A made constant has no complex; feedback planted in
+the feed-forward draws makes a complex (in six of eight); and an error planted
+in the unfolding is caught (512 of 1,024 cases differ).
