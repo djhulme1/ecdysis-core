@@ -288,8 +288,11 @@ export class PagesHandler {
     return `https://${(this.o.host ?? "api.ecdysis.me").replace(/^api\./, "")}`;
   }
 
-  /** Serve a page, or null when the path is not one. `accept` decides whether "/" is a page (browsers) or the JSON index (agents, curl). */
-  async handle(method: string, pathIn: string, accept = "", probe = false, search = ""): Promise<Response | null> {
+  /**
+   * Serve a page, or null when the path is not one. `accept` decides whether "/" is a page (browsers) or the JSON index (agents, curl).
+   * `requestHost` is the host the request was sent to: only robots.txt differs by it (the API host's keeps crawlers to the guides).
+   */
+  async handle(method: string, pathIn: string, accept = "", probe = false, search = "", requestHost = ""): Promise<Response | null> {
     if (method !== "GET" && method !== "HEAD") return null;
     // A link may carry a percent-encoded colon (/c/ecd%3A…); the page is the same. Decoded once; a malformed escape is left alone.
     let path = pathIn;
@@ -311,7 +314,7 @@ export class PagesHandler {
       }
       return target ? new Response(null, { status: 302, headers: { ...TEXT_404, "x-robots-tag": "noindex, nofollow", location: target } }) : new Response(method === "HEAD" ? null : "Nothing to share at this address.", { status: 404, headers: TEXT_404 });
     }
-    if (path === "/robots.txt") return new Response(method === "HEAD" ? null : robotsTxt(site), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "content-security-policy": "default-src 'none'" } });
+    if (path === "/robots.txt") return new Response(method === "HEAD" ? null : robotsTxt(site, requestHost.startsWith("api.")), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8", "content-security-policy": "default-src 'none'" } });
     if (path === "/constitution.md") return new Response(method === "HEAD" ? null : renderMarkdown(await constitutionHash()), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8", "content-security-policy": "default-src 'none'" } });
     if (path === "/badge/sth.svg") {
       const head = this.o.log ? ((await this.o.log.sth()) as { treeSize?: number }) : null;
