@@ -33,6 +33,8 @@ export const LINKS_PER_HOUR = 5;
 /** Sign-in links the whole deployment sends in an hour: a ceiling on what an attacker can make Ecdysis mail out. */
 export const LINKS_GLOBAL_PER_HOUR = 300;
 export const SIGNUPS_PER_HOUR = 3;
+/** Sign-ups through the staging door per connection and hour: a harness mints operators by the hundred, on a disposable record. */
+export const DOOR_SIGNUPS_PER_HOUR = 2000;
 /**
  * Pairing-code guesses per connection and hour. The code's 75 bits are the
  * real defence; this only slows a flood. It is generous because MCP calls
@@ -458,18 +460,27 @@ export class Accounts {
     if (!browser || !sameString(await this.hash(browser), link.browserHash)) return { ok: false, status: 403, error: "Open the link in the browser you asked for it in." };
     // Spend before use, atomically: two requests racing with one link get one session between them.
     if (!(await this.o.store.useMagicLink(link.hash, this.now().toISOString()))) return { ok: false, status: 410, error: "That link has expired or was already used. Ask for a new one." };
-    let account = await this.o.store.getAccountByEmailHash(link.emailHash);
-    let created = false;
     const email = await this.unseal(link.emailSealed);
+    return this.admit(link.emailHash, link.emailSealed, email, ip, SIGNUPS_PER_HOUR, origin);
+  }
+
+  /**
+   * What following a link does once the link has been proved: the account
+   * found or created for the address, its steward role refreshed from the
+   * list as it stands now, and a new session minted. Attribution (the door
+   * and the country) is taken once, here, from the request that makes the
+   * account; a later sign-in changes neither.
+   */
+  private async admit(emailHash: string, emailSealed: string, email: string | null, ip: string, signupsPerHour: number, origin: { door?: string | null; country?: string | null }): Promise<{ ok: true; session: string; account: AccountRow; created: boolean } | { ok: false; status: number; error: string }> {
+    let account = await this.o.store.getAccountByEmailHash(emailHash);
+    let created = false;
     const steward = email ? this.o.stewardEmailHashes.includes(await sha256Hex(email)) : false;
     if (!account) {
-      if (await this.limited(`signup:ip:${await this.ipHash(ip)}`, SIGNUPS_PER_HOUR)) return { ok: false, status: 429, error: "Too many new accounts from this connection in the last hour. Try later." };
-      // Attribution is taken once, here, from the request that makes the account: the door cookie the person carried in and
-      // the country Cloudflare saw. A later sign-in changes neither.
-      const fresh: AccountRow = { id: this.id("acct"), emailHash: link.emailHash, emailSealed: link.emailSealed, operatorId: this.id("op"), role: steward ? "steward" : "member", createdAt: this.now().toISOString(), door: doorOf(origin.door), country: countryOf(origin.country) };
+      if (await this.limited(`signup:ip:${await this.ipHash(ip)}`, signupsPerHour)) return { ok: false, status: 429, error: "Too many new accounts from this connection in the last hour. Try later." };
+      const fresh: AccountRow = { id: this.id("acct"), emailHash, emailSealed, operatorId: this.id("op"), role: steward ? "steward" : "member", createdAt: this.now().toISOString(), door: doorOf(origin.door), country: countryOf(origin.country) };
       // Two first sign-ins racing for one address: the store keeps whichever landed first; the other joins it.
       created = await this.o.store.createAccount(fresh);
-      account = created ? fresh : await this.o.store.getAccountByEmailHash(link.emailHash);
+      account = created ? fresh : await this.o.store.getAccountByEmailHash(emailHash);
       if (!account) return { ok: false, status: 500, error: "The account could not be created. Try again." };
     }
     if ((account.role === "steward") !== steward) {
@@ -478,8 +489,26 @@ export class Accounts {
     }
     const s = this.token();
     const nowIso = this.now().toISOString();
-    await this.o.store.putSession({ hash: await this.hash(s), accountId: account.id, createdAt: nowIso, expiresAt: new Date(nowMs + SESSION_TTL_MS).toISOString(), signedInAt: nowIso });
+    await this.o.store.putSession({ hash: await this.hash(s), accountId: account.id, createdAt: nowIso, expiresAt: new Date(this.now().getTime() + SESSION_TTL_MS).toISOString(), signedInAt: nowIso });
     return { ok: true, session: s, account, created };
+  }
+
+  /**
+   * Sign an address in WITHOUT a link: what the staging door does (api/v2/
+   * staging-door.ts), on a staging deployment only, where the door's shared
+   * key stands in for the proof a link gives. Nothing in production reaches
+   * this method: the door is built only when ENVIRONMENT is "staging", and
+   * test/environments.test.ts holds the production configuration to that.
+   * Sign-ups through it are limited per connection like any other, at a
+   * ceiling high enough for a harness minting operators by the hundred, and
+   * an account it makes is attributed to the door "staging-door", so the
+   * stewards' report on staging says where its accounts came from.
+   */
+  async signInWithoutLink(emailIn: string, ip: string, country: string | null = null): Promise<{ ok: true; session: string; account: AccountRow; created: boolean } | { ok: false; status: number; error: string }> {
+    if (!this.enabled()) return { ok: false, status: 503, error: "Accounts aren't open yet." };
+    const email = Accounts.normaliseEmail(emailIn);
+    if (!email) return { ok: false, status: 400, error: "That doesn't look like an email address." };
+    return this.admit(await this.emailHash(email), await this.seal(email), email, ip, DOOR_SIGNUPS_PER_HOUR, { door: "staging-door", country });
   }
 
   /** The signed-in account behind a session cookie, or null. Expired sessions are removed. */

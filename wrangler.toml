@@ -127,3 +127,78 @@ CONTEXT_DAILY_CAP = "1000"
 ACCESS_TEAM_DOMAIN = "withered-base-4068.cloudflareaccess.com"
 ACCESS_AUD = "99fb059aa0ff3e3a5da1bfa8a7aee965999dff834cc6a335637aae4310d2ddf0"
 OPERATOR_EMAIL_HASHES = "e5c59b8043408e58170c1159ca6c35d8a48ffa1115fb89412c649dd2120bb0b3,8fa013efc6bfd14c3931ab432e98fe3291c44b298a45b473b1aa9775c30eec11"
+
+# =========================================================================
+# Staging: the team's disposable record (docs/ENVIRONMENTS.md).
+# =========================================================================
+# The same code as production, deployed as a second Worker on a record of
+# its own: its own database, log key, operator key and accounts key, all made
+# by the Staging workflow (.github/workflows/staging.yml) and never seen by
+# anyone; its own genesis; reset whenever the team likes. Every merge to main
+# deploys here first, every pull request is previewed here, and the attack
+# harness (attacks/) runs here and nowhere else. Nothing on it is mirrored or
+# trusted, and every response from it says so. Bindings and variables are
+# not inherited between environments, so each is declared again here; the
+# placeholders are patched at deploy time from repository variables
+# (STAGING_D1_ID, STAGING_STH_PUBLIC_KEY, STAGING_OPERATOR_PUBLIC_KEY), the
+# way production's operator key is. Reached at its workers.dev address until
+# the owner attaches staging.ecdysis.me in the dashboard.
+[env.staging]
+name = "ecdysis-core-staging"
+workers_dev = true
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "ecdysis-staging"
+database_id = "REPLACE_WITH_STAGING_D1_ID"
+migrations_dir = "migrations"
+
+[env.staging.assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+# Its own limiter namespaces, so a flood on staging never counts against production.
+[[env.staging.ratelimits]]
+name = "RL_KEY"
+namespace_id = "2001"
+simple = { limit = 600, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "RL_MCP"
+namespace_id = "2002"
+simple = { limit = 6000, period = 60 }
+
+# No [env.staging.ai]: Workers AI's daily budget is the account's, shared with
+# production, and a harness flooding staging must never push production's
+# screening into review. Staging screens structurally only (ENVIRONMENT is
+# not "production", so it does not fail closed); the classifier is exercised
+# in production alone.
+
+# Hourly, not every quarter hour: the scouts share production's outbound
+# addresses, and OpenAlex's free budget with them.
+[env.staging.triggers]
+crons = ["7 * * * *"]
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+V1_ARCHIVE_URL = "https://v1.ecdysis.me"
+# The staging log key's public half, rotated by every reset; patched from STAGING_STH_PUBLIC_KEY.
+STH_PUBLIC_KEY = "REPLACE_WITH_STAGING_STH_PUBLIC_KEY"
+# The staging operator key's public half: made by the Staging workflow, used once for genesis, never kept; patched from STAGING_OPERATOR_PUBLIC_KEY.
+OPERATOR_PUBLIC_KEY = "REPLACE_WITH_STAGING_OPERATOR_PUBLIC_KEY"
+READ_ONLY = "0"
+# Staging sends no email: no provider key is installed on it, and the pause is on besides. Sign-in is through the staging door.
+HERALD_REPLY_TO = "replies@ecdysis.me"
+HERALD_PAUSED = "1"
+EMAIL_DAILY_CAP = "0"
+# No model key on staging, and the writer paused besides: no credits spent on a disposable record.
+CONTEXT_MODEL = "claude-sonnet-5-5"
+CONTEXT_PAUSED = "1"
+CONTEXT_DAILY_CAP = "0"
+# No Cloudflare Access on staging (the signed-in steward is the one lock), so the two Access values are empty on purpose;
+# wrangler would otherwise warn that they are missing. The stewards of the staging record: the owner, Lucy Griffiths and
+# Chris, as SHA-256 of their addresses (printf '%s' addr | sha256sum).
+ACCESS_TEAM_DOMAIN = ""
+ACCESS_AUD = ""
+OPERATOR_EMAIL_HASHES = "e5c59b8043408e58170c1159ca6c35d8a48ffa1115fb89412c649dd2120bb0b3,8fa013efc6bfd14c3931ab432e98fe3291c44b298a45b473b1aa9775c30eec11,ba619a2381cba769759c468c7e2eea53e40f3c9fe7547900d1a9a46ca475bb4a"

@@ -1,0 +1,109 @@
+name: Watch
+
+# The team's shared monitor (docs/ENVIRONMENTS.md § Watching): every quarter
+# of an hour, the read-mode probes against production and, when it is
+# provisioned, against staging. Nothing is written to either record, and
+# nothing is mirrored here (the nightly Live check does that).
+#
+# When production fails, the run opens ONE issue labelled "incident" (or adds
+# to the open one) with the probe output, and posts to the team's channel
+# when ALERT_WEBHOOK_URL is set (a Slack or Discord incoming webhook, as a
+# repository secret). When production passes again, it closes the issue and
+# posts the recovery. So an open "incident" issue IS the status page: no
+# open issue, no known outage. Staging's failures are reported in the run's
+# summary only: a broken staging never pages anyone.
+
+on:
+  schedule:
+    - cron: "11,26,41,56 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Probe production
+        id: production
+        env:
+          ECDYSIS_URL: https://api.ecdysis.me
+          MODE: read
+        shell: bash
+        run: |
+          if node --import tsx scripts/live-check.ts > /tmp/production.log 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo '## Production' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -40 /tmp/production.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Probe staging (when provisioned)
+        if: vars.STAGING_STH_PUBLIC_KEY != '' && vars.STAGING_URL != ''
+        env:
+          ECDYSIS_URL: ${{ vars.STAGING_URL }}
+          STH_PUBLIC_KEY: ${{ vars.STAGING_STH_PUBLIC_KEY }}
+          MODE: read
+        shell: bash
+        run: |
+          node --import tsx scripts/live-check.ts > /tmp/staging.log 2>&1 || true
+          echo '## Staging' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -40 /tmp/staging.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open, update or close the incident
+        env:
+          OK: ${{ steps.production.outputs.ok }}
+          WEBHOOK: ${{ secrets.ALERT_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          post() {
+            # A Slack-shaped payload, which Discord accepts too when its webhook address ends in /slack.
+            [ -z "$WEBHOOK" ] && return 0
+            curl -fsS -X POST -H 'content-type: application/json' --data "$(jq -cn --arg t "$1" '{text: $t}')" "$WEBHOOK" > /dev/null || echo "the webhook did not accept the post"
+          }
+          OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --label incident --state open --json number --jq '.[0].number // empty')
+          FAILS=$(grep -E '^✗' /tmp/production.log | head -20 || true)
+          if [ "$OK" = "true" ]; then
+            if [ -n "$OPEN" ]; then
+              gh issue comment "$OPEN" --repo "$GITHUB_REPOSITORY" --body "Production answers the probes again ($(date -u +%FT%TZ)). Closing. Run: $RUN_URL"
+              gh issue close "$OPEN" --repo "$GITHUB_REPOSITORY" --reason completed
+              post "Ecdysis: production answers the probes again (incident #$OPEN closed). $RUN_URL"
+            fi
+            exit 0
+          fi
+          BODY="The quarter-hourly probes against https://api.ecdysis.me failed at $(date -u +%FT%TZ).
+
+          \`\`\`
+          $FAILS
+          \`\`\`
+
+          Full output: $RUN_URL. This issue closes itself when the probes pass again; until then it is the status page. What to check first: the stewards' health page (ecdysis.me/steward/health), the last Deploy run, and Cloudflare's status."
+          if [ -n "$OPEN" ]; then
+            gh issue comment "$OPEN" --repo "$GITHUB_REPOSITORY" --body "Still failing at $(date -u +%FT%TZ): $RUN_URL"
+          else
+            gh label create incident --repo "$GITHUB_REPOSITORY" --color B60205 --description "Production is failing its probes" 2>/dev/null || true
+            NEW=$(gh issue create --repo "$GITHUB_REPOSITORY" --label incident --title "Incident: production failed the probes ($(date -u +%F' '%H:%M) UTC)" --body "$BODY")
+            post "Ecdysis: PRODUCTION FAILED THE PROBES. $NEW"
+          fi
+          exit 1

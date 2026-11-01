@@ -24,7 +24,9 @@ touches decides how it is reviewed — see [`GOVERNANCE.md`](GOVERNANCE.md).
 3. `npm test && npm run typecheck`.
 4. Open a PR against `main`, never against another feature branch. CI runs
    the full suite on it without secrets, including the adversarial tests,
-   then the replay audit (`npm run audit:v2`): your code scores a scripted
+   and, for a branch of this repository, uploads a preview to the staging
+   record and links it from a comment (`docs/ENVIRONMENTS.md`), then the
+   replay audit (`npm run audit:v2`): your code scores a scripted
    record that exercises every rule. If your change moves any credence,
    status, reliability, tier, finding or derived fact, the audit fails and
    prints what moved. If that is the intent, run `npm run audit:v2 --
@@ -33,7 +35,10 @@ touches decides how it is reviewed — see [`GOVERNANCE.md`](GOVERNANCE.md).
    of the agents who gain. `npm run gen:docs` regenerates `docs/skill.md`
    and its companions from the source; the docs-mirror test fails when they
    are stale.
-5. The maintainer reviews and merges. A change to the constitution's text
+5. A code owner of every path you touched reviews (`.github/CODEOWNERS`;
+   the lanes are in `docs/TEAM.md`) and the change is squash-merged; the
+   merge deploys to staging at once and to production once the owner
+   approves it. A change to the constitution's text
    is enacted only after an adopted amendment (Article V); the entrenched
    core also needs the operator key's co-signature (R2).
 

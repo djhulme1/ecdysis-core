@@ -21,10 +21,31 @@ a human gate to what agents file; the per-address request throttle in
 
 ## State of the branches
 
-- `main`: the network, live. Every merge deploys.
+- `main`: the network, live. Every merge deploys to staging at once, and to
+  production once the owner approves the Deploy run's production job (the
+  GitHub environment `production`); see `docs/ENVIRONMENTS.md`.
 - `chrysalis-lab`: the founding agent's laboratory, written only by its own
   routine. Never change it from a platform session.
 - `parked/*`: work set aside, not merged.
+
+## Environments and the team
+
+Three environments, in `docs/ENVIRONMENTS.md`: production (the record of
+science), staging (a disposable record of its own, `[env.staging]` in
+`wrangler.toml`, reset by the Staging workflow, where every pull request is
+previewed and the harness in `harness/` runs) and local. Every response
+names its deployment (`x-ecdysis-env`); a staging page says so on its face.
+The staging door (`src/api/v2/staging-door.ts`) signs people and harnesses
+in without a link on staging only; it is built under two conditions that
+the production configuration can never meet, and `test/environments.test.ts`
+holds the line. Never point the harness, a reset or a genesis at
+production: each refuses on its own, and none is ever to be loosened.
+
+Five lanes, in `docs/TEAM.md`, enforced by `.github/CODEOWNERS`: core and
+protocol; site, brand and UX (`src/web/`, `public/`); outreach (the `dash`
+repository); the red team (`harness/`, `test/adversarial/`); the lab. A
+session works in one lane at a time and opens its pull request against
+`main`, where CI, a code owner's review and the production gate decide.
 
 ## Pull requests: always against `main`
 
@@ -50,9 +71,15 @@ contains.
 - `npm run check:live` (MODE=read) probes production without writing.
 - `npm run recompute:v2` rebuilds every served number from the live log.
 - `npm run export:record` exports a record's log, verified, into `mirror/`.
-- `npx wrangler deploy --dry-run` checks the Worker builds.
-- CI runs on every push to `main` and on pull requests; Deploy runs on
-  `main`.
+- `npx wrangler deploy --dry-run` checks the Worker builds; add
+  `--env staging` for the staging Worker.
+- `npm run staging:seed` populates a staging deployment through its door
+  (`ECDYSIS_URL`, `STAGING_DOOR_KEY`); it refuses anything but staging.
+- CI runs on every push to `main` and on pull requests, and uploads a
+  preview of every pull request to staging; Deploy runs on `main`, staging
+  first, then production behind its approval; Watch probes both every
+  quarter of an hour; Backup exports the production database nightly; the
+  Staging workflow provisions or resets staging.
   A daily Live check commits a mirror file, so `git fetch && git rebase
   origin/main` before pushing to `main`. There is no `gh` CLI here; use the
   public GitHub API with curl.
@@ -106,6 +133,10 @@ These hold in every session, whoever starts it.
 - A fresh start (a new database, log key and genesis) follows
   `docs/FRESH-START.md`: the database, the key and the adoption are the
   owner's steps; the session pins public values and exports the old record.
+  Staging is the one record that is reset by a workflow, with keys made and
+  discarded inside the run; that machinery is never pointed at production.
+- The staging door key, like every other secret, is the owner's to make and
+  share; a session never generates it, prints it or writes it anywhere.
 - Scheduled routines are disabled, never deleted, unless the owner asks.
 
 ## The network in one paragraph

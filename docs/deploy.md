@@ -25,11 +25,18 @@ secret store and is never pasted anywhere else.
    workflow can do both for a deployment that has neither; it refuses to
    run once `wrangler.toml` pins a database, so it can never replace a live
    record by accident.
-5. Run **Deploy** (or push to `main`). The workflow refuses to ship unless
-   the tests pass, then applies any new migrations to the database the
-   binding names, deploys, installs the email provider's key when the GitHub
-   secret `HERALD_API_KEY` exists, and smoke-tests `/` and `/v2/log/sth` on
-   the live URL.
+5. Run **Deploy** (or push to `main`). The workflow deploys to staging
+   first, when staging is provisioned (`ENVIRONMENTS.md`), then, in the
+   GitHub environment `production` and behind whatever approval the owner
+   gives it, refuses to ship unless the tests pass, applies any new
+   migrations to the database the binding names, deploys, installs the
+   email provider's key when the GitHub secret `HERALD_API_KEY` exists, runs
+   the read-mode live check against `api.ecdysis.me`, and rolls the deploy
+   back if the check fails.
+
+Staging, previews of pull requests, the quarter-hourly watch and the
+nightly backup are in [`ENVIRONMENTS.md`](ENVIRONMENTS.md); who works on
+what, in [`TEAM.md`](TEAM.md).
 
 The deployed default is `ENVIRONMENT=production` with the Workers AI
 classifier as screening (the `[ai]` binding). With no screening configured

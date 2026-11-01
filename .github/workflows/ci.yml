@@ -35,5 +35,103 @@ jobs:
         run: npm run typecheck
       - name: Replay audit (credence, statuses, reliability, tiers and findings on the scripted record)
         run: npm run audit:v2
-      - name: Worker bundles and config validates
-        run: npx wrangler deploy --dry-run --outdir /tmp/wrbuild
+      - name: Worker bundles and config validates (production and staging)
+        run: |
+          npx wrangler deploy --dry-run --outdir /tmp/wrbuild
+          npx wrangler deploy --dry-run --env staging --outdir /tmp/wrbuild-staging
+
+  preview:
+    # A preview of every pull request from this repository, on the staging record (docs/ENVIRONMENTS.md § Previews): the
+    # branch's Worker uploaded as a version of the staging Worker, reachable at an address of its own, linked from a comment
+    # on the pull request, and probed once. Forks get no preview: their pull requests see no secrets, by design.
+    name: Preview on staging
+    needs: test
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STAGING_D1_ID: ${{ vars.STAGING_D1_ID }}
+      STAGING_STH_PUBLIC_KEY: ${{ vars.STAGING_STH_PUBLIC_KEY }}
+      STAGING_OPERATOR_PUBLIC_KEY: ${{ vars.STAGING_OPERATOR_PUBLIC_KEY }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Gate on configuration
+        id: gate
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$STAGING_D1_ID" ] || [ -z "$STAGING_STH_PUBLIC_KEY" ] || [ -z "$STAGING_OPERATOR_PUBLIC_KEY" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "No preview: staging is not provisioned yet (run the Staging workflow once)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload the branch as a version of the staging Worker
+        id: upload
+        if: steps.gate.outputs.ready == 'true'
+        shell: bash
+        run: |
+          sed -i "s/REPLACE_WITH_STAGING_D1_ID/$STAGING_D1_ID/; s/REPLACE_WITH_STAGING_STH_PUBLIC_KEY/$STAGING_STH_PUBLIC_KEY/; s/REPLACE_WITH_STAGING_OPERATOR_PUBLIC_KEY/$STAGING_OPERATOR_PUBLIC_KEY/" wrangler.toml
+          npx wrangler versions upload --env staging --preview-alias "pr-$PR" --tag "pr-$PR" --message "Pull request #$PR, ${GITHUB_SHA::7}" | tee /tmp/upload.log
+          URL=$(grep -oE 'https://pr-[0-9]+-[a-z0-9.-]+\.workers\.dev' /tmp/upload.log | head -1)
+          if [ -z "$URL" ]; then URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/upload.log | head -1); fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Preview: ${URL:-no preview address in the upload output}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Probe the preview
+        if: steps.gate.outputs.ready == 'true' && steps.upload.outputs.url != ''
+        # The nightly probes, against the preview. A pull request that carries a migration is probed against the staging
+        # database as it stands, so its new tables are not there yet: it is previewed properly once merged.
+        env:
+          ECDYSIS_URL: ${{ steps.upload.outputs.url }}
+          STH_PUBLIC_KEY: ${{ vars.STAGING_STH_PUBLIC_KEY }}
+          MODE: read
+        shell: bash
+        run: |
+          sleep 5
+          node --import tsx scripts/live-check.ts | tee /tmp/preview-check.log || echo "preview_failed=1" >> "$GITHUB_ENV"
+          echo '## Preview check' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/preview-check.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Link the preview from the pull request
+        if: steps.gate.outputs.ready == 'true' && steps.upload.outputs.url != ''
+        # One comment per pull request, updated on every push, so the thread never fills with addresses.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.upload.outputs.url }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          MARK="<!-- ecdysis-preview -->"
+          STATE=$([ -n "$preview_failed" ] && echo "the probes FAILED: see the Preview on staging job" || echo "the probes passed")
+          BODY="$MARK
+          **Preview on the staging record:** $URL (commit ${SHA::7}; $STATE).
+
+          It runs this branch's Worker on staging's disposable database and log key: sign in there through the staging door, and nothing you do reaches ecdysis.me. The address is replaced on every push."
+          EXISTING=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq ".[] | select(.body | startswith(\"$MARK\")) | .id" | head -1)
+          if [ -n "$EXISTING" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$EXISTING" -f body="$BODY" > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$BODY" > /dev/null
+          fi
+
+      - name: Fail when the preview's probes failed
+        if: steps.gate.outputs.ready == 'true' && env.preview_failed == '1'
+        run: |
+          echo "::error::the preview answered the probes wrongly; see the step above"
+          exit 1

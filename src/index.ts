@@ -40,10 +40,29 @@ import { accessConfigured, type AccessConfig } from "./api/access.js";
 import type { HealthSwitch } from "./web/steward.js";
 import type { Store } from "./store/store.js";
 import { signJson, verifyJson } from "./core/crypto.js";
+import { ENV_HEADER, environmentOf } from "./api/environment.js";
+import { DOOR_KEY, StagingDoor } from "./api/v2/staging-door.js";
 
 export interface Env {
   DB: D1Database;
+  /**
+   * Which deployment this is: "production" (the record of science, at the top of wrangler.toml), "staging" (under
+   * [env.staging]: a disposable record of its own, with the staging door) or "development" (wrangler dev). Anything else
+   * is production (api/environment.ts).
+   */
   ENVIRONMENT: string;
+  /**
+   * Where this deployment is reached, when it is not ecdysis.me and api.ecdysis.me: the site's and the API's host names
+   * (one host may serve both). Production ignores them and uses its own names; staging and development read them, and
+   * without them take the host the request arrived on, so a preview answers for itself.
+   */
+  SITE_HOST?: string;
+  API_HOST?: string;
+  /**
+   * Secret, staging only: 32 bytes as 64 hex characters, the key to the staging door (api/v2/staging-door.ts). The door is
+   * built only when ENVIRONMENT is "staging" and this is installed; in production the variable has no effect.
+   */
+  STAGING_DOOR_KEY?: string;
   /** Public half of the log key (base64url SPKI), pinned in wrangler.toml. */
   STH_PUBLIC_KEY: string;
   /**
@@ -268,8 +287,28 @@ const csprng = () => crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32;
 const FROM = (env: Pick<Env, "ACCOUNTS_FROM">) => env.ACCOUNTS_FROM || "Ecdysis <accounts@notify.ecdysis.me>";
 const REPLY_TO = (env: Pick<Env, "HERALD_REPLY_TO">) => env.HERALD_REPLY_TO || "replies@ecdysis.me";
 
+/** Where a deployment is reached: the site's host and the API's (production: ecdysis.me and api.ecdysis.me). */
+export interface Hosts { site: string; api: string }
+const PRODUCTION_HOSTS: Hosts = { site: "ecdysis.me", api: "api.ecdysis.me" };
+const HOST = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/;
+
+/**
+ * The hosts a deployment answers for. Production's are fixed: a request's Host header never decides where production's
+ * sign-in links, OAuth documents or doorbell rings point. Staging and development use SITE_HOST and API_HOST when set, and
+ * otherwise the host the request arrived on (one host serving site and API alike), so a preview of a pull request, which
+ * has a host of its own, answers for itself; the cron, which has no request, falls back to the variables or production's.
+ */
+export function hostsFrom(env: Pick<Env, "ENVIRONMENT" | "SITE_HOST" | "API_HOST">, requestHost: string | null = null): Hosts {
+  if (environmentOf(env.ENVIRONMENT) === "production") return PRODUCTION_HOSTS;
+  const clean = (h: string | undefined | null): string | null => { const s = (h ?? "").trim().toLowerCase(); return s && HOST.test(s) ? s : null; };
+  const fromRequest = clean(requestHost);
+  const site = clean(env.SITE_HOST) ?? fromRequest ?? PRODUCTION_HOSTS.site;
+  const api = clean(env.API_HOST) ?? fromRequest ?? PRODUCTION_HOSTS.api;
+  return { site, api };
+}
+
 /** Accounts for people, closed without ACCOUNTS_KEY. */
-function accountsFrom(env: Env, store: D1AccountStore): Accounts {
+function accountsFrom(env: Env, store: D1AccountStore, hosts: Hosts): Accounts {
   return new Accounts({
     store,
     key: env.ACCOUNTS_KEY ?? null,
@@ -277,7 +316,7 @@ function accountsFrom(env: Env, store: D1AccountStore): Accounts {
     send: env.HERALD_API_KEY && !emailPaused(env) ? resendSender(env.HERALD_API_KEY) : null,
     from: FROM(env),
     replyTo: REPLY_TO(env),
-    siteBase: "https://ecdysis.me",
+    siteBase: `https://${hosts.site}`,
     stewardEmailHashes: accessFrom(env).emailHashes,
   });
 }
@@ -320,9 +359,12 @@ export function logApiFrom(env: Pick<Env, "STH_SIGNING_KEY_PKCS8" | "READ_ONLY" 
 }
 
 /** Everything the record needs, for the request path and the cron alike. */
-function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env), keysAgree = true) {
+function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) => void) | null = null, frozen = readOnly(env), keysAgree = true, hosts: Hosts = hostsFrom(env)) {
+  const site = `https://${hosts.site}`;
+  const api = `https://${hosts.api}`;
+  const environment = environmentOf(env.ENVIRONMENT);
   const accountStore = new D1AccountStore(env.DB);
-  const accounts = accountsFrom(env, accountStore);
+  const accounts = accountsFrom(env, accountStore, hosts);
   const log = new TransparencyLog(store);
   const logApi = logApiFrom(env, store, keysAgree);
   const candidates = candidatesFrom(store);
@@ -343,9 +385,9 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
     operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY),
   });
   const send = env.HERALD_API_KEY && !emailPaused(env) ? resendSender(env.HERALD_API_KEY) : null;
-  const notifier = new Notifier({ accounts, accountStore, ledger: store, v2, send, from: FROM(env), replyTo: REPLY_TO(env), siteBase: "https://ecdysis.me", emailDailyCap: emailCap(env) });
+  const notifier = new Notifier({ accounts, accountStore, ledger: store, v2, send, from: FROM(env), replyTo: REPLY_TO(env), siteBase: site, emailDailyCap: emailCap(env) });
   // OAuth 2.1 for the connector and managed agents (I.4): tokens stand for people; the archive holds only the keys people asked it to.
-  const oauth = new OAuth({ accounts, store: new D1OAuthStore(env.DB), v2, issuer: "https://ecdysis.me", resource: "https://api.ecdysis.me/mcp", siteBase: "https://ecdysis.me" });
+  const oauth = new OAuth({ accounts, store: new D1OAuthStore(env.DB), v2, issuer: site, resource: `${api}/mcp`, siteBase: site });
   // R2 needs the operator key and only that: the log key lives in this Worker, so falling back to it would let the archive co-sign for its owner.
   const governance = new V2Governance({ v2, log, operatorPublicKey: realKey(env.OPERATOR_PUBLIC_KEY), closedElectorates: V2_CACHE.closedElectorates });
   // The issues queue: complaints and scouts' flags, off the log, decided on /steward/content. A new complaint is announced to
@@ -382,10 +424,12 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
     v2, logApi, notifier, quotes, stakes, context, governance, issues,
     oauth: { logic: oauth, http: new OAuthHandler({ oauth, accounts, readOnly: frozen }) },
     complaints: new ComplaintsHandler({ issues, readOnly: frozen }),
-    me: new MeHandler({ accounts, v2, oauth, governance, issues, feeds: new V2Feeds(v2, { site: "https://ecdysis.me", api: "https://api.ecdysis.me" }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
-    // Access is always configured in production; when it is, /steward needs its token as well as a steward's session.
+    me: new MeHandler({ accounts, v2, oauth, governance, issues, feeds: new V2Feeds(v2, { site, api }), readOnly: frozen, stop: (a, t) => notifier.stop(a, t) }),
+    // Access is always configured in production; when it is, /steward needs its token as well as a steward's session. Staging
+    // has no Access application in front of it (docs/ENVIRONMENTS.md): there the signed-in steward is the one lock, and the
+    // staging door is how a steward signs in.
     steward: new StewardHandler({
-      accounts, v2, access: accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }), issues,
+      accounts, v2, access: environment === "staging" ? null : accessFrom(env), readOnly: frozen, canaries: new CanaryRegistry({ store: new D1CanaryStore(env.DB), accounts, v2 }), issues,
       // Health: the deployment's head, cron, audit and switches, read from the same places.
       health: {
         sth: async () => (await logApi.sth()) as unknown as Record<string, unknown>,
@@ -403,8 +447,10 @@ function recordFrom(env: Env, store: D1Store, waitUntil: ((p: Promise<unknown>) 
         switches: switchesFrom(env, accessFrom(env), keysAgree),
       },
     }),
+    // The staging door: a staging deployment's sign-in without a link, built under two conditions and never otherwise.
+    stagingDoor: environment === "staging" && env.STAGING_DOOR_KEY && DOOR_KEY.test(env.STAGING_DOOR_KEY.trim()) ? new StagingDoor({ accounts, v2, key: env.STAGING_DOOR_KEY.trim() }) : null,
     pages: new PagesHandler(v2, {
-      host: "api.ecdysis.me", logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null, quotes: quoteStore, context: contextStore, log: logApi, memo: offLogMemo(env.DB),
+      host: hosts.api, logPublicKey: realKey(env.STH_PUBLIC_KEY), governance, accounts, archive: env.V1_ARCHIVE_URL ?? null, quotes: quoteStore, context: contextStore, log: logApi, memo: offLogMemo(env.DB),
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },
       ...(waitUntil ? { waitUntil } : {}),
     }),
@@ -420,11 +466,12 @@ export function doorbellsFrom(
   store: Store,
   v2: V2Service,
   keysAgree = true,
+  hosts: Hosts = PRODUCTION_HOSTS,
 ): Doorbells {
   return new Doorbells({
     store,
-    siteBase: "https://ecdysis.me",
-    apiBase: "https://api.ecdysis.me",
+    siteBase: `https://${hosts.site}`,
+    apiBase: `https://${hosts.api}`,
     // A log key that is not the other half of the pin signs no ring and seals nothing, and the doorbells take no changes.
     sthPrivateKey: keysAgree ? env.STH_SIGNING_KEY_PKCS8 ?? null : null,
     sealSecret: env.DOORBELL_KEY ?? null,
@@ -449,7 +496,8 @@ export function accessFrom(env: Env): AccessConfig {
     teamDomain: env.ACCESS_TEAM_DOMAIN?.trim().toLowerCase() || null,
     aud: env.ACCESS_AUD?.trim().toLowerCase() || null,
     emailHashes: (env.OPERATOR_EMAIL_HASHES ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean),
-    host: "ecdysis.me",
+    // Access guards production's own host; staging has no Access layer at all (recordFrom), so its hosts never reach here.
+    host: PRODUCTION_HOSTS.site,
   };
 }
 
@@ -487,8 +535,11 @@ const bellKeyReadable = (k: string) => /^[0-9a-fA-F]{64}$/.test(k.trim()) || /^[
 /** The switches the stewards' Health page shows, read from this deployment's configuration. */
 function switchesFrom(env: Env, access: AccessConfig, keysAgree = true): HealthSwitch[] {
   const on = (ok: boolean, yes: string, no: string, note?: string): Pick<HealthSwitch, "ok" | "value" | "note"> => ({ ok, value: ok ? yes : no, ...(note ? { note } : {}) });
+  const environment = environmentOf(env.ENVIRONMENT);
   return [
-    { name: "Stewardship lock (Cloudflare Access)", ...on(accessConfigured(access), "configured", "not configured", "Team domain, audience tag and allowed address hashes.") },
+    { name: "Deployment", ok: true, value: environment, note: environment === "production" ? "The record of science: ecdysis.me." : "A disposable record of its own (docs/ENVIRONMENTS.md): reset at will, never mirrored, never trusted." },
+    ...(environment === "staging" ? [{ name: "Staging door", ...on(!!env.STAGING_DOOR_KEY && DOOR_KEY.test(env.STAGING_DOOR_KEY.trim()), "open", "closed: no key", "STAGING_DOOR_KEY, a 64-hex secret on the staging Worker: sign in at /staging/door without a link (api/v2/staging-door.ts).") }] : []),
+    { name: "Stewardship lock (Cloudflare Access)", ...on(environment === "staging" ? true : accessConfigured(access), environment === "staging" ? "not used on staging" : "configured", "not configured", environment === "staging" ? "Staging has no Access application: the signed-in steward is the one lock." : "Team domain, audience tag and allowed address hashes.") },
     { name: "Read-only kill switch", ...on(!readOnly(env), "off", "ON", "READ_ONLY: when on, every write is refused.") },
     { name: "Log key matches its pin", ...on(keysAgree, "yes", "NO: writes refused", "The installed signing key must be the other half of STH_PUBLIC_KEY; until it is, every write is refused.") },
     { name: "Safety classifier", ...on(!!env.AI, "Workers AI", "absent: fail-closed screening", env.SCREENING_MODEL || GUARD_MODEL) },
@@ -534,10 +585,11 @@ export default {
       const at = new Date().toISOString();
       const started = Date.now();
       try {
-        const rec = recordFrom(env, store);
+        const hosts = hostsFrom(env);
+        const rec = recordFrom(env, store, null, readOnly(env), true, hosts);
         // Each runs on its own: an email that failed never stops an agent being woken, nor a lapse being recorded.
         const swept = await rec.v2.sweepLapses().catch((e) => { console.error("sweep failed", e); return { lapsed: [] as string[], sealed: [] as string[] }; });
-        const rang = await doorbellsFrom(env, store, rec.v2).notify().catch((e) => {
+        const rang = await doorbellsFrom(env, store, rec.v2, true, hosts).notify().catch((e) => {
           console.error("doorbells failed", e);
           return { rung: 0, failed: 0, paused: 0, waiting: 0, error: String((e as Error)?.message ?? e).slice(0, 200) };
         });
@@ -571,22 +623,32 @@ export default {
   },
 
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const environment = environmentOf(env.ENVIRONMENT);
     // The site's media (the front page's video, its poster and captions) are static files: answered first, with byte
-    // ranges, before anything touches the record, the rate limits or the counters.
+    // ranges, before anything touches the record, the rate limits or the counters. They name their deployment like
+    // everything else, and nothing more: their bytes are the file's.
     const media = await serveMedia(req, env.ASSETS);
-    if (media) return media;
+    if (media) {
+      const labelled = new Response(media.body, media);
+      labelled.headers.set(ENV_HEADER, environment);
+      return labelled;
+    }
     const store = new D1Store(env.DB);
     // A log key that does not match its pin freezes every write, as the kill switch would: nothing the pinned key cannot verify is ever signed.
     const keysAgree = await logKeysAgree(env);
     if (!keysAgree) console.error("log key mismatch: STH_SIGNING_KEY_PKCS8 is not the other half of STH_PUBLIC_KEY; writes are refused");
     const frozen = readOnly(env) || !keysAgree;
-    const rec = recordFrom(env, store, (p) => ctx.waitUntil(p), frozen, keysAgree);
+    // Production answers for its own names whatever the request says; a staging or preview deployment answers for the host it arrived on.
+    const hosts = hostsFrom(env, new URL(req.url).hostname);
+    const rec = recordFrom(env, store, (p) => ctx.waitUntil(p), frozen, keysAgree, hosts);
     return route(req, limiterFrom(env), {
       v2: rec.v2,
       log: rec.logApi,
       sthPublicKey: realKey(env.STH_PUBLIC_KEY),
       readOnly: frozen,
-      doorbells: doorbellsFrom(env, store, rec.v2, keysAgree),
+      doorbells: doorbellsFrom(env, store, rec.v2, keysAgree, hosts),
+      environment,
+      stagingDoor: rec.stagingDoor,
       openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE ?? null,
       waitUntil: (p) => ctx.waitUntil(p),
       count: async (keys) => { for (const k of keys) await store.bumpAccess(k).catch(() => {}); },

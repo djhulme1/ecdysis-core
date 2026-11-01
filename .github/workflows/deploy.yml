@@ -1,8 +1,13 @@
 name: Deploy
 
-# Deploys on every push to main once secrets and variables are configured
-# (see provision.yml). Without them, the job skips gracefully instead of
-# failing, so CI stays readable before Cloudflare is connected.
+# Every push to main deploys to STAGING first, then to PRODUCTION
+# (docs/ENVIRONMENTS.md). The production job runs in the GitHub environment
+# "production": once the owner gives that environment a required reviewer
+# (Settings → Environments → production), every production deploy waits for
+# their approval, and nothing a merge does can reach the record of science
+# by itself. Until then the job runs as it always did, straight after the
+# staging job passes. Both jobs skip gracefully, with a note in the summary,
+# while their Cloudflare resources are not yet configured.
 
 on:
   push:
@@ -17,7 +22,100 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  staging:
+    name: Staging
+    runs-on: ubuntu-24.04
+    outputs:
+      deployed: ${{ steps.deploy.outputs.deployed }}
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # The staging record's own database and public keys, set by the Staging workflow (staging.yml) when it provisions or
+      # resets the record; patched into [env.staging] of wrangler.toml at deploy time, as production's operator key is.
+      STAGING_D1_ID: ${{ vars.STAGING_D1_ID }}
+      STAGING_STH_PUBLIC_KEY: ${{ vars.STAGING_STH_PUBLIC_KEY }}
+      STAGING_OPERATOR_PUBLIC_KEY: ${{ vars.STAGING_OPERATOR_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Gate on configuration
+        id: gate
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare secrets not set: skipping the staging deploy." >> "$GITHUB_STEP_SUMMARY"
+          elif [ -z "$STAGING_D1_ID" ] || [ -z "$STAGING_STH_PUBLIC_KEY" ] || [ -z "$STAGING_OPERATOR_PUBLIC_KEY" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Staging is not provisioned (no STAGING_D1_ID, STAGING_STH_PUBLIC_KEY and STAGING_OPERATOR_PUBLIC_KEY variables): skipping it. Run the Staging workflow once to provision it (docs/ENVIRONMENTS.md)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Patch the staging placeholders
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          sed -i "s/REPLACE_WITH_STAGING_D1_ID/$STAGING_D1_ID/; s/REPLACE_WITH_STAGING_STH_PUBLIC_KEY/$STAGING_STH_PUBLIC_KEY/; s/REPLACE_WITH_STAGING_OPERATOR_PUBLIC_KEY/$STAGING_OPERATOR_PUBLIC_KEY/" wrangler.toml
+          if grep -q 'REPLACE_WITH_STAGING' wrangler.toml; then echo "::error::a staging placeholder survived the patch"; exit 1; fi
+
+      - name: Apply any new migrations to the staging database
+        if: steps.gate.outputs.ready == 'true'
+        run: npx wrangler d1 migrations apply DB --env staging --remote
+
+      - name: Deploy to staging
+        id: deploy
+        if: steps.gate.outputs.ready == 'true'
+        shell: bash
+        run: |
+          npx wrangler deploy --env staging | tee /tmp/deploy.log
+          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          echo "deployed=true" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Staging deployed: ${URL:-no workers.dev address in the deploy output}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the staging door key (when configured)
+        if: steps.gate.outputs.ready == 'true'
+        # The door's shared key (docs/ENVIRONMENTS.md § The staging door): a repository secret, installed on the staging
+        # Worker alone; piped, never echoed. Without it the door stays closed and staging takes no sign-ins.
+        env:
+          STAGING_DOOR_KEY: ${{ secrets.STAGING_DOOR_KEY }}
+        shell: bash
+        run: |
+          if [ -n "$STAGING_DOOR_KEY" ]; then
+            printf '%s' "$STAGING_DOOR_KEY" | npx wrangler secret put STAGING_DOOR_KEY --env staging > /dev/null
+            echo "Staging door key installed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No STAGING_DOOR_KEY secret: the staging door is closed (nobody can sign in on staging)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Check staging (read mode)
+        if: steps.gate.outputs.ready == 'true' && steps.deploy.outputs.url != ''
+        # The same probes production gets nightly, against the staging record and its own log key. A failure here stops
+        # the production job: what broke staging never ships.
+        env:
+          ECDYSIS_URL: ${{ steps.deploy.outputs.url }}
+          STH_PUBLIC_KEY: ${{ vars.STAGING_STH_PUBLIC_KEY }}
+          MODE: read
+        shell: bash
+        run: |
+          sleep 5
+          node --import tsx scripts/live-check.ts | tee /tmp/staging-check.log
+          echo '## Staging check' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/staging-check.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  production:
+    name: Production
+    needs: staging
+    # The one gate that matters: a required reviewer on this environment (the owner's to set) holds every production
+    # deploy for a tap of approval. The job also waits for the staging job, which fails when staging broke.
+    environment: production
     runs-on: ubuntu-24.04
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -136,19 +234,23 @@ jobs:
             echo "No ANTHROPIC_API_KEY secret: no summaries are written; the papers' records still are." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Smoke test the live API
+      - name: Check production, and roll back if it fails
         if: steps.gate.outputs.ready == 'true'
+        # The nightly probes, run at once against the record of science: a deploy that fails them is rolled back to the
+        # previous version before anyone notices, and the job fails loudly so the merge is looked at.
+        env:
+          ECDYSIS_URL: https://api.ecdysis.me
+          MODE: read
         shell: bash
         run: |
-          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
-          if [ -z "$URL" ]; then
-            echo "Could not find a workers.dev URL in the deploy output (custom domain?). Skipping smoke test." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          sleep 8
+          if node --import tsx scripts/live-check.ts | tee /tmp/live-check.log; then
+            echo '## Production check: passed' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '## Production check: FAILED — rolled back to the previous version' >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/live-check.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            npx wrangler rollback --yes --message "Deploy ${GITHUB_SHA::7} failed the live check" || echo "::error::rollback failed; check the dashboard"
+            exit 1
           fi
-          sleep 5
-          echo "Live at: $URL" >> "$GITHUB_STEP_SUMMARY"
-          curl -fsS "$URL/" | head -c 400
-          echo
-          curl -fsS "$URL/v2/log/sth" | head -c 400
-          echo
-          echo "Smoke test passed: / and /v2/log/sth answered." >> "$GITHUB_STEP_SUMMARY"

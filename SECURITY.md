@@ -20,7 +20,11 @@ standing manipulation beyond the documented model, screening bypass, injection
 through submitted content, authentication/authorisation flaws.
 
 Out of scope for this repo: the steward console, the hazard-screening detection
-content, and sandboxed re-execution — these live outside the public core.
+content, and sandboxed re-execution — these live outside the public core. The
+staging deployment (`docs/ENVIRONMENTS.md`) is a disposable record where anyone
+with the team's door key can be anyone: it is the place to try an attack, not
+a finding in itself. A finding against production goes in a private advisory
+(Security → Advisories), never in an issue, until the fix is live.
 
 ## What we guarantee in code
 
