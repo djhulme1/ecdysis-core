@@ -34,6 +34,7 @@ import { privacyPageV2, termsMdV2 } from "./legal.js";
 import { agentsPageV2, kitPageV2, landingPageV2, peoplePageV2, type HomeFinding, type LandingData } from "../../web/v2/site.js";
 import { labPageV2, labTextV2 } from "../../web/v2/lab.js";
 import { heartbeatMdV2 } from "../../web/v2/heartbeat-guide.js";
+import { SCORING_METHOD_MD } from "../../web/v2/scoring-method.js";
 import { LAB_LEVEL1_PY } from "../../web/v2/lab-guide.js";
 import { connectPage } from "../../web/connect.js";
 import { comparePageV2, faqPageV2 } from "../../web/v2/explain.js";
@@ -114,7 +115,7 @@ function paperEraMove(path: string): string | null {
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
   "/", "/people", "/connect", "/lab", "/agents", "/claims", "/claims/table", "/network", "/map", "/leaderboard", "/observatory", "/governance", "/privacy",
   "/faq", "/compare", "/api",
-  "/skill.md", "/heartbeat.md", "/llms.txt", "/constitution.md", "/terms", "/kit",
+  "/skill.md", "/heartbeat.md", "/scoring.md", "/llms.txt", "/constitution.md", "/terms", "/kit",
 ];
 
 export interface PagesOptions {
@@ -336,6 +337,7 @@ export class PagesHandler {
     if (path === "/connect") return html(200, connectPage({ host: site, mcpUrl: mcpUrlFor(host) }));
     if (path === "/lab") return html(200, labPageV2({ host, mcpUrl: mcpUrlFor(host) }));
     if (path === "/lab.md") return new Response(method === "HEAD" ? null : labTextV2(host), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
+    if (path === "/scoring.md") return new Response(method === "HEAD" ? null : SCORING_METHOD_MD, { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/heartbeat.md") return new Response(method === "HEAD" ? null : heartbeatMdV2(host), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/lab/level1.py") return new Response(method === "HEAD" ? null : LAB_LEVEL1_PY, { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/x-python; charset=utf-8", "content-disposition": 'inline; filename="level1.py"' } });
     if (path === "/skill.md") return new Response(method === "HEAD" ? null : skillMdV2(this.o.host ?? "api.ecdysis.me", this.o.logPublicKey ?? null), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });

@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { mirrorSkillMd } from "../src/api/v2/skill.js";
 import { LAB_GUIDE_MD, LAB_LEVEL1_PY } from "../src/web/v2/lab-guide.js";
 import { mirrorHeartbeatMd } from "../src/web/v2/heartbeat-guide.js";
+import { mirrorScoringMd } from "../src/web/v2/scoring-method.js";
 import { mirrorOpenApi } from "../src/api/openapi.js";
 
 const onDisk = (f: string) => readFileSync(new URL(`../docs/${f}`, import.meta.url), "utf8");
@@ -23,6 +24,9 @@ describe("the repository's mirrors of what the site serves", () => {
   });
   it("docs/heartbeat.md is /heartbeat.md, exactly", () => {
     assert.equal(onDisk("heartbeat.md"), mirrorHeartbeatMd(), "docs/heartbeat.md is stale: run `npm run gen:docs` and commit it");
+  });
+  it("docs/scoring.md is /scoring.md, exactly", () => {
+    assert.equal(onDisk("scoring.md"), mirrorScoringMd(), "docs/scoring.md is stale: run `npm run gen:docs` and commit it");
   });
   it("docs/openapi.json is /openapi.json, exactly", () => {
     assert.equal(onDisk("openapi.json"), mirrorOpenApi(), "docs/openapi.json is stale: run `npm run gen:docs` and commit it");
