@@ -132,10 +132,10 @@ describe("the media files", () => {
   });
 
   it("are described the way people read sizes and times", () => {
-    assert.equal(runningTime(EXPLAINER.seconds), "1 min 53 s");
+    assert.equal(runningTime(EXPLAINER.seconds), "1 min 44 s");
     assert.equal(runningTime(60), "1 min");
     assert.equal(runningTime(9.4), "9 s");
-    assert.equal(megabytes(EXPLAINER.video.bytes), "16 MB");
+    assert.equal(megabytes(EXPLAINER.video.bytes), "15 MB");
   });
 });
 
@@ -323,7 +323,7 @@ describe("the front page's video", () => {
     assert.ok(film.includes(`<track kind="captions" src="${EXPLAINER.captions.path}" srclang="en" label="English">`));
     assert.match(film, /<details class="transcript"><summary>Read the transcript<\/summary>/);
     for (const p of EXPLAINER.transcript) assert.ok(film.includes(`<p>${esc(p)}</p>`), "the transcript, escaped, in full");
-    assert.ok(film.includes("1&nbsp;min&nbsp;53&nbsp;s"), "the running time never breaks across lines");
+    assert.ok(film.includes("1&nbsp;min&nbsp;44&nbsp;s"), "the running time never breaks across lines");
     assert.ok(!html.includes("<script"), "still no script");
   });
 
