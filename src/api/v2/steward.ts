@@ -16,7 +16,7 @@ import { subjectKind, type V2Service } from "./service.js";
 import type { V2Record } from "../../core/v2/flow.js";
 import type { CanaryRegistry } from "./canaries.js";
 import type { IssueRegistry } from "./issues.js";
-import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, evidencePage, healthPage, overviewPage, peoplePage, refusedPage, type AgentRow, type HealthSwitch, type PersonRow, type VerificationRequestRow } from "../../web/steward.js";
+import { agentsPage, auditPage, canariesPage, contentPage, controlsPage, doorsPage, evidencePage, healthPage, overviewPage, peoplePage, refusedPage, type AgentRow, type HealthSwitch, type PersonRow, type VerificationRequestRow } from "../../web/steward.js";
 
 export interface StewardOptions {
   accounts: Accounts;
@@ -201,6 +201,16 @@ export class StewardHandler {
           disputes: all.filter((c) => c.dispute > 0).length,
           queue: all.filter((c) => c.status !== "established" && c.status !== "refuted").sort((a, b) => b.valueOfChecking - a.valueOfChecking).slice(0, 10).map((c) => ({ ref: c.ref, status: c.status, credence: c.credence, use: c.use })),
         }, flash, problem, who));
+      }
+      case "/steward/people/doors": {
+        // The attribution report: accounts made in the last twelve months by month, door and country. Counts only; no account is named.
+        const since = new Date(this.now().getTime() - 366 * 24 * 3600 * 1000).toISOString().slice(0, 7) + "-01";
+        const rows = await this.o.accounts.doors(since);
+        if (url.searchParams.get("format") === "csv") {
+          const csv = ["month,door,country,accounts", ...rows.map((x) => [x.month, x.door ?? "", x.country ?? "", String(x.count)].join(","))].join("\r\n") + "\r\n";
+          return new Response(csv, { status: 200, headers: { ...ME_HEADERS, "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="ecdysis-doors.csv"' } });
+        }
+        return this.html(200, doorsPage({ rows, since }, flash, problem, who));
       }
       case "/steward/people": {
         const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80);

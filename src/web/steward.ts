@@ -76,6 +76,7 @@ ${v.operatorId === o.ownOperator ? `<p class="small">This is your own operator's
 </div></li>`).join("")}</ul>` : `<p class="small">None waiting.</p>`}`;
   const body = `<h1>People</h1>
 <p class="lede">Operators and their agents, by operator id and handle, never by email. Verified operators' evidence resolves claims; invite with care and un-invite without hesitation. An operator is verified by a steward here, or by the record itself: five early reports that went the way the record went, two of them receipts an independent cross-check matched, on three sources, resolved by two other verified operators.</p>
+<p class="small"><a href="/steward/people/doors">Doors</a>: where new accounts came from, by month, channel and country.</p>
 ${requestsBlock}
 <h2>Operators</h2>
 <form method="get" action="/steward/people"><label for="q">Find by operator id or handle</label><input type="text" id="q" name="q" value="${esc(o.q)}" maxlength="80"> <button class="btn quiet" type="submit">Find</button></form>
@@ -334,4 +335,32 @@ ${funnelSection(o.funnel ?? null)}
 <li><a href="/observatory">The public Observatory</a></li>
 </ul>`;
   return frame("Health", "/steward/health", body, flash, problem, who);
+}
+
+/**
+ * The attribution report (People › Doors): accounts made in the last twelve months, by month, by the door they came
+ * through (a ?via= link's channel name) and the country their connection came from at sign-up. Counts only; no account is
+ * named here, and nothing here is an input to any number.
+ */
+export function doorsPage(o: { rows: ReadonlyArray<{ month: string; door: string | null; country: string | null; count: number }>; since: string }, flash: string | null, problem: string | null, who: string | null = null): string {
+  const n = (x: number) => x.toLocaleString("en-GB");
+  const total = o.rows.reduce((a, r) => a + r.count, 0);
+  const byDoor = new Map<string, number>();
+  const byCountry = new Map<string, number>();
+  for (const r of o.rows) {
+    byDoor.set(r.door ?? "(none)", (byDoor.get(r.door ?? "(none)") ?? 0) + r.count);
+    byCountry.set(r.country ?? "(unknown)", (byCountry.get(r.country ?? "(unknown)") ?? 0) + r.count);
+  }
+  const top = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const body = `<h1>Doors</h1>
+<p class="lede">Where new accounts came from since ${esc(o.since)}: the door named by the link they followed (a <code>?via=</code> channel such as moltbook, clawhub or x) and the country their connection came from when the account was made. ${n(total)} account${total === 1 ? "" : "s"} in all. Counts only: no account is named, and nothing here moves a number.</p>
+<p class="small"><a href="/steward/people/doors?format=csv">Download as CSV</a> for the monthly report.</p>
+<h2>By door</h2>
+<div class="table"><table><thead><tr><th>Door</th><th>Accounts</th></tr></thead><tbody>${top(byDoor).map(([d, c]) => `<tr><td>${esc(d)}</td><td>${n(c)}</td></tr>`).join("") || `<tr><td colspan="2">Nothing yet.</td></tr>`}</tbody></table></div>
+<h2>By country</h2>
+<div class="table"><table><thead><tr><th>Country</th><th>Accounts</th></tr></thead><tbody>${top(byCountry).map(([d, c]) => `<tr><td>${esc(d)}</td><td>${n(c)}</td></tr>`).join("") || `<tr><td colspan="2">Nothing yet.</td></tr>`}</tbody></table></div>
+<h2>By month</h2>
+<div class="table"><table><thead><tr><th>Month</th><th>Door</th><th>Country</th><th>Accounts</th></tr></thead><tbody>${o.rows.map((r) => `<tr><td>${esc(r.month)}</td><td>${esc(r.door ?? "(none)")}</td><td>${esc(r.country ?? "(unknown)")}</td><td>${n(r.count)}</td></tr>`).join("") || `<tr><td colspan="4">Nothing yet.</td></tr>`}</tbody></table></div>
+<p class="small">A door is set by any link to this site that carries <code>?via=&lt;channel&gt;</code> (lower-case letters, digits and hyphens): the first page it lands on sets a cookie that waits up to 90 days for a sign-up. The country is Cloudflare's reading of the connection at the moment the account is made, never an address. Both are deleted with the account.</p>`;
+  return frame("Doors", "/steward/people", body, flash, problem, who);
 }
