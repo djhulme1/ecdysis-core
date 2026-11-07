@@ -20,7 +20,7 @@ import { Accounts, MemoryAccountStore } from "../src/api/v2/accounts.js";
 import { PagesHandler } from "../src/api/v2/pages.js";
 import { LogApi } from "../src/api/v2/log-api.js";
 import { MemoryRateLimiter, route } from "../src/api/router.js";
-import { ENV_HEADER, environmentBanner, environmentNotice, environmentOf, labelResponse, ROBOTS_DISALLOW } from "../src/api/environment.js";
+import { ENV_HEADER, environmentBanner, environmentNotice, environmentOf, labelResponse, noticeInto, ROBOTS_DISALLOW } from "../src/api/environment.js";
 import { DOOR_KEY, doorNext, StagingDoor } from "../src/api/v2/staging-door.js";
 import { hostsFrom } from "../src/index.js";
 import { sha256Hex } from "../src/api/access.js";
@@ -120,6 +120,8 @@ describe("every response names its deployment; a disposable one says so everywhe
     const text = await r.text();
     assert.ok(text.startsWith("> **STAGING.** This is the staging record"), text.slice(0, 80));
     assert.ok(text.endsWith("# Ecdysis\n\nRead this."));
+    assert.equal(noticeInto("---\nname: x\n---\n\n# Title\n", "> N.\n\n"), "---\nname: x\n---\n\n> N.\n\n# Title\n", "after front matter");
+    assert.equal(noticeInto("---\nunterminated\n", "> N.\n\n"), "> N.\n\n---\nunterminated\n", "an unterminated block is text");
     const txt = new Response("# Ecdysis\n", { headers: { "content-type": "text/plain; charset=utf-8" } });
     assert.ok((await (await labelResponse(txt, "staging", "/llms.txt")).text()).startsWith("# STAGING: This is the staging record"));
     const other = new Response("just text", { headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -175,8 +177,15 @@ describe("the router on a disposable deployment", () => {
     assert.equal(await robots.text(), ROBOTS_DISALLOW);
     const page = await route(w.req("/", { accept: "text/html" }), limiter(), w.opts);
     assert.match(await page.text(), /data-ecdysis-env="staging"/, "the landing page carries the banner");
-    const skill = await route(w.req("/skill.md"), limiter(), w.opts);
-    assert.ok((await skill.text()).startsWith("> **STAGING.**"), "skill.md begins with the notice");
+    const skill = await (await route(w.req("/skill.md"), limiter(), w.opts)).text();
+    // skill.md opens with YAML front matter for skill registries; the notice comes straight after it, before the title.
+    assert.ok(skill.startsWith("---\nname: ecdysis\n"), "the front matter is still first");
+    const fm = skill.indexOf("\n---\n", 4) + 5;
+    assert.ok(skill.slice(fm).startsWith("\n> **STAGING.** This is the staging record"), skill.slice(fm, fm + 60));
+    assert.match(skill, /\n\n# Ecdysis agent protocol/, "the title follows the notice");
+    assert.equal((skill.match(/^---$/gm) ?? []).length, 2, "one front matter block, untouched");
+    const heartbeat = await route(w.req("/heartbeat.md"), limiter(), w.opts);
+    if (heartbeat.status === 200) assert.ok((await heartbeat.text()).startsWith("> **STAGING.**"), "heartbeat.md begins with the notice");
   });
   it("production's index, robots and pages carry none of it, only the header", async () => {
     const w = await world({ environment: "production" });

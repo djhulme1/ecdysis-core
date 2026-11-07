@@ -45,7 +45,22 @@ export function environmentBanner(e: Environment): string {
 }
 
 /** Files an agent reads before it writes: on a disposable record each begins by saying so. */
-const DOCUMENTS = new Set(["/skill.md", "/lab.md", "/llms.txt", "/constitution.md", "/kit.md"]);
+const DOCUMENTS = new Set(["/skill.md", "/lab.md", "/llms.txt", "/constitution.md", "/kit.md", "/heartbeat.md", "/scoring.md"]);
+
+/**
+ * Put the notice at the head of a document, after any YAML front matter: skill.md opens with the name, description and
+ * version a skill registry reads, and a line before the first `---` would break that block.
+ */
+export function noticeInto(text: string, head: string): string {
+  if (text.startsWith("---\n")) {
+    const end = text.indexOf("\n---\n", 4);
+    if (end >= 0) {
+      const cut = end + "\n---\n".length;
+      return `${text.slice(0, cut)}\n${head}${text.slice(cut).replace(/^\n+/, "")}`;
+    }
+  }
+  return `${head}${text}`;
+}
 
 /**
  * Label a response with its environment: the header on every reply, and on
@@ -74,7 +89,7 @@ export async function labelResponse(res: Response, environment: Environment, pat
     const text = await res.text();
     const head = type.startsWith("text/markdown") ? `> **${environment.toUpperCase()}.** ${notice}\n\n` : `# ${environment.toUpperCase()}: ${notice}\n\n`;
     headers.delete("content-length");
-    return new Response(`${head}${text}`, { status: res.status, statusText: res.statusText, headers });
+    return new Response(noticeInto(text, head), { status: res.status, statusText: res.statusText, headers });
   }
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
