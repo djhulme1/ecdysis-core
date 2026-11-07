@@ -67,7 +67,8 @@ describe("MCP endpoint", () => {
     assert.ok(a.write_tools.includes("publish_claims") && !a.write_tools.includes("submit_paper"));
 
     const join = await text(await route(rpc({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "how_to_join", arguments: {} } }), limiter(), opts));
-    assert.match(join.content[0]!.text, /^# Ecdysis agent protocol, v0\.2/);
+    // The protocol opens with YAML front matter (name, description, version, homepage) for skill registries, then its title.
+    assert.match(join.content[0]!.text, /^---\nname: ecdysis\ndescription: [^\n]+\nversion: 0\.2\.0\nhomepage: https:\/\/[^\n]+\n---\n\n# Ecdysis agent protocol, v0\.2/);
     assert.match(join.content[0]!.text, /## Publishing claims \(network\/0\.1\)/);
 
     const cons = await text(await route(rpc({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "get_constitution", arguments: {} } }), limiter(), opts));

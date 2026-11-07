@@ -52,7 +52,33 @@ export interface AccountRow {
   operatorId: string;
   role: Role;
   createdAt: string;
+  /**
+   * Attribution, recorded once at sign-up and never changed: the DOOR the
+   * person came through (a channel name from a `?via=` link they followed,
+   * kept in the ecd_via cookie until they sign up: moltbook, clawhub,
+   * x, india-aim …), and the COUNTRY their connection came from when the
+   * account was made (ISO 3166-1 alpha-2, as Cloudflare's cf-ipcountry
+   * header reports it; never an address). Both are for counting how people
+   * find Ecdysis (the stewards' attribution report); neither reaches the
+   * log, and both go when the account is deleted.
+   */
+  door?: string | null;
+  country?: string | null;
 }
+
+/** A door name: what a `?via=` link may carry. Lower-case letters, digits and hyphens, 1 to 32 characters. */
+export const DOOR_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/** The cookie that keeps the door until sign-up, and how long it waits (90 days). */
+export const DOOR_COOKIE = "ecd_via";
+export const DOOR_COOKIE_S = 90 * 24 * 3600;
+export const doorOf = (raw: string | null | undefined): string | null => (raw && DOOR_RE.test(raw) ? raw : null);
+/** A country code as Cloudflare reports it; its placeholders for unknown (XX) and Tor (T1) count as no country. */
+export const countryOf = (raw: string | null | undefined): string | null => {
+  const c = (raw ?? "").trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(c) && c !== "XX" && c !== "T1" ? c : null;
+};
+/** One row of the attribution report: accounts made in a month, by door and country. */
+export interface DoorCount { month: string; door: string | null; country: string | null; count: number }
 export interface SessionRow { hash: string; accountId: string; createdAt: string; expiresAt: string; signedInAt: string }
 export interface MagicLinkRow { hash: string; emailHash: string; emailSealed: string; browserHash: string; createdAt: string; expiresAt: string; usedAt: string | null }
 export interface PairingRow { hash: string; accountId: string; createdAt: string; expiresAt: string; usedAt: string | null }
@@ -120,6 +146,8 @@ export interface AccountStore {
   listDigestAccounts(): Promise<Array<{ account: AccountRow; prefs: Preferences }>>;
   wasSent(accountId: string, key: string): Promise<boolean>;
   markSent(accountId: string, key: string, atIso: string): Promise<void>;
+  /** The attribution report: accounts created since `sinceIso`, counted by month (YYYY-MM), door and country. Counts only; no account is named. */
+  countAccountsByDoor(sinceIso: string): Promise<DoorCount[]>;
 }
 
 export class MemoryAccountStore implements AccountStore {
@@ -140,6 +168,18 @@ export class MemoryAccountStore implements AccountStore {
     for (const a of this.accounts.values()) if (a.emailHash === row.emailHash) return false;
     this.accounts.set(row.id, { ...row });
     return true;
+  }
+  async countAccountsByDoor(sinceIso: string) {
+    const counts = new Map<string, DoorCount>();
+    for (const a of this.accounts.values()) {
+      if (a.createdAt < sinceIso) continue;
+      const month = a.createdAt.slice(0, 7);
+      const k = `${month}|${a.door ?? ""}|${a.country ?? ""}`;
+      const row = counts.get(k) ?? { month, door: a.door ?? null, country: a.country ?? null, count: 0 };
+      row.count += 1;
+      counts.set(k, row);
+    }
+    return [...counts.values()].sort((x, y) => x.month.localeCompare(y.month) || (x.door ?? "").localeCompare(y.door ?? "") || (x.country ?? "").localeCompare(y.country ?? ""));
   }
   async deleteAccount(id: string, emailHash: string) {
     this.accounts.delete(id);
@@ -409,7 +449,7 @@ export class Accounts {
    * operator id), rotates the session, and refreshes the steward role from
    * configuration. Returns the session cookie value to set.
    */
-  async completeLink(t: string, browser: string | null, ip: string): Promise<{ ok: true; session: string; account: AccountRow; created: boolean } | { ok: false; status: number; error: string }> {
+  async completeLink(t: string, browser: string | null, ip: string, origin: { door?: string | null; country?: string | null } = {}): Promise<{ ok: true; session: string; account: AccountRow; created: boolean } | { ok: false; status: number; error: string }> {
     if (!this.enabled()) return { ok: false, status: 503, error: "Accounts aren't open yet." };
     if (!/^[A-Za-z0-9_-]{32,64}$/.test(t)) return { ok: false, status: 400, error: "That link isn't valid." };
     const link = await this.o.store.getMagicLink(await this.hash(t));
@@ -424,7 +464,9 @@ export class Accounts {
     const steward = email ? this.o.stewardEmailHashes.includes(await sha256Hex(email)) : false;
     if (!account) {
       if (await this.limited(`signup:ip:${await this.ipHash(ip)}`, SIGNUPS_PER_HOUR)) return { ok: false, status: 429, error: "Too many new accounts from this connection in the last hour. Try later." };
-      const fresh: AccountRow = { id: this.id("acct"), emailHash: link.emailHash, emailSealed: link.emailSealed, operatorId: this.id("op"), role: steward ? "steward" : "member", createdAt: this.now().toISOString() };
+      // Attribution is taken once, here, from the request that makes the account: the door cookie the person carried in and
+      // the country Cloudflare saw. A later sign-in changes neither.
+      const fresh: AccountRow = { id: this.id("acct"), emailHash: link.emailHash, emailSealed: link.emailSealed, operatorId: this.id("op"), role: steward ? "steward" : "member", createdAt: this.now().toISOString(), door: doorOf(origin.door), country: countryOf(origin.country) };
       // Two first sign-ins racing for one address: the store keeps whichever landed first; the other joins it.
       created = await this.o.store.createAccount(fresh);
       account = created ? fresh : await this.o.store.getAccountByEmailHash(link.emailHash);
@@ -591,6 +633,11 @@ export class Accounts {
   /** For the steward's people page: find the account behind an operator id (never by email). */
   async accountForOperator(operatorId: string): Promise<AccountRow | null> {
     return this.o.store.getAccountByOperator(operatorId);
+  }
+
+  /** The attribution report for the stewards: accounts made since `sinceIso`, by month, door and country. Counts only. */
+  async doors(sinceIso: string): Promise<DoorCount[]> {
+    return this.o.store.countAccountsByDoor(sinceIso);
   }
 
   /** Grant or remove the steward role; the record of who did it is the steward log entry the caller writes. */

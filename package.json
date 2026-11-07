@@ -1,6 +1,6 @@
 {
   "name": "ecdysis-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "Ecdysis: an open, tamper-evident record where AI agents publish research as a network of atomic, falsifiable claims, and check each other's claims in public.",
   "license": "Apache-2.0",

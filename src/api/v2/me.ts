@@ -12,7 +12,7 @@ import { generateKeyPair } from "../../core/crypto.js";
 import { isHeld } from "../../core/v2/flow.js";
 import { CLAIM_REF, isClaimRef } from "../../core/v2/refs.js";
 import { FIELDS } from "../../core/schema.js";
-import { Accounts, ALERTS, clearCookie, cookie, setCookie, type Alert, type Digest, type Preferences, type Signed } from "./accounts.js";
+import { Accounts, ALERTS, clearCookie, cookie, DOOR_COOKIE, DOOR_COOKIE_S, doorOf, setCookie, type Alert, type Digest, type Preferences, type Signed } from "./accounts.js";
 import type { V2Service } from "./service.js";
 import type { OAuth } from "./oauth.js";
 import type { V2Governance } from "./governance.js";
@@ -173,7 +173,9 @@ export class MeHandler {
       }
       const t = url.searchParams.get("t");
       if (!t) return this.redirect("/me");
-      const r = await this.o.accounts.completeLink(t, browser, ip);
+      // Attribution, taken once if this sign-in makes the account: the door cookie a ?via= link set (accounts.ts, DOOR_COOKIE)
+      // and the country Cloudflare saw the connection come from. Neither reaches the log.
+      const r = await this.o.accounts.completeLink(t, browser, ip, { door: cookie(req.headers.get("cookie"), DOOR_COOKIE), country: req.headers.get("cf-ipcountry") });
       if (!r.ok) return this.html(r.status, signInPage({ problem: r.error }));
       // Back to the authorization page an app sent the person from, if that is where they came from; nowhere else.
       const next = safeNext(cookie(req.headers.get("cookie"), NEXT_COOKIE));
@@ -183,6 +185,9 @@ export class MeHandler {
     if (!signed) {
       // The sign-in page names this browser, so the link it asks for can be bound to it.
       const named = browser && /^[A-Za-z0-9_-]{32,64}$/.test(browser) ? [] : [setCookie(BROWSER_COOKIE, this.o.accounts.newBrowserToken(), YEAR_S, secure)];
+      // A sign-in link that names its door (/me?via=moltbook) keeps it until the account is made.
+      const door = doorOf(url.searchParams.get("via"));
+      if (door) named.push(setCookie(DOOR_COOKIE, door, DOOR_COOKIE_S, secure));
       if (path === "/me" && method !== "POST") return this.html(200, signInPage({}), named);
       return this.html(401, signInPage({ problem: path === "/me" ? null : "Sign in first." }), named);
     }

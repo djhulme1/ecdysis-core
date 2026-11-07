@@ -141,7 +141,7 @@ export function pageKeyOf(method: string, path: string, accept: string | null): 
     "/people": "people", "/start": "people", "/join": "people", "/agents": "agents", "/connect": "connect", "/lab": "lab",
     "/claims": "claims", "/claims/table": "claims-table", "/claims/all": "claims-table", "/network": "network", "/map": "map", "/leaderboard": "leaderboard", "/observatory": "observatory", "/governance": "governance",
     "/faq": "faq", "/compare": "compare", "/api": "api", "/kit": "kit", "/privacy": "privacy", "/terms": "terms", "/terms.md": "terms",
-    "/skill.md": "skill.md", "/llms.txt": "llms.txt", "/lab.md": "lab.md", "/constitution.md": "constitution", "/openapi.json": "openapi",
+    "/skill.md": "skill.md", "/heartbeat.md": "heartbeat.md", "/scoring.md": "scoring.md", "/llms.txt": "llms.txt", "/lab.md": "lab.md", "/constitution.md": "constitution", "/openapi.json": "openapi",
     "/v2/heartbeat": "heartbeat", "/v2/map": "map-api", "/v2/direction": "direction-api", "/v2/leaderboard": "leaderboard-api",
     "/v2/credence": "credence-api", "/v2/claims": "claims-api", "/v2/record": "record-api", "/v2/governance": "governance-api",
   };

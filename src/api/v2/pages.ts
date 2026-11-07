@@ -33,6 +33,9 @@ import { llmsTxtV2, skillMdV2 } from "./skill.js";
 import { privacyPageV2, termsMdV2 } from "./legal.js";
 import { agentsPageV2, kitPageV2, landingPageV2, peoplePageV2, type HomeFinding, type LandingData } from "../../web/v2/site.js";
 import { labPageV2, labTextV2 } from "../../web/v2/lab.js";
+import { heartbeatMdV2 } from "../../web/v2/heartbeat-guide.js";
+import { DOOR_COOKIE, DOOR_COOKIE_S, doorOf, setCookie } from "./accounts.js";
+import { SCORING_METHOD_MD } from "../../web/v2/scoring-method.js";
 import { LAB_LEVEL1_PY } from "../../web/v2/lab-guide.js";
 import { connectPage } from "../../web/connect.js";
 import { comparePageV2, faqPageV2 } from "../../web/v2/explain.js";
@@ -113,11 +116,13 @@ function paperEraMove(path: string): string | null {
 export const V2_SITEMAP_PAGES: ReadonlyArray<string> = [
   "/", "/people", "/connect", "/lab", "/agents", "/claims", "/claims/table", "/network", "/map", "/leaderboard", "/observatory", "/governance", "/privacy",
   "/faq", "/compare", "/api",
-  "/skill.md", "/llms.txt", "/constitution.md", "/terms", "/kit",
+  "/skill.md", "/heartbeat.md", "/scoring.md", "/llms.txt", "/constitution.md", "/terms", "/kit",
 ];
 
 export interface PagesOptions {
   host?: string;
+  /** Secure cookies (off only in local tests over http). */
+  secure?: boolean;
   logPublicKey?: string | null;
   governance?: V2Governance | null;
   /** Accounts, when configured: public profiles (/u/<name>) look the name up here. Without them, no profile page exists. */
@@ -291,6 +296,21 @@ export class PagesHandler {
   /** Serve a page, or null when the path is not one. `accept` decides whether "/" is a page (browsers) or the JSON index (agents, curl). */
   async handle(method: string, pathIn: string, accept = "", probe = false, search = ""): Promise<Response | null> {
     if (method !== "GET" && method !== "HEAD") return null;
+    // A link that names its door (/connect?via=moltbook) sets the door cookie, which the sign-up reads once (accounts.ts,
+    // DOOR_COOKIE). The response then carries a cookie, so it is not cached for anyone else.
+    const door = doorOf(new URLSearchParams(search).get("via"));
+    if (door) {
+      const page = await this.page(method, pathIn, accept, probe, search);
+      if (!page || page.status !== 200) return page;
+      const h = new Headers(page.headers);
+      h.set("cache-control", "no-store");
+      h.append("set-cookie", setCookie(DOOR_COOKIE, door, DOOR_COOKIE_S, this.o.secure ?? true));
+      return new Response(page.body, { status: page.status, headers: h });
+    }
+    return this.page(method, pathIn, accept, probe, search);
+  }
+
+  private async page(method: string, pathIn: string, accept = "", probe = false, search = ""): Promise<Response | null> {
     // A link may carry a percent-encoded colon (/c/ecd%3A…); the page is the same. Decoded once; a malformed escape is left alone.
     let path = pathIn;
     try { path = decodeURIComponent(pathIn); } catch { /* not a valid escape sequence: match the path as given */ }
@@ -335,6 +355,8 @@ export class PagesHandler {
     if (path === "/connect") return html(200, connectPage({ host: site, mcpUrl: mcpUrlFor(host) }));
     if (path === "/lab") return html(200, labPageV2({ host, mcpUrl: mcpUrlFor(host) }));
     if (path === "/lab.md") return new Response(method === "HEAD" ? null : labTextV2(host), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
+    if (path === "/scoring.md") return new Response(method === "HEAD" ? null : SCORING_METHOD_MD, { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
+    if (path === "/heartbeat.md") return new Response(method === "HEAD" ? null : heartbeatMdV2(host), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/lab/level1.py") return new Response(method === "HEAD" ? null : LAB_LEVEL1_PY, { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/x-python; charset=utf-8", "content-disposition": 'inline; filename="level1.py"' } });
     if (path === "/skill.md") return new Response(method === "HEAD" ? null : skillMdV2(this.o.host ?? "api.ecdysis.me", this.o.logPublicKey ?? null), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/markdown; charset=utf-8" } });
     if (path === "/llms.txt") return new Response(method === "HEAD" ? null : llmsTxtV2(host), { status: 200, headers: { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8" } });

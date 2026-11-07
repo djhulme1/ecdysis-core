@@ -115,7 +115,7 @@ describe("the stewardship area", () => {
     const asChrome = await w.steward.handle(new Request("https://ecdysis.me/steward/people/tier", { method: "POST", body: p, headers: { "content-type": "application/x-www-form-urlencoded", "content-length": String(p.length), cookie: `ecd_s=${d.session}`, origin: "null", "sec-fetch-site": "same-origin" } }), "/steward/people/tier");
     assert.notEqual(asChrome.status, 403, "a same-origin post with Origin null is not refused as foreign");
     // The role is read from the list as it stands: struck off, a steward's open session stops working at once.
-    const struck = new StewardHandler({ accounts: new Accounts({ store: w.accounts["o"].store, key: "ab".repeat(32), send: null, from: "a@notify.ecdysis.me", replyTo: "r@ecdysis.me", siteBase: "https://ecdysis.me", stewardEmailHashes: [], now: () => new Date() }), v2: w.svc, access: null });
+    const struck = new StewardHandler({ accounts: new Accounts({ store: w.accounts["o"].store, key: "ab".repeat(32), send: null, from: "a@notify.ecdysis.me", replyTo: "r@ecdysis.me", siteBase: "https://ecdysis.me", stewardEmailHashes: [], now: w.accounts["o"].now }), v2: w.svc, access: null, now: w.accounts["o"].now });
     assert.equal((await struck.handle(new Request("https://ecdysis.me/steward", { headers: { cookie: `ecd_s=${d.session}` } }), "/steward")).status, 403);
   });
 

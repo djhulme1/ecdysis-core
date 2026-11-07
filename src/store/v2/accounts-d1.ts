@@ -1,7 +1,7 @@
 /**
  * The account store on D1 (migration 0014). Off the log; deletable.
  */
-import type { AccountRow, AccountStore, MagicLinkRow, PairingRow, Preferences, SessionRow } from "../../api/v2/accounts.js";
+import type { AccountRow, AccountStore, DoorCount, MagicLinkRow, PairingRow, Preferences, SessionRow } from "../../api/v2/accounts.js";
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -9,7 +9,7 @@ export class D1AccountStore implements AccountStore {
   constructor(private db: D1Database, private now: () => Date = () => new Date()) {}
 
   private rowToAccount(r: Record<string, unknown>): AccountRow {
-    return { id: String(r["id"]), emailHash: String(r["email_hash"]), emailSealed: String(r["email_sealed"]), operatorId: String(r["operator_id"]), role: r["role"] === "steward" ? "steward" : "member", createdAt: String(r["created_at"]) };
+    return { id: String(r["id"]), emailHash: String(r["email_hash"]), emailSealed: String(r["email_sealed"]), operatorId: String(r["operator_id"]), role: r["role"] === "steward" ? "steward" : "member", createdAt: String(r["created_at"]), door: r["door"] ? String(r["door"]) : null, country: r["country"] ? String(r["country"]) : null };
   }
   async getAccount(id: string) {
     const r = await this.db.prepare("SELECT * FROM accounts WHERE id = ?1").bind(id).first<Record<string, unknown>>();
@@ -25,13 +25,17 @@ export class D1AccountStore implements AccountStore {
   }
   /** Upsert on the id only: a row whose email hash or operator id is another account's is refused, never replaced (REPLACE would delete that other account). */
   async putAccount(a: AccountRow) {
-    await this.db.prepare("INSERT INTO accounts (id, email_hash, email_sealed, operator_id, role, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET email_hash = excluded.email_hash, email_sealed = excluded.email_sealed, operator_id = excluded.operator_id, role = excluded.role, created_at = excluded.created_at")
-      .bind(a.id, a.emailHash, a.emailSealed, a.operatorId, a.role, a.createdAt).run();
+    await this.db.prepare("INSERT INTO accounts (id, email_hash, email_sealed, operator_id, role, created_at, door, country) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(id) DO UPDATE SET email_hash = excluded.email_hash, email_sealed = excluded.email_sealed, operator_id = excluded.operator_id, role = excluded.role, created_at = excluded.created_at, door = excluded.door, country = excluded.country")
+      .bind(a.id, a.emailHash, a.emailSealed, a.operatorId, a.role, a.createdAt, a.door ?? null, a.country ?? null).run();
   }
   async createAccount(a: AccountRow) {
-    const r = await this.db.prepare("INSERT OR IGNORE INTO accounts (id, email_hash, email_sealed, operator_id, role, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
-      .bind(a.id, a.emailHash, a.emailSealed, a.operatorId, a.role, a.createdAt).run();
+    const r = await this.db.prepare("INSERT OR IGNORE INTO accounts (id, email_hash, email_sealed, operator_id, role, created_at, door, country) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)")
+      .bind(a.id, a.emailHash, a.emailSealed, a.operatorId, a.role, a.createdAt, a.door ?? null, a.country ?? null).run();
     return (r.meta?.changes ?? 0) > 0;
+  }
+  async countAccountsByDoor(sinceIso: string): Promise<DoorCount[]> {
+    const r = await this.db.prepare("SELECT substr(created_at, 1, 7) AS month, door, country, COUNT(*) AS n FROM accounts WHERE created_at >= ?1 GROUP BY month, door, country ORDER BY month, door, country").bind(sinceIso).all<Record<string, unknown>>();
+    return (r.results ?? []).map((x) => ({ month: String(x["month"]), door: x["door"] ? String(x["door"]) : null, country: x["country"] ? String(x["country"]) : null, count: Number(x["n"]) }));
   }
   async deleteAccount(id: string, emailHash: string) {
     await this.db.batch([
