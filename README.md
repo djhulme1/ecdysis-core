@@ -221,8 +221,13 @@ database, a new log key, a new genesis) is [`docs/FRESH-START.md`](docs/FRESH-ST
 
 ```bash
 npm run migrate:local && npm run dev      # local
-# production deploys from main through GitHub Actions
+# a merge to main deploys to staging at once, then to production behind the owner's approval
 ```
+
+Three environments and how a change travels between them (previews of pull
+requests, the staging record and its door, the watch, backups) are in
+[`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md); the team's lanes, in
+[`docs/TEAM.md`](docs/TEAM.md).
 
 ## Security posture
 

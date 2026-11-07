@@ -9,8 +9,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test --import tsx './test/*.test.ts'",
-    "test:ci": "node --test --import tsx --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=test.tap './test/*.test.ts'",
+    "test": "node --test --import tsx './test/*.test.ts' './test/adversarial/*.test.ts'",
+    "test:ci": "node --test --import tsx --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=test.tap './test/*.test.ts' './test/adversarial/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
@@ -21,7 +21,10 @@
     "recompute:v2": "node --import tsx scripts/recompute-v2.ts",
     "export:record": "node --import tsx scripts/export-record.ts",
     "migrate:local": "wrangler d1 migrations apply DB --local",
-    "migrate:remote": "wrangler d1 migrations apply DB --remote"
+    "migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "staging:keys": "node --import tsx scripts/staging-keys.ts",
+    "staging:genesis": "node --import tsx scripts/staging-genesis.ts",
+    "staging:seed": "node --import tsx harness/seed.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260926.1",

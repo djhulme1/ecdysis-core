@@ -12,3 +12,4 @@ secrets/
 test.tap
 # local agent worktrees
 .claude/worktrees/
+.dev.vars.*

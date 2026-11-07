@@ -24,6 +24,8 @@ import type { OAuth } from "./v2/oauth.js";
 import type { V2Governance } from "./v2/governance.js";
 import { appsFor, launchPage, MCP_APPS, mcpUrlFor, PROMPT_APPS, type McpApp, type PromptApp } from "../web/launch.js";
 import { isStarterV2, starterTextV2, type StarterIdV2 } from "../web/starters.js";
+import { environmentNotice, labelResponse, ROBOTS_DISALLOW, type Environment } from "./environment.js";
+import { StagingDoor } from "./v2/staging-door.js";
 
 export interface RateLimiter {
   /** Returns true if this identity may proceed. */
@@ -63,6 +65,14 @@ export interface RouteOptions {
   oauth?: { logic: OAuth; http: OAuthHandler } | null;
   /** Where the frozen v1 record is served (https://v1.ecdysis.me), named in the agents' index. */
   archive?: string | null;
+  /**
+   * Which deployment this is (api/environment.ts). Set, every response names it in a header; a staging or development
+   * deployment also says so on every page and document, refuses indexing, and names itself in the agents' index. Absent:
+   * nothing is added (the service-level tests).
+   */
+  environment?: Environment;
+  /** The staging door (api/v2/staging-door.ts): built by the Worker on a staging deployment only. Absent: /staging/door does not exist. */
+  stagingDoor?: StagingDoor | null;
 }
 
 /**
@@ -252,6 +262,8 @@ export async function route(req: Request, limiter: RateLimiter, opts: RouteOptio
     console.error(`unhandled ${id}`, e);
     res = respond(500, { error: "internal error", correlationId: id });
   }
+  // Every response names the deployment it came from; a disposable one says so on every page and document too.
+  if (opts.environment) res = await labelResponse(res, opts.environment, new URL(req.url).pathname.replace(/\/+$/, "") || "/");
   // The platform's own health probe deliberately sends bad writes; they are not visitors' attempts, so they are not
   // counted. (Anyone may send this header; doing so only removes them from aggregate counts.)
   if (req.headers.get("x-ecdysis-probe") === "1" || !opts.count) return res;
@@ -295,6 +307,15 @@ async function routeRequest(req: Request, limiter: RateLimiter, opts: RouteOptio
   const isMcp = path === "/mcp" || path === "/mcp/me";
   if (!(await limiter.allow(isMcp ? "mcp" : reading ? "read" : "write", ip))) {
     return respond(429, { error: "rate limit exceeded; slow down" });
+  }
+  // A disposable deployment is never indexed: its robots.txt refuses every crawler before any page is built.
+  if (reading && path === "/robots.txt" && opts.environment && opts.environment !== "production") {
+    return new Response(method === "HEAD" ? null : ROBOTS_DISALLOW, { status: 200, headers: { ...TEXT_SITE_HEADERS("text/plain; charset=utf-8"), "cache-control": "no-store" } });
+  }
+  // The staging door: a staging deployment's sign-in without a link (api/v2/staging-door.ts). Elsewhere the path does not exist.
+  if (StagingDoor.owns(path) || path.startsWith("/staging/")) {
+    if (!opts.stagingDoor || !StagingDoor.owns(path)) return respond(404, { error: "no such endpoint", see: "/skill.md" });
+    return opts.stagingDoor.handle(req, ip);
   }
   // OAuth for the connector: metadata, registration, the authorization page, tokens.
   if (OAuthHandler.owns(path)) {
@@ -457,6 +478,8 @@ async function dispatch(method: string, path: string, q: URLSearchParams, body: 
         openapi: "GET /openapi.json (OpenAPI 3.1; the reference for people is GET /api on the site)",
         endpoints: endpointIndex(),
         ...(opts.archive ? { archive: { v1: opts.archive, note: "The first record (protocol ecdysis/0.1) is frozen there; it takes no writes." } } : {}),
+        // A disposable deployment says so to every agent that reads its index, before it writes anything.
+        ...(opts.environment && opts.environment !== "production" ? { environment: opts.environment, notice: environmentNotice(opts.environment) } : {}),
       } as Json,
     };
   }
