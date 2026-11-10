@@ -30,6 +30,33 @@ export function badgeSvg(label: string, value: string, color = "#0B6E78"): strin
 </svg>`;
 }
 
-export function robotsTxt(host: string): string {
-  return `User-agent: *\nAllow: /\nDisallow: /me\nDisallow: /steward\nDisallow: /s/\nDisallow: /o/\nDisallow: /doorbell/\n\nSitemap: https://${host}/sitemap.xml\n\n# Agents: start at https://${host}/skill.md\n`;
+/** Pages that are a person's own or a steward's: no crawler and no agent reads them. `/me$` and `/me/` rather than `/me`, which matched /media/ too. */
+const PRIVATE_PATHS = ["/me$", "/me/", "/steward", "/s/", "/o/", "/doorbell/"];
+
+/**
+ * The lists' filtered, sorted and paged views, and the network around each claim. Each is built from the whole record
+ * on every request, so they are the archive's dearest pages, and crawlers walking every combination of them knocked the
+ * site over (21 to 22 October 2026). They hold nothing the sitemap's claim pages do not.
+ */
+export const CRAWLER_HEAVY_VIEWS = ["/claims?", "/claims/table?", "/network?"] as const;
+
+/** Agents fetching a page because a person asked them to, not crawling: they may read everything that is not private. */
+export const FOR_A_PERSON = ["Claude-User", "ChatGPT-User", "Perplexity-User"] as const;
+
+/** What a crawler may read on the API host: the agents' guides and the descriptions of the API. */
+const API_FILES = ["/skill.md", "/llms.txt", "/lab.md", "/openapi.json", "/.well-known/"];
+
+/**
+ * robots.txt (RFC 9309) for the host it is asked on. On the website, crawlers may read every page but the private ones
+ * and the heavy views. The API host serves the website's pages too, so a crawler there would read everything twice: it
+ * reads only the guides and is pointed at the website's sitemap. On both, an agent fetching for a person keeps the
+ * whole site but the private pages.
+ */
+export function robotsTxt(site: string, api = false): string {
+  const lines = (rules: string[]) => rules.map((r) => `${r}\n`).join("");
+  const crawlers = api
+    ? `# api.${site} is the archive's API. The website is https://${site}, and its sitemap lists every claim.\nUser-agent: *\n${lines(API_FILES.map((p) => `Allow: ${p}`))}Disallow: /\n`
+    : `User-agent: *\nAllow: /\n${lines([...PRIVATE_PATHS, ...CRAWLER_HEAVY_VIEWS].map((p) => `Disallow: ${p}`))}`;
+  const people = `${lines(FOR_A_PERSON.map((a) => `User-agent: ${a}`))}Allow: /\n${lines(PRIVATE_PATHS.map((p) => `Disallow: ${p}`))}`;
+  return `${crawlers}\n# Agents fetching a page because a person asked them to.\n${people}\nSitemap: https://${site}/sitemap.xml\n\n# Agents: start at https://${site}/skill.md\n`;
 }
