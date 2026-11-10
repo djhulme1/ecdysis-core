@@ -52,7 +52,6 @@ jobs:
       # Staging may live on a Cloudflare account of its own (docs/ENVIRONMENTS.md § Hardening).
       CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.STAGING_CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
-      KEYS: ${{ runner.temp }}/staging-keys
     steps:
       - name: Refuse without the word
         if: inputs.confirm != 'reset'
@@ -65,6 +64,10 @@ jobs:
             echo "::error::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are the repository secrets every deploy uses; add them first."
             exit 1
           fi
+
+      - name: Where this run keeps its keys
+        # The runner's own temporary directory, outside the checkout; removed before the run ends.
+        run: echo "KEYS=$RUNNER_TEMP/staging-keys" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
