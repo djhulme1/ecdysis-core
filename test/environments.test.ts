@@ -32,7 +32,7 @@ const TOML = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
 const TOP = TOML.slice(0, TOML.search(/^\[env\./m));
 const STAGING = TOML.slice(TOML.indexOf("[env.staging]"));
 const KEY = "ab".repeat(32);
-const DOOR = "0123456789abcdef".repeat(4);
+const DOOR = "five-random-words-joined-by-hyphens";
 const ACK = { version: CONSTITUTION_VERSION, hash: await constitutionHash() };
 
 describe("wrangler.toml keeps production and staging apart", () => {
@@ -50,11 +50,12 @@ describe("wrangler.toml keeps production and staging apart", () => {
     const stagingDb = STAGING.match(/^database_id\s*=\s*"([^"]+)"/m)?.[1];
     assert.ok(prodDb && stagingDb, "both pin a database");
     assert.notEqual(prodDb, stagingDb, "the staging database is never production's");
-    const prodKey = TOP.match(/^STH_PUBLIC_KEY\s*=\s*"([^"]+)"/m)?.[1];
-    const stagingKey = STAGING.match(/^STH_PUBLIC_KEY\s*=\s*"([^"]+)"/m)?.[1];
-    assert.ok(prodKey && stagingKey);
-    assert.notEqual(prodKey, stagingKey, "the staging log key is never production's");
-    assert.notEqual(STAGING.match(/^OPERATOR_PUBLIC_KEY\s*=\s*"([^"]+)"/m)?.[1], TOP.match(/^OPERATOR_PUBLIC_KEY\s*=\s*"([^"]+)"/m)?.[1]);
+    // Staging's public keys are Worker secrets the Staging workflow installs beside the private halves: the configuration
+    // pins neither, so production's can never be written into the staging block.
+    assert.ok(TOP.match(/^STH_PUBLIC_KEY\s*=\s*"([^"]+)"/m)?.[1], "production pins its log key");
+    assert.ok(!/^STH_PUBLIC_KEY\s*=/m.test(STAGING), "staging pins no log key in the configuration");
+    assert.ok(!/^OPERATOR_PUBLIC_KEY\s*=/m.test(STAGING), "staging pins no operator key in the configuration");
+    assert.match(stagingDb!, /^REPLACE_WITH_STAGING_D1_ID$/, "the staging database id is looked up by name at deploy time, never committed");
     assert.match(STAGING, /^name\s*=\s*"ecdysis-core-staging"/m, "a Worker of its own");
     const prodNs = [...TOP.matchAll(/^namespace_id\s*=\s*"(\d+)"/gm)].map((m) => m[1]);
     const stagingNs = [...STAGING.matchAll(/^namespace_id\s*=\s*"(\d+)"/gm)].map((m) => m[1]);
@@ -171,6 +172,7 @@ describe("the router on a disposable deployment", () => {
     const index = await route(w.req("/"), limiter(), w.opts);
     const body = (await index.json()) as { environment?: string; notice?: string };
     assert.equal(body.environment, "staging");
+    assert.match((body as { logPublicKey?: string }).logPublicKey ?? "", /^[A-Za-z0-9_-]{40,}$/, "a staging index names its own log key, so a check needs nothing pinned");
     assert.match(body.notice ?? "", /disposable/);
     assert.equal(index.headers.get(ENV_HEADER), "staging");
     const robots = await route(w.req("/robots.txt"), limiter(), w.opts);
@@ -191,6 +193,7 @@ describe("the router on a disposable deployment", () => {
     const w = await world({ environment: "production" });
     const body = (await (await route(w.req("/"), limiter(), w.opts)).json()) as { environment?: string };
     assert.equal(body.environment, undefined);
+    assert.equal((body as { logPublicKey?: string }).logPublicKey, undefined);
     const robots = await route(w.req("/robots.txt"), limiter(), w.opts);
     assert.notEqual(await robots.text(), ROBOTS_DISALLOW);
     const page = await route(w.req("/", { accept: "text/html" }), limiter(), w.opts);
@@ -212,8 +215,8 @@ describe("the staging door", () => {
   it("refuses to be built with anything but a 64-hex key, and a wrong key learns nothing", async () => {
     const w = await world({ door: true });
     assert.throws(() => new StagingDoor({ accounts: w.accounts, v2: w.v2, key: "short" }));
-    assert.ok(DOOR_KEY.test(DOOR) && !DOOR_KEY.test(DOOR.slice(1)) && !DOOR_KEY.test(`${DOOR}0`));
-    for (const key of ["", "x".repeat(64), DOOR.slice(0, 63) + "0", "0".repeat(64)]) {
+    assert.ok(DOOR_KEY.test(DOOR) && DOOR_KEY.test("ab".repeat(32)) && !DOOR_KEY.test("too-short-to-be-a-key") && !DOOR_KEY.test("has a space in it, so it is no key") && !DOOR_KEY.test("x".repeat(129)));
+    for (const key of ["", "x".repeat(64), DOOR.slice(0, -1) + "x", DOOR.toUpperCase(), DOOR + "s"]) {
       const r = await route(w.req(`/staging/door?key=${key}&email=not-an-address`), limiter(), w.opts);
       assert.equal(r.status, 403, "the key is checked before the address");
       assert.match(await r.text(), /door key does not match/);

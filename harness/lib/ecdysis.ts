@@ -44,7 +44,7 @@ export interface Commitment { id: string; status: number; seed: string | null; c
 export type Outputs = Record<string, number | string | boolean>;
 
 const HEADERS = { accept: "application/json", "content-type": "application/json", "x-ecdysis-probe": "1" };
-const DOOR_KEY = /^[0-9a-f]{64}$/i;
+const DOOR_KEY = /^[A-Za-z0-9._~-]{24,128}$/;
 
 /** ISO-8601 UTC to the second, as the archive writes timestamps. */
 export const ts = (d = new Date()): string => d.toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -63,7 +63,7 @@ export class Staging {
     if (index.environment !== "staging") throw new Error(`refusing: ${b} does not say it is the staging deployment (environment: ${index.environment ?? "none"}); the harness runs against staging only`);
     const record = (await (await fetch(`${b}/v2/record`, { headers: HEADERS })).json()) as { constitution: { version: string; hash: string } | null };
     if (!record.constitution) throw new Error("the staging record has not opened: run the Staging workflow (genesis) first");
-    if (doorKey !== null && !DOOR_KEY.test(doorKey)) throw new Error("STAGING_DOOR_KEY: 64 hex characters");
+    if (doorKey !== null && !DOOR_KEY.test(doorKey)) throw new Error("STAGING_DOOR_KEY: 24 to 128 letters, digits, dots, hyphens, underscores or tildes");
     return new Staging(b, doorKey, record.constitution);
   }
 

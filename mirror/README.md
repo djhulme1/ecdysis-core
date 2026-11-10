@@ -9,7 +9,10 @@ Three records, one directory each:
 
 - `network/sth-history.jsonl`: the live record, the network of claims, from
   its genesis at the fresh start of 5 October 2026 (network/0.1). The
-  nightly live check appends to it.
+  nightly live check appends to it, on the branch `mirror` since 10 November
+  2026 (`main` changes only through reviewed pull requests, which a nightly
+  commit cannot pass): the copy on `main` stops there, and the living file is
+  on that branch.
 - `v2/`: the record of 3 to 5 October 2026 (claims published inside papers,
   receipts, the challenge board), left behind at the fresh start in its own
   database. `entries.jsonl` is every entry it holds, exported and verified

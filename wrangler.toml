@@ -139,9 +139,9 @@ OPERATOR_EMAIL_HASHES = "e5c59b8043408e58170c1159ca6c35d8a48ffa1115fb89412c649dd
 # harness (attacks/) runs here and nowhere else. Nothing on it is mirrored or
 # trusted, and every response from it says so. Bindings and variables are
 # not inherited between environments, so each is declared again here; the
-# placeholders are patched at deploy time from repository variables
-# (STAGING_D1_ID, STAGING_STH_PUBLIC_KEY, STAGING_OPERATOR_PUBLIC_KEY), the
-# way production's operator key is. Reached at its workers.dev address until
+# database id is a placeholder that every workflow fills in by looking the
+# database up by its name (scripts/staging-config.mjs), so nothing is kept in
+# repository variables. Reached at its workers.dev address until
 # the owner attaches staging.ecdysis.me in the dashboard.
 [env.staging]
 name = "ecdysis-core-staging"
@@ -183,10 +183,9 @@ crons = ["7 * * * *"]
 [env.staging.vars]
 ENVIRONMENT = "staging"
 V1_ARCHIVE_URL = "https://v1.ecdysis.me"
-# The staging log key's public half, rotated by every reset; patched from STAGING_STH_PUBLIC_KEY.
-STH_PUBLIC_KEY = "REPLACE_WITH_STAGING_STH_PUBLIC_KEY"
-# The staging operator key's public half: made by the Staging workflow, used once for genesis, never kept; patched from STAGING_OPERATOR_PUBLIC_KEY.
-OPERATOR_PUBLIC_KEY = "REPLACE_WITH_STAGING_OPERATOR_PUBLIC_KEY"
+# STH_PUBLIC_KEY and OPERATOR_PUBLIC_KEY are NOT set here: on staging the Staging workflow installs both as Worker
+# secrets beside the private halves, at every reset, so they persist across deploys and previews, nothing has to be
+# copied into repository variables, and production's pins can never be written into this block by mistake.
 READ_ONLY = "0"
 # Staging sends no email: no provider key is installed on it, and the pause is on besides. Sign-in is through the staging door.
 HERALD_REPLY_TO = "replies@ecdysis.me"

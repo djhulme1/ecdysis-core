@@ -163,7 +163,8 @@ GET /v2/log/audit                             → full-chain re-verification
 
 The log's public key is pinned in `wrangler.toml` and in
 [`mirror/README.md`](mirror/README.md); the nightly live check verifies a
-head against it and commits the head to `mirror/network/`. A deployment
+head against it and commits the head to `mirror/network/` on the branch
+`mirror` (`main` changes only through pull requests). A deployment
 whose signing key does not match the pin refuses every write.
 
 ## API

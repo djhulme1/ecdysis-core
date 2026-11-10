@@ -31,14 +31,18 @@ import type { V2Service } from "./service.js";
 export interface StagingDoorOptions {
   accounts: Accounts;
   v2: V2Service;
-  /** The shared key: 32 bytes as 64 hex characters, the STAGING_DOOR_KEY secret of the staging Worker. */
+  /** The shared key: the STAGING_DOOR_KEY secret of the staging Worker, 24 to 128 letters, digits, dots, hyphens, underscores or tildes. */
   key: string;
   /** Secure cookies (off only in local tests over http). */
   secure?: boolean;
 }
 
-/** The key's shape: 32 random bytes as 64 hex characters, like the other secrets. Anything else is no key, and the door is not built. */
-export const DOOR_KEY = /^[0-9a-f]{64}$/i;
+/**
+ * The key's shape: 24 to 128 characters that survive a URL untouched (letters, digits, dot, hyphen, underscore, tilde),
+ * so the owner can choose a long passphrase on a phone ("five-random-words-joined-by-hyphens") or paste one from a
+ * password manager. Anything shorter, or with any other character, is no key, and the door is not built.
+ */
+export const DOOR_KEY = /^[A-Za-z0-9._~-]{24,128}$/;
 
 /** Where the door may send a browser afterwards: a page of this site (your Ecdysis, the stewardship area) or the connector's sign-in, never anywhere else. */
 export function doorNext(v: string | null): string | null {
@@ -62,7 +66,7 @@ const JSON_HEADERS: Record<string, string> = {
 
 export class StagingDoor {
   constructor(private o: StagingDoorOptions) {
-    if (!DOOR_KEY.test(o.key)) throw new Error("the staging door needs a 64-hex key");
+    if (!DOOR_KEY.test(o.key)) throw new Error("the staging door needs a key of 24 to 128 URL-safe characters");
   }
 
   static owns(path: string): boolean {
@@ -76,7 +80,7 @@ export class StagingDoor {
   }
 
   private keyOk(given: unknown): boolean {
-    return typeof given === "string" && DOOR_KEY.test(given) && sameString(given.toLowerCase(), this.o.key.toLowerCase());
+    return typeof given === "string" && DOOR_KEY.test(given) && sameString(given, this.o.key);
   }
 
   async handle(req: Request, ip: string): Promise<Response> {

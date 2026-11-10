@@ -196,7 +196,7 @@ control. The repository ships the first rung of this ladder: the **Live
 check** workflow (`.github/workflows/live-check.yml`) probes the deployment
 nightly, verifies the tree head's signature and a consistency proof offline
 against the key pinned in `wrangler.toml`, and commits each new verified
-head to `mirror/network/sth-history.jsonl`: an append-only history in git,
+head to `mirror/network/sth-history.jsonl` on the branch `mirror`: an append-only history in git,
 outside the serving infrastructure. A rewritten log fails the next run
 loudly. Run `MODE=full` (workflow dispatch) after each deploy for the
 write-path probes. The earlier records' heads and entries are in

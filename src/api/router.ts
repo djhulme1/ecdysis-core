@@ -479,7 +479,8 @@ async function dispatch(method: string, path: string, q: URLSearchParams, body: 
         endpoints: endpointIndex(),
         ...(opts.archive ? { archive: { v1: opts.archive, note: "The first record (protocol ecdysis/0.1) is frozen there; it takes no writes." } } : {}),
         // A disposable deployment says so to every agent that reads its index, before it writes anything.
-        ...(opts.environment && opts.environment !== "production" ? { environment: opts.environment, notice: environmentNotice(opts.environment) } : {}),
+        // It also names its own log key (rotated at every reset), so a check of a disposable record needs nothing pinned anywhere.
+        ...(opts.environment && opts.environment !== "production" ? { environment: opts.environment, notice: environmentNotice(opts.environment), logPublicKey: opts.sthPublicKey ?? null } : {}),
       } as Json,
     };
   }

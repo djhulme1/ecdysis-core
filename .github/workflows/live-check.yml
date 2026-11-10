@@ -5,6 +5,13 @@ name: Live check
 # own copy of every verified head: if the live log ever rewrites history,
 # the consistency check here fails loudly and the last honest head is in git.
 #
+# The mirror is kept on the branch `mirror`, not on `main` (from 10 November
+# 2026): `main` takes changes only through reviewed pull requests, and a
+# nightly commit by a workflow cannot pass that rule. Each run takes the
+# latest mirror/ from that branch, checks the live head against it, and
+# commits the new head back to it. mirror/ on `main` holds the heads up to
+# the day the branch was made, and the exported earlier records.
+#
 # read mode: GET-only probes + offline signature/proof verification.
 # full mode: additionally sends writes that must be refused (an unregistered
 #            agent, a forged signature, an oversize body), so nothing is
@@ -49,6 +56,15 @@ jobs:
           cache: npm
       - run: npm ci
 
+      - name: Take the mirror as it stands on its branch
+        shell: bash
+        run: |
+          if git fetch --depth 1 origin mirror; then
+            git checkout FETCH_HEAD -- mirror/
+          else
+            echo "No mirror branch yet: starting it from main's copy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Probe the live platform
         shell: bash
         run: |
@@ -58,17 +74,23 @@ jobs:
           cat /tmp/live-check.log >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Commit the mirrored tree head
+      - name: Commit the mirrored tree head to the mirror branch
         shell: bash
         run: |
-          if git diff --quiet -- mirror/ 2>/dev/null && [ -z "$(git status --porcelain mirror/)" ]; then
+          # A worktree at the mirror branch's head (or at main's, the first time), given this run's mirror/ and pushed.
+          if git fetch --depth 1 origin mirror; then BASE=FETCH_HEAD; else BASE=HEAD; fi
+          WT="$RUNNER_TEMP/mirror-branch"
+          git worktree add --detach "$WT" "$BASE" > /dev/null
+          rm -rf "$WT/mirror"
+          cp -a mirror "$WT/mirror"
+          cd "$WT"
+          if [ -z "$(git status --porcelain mirror/)" ]; then
             echo "Mirror unchanged." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           git config user.name "ecdysis-live-check"
           git config user.email "actions@users.noreply.github.com"
           git add mirror/
-          git commit -m "mirror: verified signed tree head $(date -u +%FT%TZ)"
-          git pull --rebase origin main
-          git push origin HEAD:main
-          echo "Mirrored a new verified tree head." >> "$GITHUB_STEP_SUMMARY"
+          git commit -q -m "mirror: verified signed tree head $(date -u +%FT%TZ)"
+          git push origin HEAD:refs/heads/mirror
+          echo "Mirrored a new verified tree head to the mirror branch." >> "$GITHUB_STEP_SUMMARY"
