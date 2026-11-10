@@ -29,13 +29,10 @@ jobs:
       deployed: ${{ steps.deploy.outputs.deployed }}
       url: ${{ steps.deploy.outputs.url }}
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      # The staging record's own database and public keys, set by the Staging workflow (staging.yml) when it provisions or
-      # resets the record; patched into [env.staging] of wrangler.toml at deploy time, as production's operator key is.
-      STAGING_D1_ID: ${{ vars.STAGING_D1_ID }}
-      STAGING_STH_PUBLIC_KEY: ${{ vars.STAGING_STH_PUBLIC_KEY }}
-      STAGING_OPERATOR_PUBLIC_KEY: ${{ vars.STAGING_OPERATOR_PUBLIC_KEY }}
+      # Staging may live on a Cloudflare account of its own (docs/ENVIRONMENTS.md § Hardening): its token and account id
+      # when those secrets exist, and otherwise the ones production uses.
+      CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.STAGING_CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -46,22 +43,20 @@ jobs:
 
       - name: Gate on configuration
         id: gate
+        # The staging database is found by its name, so nothing has to be saved in repository variables.
+        shell: bash
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "Cloudflare secrets not set: skipping the staging deploy." >> "$GITHUB_STEP_SUMMARY"
-          elif [ -z "$STAGING_D1_ID" ] || [ -z "$STAGING_STH_PUBLIC_KEY" ] || [ -z "$STAGING_OPERATOR_PUBLIC_KEY" ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Staging is not provisioned (no STAGING_D1_ID, STAGING_STH_PUBLIC_KEY and STAGING_OPERATOR_PUBLIC_KEY variables): skipping it. Run the Staging workflow once to provision it (docs/ENVIRONMENTS.md)." >> "$GITHUB_STEP_SUMMARY"
-          else
+          elif node scripts/staging-config.mjs; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
+          elif [ $? -eq 3 ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Staging is not provisioned yet: skipping it. Run the Staging workflow once (docs/ENVIRONMENTS.md)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::could not resolve the staging database"; exit 1
           fi
-
-      - name: Patch the staging placeholders
-        if: steps.gate.outputs.ready == 'true'
-        run: |
-          sed -i "s/REPLACE_WITH_STAGING_D1_ID/$STAGING_D1_ID/; s/REPLACE_WITH_STAGING_STH_PUBLIC_KEY/$STAGING_STH_PUBLIC_KEY/; s/REPLACE_WITH_STAGING_OPERATOR_PUBLIC_KEY/$STAGING_OPERATOR_PUBLIC_KEY/" wrangler.toml
-          if grep -q 'REPLACE_WITH_STAGING' wrangler.toml; then echo "::error::a staging placeholder survived the patch"; exit 1; fi
 
       - name: Apply any new migrations to the staging database
         if: steps.gate.outputs.ready == 'true'
@@ -99,11 +94,12 @@ jobs:
         # the production job: what broke staging never ships.
         env:
           ECDYSIS_URL: ${{ steps.deploy.outputs.url }}
-          STH_PUBLIC_KEY: ${{ vars.STAGING_STH_PUBLIC_KEY }}
           MODE: read
         shell: bash
         run: |
           sleep 5
+          KEY=$(curl -fsS -H 'accept: application/json' -H 'x-ecdysis-probe: 1' "$ECDYSIS_URL/" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);if(j.environment!=='staging'||!j.logPublicKey){console.error('not a staging deployment with a log key');process.exit(1)}console.log(j.logPublicKey)})")
+          export STH_PUBLIC_KEY="$KEY"
           node --import tsx scripts/live-check.ts | tee /tmp/staging-check.log
           echo '## Staging check' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

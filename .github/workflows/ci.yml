@@ -55,11 +55,10 @@ jobs:
       group: preview-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      STAGING_D1_ID: ${{ vars.STAGING_D1_ID }}
-      STAGING_STH_PUBLIC_KEY: ${{ vars.STAGING_STH_PUBLIC_KEY }}
-      STAGING_OPERATOR_PUBLIC_KEY: ${{ vars.STAGING_OPERATOR_PUBLIC_KEY }}
+      # Staging may live on a Cloudflare account of its own (docs/ENVIRONMENTS.md § Hardening): its token and account id
+      # when those secrets exist, and otherwise the ones production uses.
+      CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.STAGING_CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
       PR: ${{ github.event.pull_request.number }}
     steps:
       - uses: actions/checkout@v5
@@ -71,12 +70,18 @@ jobs:
 
       - name: Gate on configuration
         id: gate
+        shell: bash
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$STAGING_D1_ID" ] || [ -z "$STAGING_STH_PUBLIC_KEY" ] || [ -z "$STAGING_OPERATOR_PUBLIC_KEY" ]; then
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "No preview: no Cloudflare secrets." >> "$GITHUB_STEP_SUMMARY"
+          elif node scripts/staging-config.mjs; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          elif [ $? -eq 3 ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "No preview: staging is not provisioned yet (run the Staging workflow once)." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "::error::could not resolve the staging database"; exit 1
           fi
 
       - name: Upload the branch as a version of the staging Worker
@@ -84,7 +89,6 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         shell: bash
         run: |
-          sed -i "s/REPLACE_WITH_STAGING_D1_ID/$STAGING_D1_ID/; s/REPLACE_WITH_STAGING_STH_PUBLIC_KEY/$STAGING_STH_PUBLIC_KEY/; s/REPLACE_WITH_STAGING_OPERATOR_PUBLIC_KEY/$STAGING_OPERATOR_PUBLIC_KEY/" wrangler.toml
           npx wrangler versions upload --env staging --preview-alias "pr-$PR" --tag "pr-$PR" --message "Pull request #$PR, ${GITHUB_SHA::7}" | tee /tmp/upload.log
           URL=$(grep -oE 'https://pr-[0-9]+-[a-z0-9.-]+\.workers\.dev' /tmp/upload.log | head -1)
           if [ -z "$URL" ]; then URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/upload.log | head -1); fi
@@ -97,11 +101,12 @@ jobs:
         # database as it stands, so its new tables are not there yet: it is previewed properly once merged.
         env:
           ECDYSIS_URL: ${{ steps.upload.outputs.url }}
-          STH_PUBLIC_KEY: ${{ vars.STAGING_STH_PUBLIC_KEY }}
           MODE: read
         shell: bash
         run: |
           sleep 5
+          KEY=$(curl -fsS -H 'accept: application/json' -H 'x-ecdysis-probe: 1' "$ECDYSIS_URL/" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);if(j.environment!=='staging'||!j.logPublicKey){console.error('not a staging deployment with a log key');process.exit(1)}console.log(j.logPublicKey)})")
+          export STH_PUBLIC_KEY="$KEY"
           node --import tsx scripts/live-check.ts | tee /tmp/preview-check.log || echo "preview_failed=1" >> "$GITHUB_ENV"
           echo '## Preview check' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

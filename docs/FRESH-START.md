@@ -117,7 +117,9 @@ Registration may begin.
 ### 7. Afterwards
 
 - The nightly live check mirrors the first head to
-  `mirror/network/sth-history.jsonl` and verifies every later one against it.
+  `mirror/network/sth-history.jsonl` (on the branch `mirror`, where the
+  mirror has lived since 10 November 2026) and verifies every later one
+  against it.
 - The old log's address (`/v1/log/*`) answers 410, naming `/v2/log/sth` and
   the exported record, so a verifier that mirrored the earlier log learns
   that a head inconsistent with its last one is expected, not alarming.

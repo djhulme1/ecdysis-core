@@ -3,13 +3,14 @@ name: Staging (provision or reset)
 # Makes the staging record, or makes it afresh (docs/ENVIRONMENTS.md § Reset):
 #
 #   1. the staging database (ecdysis-staging), created if it does not exist, then WIPED;
-#   2. new keys, made inside this runner and never printed: the log key (its
-#      private half becomes the staging Worker's STH_SIGNING_KEY_PKCS8), the
-#      operator key (used once, below, for genesis, then gone), and the
-#      accounts key (ACCOUNTS_KEY); the public halves and the database id are
-#      saved as repository variables for every later deploy and preview;
-#   3. the migrations, the deploy of the staging Worker, its secrets (the
-#      door key too, when the STAGING_DOOR_KEY repository secret exists);
+#   2. new keys, made inside this runner and never printed: the log key, the
+#      operator key (used once, below, for genesis, then gone) and the
+#      accounts key;
+#   3. the migrations, the deploy of the staging Worker, and its secrets in
+#      one step: the private halves, the two public halves the Worker checks
+#      itself against, and the door key when the STAGING_DOOR_KEY repository
+#      secret exists. They live on the Worker from then on, so later deploys
+#      and previews need nothing copied anywhere;
 #   4. genesis: the constitution adopted under R2 with the operator key of
 #      step 2, on a deployment that says it is staging (scripts/staging-genesis.ts
 #      refuses any other);
@@ -17,7 +18,8 @@ name: Staging (provision or reset)
 #   6. the read-mode probes.
 #
 # Nothing here can touch production: every wrangler command runs with --env
-# staging, the wipe script refuses any database but ecdysis-staging, the
+# staging, the database is found by the name ecdysis-staging and refused if
+# its id is production's, the wipe script refuses any other database, the
 # genesis script refuses any deployment that does not say it is staging, and
 # the production database, keys and secrets are never read. Run it as often
 # as you like; type "reset" to confirm you mean to wipe the staging record.
@@ -38,8 +40,6 @@ on:
 
 permissions:
   contents: read
-  # To save the public values as repository variables. If the token cannot, the run prints them to save by hand.
-  actions: write
 
 concurrency:
   group: staging
@@ -49,9 +49,9 @@ jobs:
   reset:
     runs-on: ubuntu-24.04
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      GH_TOKEN: ${{ github.token }}
+      # Staging may live on a Cloudflare account of its own (docs/ENVIRONMENTS.md § Hardening).
+      CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.STAGING_CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
       KEYS: ${{ runner.temp }}/staging-keys
     steps:
       - name: Refuse without the word
@@ -74,15 +74,7 @@ jobs:
       - run: npm ci
 
       - name: The staging database (created once, kept across resets)
-        id: d1
-        shell: bash
-        run: |
-          npx wrangler d1 create ecdysis-staging > /dev/null 2>&1 || echo "ecdysis-staging exists; keeping it"
-          UUID=$(npx wrangler d1 list --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s.slice(s.indexOf('[')));const r=j.find(x=>x.name==='ecdysis-staging');if(!r){console.error('ecdysis-staging not found');process.exit(1)};console.log(r.uuid)})")
-          PROD=$(grep -m1 -E '^database_id *= *"' wrangler.toml | sed -E 's/.*"([^"]+)".*/\1/')
-          if [ "$UUID" = "$PROD" ]; then echo "::error::the staging database id is production's; stopping"; exit 1; fi
-          echo "uuid=$UUID" >> "$GITHUB_OUTPUT"
-          sed -i "s/REPLACE_WITH_STAGING_D1_ID/$UUID/" wrangler.toml
+        run: node scripts/staging-config.mjs --create
 
       - name: New keys for the staging record, made here and never printed
         id: keys
@@ -90,22 +82,8 @@ jobs:
         run: |
           node --import tsx scripts/staging-keys.ts "$KEYS" > /dev/null
           for f in log.private operator.private accounts.key; do echo "::add-mask::$(cat "$KEYS/$f")"; done
-          LOG_PUB=$(cat "$KEYS/log.public"); OP_PUB=$(cat "$KEYS/operator.public")
-          echo "log_pub=$LOG_PUB" >> "$GITHUB_OUTPUT"
-          echo "op_pub=$OP_PUB" >> "$GITHUB_OUTPUT"
-          sed -i "s#REPLACE_WITH_STAGING_STH_PUBLIC_KEY#$LOG_PUB#; s#REPLACE_WITH_STAGING_OPERATOR_PUBLIC_KEY#$OP_PUB#" wrangler.toml
-          if grep -q 'REPLACE_WITH_STAGING' wrangler.toml; then echo "::error::a staging placeholder survived"; exit 1; fi
-
-      - name: Save the public values as repository variables
-        id: vars
-        shell: bash
-        run: |
-          ok=true
-          for pair in "STAGING_D1_ID=${{ steps.d1.outputs.uuid }}" "STAGING_STH_PUBLIC_KEY=${{ steps.keys.outputs.log_pub }}" "STAGING_OPERATOR_PUBLIC_KEY=${{ steps.keys.outputs.op_pub }}"; do
-            name="${pair%%=*}"; value="${pair#*=}"
-            gh variable set "$name" --body "$value" --repo "$GITHUB_REPOSITORY" || ok=false
-          done
-          echo "saved=$ok" >> "$GITHUB_OUTPUT"
+          echo "log_pub=$(cat "$KEYS/log.public")" >> "$GITHUB_OUTPUT"
+          echo "op_pub=$(cat "$KEYS/operator.public")" >> "$GITHUB_OUTPUT"
 
       - name: Wipe the staging record
         run: node scripts/staging-wipe.mjs
@@ -122,24 +100,21 @@ jobs:
           if [ -z "$URL" ]; then echo "::error::no workers.dev address in the deploy output (is the account's workers.dev subdomain registered? subdomain.yml)"; exit 1; fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Save the staging address as a repository variable (for the Watch)
-        shell: bash
-        run: |
-          gh variable set STAGING_URL --body "${{ steps.deploy.outputs.url }}" --repo "$GITHUB_REPOSITORY" || echo "Could not save STAGING_URL; save it by hand for the Watch workflow: ${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Install the staging Worker's secrets
+      - name: Install the staging Worker's secrets, all at once
         env:
           STAGING_DOOR_KEY: ${{ secrets.STAGING_DOOR_KEY }}
         shell: bash
         run: |
-          npx wrangler secret put STH_SIGNING_KEY_PKCS8 --env staging < "$KEYS/log.private" > /dev/null
-          npx wrangler secret put ACCOUNTS_KEY --env staging < "$KEYS/accounts.key" > /dev/null
-          if [ -n "$STAGING_DOOR_KEY" ]; then
-            printf '%s' "$STAGING_DOOR_KEY" | npx wrangler secret put STAGING_DOOR_KEY --env staging > /dev/null
-            echo "door=open" >> "$GITHUB_ENV"
-          else
-            echo "door=closed" >> "$GITHUB_ENV"
-          fi
+          # One file, one deployment: the Worker never runs with a new private key beside an old public half.
+          node -e '
+            const fs = require("fs"); const d = process.env.KEYS; const r = (f) => fs.readFileSync(d + "/" + f, "utf8").trim();
+            const s = { STH_SIGNING_KEY_PKCS8: r("log.private"), STH_PUBLIC_KEY: r("log.public"), OPERATOR_PUBLIC_KEY: r("operator.public"), ACCOUNTS_KEY: r("accounts.key") };
+            if (process.env.STAGING_DOOR_KEY) s.STAGING_DOOR_KEY = process.env.STAGING_DOOR_KEY.trim();
+            fs.writeFileSync(d + "/secrets.json", JSON.stringify(s), { mode: 0o600 });
+          '
+          npx wrangler secret bulk "$KEYS/secrets.json" --env staging > /dev/null
+          rm -f "$KEYS/secrets.json"
+          if [ -n "$STAGING_DOOR_KEY" ]; then echo "door=open" >> "$GITHUB_ENV"; else echo "door=closed (no STAGING_DOOR_KEY repository secret)" >> "$GITHUB_ENV"; fi
 
       - name: Genesis
         env:
@@ -194,19 +169,11 @@ jobs:
           {
             echo "## Staging: ${{ steps.deploy.outputs.url || 'not deployed' }}"
             echo ""
-            echo "- Database: ecdysis-staging (\`${{ steps.d1.outputs.uuid }}\`), wiped and migrated."
+            echo "**Share this address with the team.** Sign in at \`${{ steps.deploy.outputs.url }}/staging/door?key=<the door key>&email=<your address>\`."
+            echo ""
+            echo "- Database: ecdysis-staging, wiped and migrated."
             echo "- Log key: \`${{ steps.keys.outputs.log_pub }}\` (public half; the private half is the staging Worker's secret and was never printed)."
             echo "- Operator key: \`${{ steps.keys.outputs.op_pub }}\` (used once, for genesis; its private half is gone)."
             echo "- Staging door: ${door:-unknown}."
-            if [ "${{ steps.vars.outputs.saved }}" = "true" ]; then
-              echo "- Repository variables STAGING_D1_ID, STAGING_STH_PUBLIC_KEY and STAGING_OPERATOR_PUBLIC_KEY saved: every later deploy and preview patches them in."
-            else
-              echo "- **Save these as repository variables** (Settings → Secrets and variables → Actions → Variables), because this run could not:"
-              echo ""
-              echo '| Variable | Value |'
-              echo '| --- | --- |'
-              echo "| \`STAGING_D1_ID\` | \`${{ steps.d1.outputs.uuid }}\` |"
-              echo "| \`STAGING_STH_PUBLIC_KEY\` | \`${{ steps.keys.outputs.log_pub }}\` |"
-              echo "| \`STAGING_OPERATOR_PUBLIC_KEY\` | \`${{ steps.keys.outputs.op_pub }}\` |"
-            fi
+            echo "- Nothing to copy anywhere: later deploys and previews find the database by name and the keys on the Worker."
           } >> "$GITHUB_STEP_SUMMARY"

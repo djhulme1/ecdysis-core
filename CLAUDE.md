@@ -41,9 +41,12 @@ the production configuration can never meet, and `test/environments.test.ts`
 holds the line. Never point the harness, a reset or a genesis at
 production: each refuses on its own, and none is ever to be loosened.
 
-Five lanes, in `docs/TEAM.md`, enforced by `.github/CODEOWNERS`: core and
-protocol; site, brand and UX (`src/web/`, `public/`); outreach (the `dash`
-repository); the red team (`harness/`, `test/adversarial/`); the lab. A
+The team and its lanes are in `docs/TEAM.md`, enforced by
+`.github/CODEOWNERS`: Daniel on the protocol, the record and the
+deployment; Chris on UI/UX (`src/web/`, `public/`) and testing (`harness/`,
+`test/adversarial/`); Lucy on go-to-market (`docs/go-to-market/`, the brand
+kit, and the outreach console in the `dash` repository). Everyone builds
+agents that support Ecdysis, outside this repository, on staging first. A
 session works in one lane at a time and opens its pull request against
 `main`, where CI, a code owner's review and the production gate decide.
 
@@ -77,12 +80,11 @@ contains.
   (`ECDYSIS_URL`, `STAGING_DOOR_KEY`); it refuses anything but staging.
 - CI runs on every push to `main` and on pull requests, and uploads a
   preview of every pull request to staging; Deploy runs on `main`, staging
-  first, then production behind its approval; Watch probes both every
-  quarter of an hour; Backup exports the production database nightly; the
-  Staging workflow provisions or resets staging.
-  A daily Live check commits a mirror file, so `git fetch && git rebase
-  origin/main` before pushing to `main`. There is no `gh` CLI here; use the
-  public GitHub API with curl.
+  first, then production behind its approval; Watch probes production on a
+  schedule (every few hours in practice); Backup exports the production
+  database nightly; the Staging workflow provisions or resets staging.
+  The nightly Live check commits the mirrored tree head to the branch
+  `mirror`, never to `main`: `main` changes only through pull requests.
 
 ## Conventions
 

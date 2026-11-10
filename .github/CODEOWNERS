@@ -1,20 +1,15 @@
-# Who reviews what (docs/TEAM.md). With "Require review from Code Owners" on
-# in the branch protection for main, a pull request that touches a path needs
-# an approval from one of its owners before it can merge; the owner of the
-# repository can always merge. People are named by the address on their
-# GitHub account, so this file needs no usernames; the first time someone's
-# address is not on their GitHub account, add it there (Settings → Emails).
+# Who reviews what (docs/TEAM.md). With the ruleset for main requiring review
+# from code owners, a pull request that touches a path needs an approval from
+# one of its owners before it can merge; the owner of the repository can
+# always merge. People are named by the address on their GitHub account, so
+# this file needs no usernames; the address must be on the person's GitHub
+# account (Settings → Emails) and the person must have write access, or
+# GitHub ignores the line.
 #
 # Last match wins, so the lanes below override the owner's catch-all.
 
 # Everything, unless a lane below says otherwise: the owner.
 *                                 daniel@hulme.ai
-
-# The site lane: content, brand, UI and UX (docs/TEAM.md § Site).
-/src/web/                         daniel@hulme.ai lucy@hulme.ai
-/public/                          daniel@hulme.ai lucy@hulme.ai
-/docs/brand/                      daniel@hulme.ai lucy@hulme.ai
-/docs/fonts/                      daniel@hulme.ai lucy@hulme.ai
 
 # The protocol and the record: core, the API, the store, the migrations and the
 # constitution. The owner alone; a change to the constitution's text is an
@@ -31,6 +26,17 @@
 /.github/                         daniel@hulme.ai
 /scripts/                         daniel@hulme.ai
 
-# The staging harness and the adversarial tests: the red team's lane, with the owner.
+# UI and UX: every page, its layout and styles, the media and the typefaces. Chris, with the owner.
+/src/web/                         daniel@hulme.ai chris@hulme.ai
+/public/                          daniel@hulme.ai chris@hulme.ai
+/docs/fonts/                      daniel@hulme.ai chris@hulme.ai
+
+# The brand kit is Lucy's; its use on the site is Chris's. Either, with the owner.
+/docs/brand/                      daniel@hulme.ai lucy@hulme.ai chris@hulme.ai
+
+# Testing: the staging harness and the adversarial tests. Chris, with the owner.
 /harness/                         daniel@hulme.ai chris@hulme.ai
 /test/adversarial/                daniel@hulme.ai chris@hulme.ai
+
+# Go-to-market: what the site says to the world and what agents and directories read about Ecdysis. Lucy, with the owner.
+/docs/go-to-market/               daniel@hulme.ai lucy@hulme.ai

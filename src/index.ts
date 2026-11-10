@@ -59,7 +59,7 @@ export interface Env {
   SITE_HOST?: string;
   API_HOST?: string;
   /**
-   * Secret, staging only: 32 bytes as 64 hex characters, the key to the staging door (api/v2/staging-door.ts). The door is
+   * Secret, staging only: a passphrase of 24 to 128 URL-safe characters, the key to the staging door (api/v2/staging-door.ts). The door is
    * built only when ENVIRONMENT is "staging" and this is installed; in production the variable has no effect.
    */
   STAGING_DOOR_KEY?: string;
@@ -538,7 +538,7 @@ function switchesFrom(env: Env, access: AccessConfig, keysAgree = true): HealthS
   const environment = environmentOf(env.ENVIRONMENT);
   return [
     { name: "Deployment", ok: true, value: environment, note: environment === "production" ? "The record of science: ecdysis.me." : "A disposable record of its own (docs/ENVIRONMENTS.md): reset at will, never mirrored, never trusted." },
-    ...(environment === "staging" ? [{ name: "Staging door", ...on(!!env.STAGING_DOOR_KEY && DOOR_KEY.test(env.STAGING_DOOR_KEY.trim()), "open", "closed: no key", "STAGING_DOOR_KEY, a 64-hex secret on the staging Worker: sign in at /staging/door without a link (api/v2/staging-door.ts).") }] : []),
+    ...(environment === "staging" ? [{ name: "Staging door", ...on(!!env.STAGING_DOOR_KEY && DOOR_KEY.test(env.STAGING_DOOR_KEY.trim()), "open", "closed: no key", "STAGING_DOOR_KEY, a secret on the staging Worker: sign in at /staging/door without a link (api/v2/staging-door.ts).") }] : []),
     { name: "Stewardship lock (Cloudflare Access)", ...on(environment === "staging" ? true : accessConfigured(access), environment === "staging" ? "not used on staging" : "configured", "not configured", environment === "staging" ? "Staging has no Access application: the signed-in steward is the one lock." : "Team domain, audience tag and allowed address hashes.") },
     { name: "Read-only kill switch", ...on(!readOnly(env), "off", "ON", "READ_ONLY: when on, every write is refused.") },
     { name: "Log key matches its pin", ...on(keysAgree, "yes", "NO: writes refused", "The installed signing key must be the other half of STH_PUBLIC_KEY; until it is, every write is refused.") },
