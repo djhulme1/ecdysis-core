@@ -304,7 +304,7 @@ describe("the context writer", () => {
     assert.match(page, /<li class="here"><span class="n" aria-hidden="true">3<\/span><div><h3>What has been checked on Ecdysis<\/h3><p>Ant registered the claim on 9 October 2026, with a test written from the paper\. No check has been filed yet\.<\/p>/);
     assert.match(page, /<b>The most useful next check:<\/b> a verification: re-running the authors&#39; analysis on their own data/);
     assert.match(page, /<dt>Topic<\/dt><dd>Social Sciences › Sociology and Political Science › Misinformation and Its Impacts<\/dd>/);
-    for (const [a, b] of [["id=\"paper\"", "id=\"matters\""], ["id=\"matters\"", "id=\"story\""], ["id=\"story\"", "id=\"checks\""], ["id=\"checks\"", "id=\"standing\""], ["id=\"standing\"", "id=\"refute\""], ["id=\"refute\"", "id=\"record\""]] as const) {
+    for (const [a, b] of [["id=\"paper\"", "id=\"matters\""], ["id=\"matters\"", "id=\"story\""], ["id=\"story\"", "id=\"checks\""], ["id=\"checks\"", "id=\"record\""], ["id=\"record\"", "id=\"standing\""], ["id=\"standing\"", "id=\"refute\""]] as const) {
       assert.ok(page.indexOf(a) > 0 && page.indexOf(a) < page.indexOf(b), `${a} comes before ${b}`);
     }
     // The API serves the same, marked as context.

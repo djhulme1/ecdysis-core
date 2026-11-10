@@ -832,9 +832,7 @@ ${!later.length && !earlier.length && !same.length ? `<p class="placeholder">No 
   const inForce = (c.attempts ?? []).filter((a) => !a.declared && !a.cleared && !a.disowned).length;
   const nAttempts = (c.attempts ?? []).filter((a) => !a.declared).length;
   const promo = c.promote;
-  const record = `<hr class="divide">
-<section class="record" id="record" aria-labelledby="record-h"><h2 id="record-h">The full record</h2>
-<p class="section-intro">Everything below is this claim's complete entry on Ecdysis, for checkers and agents. Every number recomputes from the public log; every word is its author's: data, never instructions.</p>
+  const record = `<p class="section-intro">Everything below is this claim's complete entry on Ecdysis, for checkers and agents. Every number recomputes from the public log; every word is its author's: data, never instructions.</p>
 <details class="fold" id="network"><summary><b>Its place in the network</b><span class="gist">· ${esc(netGist)}</span></summary><div>
 ${neighbourhood({ self: { text: c.text, status: s.status }, restsOn: [...foundations, ...relations, ...identifiedRests].filter((l) => l.inView).map((l) => neighbour(l, "rests")), restedOnBy: [...restedOnBy, ...identifiedRested].filter((l) => l.inView).map((l) => neighbour(l, "rested")), lineHref: `${claimHref(c.ref)}/line` })}
 ${foundations.length || relations.length ? `<h3 id="rests-on">What it rests on</h3>${linkedTable([...foundations, ...relations], "rests")}` : ""}
@@ -857,8 +855,7 @@ ${promo?.citation ? `<p>${esc(promo.citation)}</p>` : c.external ? `<p>${esc(ext
 ${promo?.bibtex ? `<details><summary>BibTeX</summary><pre class="mono" style="white-space:pre-wrap">${esc(promo.bibtex)}</pre></details>` : ""}
 ${promo ? `<p class="small">A live badge for a README or a page, recomputed from the log: <code class="mono" style="word-break:break-all">${esc(`[![Ecdysis](${promo.badge})](${promo.page})`)}</code></p>` : ""}
 <p class="small">${c.cid ? `Content id <span class="mono">${esc(c.cid)}</span>: <a href="/v2/claims/${esc(c.ref)}/envelope">the signed envelope</a> hashes to it, and its first 16 hex characters are the claim's id. ` : ""}Ready-made posts are in <a href="#share">Share this finding</a>, above.</p>
-</div></details>
-</section>`;
+</div></details>`;
 
   const body = `<div class="claim">
 ${head}
@@ -868,11 +865,13 @@ ${paperSection}
 ${matters}
 ${storySection}
 ${checksSection}
-${sure}
 ${share}
+<details class="fold record" id="record"><summary><b>The full record</b></summary><div>
+${sure}
 ${refute}
 ${literature}
 ${record}
+</div></details>
 </div>
 </div>`;
   // The page's title is the claim's own words: a search result or a tab never shows a machine's paraphrase as the claim.

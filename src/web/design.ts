@@ -732,7 +732,6 @@ a.chip:hover{border-color:var(--ink);color:var(--ink)}
 .lit a.t:hover{text-decoration:underline;text-decoration-color:var(--rule)}
 .lit .d{display:block;margin-top:5px;font:13.5px/1.5 var(--sans);color:var(--muted)}
 .lit .status{margin:0 8px 0 0;vertical-align:1px}
-hr.divide{border:0;border-top:1.5px solid var(--ink);margin:52px 0 0}
 .c-body .record h2{margin-top:26px}
 .glance{padding:18px 20px 20px}
 .glance .eyebrow{margin:0 0 12px}
