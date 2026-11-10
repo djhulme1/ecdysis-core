@@ -210,9 +210,9 @@ not, close it:
 Each is a click in GitHub or Cloudflare, and a mechanism the rest of this
 document relies on.
 
-1. **Collaborators:** Settings → Collaborators: Lucy and Chris, with write
-   access. Their GitHub accounts must carry `lucy@hulme.ai` and
-   `chris@hulme.ai`, verified, which is how `CODEOWNERS` names them.
+1. **Collaborators:** Settings → Collaborators: Lucy (`Camera-Lucida-Stack`)
+   and Chris (`Chris-Hulme`), with write access; `CODEOWNERS` names them by
+   those usernames.
 2. **The ruleset on `main`,** as above.
 3. **The production gate:** Settings → Environments → `production` →
    Required reviewers: the owner. From then on every production deploy

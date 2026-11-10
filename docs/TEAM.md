@@ -136,8 +136,8 @@ this page, not in the person.
 ## Joining
 
 1. Accept the invitation to the repository (write access).
-2. Put your `@hulme.ai` address on your GitHub account (Settings → Emails)
-   and verify it: that is how `CODEOWNERS` names you for reviews.
+2. Check your GitHub username is the one in `.github/CODEOWNERS`: that is
+   how reviews are asked of you.
 3. Get the staging address and the staging door key from Daniel. Sign in at
    `<staging>/staging/door?key=<the key>&email=<your address>`.
 4. Join the team channel (deploys are discussed there, and the Watch posts
